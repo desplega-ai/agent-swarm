@@ -1,0 +1,13 @@
+{
+  "kind": "workflow",
+  "name": "dreaming",
+  "displayName": "Dreaming",
+  "slug": "dreaming",
+  "title": "Dreaming",
+  "description": "Nightly self-improvement loop: agents report on their day, the lead approves changes, guarded scripts apply them, and verify checks every write.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "runAllSeedersCandidate": true,
+  "autoEnableCandidate": true,
+  "tags": ["self-improvement", "memory", "profiles", "skills"]
+}

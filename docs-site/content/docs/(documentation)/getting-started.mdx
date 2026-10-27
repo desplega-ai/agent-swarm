@@ -50,15 +50,15 @@ The fastest way to get a full swarm running. The interactive wizard collects cre
 bunx @desplega.ai/agent-swarm onboard
 ```
 
-Or use the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `onboard --yes` (preset `solo` by default) in `~/agent-swarm`, waits for `/health`, and prints the dashboard `/setup` link. Pass `--preset full` to deploy every official template; `solo` runs a single coder:
+Or use the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `onboard --yes --preset full` (every official template) in `~/agent-swarm`, waits for `/health`, and prints the dashboard `/setup` link:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
-# Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --no-agent-fs, --dry-run
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full --tunnel
+curl -fsSL https://agent-swarm.dev/install.sh | bash
+# Options: --dir <path>, --version <ver>, --tunnel, --no-tunnel, --no-agent-fs, --dry-run
+curl -fsSL https://agent-swarm.dev/install.sh | bash -s -- --no-tunnel
 ```
 
-`--tunnel` exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`. It is off by default.
+The raw GitHub URL (`https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh`) serves the same script. The installer exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`, so the dashboard works from anywhere. The API key still protects every route except `/health`. Pass `--no-tunnel` (or set `AGENT_SWARM_TUNNEL=0`) to keep the API local. The tunnel stays off when `.env` already holds your own `PUBLIC_MCP_BASE_URL`. `--tunnel` forces it on. The installer saves an explicit choice as `AGENT_SWARM_TUNNEL` in `.env`, so a re-run keeps it.
 
 A new install also runs two more services: `agent-fs` (shared files on local disk, read in the dashboard's [Comb](/docs/ui/comb)) and `tei` (a local embeddings server for memory search, so memory needs no second API key). Comb is on, and file links open in the dashboard. Neither service has a host port: the browser reaches agent-fs through the API at `/agentfs`. The bundle adds about 1 GB of RAM at idle, 2.5 GB of images and 1.5 GB of volumes, and the first boot downloads about 1.5 GB. Memory search uses keywords only until TEI is ready. Pass `--no-agent-fs` to the installer (or to `onboard --yes`) to skip both. Running the installer again on an existing install changes nothing: when `docker-compose.yml` exists, it skips onboarding and only starts the stack. See [agent-fs Co-deployment](/docs/guides/agent-fs-co-deployment#new-installs-onboard-bundle).
 

@@ -30,6 +30,17 @@ import completeTaskSrc from "./catalog/complete-task.ts" with { type: "text" };
 import compoundInsightsSrc from "./catalog/compound-insights.inline.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
+import dreamingApplySrc from "./catalog/dreaming-apply.ts" with { type: "text" };
+import dreamingGatherSrc from "./catalog/dreaming-gather.ts" with { type: "text" };
+import dreamingHeartbeatSrc from "./catalog/dreaming-heartbeat.ts" with { type: "text" };
+import dreamingLearnSrc from "./catalog/dreaming-learn.ts" with { type: "text" };
+import dreamingMemtaxSrc from "./catalog/dreaming-memtax.ts" with { type: "text" };
+import dreamingMemtaxCreateSrc from "./catalog/dreaming-memtax-create.ts" with { type: "text" };
+import dreamingOwnersSrc from "./catalog/dreaming-owners.ts" with { type: "text" };
+import dreamingReportsCheckSrc from "./catalog/dreaming-reports-check.ts" with { type: "text" };
+import dreamingRollbackSrc from "./catalog/dreaming-rollback.ts" with { type: "text" };
+import dreamingTrimSrc from "./catalog/dreaming-trim.ts" with { type: "text" };
+import dreamingVerifySrc from "./catalog/dreaming-verify.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
@@ -300,6 +311,84 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "See who is in the swarm and what tasks are running — swarm stats / agent list / task counts in a single call.",
     source: asText(swarmOverviewSrc),
+  },
+  {
+    name: "dreaming-apply",
+    description:
+      "Dreaming lane A apply: identity and memory ops from the approved synthesis, capped, guarded, logged to KV with pre-images. Run by the lead with fromRun; loadResult returns the stored result.",
+    intent:
+      "Apply the approved identity and memory changes with Lead authority, or replay their stored result.",
+    source: asText(dreamingApplySrc),
+  },
+  {
+    name: "dreaming-gather",
+    description:
+      "Dreaming step 1: read-only gather of the last day of tasks, agent profiles, skills, memory, workflow changes and budget. Resolves the run's lead, coder and writer agent ids.",
+    intent: "Collect the nightly dreaming inputs and resolve who runs the Lead-authority steps.",
+    source: asText(dreamingGatherSrc),
+  },
+  {
+    name: "dreaming-heartbeat",
+    description:
+      "Dreaming lane C: the lead's HEARTBEAT triage and prune (plan, stage, check, apply, revert, selftest).",
+    intent: "Keep the lead's heartbeat file short, with drafts checked before a guarded write.",
+    source: asText(dreamingHeartbeatSrc),
+  },
+  {
+    name: "dreaming-learn",
+    description:
+      "Dreaming learning loop: scores past cuts and pins and records per-lane night-over-night metrics in KV.",
+    intent: "Score the effect of earlier dreaming changes so the next night can learn from them.",
+    source: asText(dreamingLearnSrc),
+  },
+  {
+    name: "dreaming-memtax",
+    description:
+      "Dreaming lane B1: memory taxonomy plan, classify-batch report and controls. Classify only; no memory writes.",
+    intent: "Classify swarm memory into the long-term taxonomy without writing.",
+    source: asText(dreamingMemtaxSrc),
+  },
+  {
+    name: "dreaming-memtax-create",
+    description:
+      "Dreaming lane B: compose, validate and write long-term memory docs (create, edit, tidy), capped, with pre-images and rollback; controls mode for self-tests.",
+    intent: "Distill memory into long-term docs behind write guards, or roll them back.",
+    source: asText(dreamingMemtaxCreateSrc),
+  },
+  {
+    name: "dreaming-owners",
+    description:
+      "Dreaming owners: sends follow-up tasks for proposals that need an owner (script builds, reviews), with a routing reason.",
+    intent: "Hand off dreaming proposals that need a person or a coding agent.",
+    source: asText(dreamingOwnersSrc),
+  },
+  {
+    name: "dreaming-reports-check",
+    description:
+      "Dreaming: check per-agent self-reports against the roster, list the ones to retry, and merge first and retry results.",
+    intent: "Validate and merge the nightly agent self-reports before synthesis.",
+    source: asText(dreamingReportsCheckSrc),
+  },
+  {
+    name: "dreaming-rollback",
+    description:
+      "Dreaming manual rollback: reads the run ledger in KV and undoes applied items in reverse, re-reading after each restore. Supports dryRun.",
+    intent: "Undo one dreaming run's changes by hand.",
+    source: asText(dreamingRollbackSrc),
+  },
+  {
+    name: "dreaming-trim",
+    description:
+      "Dreaming profile trims: plan (pick oversized fields), apply (net-smaller check, write, re-read, survival, cut ledger), revert, selftest.",
+    intent: "Plan and apply profile-field trims with pre-images in KV and a survival check.",
+    source: asText(dreamingTrimSrc),
+  },
+  {
+    name: "dreaming-verify",
+    description:
+      "Dreaming verify: checks synthesis claims against real writes, flags unclaimed writes and silent refusals, checks survival of earlier changes, writes the run ledger.",
+    intent: "Verify that what dreaming said it changed is what actually changed.",
+    source: asText(dreamingVerifySrc),
   },
 ];
 

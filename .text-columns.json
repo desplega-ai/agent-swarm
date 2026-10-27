@@ -3589,6 +3589,9 @@
     },
     "parentStepId": {
       "exempt": "identifier"
+    },
+    "triggeredByAgentId": {
+      "exempt": "identifier"
     }
   },
   "workflow_versions": {
