@@ -375,6 +375,26 @@ const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
   claudeTransport: ClaudeTransportSchema.optional(),
 });
 
+/**
+ * The agents whose name, role or id contains `q` (case-insensitive), at most
+ * `limit` of them. A swarm has tens of agents, so filtering loaded rows is cheap.
+ */
+export function searchAgents<T extends { id: string; name: string; role?: string | null }>(
+  agents: T[],
+  q: string | undefined,
+  limit: number | undefined,
+): T[] {
+  const needle = q?.toLowerCase();
+  const matching = needle
+    ? agents.filter((agent) =>
+        [agent.name, agent.role ?? "", agent.id].some((field) =>
+          field.toLowerCase().includes(needle),
+        ),
+      )
+    : agents;
+  return limit === undefined ? matching : matching.slice(0, limit);
+}
+
 const listAgents = route({
   method: "get",
   path: "/api/agents",
@@ -385,6 +405,9 @@ const listAgents = route({
   tags: ["Agents"],
   query: z.object({
     include: z.enum(["tasks"]).optional(),
+    /** Matches the name, role or id anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `full` restores the legacy shape (includes identity markdown); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -853,12 +876,14 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks
+    const allAgents = includeTasks
       ? await getAllAgentsWithTasks({
           slim,
           readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
         })
       : await getAllAgents({ slim });
+    // Filtered before the per-agent capacity lookups.
+    const agents = searchAgents(allAgents, parsed.query.q, parsed.query.limit);
     const [agentsWithCapacity, transports] = await Promise.all([
       Promise.all(agents.map(agentWithCapacity)),
       resolveListClaudeTransports(agents),

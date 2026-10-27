@@ -289,6 +289,11 @@ const listAppsRoute = route({
   pattern: ["api", "apps"],
   summary: "List apps",
   tags: ["Apps"],
+  query: z.object({
+    /** Matches the name or description anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+  }),
   responses: {
     200: {
       description: "App summaries without definitions",
@@ -1129,7 +1134,11 @@ export async function handleApps(
   }
 
   if (listAppsRoute.match(req.method, pathSegments)) {
-    listAppsRoute.respond(res, 200, { apps: await listApps() });
+    const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    listAppsRoute.respond(res, 200, {
+      apps: await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+    });
     return true;
   }
 

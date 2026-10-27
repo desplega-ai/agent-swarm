@@ -4,10 +4,10 @@ import { parseFlags } from "./cli.ts";
 import {
   type ArtifactRecord,
   buildShardPayload,
-  type IngestPayload,
   type RunContext,
   type Summary,
 } from "./ingest-payload.ts";
+import { postPayloads } from "./ingest-post.ts";
 
 interface Options {
   summaries: string;
@@ -77,75 +77,6 @@ function runContext(): RunContext {
   };
 }
 
-function redact(value: string, bearer: string): string {
-  return value.replaceAll(bearer, "[redacted]");
-}
-
-function compact(value: unknown, bearer: string): string {
-  return redact(JSON.stringify(value), bearer).slice(0, 500);
-}
-
-function responseDetails(body: unknown, bearer: string): string | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const record = body as Record<string, unknown>;
-  if ("result" in record) return compact(record.result, bearer);
-  const error = record.error;
-  if (typeof error === "object" && error !== null) {
-    const message = (error as Record<string, unknown>).message;
-    if (typeof message === "string") return redact(message, bearer).slice(0, 500);
-  }
-  return undefined;
-}
-
-async function postPayloads(
-  payloads: IngestPayload[],
-  url: string,
-  bearer: string,
-): Promise<boolean> {
-  const host = new URL(url).host;
-  console.log(`ingest host: ${host}`);
-  let succeeded = true;
-
-  for (const payload of payloads) {
-    let status = 0;
-    let body: unknown;
-    let durationMs = 0;
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          "Content-Type": "application/json",
-          "X-Swarm-Timeout-Ms": "180000",
-        },
-        body: JSON.stringify(payload),
-      });
-      status = response.status;
-      body = await response.json();
-      if (typeof body === "object" && body !== null) {
-        const responseBody = body as Record<string, unknown>;
-        if (typeof responseBody.durationMs === "number") durationMs = responseBody.durationMs;
-      }
-    } catch (error) {
-      body = { error: { message: error instanceof Error ? error.message : String(error) } };
-    }
-
-    const ok =
-      status === 200 &&
-      typeof body === "object" &&
-      body !== null &&
-      (body as Record<string, unknown>).ok === true;
-    console.log(
-      `shard ${payload.run.shardIndex}: HTTP ${status} ok=${ok} durationMs=${durationMs}`,
-    );
-    const details = responseDetails(body, bearer);
-    if (details) console.log(details);
-    if (!ok) succeeded = false;
-  }
-
-  return succeeded;
-}
-
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (!statSync(options.summaries).isDirectory()) {
@@ -177,7 +108,20 @@ async function main(): Promise<void> {
     console.log("ingest skipped: UI_E2E_INGEST_URL or UI_E2E_INGEST_BEARER is not set");
     return;
   }
-  if (!(await postPayloads(payloads, url, bearer))) process.exitCode = 1;
+  if (!(await postPayloads(payloads, url, bearer, { delaysMs: retryDelays() }))) {
+    process.exitCode = 1;
+  }
+}
+
+// Comma-separated waits in ms, e.g. "0,0". Unset keeps the default backoff.
+function retryDelays(): number[] | undefined {
+  const raw = process.env.UI_E2E_INGEST_RETRY_DELAYS_MS;
+  if (!raw) return undefined;
+  const delays = raw.split(",").map((value) => Number(value.trim()));
+  if (delays.some((delay) => !Number.isFinite(delay) || delay < 0)) {
+    throw new Error(`Invalid UI_E2E_INGEST_RETRY_DELAYS_MS: ${raw}`);
+  }
+  return delays;
 }
 
 main().catch((error) => {

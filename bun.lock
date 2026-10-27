@@ -86,7 +86,7 @@
     },
     "apps/evals": {
       "name": "@agent-swarm/evals",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@desplega/model-catalog": "workspace:*",
         "@libsql/client": "^0.15.0",

@@ -276,13 +276,14 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
     expect(nightly?.configIds).toEqual(["claude-opus-5.5", "codex-6-luna"]);
     expect(weekly?.configIds).toEqual([
       "claude-opus-5.5",
+      "claude-sonnet-5.5",
       "codex-6.1-sol",
+      "codex-6.1-terra",
       "codex-6-luna",
-      "codex-6-astra",
       "pi-deepseek-v4.1-flash",
     ]);
     expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 4.5 });
-    expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 37 });
+    expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 25 });
     for (const preset of CONFIG_PRESETS) {
       const plan = preset.runDefaults;
       if (!plan) continue;
@@ -330,7 +331,7 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
     });
     expect(presetRunDefaults(["budget", "weekly-matrix"])).toEqual({
       attemptsPerCell: 5,
-      maxMeteredUsd: 37,
+      maxMeteredUsd: 25,
     });
     expect(presetRunDefaults(["nightly-canary", "weekly-matrix"])).toEqual({
       attemptsPerCell: 3,

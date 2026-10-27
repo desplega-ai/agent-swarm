@@ -172,6 +172,7 @@ export function codexOAuthKeyForSlot(slot: number): string {
 /**
  * Load all stored Codex OAuth credential slots from the config store.
  * Returns slots sorted by slot index (ascending).
+ * HTTP and network failures return an empty pool unless `throwOnError` is set.
  *
  * Backwards-compat: during a rolling upgrade the control plane may still
  * only expose the legacy single-row `codex_oauth` key (pre-071-migration).
@@ -188,17 +189,24 @@ export function codexOAuthKeyForSlot(slot: number): string {
 export async function loadAllCodexOAuthSlots(
   apiUrl: string,
   apiKey: string,
+  options: { throwOnError?: boolean } = {},
 ): Promise<Array<{ slot: number; creds: CodexOAuthCredentials }>> {
   let res: Response;
   try {
     res = await fetch(`${apiUrl}/api/config/resolved?includeSecrets=true`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-  } catch {
+  } catch (err) {
+    if (options.throwOnError) throw err;
     return [];
   }
 
-  if (!res.ok) return [];
+  if (!res.ok) {
+    if (options.throwOnError) {
+      throw new Error(`Failed to load Codex OAuth slots: HTTP ${res.status}`);
+    }
+    return [];
+  }
 
   const data = (await res.json()) as { configs: Array<{ key: string; value: string }> };
   const slotPattern = /^codex_oauth_(\d+)$/;
