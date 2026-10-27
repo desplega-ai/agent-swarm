@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-27
+
+### Added
+- Pi: tool deferral is on by default (`PI_TOOL_DEFERRAL=false` restores the old behaviour); non-core swarm tools and installed MCP server tools load through tool search (#2453). Each LLM call logs one `call_usage` line (#2451).
+- Store-progress: an optional `learning` field writes a swarm memory tied to the task (#2472).
+- Scripts: select a script executor (`native` or `quickjs`) per saved script or per run (#2464); both executors skip the duplicate `argsSchema.parse` the host already validated (#2465, #2466).
+- Workflows: `trigger-workflow` takes `wait: false` to return once the run is created (#2441); a `workflow.run.finished` event fires when any run ends (#2452).
+- Pages: `PAGES_FRAME_ANCESTORS` lets listed origins iframe public pages (#2454).
+- Credentials: key availability is matched by key suffix, not the global pool index (#2436).
+- Heartbeat: the gate wakes when the script runner is unhealthy (#2447).
+- UI: a request composition panel and per-call prompt bar (#2471); a per-call cache-hit chip in the session log (#2450).
+- Skills: agents know about the docs.agent-swarm.dev playbooks and guides (#2462).
+
+### Changed
+- agent-fs pins bumped to 0.18.9 (#2446, #2461, #2476).
+- Worker image bumps dsh, amp and agent-browser (#2438, #2440, #2470).
+- Dependencies: vulnerable root and docs-site dependencies bumped (#2448, #2449).
+- Scripts: a tool-schema token probe for harness bumps (#2455).
+- Docs: the Linear Delivery Loop playbook and template (#2463), the lead agent rulebook playbook (#2456), host requirements and a Docker disk cleanup guide (#2475), and TLA+ specs synced with main (#2439).
+
+### Fixed
+- Workflows: a step timeout aborts its executor, so a timed-out script step stops running (#2441).
+- Env flags: `CRED_CHECK_DISABLE`, `OAUTH_KEEPALIVE_DISABLE` and `OAUTH_REFRESH_SWEEP_DISABLE` are parsed via `isEnvFlagEnabled` (#2467, #2468).
+- Onboarding: agent volumes mount where the worker writes (#2474).
+- Evals: docs-suggestion counts only real swarm-docs skill loads (#2473).
+- Comb: keyboard-reachable row menus, an Enter-retry hint, and the full menu on Recent and Favorites (#2435).
+- Docs: the cron example uses a supported code fence (#2477).
+
 ## [2.6.0] - 2026-10-26
 
 ### Added

@@ -15,14 +15,14 @@ import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
-import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { type AgentModelDisplay, getAgentModelDisplay } from "@/lib/agents-list-model-display";
 import { formatRelative } from "@/lib/relative-time";
-import { cn, parseUTCDate } from "@/lib/utils";
+import { parseUTCDate } from "@/lib/utils";
+import { AgentRoleChip } from "../../components/agent-role-chip";
 import { ExternalTextLink } from "../integrations/pane-parts";
 
 const MAX_ROWS = 8;
@@ -262,13 +262,9 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
           );
           return (
             <li key={agent.id} className="flex items-center gap-2.5 px-3 py-2">
-              <Badge
-                variant="outline"
-                size="tag"
-                className={cn("w-14 justify-center", !agent.isLead && "text-muted-foreground")}
-              >
-                {agent.isLead ? "Lead" : "Worker"}
-              </Badge>
+              <span className="w-14 shrink-0">
+                <AgentRoleChip isLead={agent.isLead} />
+              </span>
               <RuntimeTip
                 harness={agent.harnessProvider ?? agent.provider}
                 model={model}
