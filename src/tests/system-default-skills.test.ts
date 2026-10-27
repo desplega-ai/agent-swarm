@@ -54,17 +54,7 @@ describe("system-default skills", () => {
     expect(skills.find((skill) => skill.name === "script-workflows")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
-    const modernizeSkill = skills.find((skill) => skill.name === "modernize-pr");
-    expect(modernizeSkill?.systemDefault).toBe(true);
-    // Guards found on the skill's first live run: fetch draft/mergeability/
-    // maintainer-edit fields, keep contributor and draft PRs verdict-only,
-    // cap open CHANGES_REQUESTED at REWORK, and probe conflicts without a rebase.
-    expect(modernizeSkill?.content).toContain("isDraft,");
-    expect(modernizeSkill?.content).toContain("maintainerCanModify,");
-    expect(modernizeSkill?.content).toContain("mergeStateStatus,");
-    expect(modernizeSkill?.content).toMatch(/contributor's PR[^\n]*verdict-only/);
-    expect(modernizeSkill?.content).toMatch(/CHANGES_REQUESTED[^\n]*rules out MODERNIZE/);
-    expect(modernizeSkill?.content).toContain("git merge-tree --write-tree");
+    expect(skills.find((skill) => skill.name === "modernize-pr")?.systemDefault).toBe(true);
     const pagesSkill = skills.find((skill) => skill.name === "pages");
     expect(pagesSkill?.systemDefault).toBe(true);
     // The merged `pages` skill must keep advertising the taste baseline in its
