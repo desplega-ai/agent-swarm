@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   loadCodexAuthChain,
   openCodexAuth,
+  persistCodexAuthChain,
   saveCodexAuthChain,
   sealCodexAuth,
   usableCodexAuth,
@@ -86,5 +87,62 @@ describe("codex auth chain", () => {
     expect(await saveCodexAuthChain(undefined, SEED, authPath, authJson("r1"))).toBe("skipped");
     expect(await saveCodexAuthChain(join(dir, "s"), undefined, authPath, "")).toBe("skipped");
     expect(await loadCodexAuthChain(undefined, SEED)).toBeUndefined();
+  });
+
+  test("warns when a sealed chain exists but does not open, and stays quiet when absent", async () => {
+    const statePath = join(dir, "state.sealed");
+    const warnings: string[] = [];
+    const warn = (message: string) => warnings.push(message);
+    expect(await loadCodexAuthChain(statePath, SEED, warn)).toBeUndefined();
+    expect(warnings).toEqual([]);
+
+    await Bun.write(statePath, await sealCodexAuth(authJson("r2"), "other-seed"));
+    expect(await loadCodexAuthChain(statePath, SEED, warn)).toBeUndefined();
+    await Bun.write(statePath, "");
+    expect(await loadCodexAuthChain(statePath, SEED, warn)).toBeUndefined();
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("does not open under the current CODEX_OAUTH");
+    expect(warnings.join("\n")).not.toContain("r2");
+  });
+
+  test("persist logs the outcome and warns on every lost chain without auth contents", async () => {
+    const authPath = join(dir, "auth.json");
+    const lines: { level: string; message: string }[] = [];
+    const log = {
+      info: (message: string) => lines.push({ level: "info", message }),
+      warn: (message: string) => lines.push({ level: "warn", message }),
+    };
+    await Bun.write(authPath, authJson("secret-r2"));
+    await persistCodexAuthChain(join(dir, "s"), SEED, authPath, async () => authJson("r1"), log);
+    expect(lines.pop()).toEqual({ level: "info", message: "codex auth chain persisted (rotated)" });
+
+    // The state path is a directory, so the write fails.
+    await persistCodexAuthChain(dir, SEED, authPath, async () => authJson("r1"), log);
+    // A parse error message can quote the secret; only the error kind may reach the log.
+    await persistCodexAuthChain(
+      join(dir, "s"),
+      SEED,
+      authPath,
+      async () => {
+        throw new SyntaxError('JSON Parse error: Unexpected identifier "secret-seed"');
+      },
+      log,
+    );
+    await persistCodexAuthChain(
+      join(dir, "s"),
+      SEED,
+      join(dir, "missing.json"),
+      async () => "",
+      log,
+    );
+    expect(lines.map((line) => line.level)).toEqual(["warn", "warn", "warn"]);
+    expect(lines[1]?.message).toBe("WARN codex auth chain not persisted: SyntaxError");
+    expect(lines[2]?.message).toContain("missing or has no usable tokens");
+    expect(lines.map((line) => line.message).join("\n")).not.toContain("secret");
+
+    lines.length = 0;
+    await persistCodexAuthChain(undefined, SEED, authPath, async () => "", log);
+    await persistCodexAuthChain(join(dir, "s"), undefined, authPath, async () => "", log);
+    expect(lines).toEqual([]);
   });
 });

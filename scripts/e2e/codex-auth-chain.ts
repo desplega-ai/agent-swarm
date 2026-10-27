@@ -77,16 +77,35 @@ export async function openCodexAuth(sealed: string, seed: string): Promise<strin
   }
 }
 
-/** The persisted chain at `statePath`, if one exists for this seed. */
+type Warn = (message: string) => void;
+
+/** The error's code or name only: a parse error message can quote the secret it failed on. */
+function errorKind(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && code) return code;
+  return error instanceof Error ? error.name : "unknown error";
+}
+
+/**
+ * The persisted chain at `statePath`, if one exists for this seed. A file that exists but does
+ * not open goes to `warn`, because the run then falls back to a seed that may already be spent.
+ */
 export async function loadCodexAuthChain(
   statePath: string | undefined,
   seed: string | undefined,
+  warn: Warn = () => {},
 ): Promise<string | undefined> {
   if (!statePath || !seed) return undefined;
-  const sealed = await Bun.file(statePath)
-    .text()
-    .catch(() => undefined);
-  return sealed ? openCodexAuth(sealed, seed) : undefined;
+  const file = Bun.file(statePath);
+  if (!(await file.exists())) return undefined;
+  const sealed = await file.text().catch(() => undefined);
+  const authJson = sealed ? await openCodexAuth(sealed, seed) : undefined;
+  if (!authJson) {
+    warn(
+      `WARN codex auth chain at ${statePath} does not open under the current CODEX_OAUTH (reseeded, corrupt, or tampered); starting from the seed`,
+    );
+  }
+  return authJson;
 }
 
 /**
@@ -107,4 +126,30 @@ export async function saveCodexAuthChain(
   await Bun.write(statePath, await sealCodexAuth(after, seed));
   await Bun.$`chmod 600 ${statePath}`.quiet();
   return refreshTokenOf(after) === refreshTokenOf(before) ? "unchanged" : "rotated";
+}
+
+/**
+ * Runs at the end of every codex leg and never throws. A lost chain goes to `log.warn` without
+ * auth contents, because the next run would otherwise start from a spent seed with no trace.
+ */
+export async function persistCodexAuthChain(
+  statePath: string | undefined,
+  seed: string | undefined,
+  authPath: string,
+  before: () => Promise<string>,
+  log: { info: (message: string) => void; warn: Warn } = console,
+): Promise<void> {
+  if (!statePath || !seed) return;
+  try {
+    const outcome = await saveCodexAuthChain(statePath, seed, authPath, await before());
+    if (outcome === "skipped") {
+      log.warn(
+        `WARN codex auth chain not persisted: ${authPath} is missing or has no usable tokens`,
+      );
+    } else {
+      log.info(`codex auth chain persisted (${outcome})`);
+    }
+  } catch (error) {
+    log.warn(`WARN codex auth chain not persisted: ${errorKind(error)}`);
+  }
 }

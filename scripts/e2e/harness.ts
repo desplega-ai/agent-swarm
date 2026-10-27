@@ -5,7 +5,7 @@ import {
   providerForModel,
   providerKeyVars,
 } from "@desplega/model-catalog";
-import { loadCodexAuthChain, saveCodexAuthChain } from "./codex-auth-chain";
+import { loadCodexAuthChain, persistCodexAuthChain } from "./codex-auth-chain";
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
 import { knownSecrets, redactSecrets } from "./redact";
@@ -296,7 +296,7 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
     const authPath = `${homeDir}/.codex/auth.json`;
     // The CLI rotates its refresh token after access expiry, and the seeded one is then dead.
     // Start from the chain an earlier attempt or night persisted; the seed only starts a chain.
-    await Bun.write(authPath, await codexStartingAuth());
+    await Bun.write(authPath, await codexStartingAuth(console.warn));
     await Bun.$`chmod 600 ${authPath}`.quiet();
   } else if (provider === "codex" && process.env.OPENAI_API_KEY) {
     const login = Bun.spawn(["codex", "login", "--with-api-key"], {
@@ -338,22 +338,11 @@ function codexAuthStatePath(): string | undefined {
   return path ? resolve(repoRoot, path) : undefined;
 }
 
-async function codexStartingAuth(): Promise<string> {
+async function codexStartingAuth(warn?: (message: string) => void): Promise<string> {
   return (
-    (await loadCodexAuthChain(codexAuthStatePath(), process.env.CODEX_OAUTH)) ??
+    (await loadCodexAuthChain(codexAuthStatePath(), process.env.CODEX_OAUTH, warn)) ??
     codexOAuthAuthJson()
   );
-}
-
-async function persistCodexAuthChain(homeDir: string): Promise<void> {
-  if (!process.env.CODEX_OAUTH) return;
-  const outcome = await saveCodexAuthChain(
-    codexAuthStatePath(),
-    process.env.CODEX_OAUTH,
-    `${homeDir}/.codex/auth.json`,
-    await codexStartingAuth(),
-  );
-  if (outcome !== "skipped") console.log(`codex auth chain persisted (${outcome})`);
 }
 
 async function codexCredentialExpiry(): Promise<string | undefined> {
@@ -572,7 +561,14 @@ async function runHarnessAttempt(
     if (child) await stopChild(child);
     await drains?.catch(() => {});
     writer?.end();
-    if (provider === "codex") await persistCodexAuthChain(homeDir).catch(() => {});
+    if (provider === "codex") {
+      await persistCodexAuthChain(
+        codexAuthStatePath(),
+        process.env.CODEX_OAUTH,
+        `${homeDir}/.codex/auth.json`,
+        () => codexStartingAuth(),
+      );
+    }
     await Bun.$`rm -rf ${homeDir}`.quiet().catch(() => {});
   }
 }
