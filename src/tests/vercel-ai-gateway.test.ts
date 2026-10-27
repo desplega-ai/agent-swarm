@@ -49,7 +49,7 @@ describe("Vercel AI Gateway catalog", () => {
     expect(ids).not.toContain("voyage/voyage-code-3");
     expect(ids).not.toContain("klingai/kling-v3.0-t2v");
     const glm = block.models.find((m) => m.id === "zai/glm-5.3");
-    expect(glm).toMatchObject({ contextWindow: 1000000, maxTokens: 1000000, reasoning: true });
+    expect(glm).toMatchObject({ contextWindow: 1000000, maxTokens: 262144, reasoning: true });
     expect(block).toMatchObject({
       baseUrl: ENDPOINT,
       api: "openai-completions",

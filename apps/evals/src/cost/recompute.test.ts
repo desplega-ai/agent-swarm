@@ -103,8 +103,8 @@ describe("recomputeCost: claude", () => {
       ],
       sessionFiles: [],
     });
-    // "haiku" → claude-haiku-4-5: (10*1 + 13568*0.1 + 13584*1.25 + 7*5) / 1e6
-    expect(result.costUsd).toBeCloseTo(0.0183818, 8);
+    // "haiku" → claude-haiku-5-5: (10*0.1 + 13568*0.01 + 13584*0.125 + 7*0.5) / 1e6
+    expect(result.costUsd).toBeCloseTo(0.00183818, 8);
     expect(result.tokens?.model).toBe("some-internal-model");
     expect(result.tokens?.cacheWriteTokens).toBe(13584);
   });

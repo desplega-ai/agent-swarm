@@ -603,7 +603,7 @@ describe("AgentRuntimeSettings reasoning effort", () => {
   test("a dsh agent on the direct DeepSeek API can turn thinking off", async () => {
     resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "deepseek-v4-pro" }];
     const view = await mountSettings("dsh");
-    expect(enabled(view.container)).toEqual(["Auto", "Off", "High", "Max"]);
+    expect(enabled(view.container)).toEqual(["Auto", "Off", "Low", "High", "Max"]);
     await view.unmount();
   });
 
