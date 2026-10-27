@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://agent-swarm.dev/install.sh | bash
 #   curl -fsSL https://agent-swarm.dev/install.sh | bash -s -- --no-tunnel
+#   bash install.sh --public-url https://swarm.example.com --bind 127.0.0.1   # behind a reverse proxy
 #
 # The raw GitHub URL (https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh)
 # serves the same script. The API goes public through a localtunnel by default
@@ -39,7 +40,10 @@ case "${AGENT_SWARM_TUNNEL:-}" in
   1 | true | on) TUNNEL=1 ;;
   0 | false | off) TUNNEL=0 ;;
 esac
+TUNNEL_FLAG=0
 NO_AGENT_FS=0
+PUBLIC_URL="${AGENT_SWARM_PUBLIC_URL:-}"
+BIND_ADDRESS="${AGENT_SWARM_BIND_ADDRESS:-}"
 INSTALL_DIR="${AGENT_SWARM_DIR:-$DEFAULT_DIR}"
 PRESET="${AGENT_SWARM_PRESET:-$DEFAULT_PRESET}"
 CLI_VERSION="${AGENT_SWARM_CLI_VERSION:-$DEFAULT_CLI_VERSION}"
@@ -61,6 +65,12 @@ Options:
   --tunnel           Force the public tunnel on (localtunnel, lt.desplega.ai). It sets
                      PUBLIC_MCP_BASE_URL. This is already the default. See "Tunnel".
   --no-tunnel        Keep the API local only. No tunnel, no PUBLIC_MCP_BASE_URL.
+  --public-url <url> The API's public address behind your own reverse proxy, e.g.
+                     https://swarm.example.com. Sets PUBLIC_MCP_BASE_URL, implies
+                     --no-tunnel, and the dashboard link uses it.
+  --bind <addr>      Publish the API and agent ports on this host address only, e.g.
+                     127.0.0.1 behind a reverse proxy (saved as AGENT_SWARM_BIND_ADDRESS
+                     in .env). Docker-published ports bypass host firewalls such as ufw.
   --no-agent-fs      Skip the bundled agent-fs (files, Comb) and TEI (memory
                      embeddings) services. New installs only.
   --dry-run          Print every command instead of running it
@@ -72,6 +82,8 @@ Environment:
   AGENT_SWARM_CLI_PACKAGE  Full package spec for the CLI instead of the npm release:
                            a tarball path or URL from \`bun pm pack\` (testing unreleased builds)
   AGENT_SWARM_TUNNEL       1 forces the tunnel on, 0 forces it off (flags win over this)
+  AGENT_SWARM_PUBLIC_URL   Same as --public-url
+  AGENT_SWARM_BIND_ADDRESS Same as --bind
   AGENT_SWARM_LT_VERSION   @desplega.ai/localtunnel version for --tunnel (default: ${DEFAULT_LT_VERSION})
   ANONYMIZED_TELEMETRY, DESPLEGA_TELEMETRY_ENV
                            Written to .env: turn telemetry off, or set the cohort tag
@@ -92,7 +104,9 @@ What it does:
      onboarding and only runs \`docker compose up -d\`, so an existing install
      keeps its services.
   4. Waits for http://localhost:<port>/health.
-  5. Prints the dashboard link to /setup with the API URL and key filled in.
+  5. Prints the dashboard link to /setup with the API URL and key filled in. The
+     link uses the public URL (tunnel, --public-url, or PUBLIC_MCP_BASE_URL in .env)
+     when there is one, else http://localhost:<port>.
 
 Tunnel (on by default, --no-tunnel turns it off):
   The tunnel is on unless you pass --no-tunnel (or AGENT_SWARM_TUNNEL=0), or the
@@ -114,6 +128,7 @@ Examples:
   curl -fsSL .../install.sh | ANTHROPIC_API_KEY=sk-ant-... bash
   bash install.sh --dry-run --no-tunnel
   bash install.sh --dry-run --tunnel
+  bash install.sh --dry-run --public-url https://swarm.example.com --bind 127.0.0.1
 EOF
 }
 
@@ -160,8 +175,12 @@ parse_args() {
       --preset=*) PRESET="${1#*=}"; shift ;;
       --version) [ $# -ge 2 ] || die "--version needs a value"; CLI_VERSION="$2"; shift 2 ;;
       --version=*) CLI_VERSION="${1#*=}"; shift ;;
-      --tunnel) TUNNEL=1; shift ;;
+      --tunnel) TUNNEL=1; TUNNEL_FLAG=1; shift ;;
       --no-tunnel) TUNNEL=0; shift ;;
+      --public-url) [ $# -ge 2 ] || die "--public-url needs a value"; PUBLIC_URL="$2"; shift 2 ;;
+      --public-url=*) PUBLIC_URL="${1#*=}"; shift ;;
+      --bind) [ $# -ge 2 ] || die "--bind needs a value"; BIND_ADDRESS="$2"; shift 2 ;;
+      --bind=*) BIND_ADDRESS="${1#*=}"; shift ;;
       --no-agent-fs) NO_AGENT_FS=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h | --help) usage; exit 0 ;;
@@ -171,6 +190,17 @@ parse_args() {
   case "$PRESET" in
     solo | dev | content | research | full) ;;
     *) die "invalid preset '$PRESET'. Options: solo, dev, content, research, full" ;;
+  esac
+  if [ -n "$PUBLIC_URL" ]; then
+    case "$PUBLIC_URL" in
+      http://?* | https://?*) PUBLIC_URL="${PUBLIC_URL%/}" ;;
+      *) die "--public-url must start with http:// or https:// (got '$PUBLIC_URL')" ;;
+    esac
+    [ "$TUNNEL_FLAG" -eq 1 ] && die "--public-url and --tunnel conflict: the tunnel sets its own public URL"
+    TUNNEL=0
+  fi
+  case "$BIND_ADDRESS" in
+    *[!0-9a-fA-F.:]*) die "--bind needs an IP address, e.g. 127.0.0.1 (got '$BIND_ADDRESS')" ;;
   esac
 }
 
@@ -381,6 +411,40 @@ stop_tunnel() {
   done
 }
 
+# Point the stack at its public URL: PUBLIC_MCP_BASE_URL in .env, an override
+# that passes it to the API (the generated compose does not), then recreate the
+# API and agent-fs. Compose only recreates a service whose config changed.
+apply_public_url() {
+  local url="$1" port="$2"
+  set_env_value PUBLIC_MCP_BASE_URL "$url"
+  if [ ! -f "${INSTALL_DIR}/docker-compose.override.yml" ]; then
+    say "Writing docker-compose.override.yml to pass PUBLIC_MCP_BASE_URL to the API"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      printf '+ write docker-compose.override.yml (swarm-api.environment += PUBLIC_MCP_BASE_URL)\n'
+    else
+      cat >"${INSTALL_DIR}/docker-compose.override.yml" <<'YAML'
+# Written by install.sh (public URL). Compose merges this file into
+# docker-compose.yml automatically.
+services:
+  swarm-api:
+    environment:
+      - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
+YAML
+    fi
+  fi
+
+  # agent-fs reads PUBLIC_MCP_BASE_URL from .env for AGENT_FS_PUBLIC_URL, so
+  # recreate it too.
+  if has_agent_fs_service; then
+    say "Restarting the API and agent-fs with PUBLIC_MCP_BASE_URL=${url}"
+    compose_up swarm-api agent-fs
+  else
+    say "Restarting the API with PUBLIC_MCP_BASE_URL=${url}"
+    compose_up swarm-api
+  fi
+  wait_for_health "http://localhost:${port}"
+}
+
 start_tunnel() {
   local port="$1" lt_cmd url="" i code
   lt_cmd="$(lt_command)"
@@ -410,33 +474,7 @@ start_tunnel() {
   fi
   say "Tunnel URL: ${url}"
 
-  set_env_value PUBLIC_MCP_BASE_URL "$url"
-  if [ ! -f "${INSTALL_DIR}/docker-compose.override.yml" ]; then
-    say "Writing docker-compose.override.yml to pass PUBLIC_MCP_BASE_URL to the API"
-    if [ "$DRY_RUN" -eq 1 ]; then
-      printf '+ write docker-compose.override.yml (swarm-api.environment += PUBLIC_MCP_BASE_URL)\n'
-    else
-      cat >"${INSTALL_DIR}/docker-compose.override.yml" <<'YAML'
-# Written by install.sh (tunnel). Compose merges this file into
-# docker-compose.yml automatically.
-services:
-  swarm-api:
-    environment:
-      - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
-YAML
-    fi
-  fi
-
-  # agent-fs reads PUBLIC_MCP_BASE_URL from .env for AGENT_FS_PUBLIC_URL, so
-  # recreate it too.
-  if has_agent_fs_service; then
-    say "Restarting the API and agent-fs with PUBLIC_MCP_BASE_URL=${url}"
-    compose_up swarm-api agent-fs
-  else
-    say "Restarting the API with PUBLIC_MCP_BASE_URL=${url}"
-    compose_up swarm-api
-  fi
-  wait_for_health "http://localhost:${port}"
+  apply_public_url "$url" "$port"
 
   # A fresh tunnel name has no TLS certificate yet. The tunnel server gets one
   # on the first request, which usually takes 30s but can take minutes. Wait
@@ -482,7 +520,14 @@ main() {
   if [ -d "$INSTALL_DIR" ]; then cd "$INSTALL_DIR"; fi
   say "Install directory: ${INSTALL_DIR}"
 
+  # Exported so the first `docker compose up` (inside onboard) already binds there.
+  if [ -n "$BIND_ADDRESS" ]; then
+    export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
+    say "Publishing ports on ${BIND_ADDRESS} only"
+  fi
+
   onboard
+  [ -z "$BIND_ADDRESS" ] || set_env_value AGENT_SWARM_BIND_ADDRESS "$BIND_ADDRESS"
 
   local port api_key local_url dash_url
   port="$(api_port)"
@@ -491,16 +536,27 @@ main() {
 
   TUNNEL_URL=""
   resolve_tunnel
-  if [ "$TUNNEL" -eq 1 ]; then start_tunnel "$port"; fi
+  if [ "$TUNNEL" -eq 1 ]; then
+    start_tunnel "$port"
+    PUBLIC_URL="$TUNNEL_URL"
+  else
+    # Without --public-url, keep an own-domain PUBLIC_MCP_BASE_URL from .env. A
+    # stale tunnel URL is dead once the tunnel is off, so it does not count.
+    if [ -z "$PUBLIC_URL" ]; then
+      PUBLIC_URL="$(env_value PUBLIC_MCP_BASE_URL)"
+      case "$PUBLIC_URL" in https://*.lt.desplega.ai | https://*.lt.desplega.ai/*) PUBLIC_URL="" ;; esac
+    fi
+    [ -z "$PUBLIC_URL" ] || apply_public_url "$PUBLIC_URL" "$port"
+  fi
 
   api_key="$(env_value API_KEY)"
   [ -n "$api_key" ] || api_key="<API_KEY from ${INSTALL_DIR}/.env>"
-  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${TUNNEL_URL:-$local_url}")&apiKey=$(urlencode "$api_key")"
+  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${PUBLIC_URL:-$local_url}")&apiKey=$(urlencode "$api_key")"
 
   printf '\n'
   say "Agent Swarm is running"
   printf '  API:        %s\n' "$local_url"
-  [ -n "$TUNNEL_URL" ] && printf '  Public API: %s\n' "$TUNNEL_URL"
+  [ -n "$PUBLIC_URL" ] && printf '  Public API: %s\n' "$PUBLIC_URL"
   printf '  Files:      %s\n' "$INSTALL_DIR"
   printf '\n  Finish setup (harness credentials, integrations) in the dashboard:\n'
   printf '  %s\n\n' "$dash_url"

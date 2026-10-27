@@ -1,0 +1,15 @@
+#!/bin/bash
+#
+# Configured as part of the Agent Swarm 1-Click image build. Runs once per
+# Droplet: install the swarm behind Caddy, then let root log in again
+# (scripts/03-force-ssh-logout.sh held root SSH until now).
+
+unlock_root_ssh() {
+  sed -e '/Match User root/d' \
+    -e '/.*ForceCommand.*droplet.*/d' \
+    -i /etc/ssh/sshd_config
+  systemctl restart ssh
+}
+trap unlock_root_ssh EXIT
+
+/opt/agent-swarm/bootstrap.sh

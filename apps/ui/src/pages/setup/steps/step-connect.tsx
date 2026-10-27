@@ -1,4 +1,4 @@
-import { Plug, RotateCw, UserRound, XCircle } from "lucide-react";
+import { ExternalLink, Plug, RotateCw, UserRound, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useStatus } from "@/api/hooks/use-status";
@@ -23,6 +23,8 @@ import { needsLocalNetworkPermission, withAddressSpace } from "@/lib/local-netwo
 import { httpUrlError } from "../components/http-url";
 import { DEFAULT_SWARM_NAME, swarmDisplayName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
+
+const DEPLOY_GUIDE_URL = "https://docs.agent-swarm.dev/docs/guides/one-click-deploy";
 
 export interface StepConnectProps {
   /** Null until a connection exists (the shell renders step 1 before any API call works). */
@@ -460,6 +462,22 @@ function ConnectForm({
             Connect
           </Button>
         </div>
+
+        {/* An install link means a server already exists. */}
+        {setupLink ? null : (
+          <p className="text-sm text-muted-foreground">
+            No server yet?{" "}
+            <a
+              href={DEPLOY_GUIDE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Deploy one
+              <ExternalLink className="size-3" />
+            </a>
+          </p>
+        )}
 
         {probe.phase === "error" ? (
           <AlertCallout

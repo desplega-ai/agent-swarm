@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "one-click-deploy",
     "kubernetes",
     "podman-rootless",
     "published-artifacts",

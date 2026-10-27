@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Configured as part of the Agent Swarm 1-Click image build.
+# Every user sees this message, so it never prints the API key.
+
+cat <<MOTD
+********************************************************************************
+
+Welcome to the Agent Swarm 1-Click Droplet.
+
+To keep this Droplet secure, the UFW firewall is enabled.
+All ports are BLOCKED except 22 (SSH), 80 (HTTP), and 443 (HTTPS).
+Caddy serves the swarm API over HTTPS; the swarm itself listens on 127.0.0.1.
+
+As root:
+  * Your dashboard setup link (it holds the API key): cat /root/agent-swarm-setup-link.txt
+  * First boot log: /var/log/agent-swarm-deploy.log
+  * The swarm: cd /root/agent-swarm && docker compose ps
+
+Guide: https://docs.agent-swarm.dev/docs/guides/one-click-deploy
+
+********************************************************************************
+To delete this message of the day: rm -rf $(readlink -f "${0}")
+MOTD
