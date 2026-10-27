@@ -41,8 +41,11 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * `HELMCODE_API_KEY`, and the `HELMCODE_API_NAN` alias no suffix matches).
  * A new registry entry adds key vars, so it is a rule change too
  * (`secret-scrubber.test.ts` pins the list to this number).
+ * v10 = the sweep covers the dreaming-v2 KV namespace and decodes its legacy
+ * hex copies. A new sweep target needs a bump too: an install that finished
+ * the previous version never sweeps it otherwise.
  */
-export const SCRUBBER_RULES_VERSION = 9;
+export const SCRUBBER_RULES_VERSION = 10;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([

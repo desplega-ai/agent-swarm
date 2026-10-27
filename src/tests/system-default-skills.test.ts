@@ -54,6 +54,7 @@ describe("system-default skills", () => {
     expect(skills.find((skill) => skill.name === "script-workflows")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
+    expect(skills.find((skill) => skill.name === "modernize-pr")?.systemDefault).toBe(true);
     const pagesSkill = skills.find((skill) => skill.name === "pages");
     expect(pagesSkill?.systemDefault).toBe(true);
     // The merged `pages` skill must keep advertising the taste baseline in its

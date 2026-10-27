@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-10-27
+
+### Added
+- Onboarding: new installs bundle agent-fs behind the swarm API (`AGENT_FS_PROXY`) and local TEI embeddings (`EMBEDDING_QUERY_PREFIX`, `EMBEDDING_DOCUMENT_PREFIX`); `/setup` gains a Files step; Requester and Viewer users get API access; team invites with `/invite/{code}` links; `AGENT_FS_LINK_TARGET` picks where file links point (#2442).
+- Memory: a store-progress `learning` that near-duplicates an existing swarm memory is not stored; the call returns `duplicate` with the matching key (#2485).
+
+### Changed
+- Worker image bumps claude-code 2.1.311, cursor 1.1.0, amp, copilot 1.0.104 and kiro 2.34.2 (#2481).
+- Docs: TLA+ specs synced with main (#2483); `.env.example` lists the local-embedding and agent-fs proxy variables.
+
+### Fixed
+- Codex: terminal auth errors name the OAuth pool slot (#2482).
+- Prompts: the codemode tool-discovery line fits codex and opencode (#2457).
+- Runner: a long pi-mono lead session keeps its cost when it settles or aborts (#2480).
+- agent-fs: `members/invite` returns the pending invite state and accept link (#2478).
+- Setup: a first credential on an unused harness switches all agents to it (#2460).
+
 ## [2.7.0] - 2026-10-27
 
 ### Added

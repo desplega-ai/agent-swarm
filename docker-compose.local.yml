@@ -114,6 +114,8 @@ services:
         condition: service_healthy
 
     environment:
+      # Local dev stack: keep it out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - API_KEY=${API_KEY}
       - AGENT_FS_API_URL=http://agent-fs:7433
       # Browser-facing agent-fs URL for Comb (the host port published above).
@@ -163,6 +165,8 @@ services:
         condition: service_healthy
 
     environment:
+      # Local dev stack: keep it out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
       - AGENT_ID=23b94e8e-4fd3-465c-b525-1bcb050bb214
@@ -204,6 +208,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Local dev stack: keep it out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - HARNESS_PROVIDER=pi
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # Model for pi-mono via OpenRouter (required — pi-mono has no default for OpenRouter)
@@ -255,6 +261,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Local dev stack: keep it out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - HARNESS_PROVIDER=codex
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       # Baseline model is baked into the image (see Dockerfile.worker + codex-models.ts).

@@ -70,10 +70,10 @@ Do not scrub inside `db-client.execute()`: a blanket scrub corrupts byte-exact v
 
 ## Retro-sweep
 
-A new rule protects only rows written after it ships. `src/be/boot-scrub-sweep.ts` re-scrubs stored rows once per `SCRUBBER_RULES_VERSION`, so **bump the version on every rule change** (key, suffix, regex, pass, or threshold).
+A new rule protects only rows written after it ships. `src/be/boot-scrub-sweep.ts` re-scrubs stored rows once per `SCRUBBER_RULES_VERSION`, so **bump the version on every rule change** (key, suffix, regex, pass, or threshold) and on every new sweep target: an install that finished the previous version never sweeps a target added after it.
 
 - Runs after the API starts listening, fire-and-forget. Done marker: `seed_state(kind='maintenance', key='boot-scrub-v<N>')`. Per-table resume cursor: `boot-scrub-v<N>:<table>:cursor`.
-- Swept columns, in order: `session_logs.content`; `agent_tasks.task`, `output`, `failureReason`, `progress`; `agent_memory.name`, `content`, `summary`; `agent_memory_version.content`; `events.data`; `workflow_run_steps.input`, `output`, `error`, `diagnostics`; `workflow_runs.triggerData`, `context`, `error`. Before redacting a step `output` or run `context` whose replay column is NULL, the sweep seals the original there.
+- Swept columns, in order: `session_logs.content`; `agent_tasks.task`, `output`, `failureReason`, `progress`; `agent_memory.name`, `content`, `summary`; `agent_memory_version.content`; `events.data`; `workflow_run_steps.input`, `output`, `error`, `diagnostics`; `workflow_runs.triggerData`, `context`, `error`; `kv_entries.value` in the `dreaming-v2` namespace (every key: memory and profile pre-images, trim and heartbeat state, drafts, results copy swarm text, so they are redacted with their source). Before scrubbing a `dreaming-v2` value, the sweep folds each legacy `<field>Hex` copy back into `<field>`, since the scrubber cannot see a secret inside hex. Before redacting a step `output` or run `context` whose replay column is NULL, the sweep seals the original there.
 - It **redacts matching rows in place**. That is irreversible (a redaction, not a deletion). Take a copy first if forensic evidence matters.
 - Regexes run outside the write lock. Each write is compare-and-set on the value read, so a concurrently updated row is skipped, not clobbered.
 - `agent_memory` rows go through the memory store: FTS is rewritten, `contentHash` recomputed, and the embedding and `memory_vec` row dropped. The sweep then runs the re-embed backfill.

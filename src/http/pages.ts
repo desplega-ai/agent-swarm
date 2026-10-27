@@ -310,6 +310,8 @@ const listPagesRoute = route({
     agentId: z.string().min(1).optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
+    /** Matches the title, slug or description anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
     offset: z.coerce.number().int().min(0).optional(),
     /** `full` restores the legacy shape (includes `body`); default is slim. */
@@ -668,7 +670,11 @@ export async function handlePages(
     const offset = parsed.query.offset ?? 0;
     // List responses default to slim (no `body`); `?fields=full` restores it.
     const full = parsed.query.fields === "full";
-    const keyFilters = { key: parsed.query.key, keyPrefix: parsed.query.keyPrefix };
+    const keyFilters = {
+      key: parsed.query.key,
+      keyPrefix: parsed.query.keyPrefix,
+      q: parsed.query.q,
+    };
     let pages: Array<Page | PageSummary>;
     let total: number;
     if (parsed.query.agentId) {

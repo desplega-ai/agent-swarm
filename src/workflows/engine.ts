@@ -66,6 +66,13 @@ function maxIterations(): number {
 
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
+  /**
+   * The agent that started the run, as the server authenticated it: the caller
+   * of a manual or API trigger, a schedule's creator, a parent run's principal.
+   * A creator-less workflow's `swarm-script` nodes run as this agent. Never
+   * take it from trigger data, which the caller controls.
+   */
+  triggeredByAgentId?: string;
   triggerType?: "schedule" | "manual" | "event" | "api";
   /** Set when a `sub-workflow` step starts this run as its child. */
   parentStepId?: string;
@@ -329,6 +336,7 @@ async function createRunWithInitialState(
       createdBy: options.requestedByUserId,
       parentStepId,
       parentStepAttempt: parentStepId ? attempt : undefined,
+      triggeredByAgentId: options.triggeredByAgentId,
     });
     await updateWorkflowRun(
       runId,

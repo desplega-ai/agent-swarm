@@ -788,6 +788,13 @@ export const configs: HarnessConfig[] = [
     provider: "codex",
     model: "gpt-5.6",
   },
+  // 2026-10-27 snapshot refresh: models.dev added gpt-6.1-terra.
+  {
+    id: "codex-6.1-terra",
+    label: "Codex / gpt-6.1-terra",
+    provider: "codex",
+    model: "gpt-6.1-terra",
+  },
 ];
 
 export const DEFAULT_CONFIG_IDS = ["claude-haiku", "pi-deepseek-flash", "opencode-gemini-flash"];

@@ -68,6 +68,7 @@ import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
 import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { pruneCodexRollouts } from "./codex-rollouts";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -2101,8 +2102,12 @@ export async function createInProcessCodexSession(
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         config: mergedConfig,
-        ephemeral: true,
+        // Must persist a rollout: a `spawn_agent` call with `fork_context` loads
+        // the parent thread's rollout, and an ephemeral thread has none ("no
+        // rollout found for thread id"), which fails every such spawn.
+        ephemeral: false,
       });
+      void pruneCodexRollouts(env).catch(() => {});
       thread = new AppServerCodexThread(client, response.thread.id);
     } catch (error) {
       await client.close();

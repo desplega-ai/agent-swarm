@@ -1,6 +1,8 @@
 /**
  * Session-list visibility for session sharing. `all`: sessions the viewer
- * owns, ownerless sessions, and sessions shared with the viewer or everyone.
+ * owns, ownerless sessions, schedule runs (`scheduleId`, readable by every
+ * user, as in `readableSessionCondition`), and sessions shared with the viewer
+ * or everyone.
  * `mine`: owned by the viewer. `shared`: owned by someone else and shared with
  * the viewer or everyone. A null `userId` (a guest page session) owns nothing.
  */
@@ -23,7 +25,7 @@ export function sessionViewerCondition(viewer: SessionViewer): {
     };
   }
   return {
-    sql: `(r.requestedByUserId IS NULL OR r.requestedByUserId = ? OR ${shared})`,
+    sql: `(r.requestedByUserId IS NULL OR r.requestedByUserId = ? OR r.scheduleId IS NOT NULL OR ${shared})`,
     params: [viewer.userId, viewer.userId],
   };
 }

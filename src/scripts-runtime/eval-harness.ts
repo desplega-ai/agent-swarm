@@ -116,8 +116,11 @@ try {
     agentFs: payload.agentFs,
   });
 
-  const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
-  await Bun.write(userModulePath, sourceText);
+  const sourceFile = requiredEnv("SWARM_SCRIPT_SOURCE_FILE");
+  if (sourceFile !== userModulePath) {
+    const sourceText = await Bun.file(sourceFile).text();
+    await Bun.write(userModulePath, sourceText);
+  }
 
   if (startedFile) await Bun.write(startedFile, "1");
 

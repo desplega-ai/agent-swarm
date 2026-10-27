@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { getChildWorkflowRunId, getWorkflowRunLineage } from "../../be/db/workflow-runs";
+import {
+  getChildWorkflowRunId,
+  getWorkflowRunLineage,
+  getWorkflowRunTriggeredByAgentId,
+} from "../../be/db/workflow-runs";
 import type { ExecutorMeta, WorkflowRun } from "../../types";
 import { ParentStepNotCurrentError, startWorkflowExecution } from "../engine";
 import type { ExecutorDependencies, ExecutorResult } from "./base";
@@ -118,12 +122,20 @@ export class SubWorkflowExecutor extends BaseExecutor<
       return { status: "failed", error: `Workflow ${config.workflowId} is disabled` };
     }
 
+    // The child acts as the parent's principal, never as an `agentId` in
+    // `config.inputs`: the parent's author writes those, so a creator-less
+    // child would otherwise run as any agent the author names.
+    const parent = await db.getWorkflow(meta.workflowId);
+    const triggeredByAgentId =
+      parent?.createdByAgentId ?? (await getWorkflowRunTriggeredByAgentId(meta.runId)) ?? undefined;
+
     // Returns once the child run exists; the child walks on its own. A child
     // that already ended (cooldown, readiness, input failure) settles here,
     // and a concurrent execution of this attempt gets the child it created.
     let childRunId: string;
     try {
       childRunId = await startWorkflowExecution(workflow, config.inputs ?? {}, this.registry, {
+        triggeredByAgentId,
         requestedByUserId: meta.requestedByUserId,
         parentStepId: meta.stepId,
         parentStepAttempt: attempt,

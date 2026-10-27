@@ -499,6 +499,8 @@ Production Codex sessions start a fresh `codex app-server` inside the existing i
 
 The adapter creates no shared app-server daemon and never resumes a native Codex thread. Task continuity still uses the swarm context preamble.
 
+The adapter starts each thread with `ephemeral: false`. Do not switch it back to `true`: codex's `spawn_agent` tool forks the parent thread's context (`fork_context`) by reading the parent rollout, and an ephemeral thread has none, so every such spawn fails with `collab spawn failed: ... no rollout found for thread id` (the code-quality skill's confirming-agent spawn hit this). Rollouts land in `$CODEX_HOME/sessions` (default `~/.codex/sessions`). Nothing resumes them, so `pruneCodexRollouts` (`src/providers/codex-rollouts.ts`) deletes those older than 7 days when a session starts.
+
 ### Codex hook delivery for legacy exec sessions
 
 `src/hooks/codex-hook.ts` remains for legacy `codex exec` sessions. The worker image registers it for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each row delivered, then injects the rendered envelope through hook output.

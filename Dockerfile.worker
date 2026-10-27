@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.1.4
+ARG OPENCODE_VERSION=2.2.0
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793073650-g23dd39
-ARG AMP_SHA512_AMD64=5052e7e177ffb016bc3fe482e7494efb2b969bce93647c3f10460ab64d059e0952b9a598a90aded2b92b1324a612e2f821d8677aa46a4434d0b54e809ece5725
-ARG AMP_SHA512_ARM64=322cb99342276ae9ddddbc3b013c951506d1b919aba9279f9feab2d773fdd537d7c83d8c2935c3d0c873d0fda71b78e2d9ebae9425e35cac86c386ab64b909fa
+ARG AMP_VERSION=0.0.1793104576-gc52692
+ARG AMP_SHA512_AMD64=d3af61952caf3301e39ec7cee775d3993fbb3d34703b25efff993d6f11b51ea7277ea0c29879391c23e66ba3fb18c1b1d7c4e6e7547aadd367eee5214c61023b
+ARG AMP_SHA512_ARM64=b10da519b3b76607d83d78ec7326db271ffe5bd0f765aa4958690294f637b4105f30fa281a561221b1d89bd30194cd52c1c8e91a555ef1c0aab604400a30ca2b
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -634,8 +634,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.1), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.1
+# scripts are not needed for ACP (verified on 0.26.2), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.2
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \

@@ -1,5 +1,5 @@
 import { defaultAssetKey } from "../assets/key";
-import { getDbClient } from "../be/db";
+import { getDbClient, literalPrefixPattern } from "../be/db";
 import type { AppDefinition, AppValidationIssue } from "./definition";
 import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
 import {
@@ -132,10 +132,27 @@ export async function getApp(id: string): Promise<AppRecord | null> {
   return row ? decodeApp(row) : null;
 }
 
-export async function listApps(): Promise<Array<Omit<AppRecord, "definition">>> {
+export async function listApps(filters?: {
+  /** Matches the name or description anywhere, case-insensitive. */
+  q?: string;
+  limit?: number;
+}): Promise<Array<Omit<AppRecord, "definition">>> {
+  const params: (string | number)[] = [];
+  let where = "";
+  if (filters?.q) {
+    const pattern = `%${literalPrefixPattern(filters.q)}`;
+    where = ` WHERE name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'`;
+    params.push(pattern, pattern);
+  }
+  let limit = "";
+  if (filters?.limit !== undefined) {
+    limit = " LIMIT ?";
+    params.push(filters.limit);
+  }
   const rows = await getDbClient().query<AppDbRow>(
     `SELECT id, name, description, definition, created_at, updated_at
-     FROM apps ORDER BY created_at DESC, id`,
+     FROM apps${where} ORDER BY created_at DESC, id${limit}`,
+    params,
   );
   return rows.map((row) => ({
     id: row.id,
