@@ -427,6 +427,7 @@ async function runHarnessAttempt(
   let drains: Promise<unknown> | undefined;
   let phase: "setup" | "run" = "setup";
   let cost: HarnessCost | undefined;
+  let result: HarnessAttempt;
   try {
     expect(
       ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "acp"].includes(
@@ -540,7 +541,7 @@ async function runHarnessAttempt(
       expect(cost.inputTokens > 0, "acp persisted cost has no input tokens");
       expect(cost.outputTokens > 0, "acp persisted cost has no output tokens");
     }
-    return { status: "pass", durationMs: Date.now() - started, cost };
+    result = { status: "pass", durationMs: Date.now() - started, cost };
   } catch (error) {
     writer?.flush();
     // The tail and the message reach the job log, the step summary, the sticky
@@ -549,7 +550,7 @@ async function runHarnessAttempt(
     const tail = redactSecrets(await tailLog(logPath, 60), secrets);
     if (tail) console.error(`Last 60 lines of ${logPath}:\n${tail}`);
     const message = redactSecrets(errorMessage(error), secrets);
-    return {
+    result = {
       status: "fail",
       durationMs: Date.now() - started,
       error: message,
@@ -561,16 +562,27 @@ async function runHarnessAttempt(
     if (child) await stopChild(child);
     await drains?.catch(() => {});
     writer?.end();
-    if (provider === "codex") {
-      await persistCodexAuthChain(
-        codexAuthStatePath(),
-        process.env.CODEX_OAUTH,
-        `${homeDir}/.codex/auth.json`,
-        () => codexStartingAuth(),
-      );
-    }
-    await Bun.$`rm -rf ${homeDir}`.quiet().catch(() => {});
   }
+  // Only a CLI that ran can have rotated the token. A chain it rotated but we failed to keep
+  // fails the attempt, or the next night would refresh from a spent token behind a green run.
+  if (provider === "codex" && child) {
+    const lost = await persistCodexAuthChain(
+      codexAuthStatePath(),
+      process.env.CODEX_OAUTH,
+      `${homeDir}/.codex/auth.json`,
+      () => codexStartingAuth(),
+    );
+    if (lost) {
+      result = {
+        ...result,
+        status: "fail",
+        error: result.error ? `${result.error}; ${lost}` : lost,
+        failureKind: "auth-chain",
+      };
+    }
+  }
+  await Bun.$`rm -rf ${homeDir}`.quiet().catch(() => {});
+  return result;
 }
 
 export async function runHarnessLeg(
@@ -596,7 +608,8 @@ export async function runHarnessLeg(
       claudeTransport,
     );
     attempts.push(result);
-    if (result.status === "pass") break;
+    // A retry after a lost chain would refresh from a token the failed attempt already spent.
+    if (result.status === "pass" || result.failureKind === "auth-chain") break;
     if (attempt < maxAttempts) {
       console.log(
         `WARN harness ${provider}: attempt ${attempt} of ${maxAttempts} failed, retrying`,

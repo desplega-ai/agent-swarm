@@ -129,8 +129,9 @@ export async function saveCodexAuthChain(
 }
 
 /**
- * Runs at the end of every codex leg and never throws. A lost chain goes to `log.warn` without
- * auth contents, because the next run would otherwise start from a spent seed with no trace.
+ * Runs at the end of every codex attempt whose CLI ran, and never throws. Returns why the chain
+ * was not persisted, without auth contents, or undefined when it was. The caller fails the leg
+ * on a reason: the CLI may have rotated the token, so the restored chain may already be spent.
  */
 export async function persistCodexAuthChain(
   statePath: string | undefined,
@@ -138,18 +139,19 @@ export async function persistCodexAuthChain(
   authPath: string,
   before: () => Promise<string>,
   log: { info: (message: string) => void; warn: Warn } = console,
-): Promise<void> {
-  if (!statePath || !seed) return;
+): Promise<string | undefined> {
+  if (!statePath || !seed) return undefined;
+  let lost: string;
   try {
     const outcome = await saveCodexAuthChain(statePath, seed, authPath, await before());
-    if (outcome === "skipped") {
-      log.warn(
-        `WARN codex auth chain not persisted: ${authPath} is missing or has no usable tokens`,
-      );
-    } else {
+    if (outcome !== "skipped") {
       log.info(`codex auth chain persisted (${outcome})`);
+      return undefined;
     }
+    lost = `codex auth chain not persisted: ${authPath} is missing or has no usable tokens`;
   } catch (error) {
-    log.warn(`WARN codex auth chain not persisted: ${errorKind(error)}`);
+    lost = `codex auth chain not persisted: ${errorKind(error)}`;
   }
+  log.warn(`WARN ${lost}`);
+  return lost;
 }

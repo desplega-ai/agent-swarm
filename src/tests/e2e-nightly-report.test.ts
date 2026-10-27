@@ -94,6 +94,25 @@ describe("nightly report", () => {
     expect(markdown).not.toContain("### Warnings");
   });
 
+  test("off main, the codex leg is a SKIP row, not a missing leg", () => {
+    const others = DEFAULT_PROVIDERS.filter((provider) => provider !== "codex");
+    const results = [contractResult(), ...others.map((provider) => harnessResult([leg(provider)]))];
+    const offMain = buildNightlyReport({ ...base, results, ref: "refs/heads/fix/x" });
+    expect(offMain.ok).toBe(true);
+    expect(offMain.missingLegs).toEqual([]);
+    expect(offMain.skippedLegs).toEqual(["codex"]);
+    const markdown = nightlyMarkdown(offMain, [], DEFAULT_PROVIDERS);
+    expect(markdown).toContain("5/5 harness legs passed · 1 skipped");
+    expect(markdown).toContain("| codex | | SKIP | | | | | main only:");
+
+    for (const ref of ["refs/heads/main", undefined]) {
+      const report = buildNightlyReport({ ...base, results, ref });
+      expect(report.ok).toBe(false);
+      expect(report.missingLegs).toEqual(["codex"]);
+      expect(report.skippedLegs).toEqual([]);
+    }
+  });
+
   test("keeps both Claude transports and fails if either leg is missing or fails", () => {
     const cli = leg("claude", { transport: "cli" });
     const sdk = leg("claude-sdk", {
