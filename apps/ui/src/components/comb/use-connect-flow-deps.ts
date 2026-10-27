@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { api } from "@/api/client";
 import { invalidateStatusQuery } from "@/api/hooks/status-query";
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import { AgentFsClient } from "@/lib/agent-fs/client";
+import { useConfig } from "@/hooks/use-config";
+import { AgentFsClient, swarmProxyCredential } from "@/lib/agent-fs/client";
 import type { ConnectFlowDeps } from "./connect-flow";
 
 /**
@@ -14,11 +15,15 @@ import type { ConnectFlowDeps } from "./connect-flow";
 export function useConnectFlowDeps(): ConnectFlowDeps | null {
   const { endpoint, orgId, driveId, connect } = useAgentFs();
   const queryClient = useQueryClient();
+  const { config } = useConfig();
+  const { apiUrl, apiKey } = config;
 
   return useMemo(() => {
     if (!endpoint) return null;
+    // The swarm's proxy registers only with a swarm credential.
+    const swarmKey = swarmProxyCredential(endpoint, { apiUrl, apiKey });
     return {
-      register: (address) => AgentFsClient.register({ endpoint, email: address }),
+      register: (address) => AgentFsClient.register({ endpoint, email: address, swarmKey }),
       getMe: (key) => new AgentFsClient({ endpoint, apiKey: key }).getMe(),
       ls: (key) =>
         new AgentFsClient({ endpoint, apiKey: key }).callOp(
@@ -33,5 +38,5 @@ export function useConnectFlowDeps(): ConnectFlowDeps | null {
       },
       connect,
     } satisfies ConnectFlowDeps;
-  }, [endpoint, orgId, driveId, connect, queryClient]);
+  }, [endpoint, orgId, driveId, connect, queryClient, apiUrl, apiKey]);
 }

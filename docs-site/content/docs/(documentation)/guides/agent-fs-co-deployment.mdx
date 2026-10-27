@@ -90,7 +90,7 @@ AGENT_FS_PUBLIC_URL=https://swarm.example.com/agentfs
 ```
 
 <Callout type="warn">
-agent-fs `POST /auth/register` is public: anyone who reaches agent-fs can create an account. Through the proxy, that includes anyone who reaches the API, for example through a tunnel. The API limits `POST /agentfs/auth/register` to 5 requests per minute per client IP. A new account sees only its own drives until someone invites it to an org.
+agent-fs `POST /auth/register` is public, and agent-fs does not check that the caller owns the email. The swarm invites its users' emails to the shared drive, so an account made first with a teammate's email would get that teammate's seat. The proxy therefore asks for a swarm credential on `POST /agentfs/auth/register`: the operator API key can register any email, and a user token (`aswt_`) can register only the user's own email or an alias. The API also limits that route to 5 requests per minute per client IP. An agent-fs that is reachable without the proxy keeps the public route, so keep it on a private network.
 </Callout>
 
 ## New installs: onboard bundle

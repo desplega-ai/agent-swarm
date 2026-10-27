@@ -13313,8 +13313,26 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Returned by agent-fs when credentials are missing or invalid */
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13359,8 +13377,26 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Returned by agent-fs when credentials are missing or invalid */
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13405,8 +13441,26 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Returned by agent-fs when credentials are missing or invalid */
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13451,8 +13505,26 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Returned by agent-fs when credentials are missing or invalid */
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13499,8 +13571,26 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Returned by agent-fs when credentials are missing or invalid */
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };

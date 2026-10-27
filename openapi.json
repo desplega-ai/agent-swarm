@@ -33331,7 +33331,27 @@
             "description": "Upstream agent-fs response, streamed verbatim"
           },
           "401": {
-            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
             "content": {
               "application/json": {
                 "schema": {
@@ -33372,7 +33392,27 @@
             "description": "Upstream agent-fs response, streamed verbatim"
           },
           "401": {
-            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
             "content": {
               "application/json": {
                 "schema": {
@@ -33413,7 +33453,27 @@
             "description": "Upstream agent-fs response, streamed verbatim"
           },
           "401": {
-            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
             "content": {
               "application/json": {
                 "schema": {
@@ -33454,7 +33514,27 @@
             "description": "Upstream agent-fs response, streamed verbatim"
           },
           "401": {
-            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
             "content": {
               "application/json": {
                 "schema": {
@@ -33495,7 +33575,27 @@
             "description": "Upstream agent-fs response, streamed verbatim"
           },
           "401": {
-            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
             "content": {
               "application/json": {
                 "schema": {

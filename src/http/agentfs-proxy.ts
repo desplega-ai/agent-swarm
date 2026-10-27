@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { getApiKey } from "../utils/api-key";
 import { isAgentFsProxyEnabled } from "../utils/constants";
+import { resolveHttpRequestAuth } from "./auth";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { route } from "./route-def";
-import { jsonError } from "./utils";
+import { jsonError, parseBody, RequestBodyTooLargeError } from "./utils";
 
 /**
  * Streaming pass-through to the agent-fs server at AGENT_FS_API_URL, active
@@ -14,7 +16,8 @@ import { jsonError } from "./utils";
  *   agent-fs share pages embed root-absolute `/share/<token>/raw` URLs and
  *   redirect to `/site/<token>/`, so they 404 behind the `/agentfs` prefix alone.
  *
- * The swarm does no auth here: agent-fs enforces its own `af_` bearer. Only an
+ * agent-fs enforces its own `af_` bearer. The one swarm check is on
+ * `POST /agentfs/auth/register` (see `checkRegister`). Only an
  * `Authorization: Bearer af_...` credential is forwarded (never a swarm API key
  * or an `aswt_` token), plus an allowlist of other request headers (never
  * Cookie or X-Agent-ID). On `/agentfs/*` the upstream CORS headers are dropped
@@ -68,7 +71,8 @@ const RESPONSE_HEADER_ALLOWLIST = new Set([
 ]);
 const EXPOSED_HEADERS = ["X-Agent-FS-Version", "X-Agent-FS-Content-Hash", "Content-Disposition"];
 
-const UNGATED = "agent-fs enforces its own af_ auth; swarm credentials are never forwarded";
+const UNGATED =
+  "agent-fs enforces its own af_ auth; register needs a swarm credential; swarm credentials are never forwarded";
 const OK_200 = {
   description: "Upstream agent-fs response, streamed verbatim",
   unstructured: "Body is streamed from agent-fs; shape and content-type vary per upstream route",
@@ -84,7 +88,15 @@ for (const method of ["get", "post", "put", "delete", "patch"] as const) {
     tags: ["Comb"],
     responses: {
       200: OK_200,
-      401: { description: "Returned by agent-fs when credentials are missing or invalid" },
+      401: {
+        description:
+          "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+      },
+      403: {
+        description:
+          "POST /agentfs/auth/register with a user token for an email that is not the user's",
+      },
+      413: { description: "POST /agentfs/auth/register body over 16 KB" },
       429: { description: "Too many registrations from this IP (POST /agentfs/auth/register)" },
       502: { description: "agent-fs is unreachable" },
     },
@@ -118,6 +130,49 @@ const registerRateLimiter = createIpRateLimiter({ capacity: 5, refillPerMs: 5 / 
 
 export function _resetAgentFsRegisterRateLimitForTests(): void {
   registerRateLimiter.reset();
+}
+
+const REGISTER_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * agent-fs `POST /auth/register` does not check that the caller owns the
+ * email, and the swarm invites its users' emails to the shared drive. An
+ * account made first for a teammate's email would get that teammate's seat.
+ * So a registration through the proxy needs a swarm credential: the operator
+ * key may register any email, a user token only the user's own email or an
+ * alias. Returns the JSON body to send upstream, or null after it wrote the
+ * error response.
+ */
+async function checkRegister(req: IncomingMessage, res: ServerResponse): Promise<string | null> {
+  const auth = await resolveHttpRequestAuth(req, getApiKey());
+  if (!auth || auth.page || (auth.kind !== "operator" && auth.kind !== "user")) {
+    jsonError(res, "Creating an agent-fs account here needs a swarm API key or user token", 401);
+    return null;
+  }
+  let body: unknown;
+  try {
+    body = await parseBody(req, REGISTER_BODY_MAX_BYTES);
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) jsonError(res, "Request body too large", 413);
+    else jsonError(res, "Invalid JSON body", 400);
+    return null;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    jsonError(res, "Invalid JSON body", 400);
+    return null;
+  }
+  if (auth.kind === "user") {
+    const email = (body as { email?: unknown }).email;
+    const own = [auth.user.email, ...auth.user.emailAliases]
+      .filter((e): e is string => typeof e === "string")
+      .map((e) => e.trim().toLowerCase());
+    if (typeof email !== "string" || !own.includes(email.trim().toLowerCase())) {
+      jsonError(res, "You can create an agent-fs account only for your own email", 403);
+      return null;
+    }
+  }
+  // Re-encoded, so agent-fs reads the same email this check read.
+  return JSON.stringify(body);
 }
 
 /**
@@ -192,16 +247,14 @@ export async function handleAgentFsProxy(
     jsonError(res, "Invalid path", 400);
     return true;
   }
-  if (
-    isApi &&
-    method === "POST" &&
-    routedPath(sentPath) === "/auth/register" &&
-    !registerRateLimiter.take(clientIp(req))
-  ) {
+  const isRegister = isApi && method === "POST" && routedPath(sentPath) === "/auth/register";
+  if (isRegister && !registerRateLimiter.take(clientIp(req))) {
     res.setHeader("Retry-After", "12");
     jsonError(res, "rate_limited", 429);
     return true;
   }
+  const registerBody = isRegister ? await checkRegister(req, res) : null;
+  if (isRegister && registerBody === null) return true;
 
   const headers = new Headers();
   const authorization = req.headers.authorization;
@@ -211,6 +264,11 @@ export async function handleAgentFsProxy(
   for (const name of REQUEST_HEADER_ALLOWLIST) {
     const v = req.headers[name];
     if (typeof v === "string") headers.set(name, v);
+  }
+  if (registerBody !== null) {
+    // The body was read and re-encoded: fetch sets the new length.
+    headers.delete("content-length");
+    headers.set("content-type", "application/json");
   }
 
   const ac = new AbortController();
@@ -227,7 +285,9 @@ export async function handleAgentFsProxy(
       redirect: "manual",
       signal: ac.signal,
     };
-    if (hasBody) {
+    if (registerBody !== null) {
+      init.body = registerBody;
+    } else if (hasBody) {
       // Stream the request body; Bun and undici need duplex "half" for that.
       init.body = Readable.toWeb(req) as RequestInit["body"];
       init.duplex = "half";

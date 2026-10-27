@@ -14,6 +14,8 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { closeDb, createUser, initDb } from "../be/db";
+import { mintToken } from "../be/users";
 import { _resetAgentFsRegisterRateLimitForTests, handleAgentFsProxy } from "../http/agentfs-proxy";
 import { setCorsHeaders } from "../http/utils";
 import {
@@ -107,10 +109,10 @@ describe.skipIf(!HAVE_AGENT_FS)("/agentfs proxy against a real agent-fs", () => 
     });
     await waitForServer(`${swarmUrl}/health`);
 
-    // Register through the proxy: public agent-fs route, no swarm credentials.
+    // Register through the proxy: it needs a swarm credential (the operator key here).
     const reg = await fetch(`${swarmUrl}/agentfs/auth/register`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SWARM_KEY}` },
       body: JSON.stringify({ email: `proxy-${Date.now()}@example.test` }),
     });
     expect(reg.status).toBe(200);
@@ -353,6 +355,8 @@ interface FakeAgentFs {
   url: string;
   /** Headers and URL of the last request the fake saw. */
   last: { url: string; headers: Headers; method: string } | null;
+  /** The body of the last POST /auth/register. */
+  registerBody: string | null;
   hits: number;
   /** performance.now() when the fake wrote the last byte of /big. */
   bigDoneAt: number;
@@ -362,11 +366,14 @@ interface FakeAgentFs {
 }
 
 const FAKE_SHARE_TOKEN = "tok_fake_share_secret_0123456789";
+/** The swarm key in the fake-agent-fs suites (register through the proxy needs one). */
+const FAKE_SWARM_KEY = "example-agentfs-proxy-fake-swarm-key";
 
 function startFakeAgentFs(): FakeAgentFs {
   const fake: FakeAgentFs = {
     url: "",
     last: null,
+    registerBody: null,
     hits: 0,
     bigDoneAt: 0,
     sseClosed: false,
@@ -384,6 +391,12 @@ function startFakeAgentFs(): FakeAgentFs {
         headers: new Headers(request.headers),
         method: request.method,
       };
+      if (url.pathname === "/auth/register" && request.method === "POST") {
+        return request.text().then((text) => {
+          fake.registerBody = text;
+          return Response.json({ apiKey: "af_new", orgId: "org-1" });
+        });
+      }
       if (url.pathname === "/big") {
         // 20 x 1 MB chunks, 15 ms apart: the upstream needs about 300 ms to finish.
         const total = Number(url.searchParams.get("mb") ?? "20");
@@ -469,7 +482,7 @@ async function rawStatus(base: string, path: string): Promise<number> {
   });
 }
 
-/** A POST with the path sent byte for byte (fetch would resolve `.` and `\\`). */
+/** A POST with the path sent byte for byte (fetch would resolve `.` and `\\`), with the operator key. */
 async function rawPostStatus(base: string, path: string, ip: string): Promise<number> {
   const { port, hostname } = new URL(base);
   const body = JSON.stringify({ email: "a@example.test" });
@@ -484,6 +497,7 @@ async function rawPostStatus(base: string, path: string, ip: string): Promise<nu
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
           "X-Forwarded-For": ip,
+          Authorization: `Bearer ${FAKE_SWARM_KEY}`,
         },
       },
       (res) => {
@@ -500,9 +514,14 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
   let fake: FakeAgentFs;
   let server: Server;
   let proxyUrl = "";
-  const saved = { proxy: process.env.AGENT_FS_PROXY, url: process.env.AGENT_FS_API_URL };
+  const saved = {
+    proxy: process.env.AGENT_FS_PROXY,
+    url: process.env.AGENT_FS_API_URL,
+    key: process.env.AGENT_SWARM_API_KEY,
+  };
 
   beforeAll(async () => {
+    process.env.AGENT_SWARM_API_KEY = FAKE_SWARM_KEY;
     fake = startFakeAgentFs();
     process.env.AGENT_FS_API_URL = `${fake.url}/`;
     // Same order as the real pipeline: the swarm's CORS first, then the proxy.
@@ -528,6 +547,7 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     for (const [k, v] of [
       ["AGENT_FS_PROXY", saved.proxy],
       ["AGENT_FS_API_URL", saved.url],
+      ["AGENT_SWARM_API_KEY", saved.key],
     ] as const) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -688,14 +708,22 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     for (const path of paths) {
       const res = await fetch(`${proxyUrl}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "203.0.113.9",
+          Authorization: `Bearer ${FAKE_SWARM_KEY}`,
+        },
         body: JSON.stringify({ email: "a@example.test" }),
       });
       expect({ path, limited: res.status === 429 }).toEqual({ path, limited: false });
     }
     const sixth = await fetch(`${proxyUrl}/agentfs/auth/%72egister`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "203.0.113.9",
+        Authorization: `Bearer ${FAKE_SWARM_KEY}`,
+      },
       body: JSON.stringify({ email: "a@example.test" }),
     });
     expect(sixth.status).toBe(429);
@@ -756,7 +784,11 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     const register = (ip: string) =>
       fetch(`${proxyUrl}/agentfs/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Forwarded-For": ip },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": ip,
+          Authorization: `Bearer ${FAKE_SWARM_KEY}`,
+        },
         body: JSON.stringify({ email: "a@example.test" }),
       });
     for (let i = 0; i < 5; i++) expect((await register("203.0.113.7")).status).toBe(200);
@@ -926,5 +958,127 @@ describe("the API in front of a fake agent-fs", () => {
     for (const path of ["/agentfs/x", "/share/x", "/site/x"]) {
       expect((await fetch(`${off.url}${path}`)).status).toBe(404);
     }
+  });
+});
+
+describe("POST /agentfs/auth/register needs a swarm credential", () => {
+  let fake: FakeAgentFs;
+  let server: Server;
+  let proxyUrl = "";
+  let userToken = "";
+  const saved = {
+    proxy: process.env.AGENT_FS_PROXY,
+    url: process.env.AGENT_FS_API_URL,
+    key: process.env.AGENT_SWARM_API_KEY,
+  };
+
+  beforeAll(async () => {
+    process.env.AGENT_SWARM_API_KEY = FAKE_SWARM_KEY;
+    initDb(":memory:");
+    const user = await createUser({
+      name: "Proxy teammate",
+      email: "Mate@Example.test",
+      emailAliases: ["mate.alias@example.test"],
+    });
+    const actor = { kind: "operator", id: "agentfs-proxy-test" } as const;
+    userToken = (await mintToken(user.id, "agentfs-proxy-test", actor)).plaintext;
+    fake = startFakeAgentFs();
+    server = createServer(async (req, res) => {
+      if (!(await handleAgentFsProxy(req, res))) {
+        res.writeHead(404);
+        res.end("Not Found");
+      }
+    });
+    proxyUrl = `http://127.0.0.1:${await listenOnFreePort(server, "127.0.0.1")}`;
+  });
+
+  beforeEach(() => {
+    process.env.AGENT_FS_PROXY = "true";
+    process.env.AGENT_FS_API_URL = fake.url;
+    _resetAgentFsRegisterRateLimitForTests();
+    fake.registerBody = null;
+  });
+
+  afterAll(() => {
+    server.close();
+    fake.stop();
+    closeDb();
+    for (const [k, v] of [
+      ["AGENT_FS_PROXY", saved.proxy],
+      ["AGENT_FS_API_URL", saved.url],
+      ["AGENT_SWARM_API_KEY", saved.key],
+    ] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  const register = (body: unknown, authorization?: string) =>
+    fetch(`${proxyUrl}/agentfs/auth/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authorization ? { Authorization: authorization } : {}),
+      },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+
+  test("no credential, an af_ key, a wrong key or an unknown user token: 401, never upstream", async () => {
+    for (const authorization of [
+      undefined,
+      "Bearer af_someone",
+      "Bearer not-the-swarm-key",
+      "Bearer aswt_unknown",
+    ]) {
+      const res = await register({ email: "mate@example.test" }, authorization);
+      expect({ authorization, status: res.status }).toEqual({ authorization, status: 401 });
+    }
+    expect(fake.registerBody).toBeNull();
+  });
+
+  test("the operator key registers any email, and no swarm bearer goes upstream", async () => {
+    const res = await register({ email: "someone@example.test" }, `Bearer ${FAKE_SWARM_KEY}`);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(fake.registerBody ?? "null")).toEqual({ email: "someone@example.test" });
+    expect(fake.last?.headers.get("authorization")).toBeNull();
+  });
+
+  test("a user token registers its own email or an alias, not a teammate's", async () => {
+    for (const email of ["MATE@example.test", "mate.alias@example.test"]) {
+      const res = await register({ email }, `Bearer ${userToken}`);
+      expect({ email, status: res.status }).toEqual({ email, status: 200 });
+    }
+    fake.registerBody = null;
+    const other = await register({ email: "lead@example.test" }, `Bearer ${userToken}`);
+    expect(other.status).toBe(403);
+    const noEmail = await register({}, `Bearer ${userToken}`);
+    expect(noEmail.status).toBe(403);
+    expect(fake.registerBody).toBeNull();
+  });
+
+  test("agent-fs reads the same email the proxy checked, even with a repeated key", async () => {
+    // JSON.parse keeps the last key. The proxy sends the parsed body again.
+    const taken = await register(
+      '{"email":"mate@example.test","email":"lead@example.test"}',
+      `Bearer ${userToken}`,
+    );
+    expect(taken.status).toBe(403);
+    const own = await register(
+      '{"email":"lead@example.test","email":"mate@example.test"}',
+      `Bearer ${userToken}`,
+    );
+    expect(own.status).toBe(200);
+    expect(JSON.parse(fake.registerBody ?? "null")).toEqual({ email: "mate@example.test" });
+  });
+
+  test("a body over 16 KB gets 413, and bad JSON gets 400", async () => {
+    const big = await register(
+      { email: "a@example.test", pad: "x".repeat(17_000) },
+      `Bearer ${FAKE_SWARM_KEY}`,
+    );
+    expect(big.status).toBe(413);
+    const bad = await register("{not json", `Bearer ${FAKE_SWARM_KEY}`);
+    expect(bad.status).toBe(400);
+    expect(fake.registerBody).toBeNull();
   });
 });
