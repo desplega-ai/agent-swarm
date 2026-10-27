@@ -13,6 +13,17 @@ export function isSocketNotReadyError(error: unknown): boolean {
   return error instanceof Error && error.message === NOT_READY_MESSAGE;
 }
 
+/**
+ * Events whose effect is "last write wins". Run late from the drain they would
+ * overwrite a newer event that already ran live, so they never wait in the queue.
+ */
+const ORDER_DEPENDENT_EVENTS = new Set(["assistant_thread_context_changed"]);
+
+function isOrderDependentEvent(body: unknown): boolean {
+  const type = (body as { event?: { type?: unknown } } | undefined)?.event?.type;
+  return typeof type === "string" && ORDER_DEPENDENT_EVENTS.has(type);
+}
+
 type SocketAck = (response?: Record<string, unknown>) => Promise<void>;
 
 interface SocketEnvelope {
@@ -48,6 +59,9 @@ interface SocketAckOptions {
  * If the receipt cannot be stored (store down, backlog full, no event id) the
  * ack error is swallowed instead and Bolt runs the listeners inline, deduped
  * only by the in-memory `event_id` cache: losing the event is the worse failure.
+ * Order-dependent events (`assistant_thread_context_changed`, last write wins)
+ * take that inline path by design: queued, an older one could run after a newer
+ * one that ran live and overwrite it.
  * Any other ack error still throws.
  *
  * Slack redelivers the unacked event with the same `event_id` and a
@@ -129,6 +143,7 @@ function tolerateSocketNotReadyAcks(
 
 /** True when the event is now stored (or already was) and the drain owns it. */
 async function admitForDrain(payload: SocketEnvelope, envelope: string): Promise<boolean> {
+  if (isOrderDependentEvent(payload.body)) return false;
   try {
     const result = await admitSlackInbound({
       transport: "socket",
