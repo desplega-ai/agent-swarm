@@ -89,11 +89,13 @@ Or self-host. [`docker-compose.example.yml`](https://github.com/desplega-ai/agen
 
 Plan for at least 4 vCPU, 8 GB RAM and 40 GB of free disk, and prune old Docker images after upgrades. See [Host requirements & disk cleanup](https://docs.agent-swarm.dev/docs/guides/host-requirements).
 
-The one-shot installer checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes`, and prints the dashboard `/setup` link. It defaults to the single-agent `solo` preset, so pass `--preset full` for every official template (it runs one coder where the example runs two):
+The one-shot installer checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes --preset full` (every official template; it runs one coder where the example runs two), and prints the dashboard `/setup` link:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
+curl -fsSL https://agent-swarm.dev/install.sh | bash
 ```
+
+The raw GitHub URL (`https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh`) serves the same script. The API is public through a tunnel by default, protected by the API key. Add `bash -s -- --no-tunnel` to keep it local.
 
 Or use the examples directly:
 

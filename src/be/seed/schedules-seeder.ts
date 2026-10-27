@@ -35,6 +35,12 @@ import dailyWorkflowHealthAuditConfig from "../../../templates/schedules/daily-w
 import dailyWorkflowHealthAuditContent from "../../../templates/schedules/daily-workflow-health-audit/content.md" with {
   type: "text",
 };
+import dreamingDailyConfig from "../../../templates/schedules/dreaming-daily/config.json" with {
+  type: "text",
+};
+import dreamingDailyContent from "../../../templates/schedules/dreaming-daily/content.md" with {
+  type: "text",
+};
 import gtmWeeklyReviewConfig from "../../../templates/schedules/gtm-weekly-review/config.json" with {
   type: "text",
 };
@@ -129,6 +135,7 @@ const BUILT_IN_SCHEDULE_SOURCES: readonly ScheduleTemplateSource[] = [
     config: asText(dailyWorkflowHealthAuditConfig),
     content: asText(dailyWorkflowHealthAuditContent),
   },
+  { config: asText(dreamingDailyConfig), content: asText(dreamingDailyContent) },
   { config: asText(gtmWeeklyReviewConfig), content: asText(gtmWeeklyReviewContent) },
   {
     config: asText(weeklyCodeHealthReportsConfig),

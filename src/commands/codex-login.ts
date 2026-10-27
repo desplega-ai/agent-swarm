@@ -13,7 +13,7 @@ import { exec } from "node:child_process";
 import { emitKeypressEvents } from "node:readline";
 
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
-import { loginCodexOAuth } from "../providers/codex-oauth/flow.js";
+import { extractChatgptUserId, loginCodexOAuth } from "../providers/codex-oauth/flow.js";
 import {
   loadAllCodexOAuthSlots,
   MAX_CODEX_OAUTH_SLOT,
@@ -333,6 +333,30 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
     log("\nOAuth flow completed successfully!");
     log(`  Account ID: ${creds.accountId}`);
     log(`  Expires: ${new Date(creds.expires).toISOString()}`);
+
+    const userId = extractChatgptUserId(creds.access);
+    if (userId) {
+      try {
+        // Re-read after OAuth: the pool can change while the browser login is open.
+        const duplicateSlots = (await loadAllSlots(apiUrl, apiKey, { throwOnError: true }))
+          .filter(
+            (existing) =>
+              existing.slot !== slot &&
+              existing.creds.accountId === creds.accountId &&
+              extractChatgptUserId(existing.creds.access) === userId,
+          )
+          .map((existing) => existing.slot);
+        if (duplicateSlots.length > 0) {
+          error(
+            `Warning: This ChatGPT user already has Codex credentials in slot(s) ${duplicateSlots.join(", ")}. ` +
+              `This login will also be stored in slot ${slot}. ` +
+              `To replace existing credentials, re-run agent-swarm codex-login --slot ${duplicateSlots[0]}.`,
+          );
+        }
+      } catch {
+        error("Warning: Could not check existing Codex slots for duplicate accounts.");
+      }
+    }
 
     // Read the auth-failure fence before the credential write (see clearCodexAuthBench).
     const authFence = await readAuthFence(apiUrl, apiKey).catch((err: unknown) => err);

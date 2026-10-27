@@ -266,7 +266,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `AgentLink` | linked agent name with avatar | `<AgentLink agentId={id} agentName={name} />` |
 | `CollapsibleDescription` | truncated text with show-more toggle | `<CollapsibleDescription text={long} />` |
 | `CollapsibleSection` | folding section header | `<CollapsibleSection title="Details">...</CollapsibleSection>` |
-| `CommandMenu` | global ⌘K palette | mounted at root |
+| `CommandMenu` | global ⌘K palette. A new route needs a `handle` in `app/routes.tsx`: `nav({...})` lists it in "Go to", `unlisted(reason)` opts out; an entity list (`/x` + `/x/:id`) also names `search` providers (`components/command-palette/providers.tsx`) or a `searchOptOut`. `app/routes.test.tsx` fails otherwise. Page-specific commands: `useCommandMenuGroup` | mounted at root |
 | `DataGrid` | AG Grid wrapper — REQUIRED for all data lists | `<DataGrid rowData={rows} columnDefs={cols} />` |
 | `EmptyState` | icon + title + description + optional action. First-run page empties add `entity` (renders an "Ask the swarm" CTA that seeds a new session) + `fullPage` (vertical centering) | `<EmptyState icon={Inbox} title="No tasks yet" description="..." entity="task" fullPage />` |
 | `ErrorBoundary` | top-level error fallback | wrap routes |

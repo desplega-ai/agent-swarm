@@ -1,0 +1,190 @@
+---
+title: Slack Reply Gate
+description: Stop Lead from waking on Slack thread replies that are not meant for it. One catalog extension asks a SystemOne model, Jev or Clef, whether a buffered thread reply needs Lead, and drops the wake-up when it does not. Install it in shadow mode, read its decisions, then enforce.
+agent:
+  when: "Someone wants Lead to stop answering or waking on Slack thread banter, reactions, or messages meant for other people"
+  notWhen: "Someone wants to route Slack messages to a specific agent or channel, which is a pre.slack.route extension"
+---
+
+**Lead answers the thread when someone talks to it, and stays quiet otherwise.**
+
+The `slack-reply-gate` extension sits between the Slack thread buffer and Lead. When a thread reply would wake Lead, it asks a small SystemOne decision model whether the message is meant for Lead. If the answer is a confident no, the Lead task is never created and the message gets a :mute: reaction. It ships in the extension catalog, so you install it by name and change it with config only.
+
+## The problem
+
+With the [additive Slack buffer](/docs/integrations/slack#additive-slack-buffer) on (`ADDITIVE_SLACK=true`), a reply in a thread the swarm takes part in does not need an @mention. The buffer collects the replies for a short debounce window and turns them into one Lead task. That is what lets people give multi-message feedback without tagging the bot each time.
+
+It also means every human message in that thread wakes Lead: "lol", an emoji, "thanks", or two people talking to each other. Lead spends a session deciding to say nothing, or replies to a conversation that was not addressed to it. Messages that @mention another person are already skipped by the buffer. Everything else reaches Lead.
+
+## How it works
+
+<Mermaid title="Slack Reply Gate: a buffered thread reply passes on files or a Lead mention, otherwise one SystemOne choice call decides, and only a confident skip in enforce mode drops the Lead task." chart={`flowchart TD
+  M["Thread reply<br/>no bot @mention"] --> B["Thread buffer<br/>debounce, batch"]
+  B --> S{"Lead's thread task<br/>in progress?"}
+  S -- yes --> ST["Steer that task<br/>gate does not run"]
+  S -- no --> H["pre.task.create<br/>origin slack + buffer header"]
+  H --> F{"Files, or @lead<br/>in the new messages?"}
+  F -- yes --> P["Pass<br/>Lead task created"]
+  F -- no --> D["One SystemOne choice call<br/>Jev or Clef"]
+  D -- "error or timeout" --> P
+  D --> K{"Skip label on top and<br/>p(skip) >= minConfidence<br/>or unscored?"}
+  K -- no --> P
+  K -- "yes, shadow" --> SH["Record shadow-skip<br/>Lead task created"]
+  K -- "yes, enforce" --> X["Block<br/>no Lead task, :mute:"]
+`} />
+
+The gate is one hook on `pre.task.create`. It runs only for tasks with origin `slack` whose description carries the buffer's header, `[Thread follow-up — N message(s) buffered]`. A direct @mention of the bot takes the normal mention path, creates a task without that header, and is never gated. The header counts only at the start of the description or right after the closing `</thread_context>`, so a header quoted inside the thread context does not trigger the gate.
+
+For each buffered follow-up:
+
+1. **Files pass.** A follow-up with downloaded files (task status `draft`) passes without a model call.
+2. **Mentions pass.** A new message that names Lead passes without a model call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
+3. **One decision.** Otherwise the hook makes one SystemOne `choice` call through the `system-one-decide` tool, with the new messages, the sender kind (known teammate, unknown, or a listed bot), and the last `contextMessages` thread messages. The labels are `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, and `other`.
+4. **Skip only when sure.** The verdict is "no reply" only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels (`skipP`) is at least `minConfidence`. A split between two skip labels still skips. A skip label below the threshold replies. When the model returns no probabilities, the top label's confidence stands in for `skipP`. When it returns neither probabilities nor a confidence, `skipP` is null and the threshold is not applied: a skip label on top still skips. The decision row records `skipP: null` and `lowConfidence: false`, and in `enforce` the message is dropped however unsure the model was.
+5. **Fail open.** A missing credential, a provider error, a network error, a timeout, a malformed answer, or an unknown label lets the task through. The handler never throws, so a provider outage cannot auto-disable the extension. Each failure is recorded as `fail-open`.
+
+Several buffered messages are judged together. One mention in any of them passes the whole batch.
+
+In `enforce`, a skip returns `block` right away. The Slack calls run after it: the hook removes the bot's own acceptance reactions (`eyes`, `heavy_plus_sign`, `zap`, `speech_balloon`, or their `SLACK_REACTION_*` overrides) from the triggering message and adds `muteReaction` (default `mute`). A slow or failing Slack call never delays the drop or turns it back into a task. The thread buffer also adds :no_entry: to the triggering message whenever a `pre.task.create` hook blocks a flush, so a dropped message shows both :no_entry: and :mute:.
+
+### Why `pre.task.create` and not `pre.slack.route`
+
+`pre.slack.route` never sees the messages this gate is for. In the Slack message handler, a non-mention reply in a swarm thread is handed to the buffer and the handler returns before it dispatches `pre.slack.route`. That hook runs only for messages that go on to normal routing, such as @mentions.
+
+`pre.task.create` fires when the buffer flush creates the Lead task. At that point the description holds the whole batch plus the thread context, and a `block` result drops the task before it exists.
+
+## Prerequisites
+
+- **Agent Swarm with a Lead** and the [Slack integration](/docs/integrations/slack) connected. The bot token needs `reactions:write`, which the standard Slack app manifest already includes for its acceptance reactions. A swarm with Slack connected already has `SLACK_BOT_TOKEN`.
+- **The additive buffer on:** `ADDITIVE_SLACK=true`, and `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` not set to `true`. Without the buffer, non-mention thread replies never become Lead tasks and the gate has nothing to judge.
+- **One SystemOne provider credential**, set as a global config secret. See the table below.
+- **Someone who can enable extensions:** a lead, an operator, or a dashboard user. See [Lead activation and trust](/docs/guides/extensions#lead-activation-and-trust).
+
+| `provider` | Model | Credential |
+|---|---|---|
+| `typesafe` | Jev | `TYPESAFE_API_KEY` |
+| `openrouter` | Jev | `OPENROUTER_API_KEY` |
+| `cloudflare` | Clef | `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` |
+
+The default `provider: "auto"` uses the first of these three whose credential is set. Without any, every message fails open and each KV row names the missing secrets. `laya` and `openai` work as explicit choices; their credentials are in the [SystemOne Decision](/docs/concepts/workflows#systemone-decision) reference.
+
+Set the credential as a global secret. Global writes reload the integrations, and the API process loads global rows into its environment, which is where `auto` and the Slack token are read.
+
+```bash
+export SWARM_URL=https://api.example.com   # your agent-swarm API
+export API_KEY=...                         # swarm API key
+H=(-H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json")
+
+curl -s "${H[@]}" -X PUT $SWARM_URL/api/config \
+  -d '{"scope":"global","key":"TYPESAFE_API_KEY","value":"<your key>","isSecret":true}'
+```
+
+## Install
+
+Install it in `shadow` mode. Shadow asks the model and records every verdict, but never blocks.
+
+**From the dashboard.** Open Settings, Extensions, and select **Install extension**. Pick `slack-reply-gate` and select **Install**. The extension's page opens. Set its config to `{ "mode": "shadow" }`, select **Save settings**, and enable it. A new install is disabled until you enable it.
+
+**From the API.** The install body accepts `template`, `priority`, and `config`:
+
+```bash
+EXT_ID=$(curl -s "${H[@]}" -X POST $SWARM_URL/api/extensions/install \
+  -d '{"template":"slack-reply-gate","config":{"mode":"shadow"}}' | jq -r .extension.id)
+
+curl -s "${H[@]}" -X POST $SWARM_URL/api/extensions/$EXT_ID/enable
+```
+
+Agents can do the same with the `extension-install` and `extension-enable` MCP tools. The [extensions guide](/docs/guides/extensions#install-and-operate) covers versions, the run log, and the other lifecycle calls.
+
+## Roll out
+
+### 1. Read the decisions in shadow
+
+Every decision lands in KV namespace `ext:slack-reply-gate`:
+
+- `d:<epochMs>:<channel>_<threadTs>`: one row per decision, with `action` (`pass`, `shadow-skip`, `skipped`, `fail-open`), `reason`, `skipP`, `confidence`, `lowConfidence`, `provider`, `latencyMs`, `sender`, a 300-character `preview` of the new messages, and `error` on a failure.
+- `m:<epochMs>:<channel>_<threadTs>`: one row per mute attempt in `enforce`, with `action` (`muted`, `unreacted`, `mute-error`), `removed`, `added`, and `errors`.
+- `last`: the latest decision.
+- Counters: `total`, `mention`, `files`, `reply`, `shadow-skip`, `skipped`, `error`, `muted`, `unreacted`, `mute-error`, and `reason:<label>`.
+
+Keys sort by time in ascending order, so the newest `d:` rows are at the end of the list. The list endpoint returns at most 1000 entries per page, starting at `offset`, and reports the full count as `total`. To read the newest rows, read `total` first, then fetch the last page from `offset = total - 50`.
+
+```bash
+NS=ext:slack-reply-gate
+
+# The latest decision
+curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS/last" | jq .value
+
+# The last 50 decisions, one line each
+TOTAL=$(curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS?prefix=d:&limit=1" | jq .total)
+OFFSET=$(( TOTAL > 50 ? TOTAL - 50 : 0 ))
+curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS?prefix=d:&offset=$OFFSET&limit=50" \
+  | jq -r '.entries[].value
+      | [.at, .action, (.reason // ""), (.skipP | tostring), (.provider // ""), (.preview // .error // "")]
+      | @tsv'
+
+# The counters
+for k in total mention files reply shadow-skip error; do
+  printf '%s\t%s\n' "$k" "$(curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS/$k" | jq -r '.value // 0')"
+done
+```
+
+Agents read the same rows with `kv-list` and `kv-get` on namespace `ext:slack-reply-gate`.
+
+### 2. Check what enforce would do
+
+Run shadow on real threads, then read the rows with these questions:
+
+- **Every `shadow-skip`.** Each one is a message `enforce` would drop. Read its `preview`. A real ask, answer, or instruction for Lead here is a false skip. One false skip costs more than many wasted wake-ups.
+- **`pass` rows with `lowConfidence: true`.** The top label was a skip label, but `skipP` was under `minConfidence`. These are the near misses that `enforce` lets through.
+- **`shadow-skip` rows with `skipP: null`.** The model returned neither probabilities nor a confidence, so `minConfidence` was never checked. `enforce` drops these unconditionally. If they appear, read each one closely, or switch to a provider that returns probabilities before you enforce.
+- **`fail-open` rows.** The `error` names the cause: a missing credential, a provider error, or a timeout. Fix these first; a gate that fails open on every message does nothing.
+- **`latencyMs`.** If it often approaches `timeoutMs` (default 3000, capped at 4000), the call times out and fails open. Try another provider.
+- **`provider`.** `minConfidence` was tuned on Jev. If `auto` picked Clef, read its verdicts before you enforce on it.
+
+Raise `minConfidence` if real asks score as skips, and lower it if obvious banter keeps passing as `lowConfidence`.
+
+### 3. Switch to enforce
+
+PATCH replaces the whole stored config, so send every key you set:
+
+```bash
+curl -s "${H[@]}" -X PATCH $SWARM_URL/api/extensions/$EXT_ID \
+  -d '{"config":{"mode":"enforce"}}'
+```
+
+In the dashboard, edit the config on the extension's page and select **Save settings**. An enabled extension reloads on save. Keep reading the `d:` rows after the switch: `skipped` replaces `shadow-skip`, and the `m:` rows show whether the :mute: landed. Set `mode` back to `shadow` or `off` at any time.
+
+## Config
+
+These are the keys you change during a rollout. The [template README](https://github.com/desplega-ai/agent-swarm/blob/main/templates/extensions/slack-reply-gate/README.md) has the full table, including models, timeouts, `contextMessages`, `leadAliases`, and `botSlackUserIds`.
+
+| Key | Default | What it does |
+|---|---|---|
+| `mode` | `shadow` | `off` never evaluates. `shadow` records verdicts and never blocks. `enforce` blocks the Lead task on a skip. |
+| `provider` | `auto` | `auto`, `typesafe`, `openrouter`, `cloudflare`, `laya`, or `openai`. `auto` picks the first of typesafe, openrouter, cloudflare with a credential, and moves to the next only when the server refuses a provider for a deployment setting. |
+| `minConfidence` | `0.55` | Minimum summed skip probability to skip. Higher means fewer drops. |
+| `muteReaction` | `mute` | Reaction added to a dropped message. `""` adds nothing and only removes the bot's acceptance reactions. |
+
+## Limits
+
+- **Steering bypasses the gate.** With thread steering on (the default), when Lead's latest task in the thread is in progress and the batch has no files, the flush steers that task instead of creating one. `pre.task.create` does not fire, so the gate does not run.
+- **A drop loses nothing.** The dropped messages stay in the thread, and the next follow-up's `<thread_context>` carries them to Lead.
+- **One message gets the reaction.** A flush of several messages mutes only the triggering (last) message. The others keep their acceptance reaction.
+- **Rows do not expire.** The `d:` and `m:` rows are written with no TTL and accumulate in the namespace.
+- **Without `SLACK_BOT_TOKEN`**, `enforce` still drops the message but cannot change its reactions, and records a `mute-error`.
+
+## Ask your Lead to install it
+
+Paste this to your Lead to install the gate in shadow mode:
+
+```text
+Install the slack-reply-gate extension from the extension catalog in shadow mode.
+
+1. Check that ADDITIVE_SLACK is true and SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION is not true. If the buffer is off, stop and tell me.
+2. Check that at least one of these is set as a global config secret: TYPESAFE_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ACCOUNT_ID. Never print a value. If none is set, stop and tell me which one to add.
+3. Install it with extension-install, template "slack-reply-gate", config {"mode":"shadow"}. Then enable it with extension-enable.
+4. After a few thread replies, read KV namespace ext:slack-reply-gate (the "last" key and the "d:" rows) and send me a summary: counts per action, every shadow-skip preview, and any fail-open error.
+
+Do not switch to enforce. I will decide after reading the shadow results.
+```

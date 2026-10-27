@@ -1,5 +1,6 @@
 import { RouterProvider } from "react-router-dom";
 import { AppUpdateWatcher } from "@/components/shared/app-update-prompt";
+import { CommandMenuRoutesProvider } from "@/components/shared/command-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { isDemoMode } from "@/lib/deployment-config";
 import { Providers } from "./providers";
@@ -8,7 +9,9 @@ import { router } from "./router";
 export default function App() {
   return (
     <Providers>
-      <RouterProvider router={router} />
+      <CommandMenuRoutesProvider routes={router.routes}>
+        <RouterProvider router={router} />
+      </CommandMenuRoutesProvider>
       {isDemoMode ? (
         <aside
           aria-label="Live demo environment"

@@ -58,15 +58,15 @@ describe("seeder registry", () => {
     }
   });
 
-  test("seeds all 21 automation templates on a fresh database and re-runs as a no-op", async () => {
+  test("seeds all 23 automation templates on a fresh database and re-runs as a no-op", async () => {
     expect(await listWorkflows()).toHaveLength(0);
     expect(await getScheduledTasks()).toHaveLength(0);
 
     const workflowResult = await runSeeder(workflowsSeeder, { quiet: true });
     const scheduleResult = await runSeeder(schedulesSeeder, { quiet: true });
 
-    expect(workflowResult).toMatchObject({ created: 10, failed: [] });
-    expect(scheduleResult).toMatchObject({ created: 11, failed: [] });
+    expect(workflowResult).toMatchObject({ created: 11, failed: [] });
+    expect(scheduleResult).toMatchObject({ created: 12, failed: [] });
     expect((await listWorkflows()).map((workflow) => workflow.name).sort()).toEqual(
       workflowsSeeder.items().map((item) => item.key),
     );
@@ -77,16 +77,16 @@ describe("seeder registry", () => {
     expect(await runSeeder(workflowsSeeder, { quiet: true })).toMatchObject({
       created: 0,
       updated: 0,
-      skippedUnchanged: 10,
+      skippedUnchanged: 11,
       failed: [],
     });
     expect(await runSeeder(schedulesSeeder, { quiet: true })).toMatchObject({
       created: 0,
       updated: 0,
-      skippedUnchanged: 11,
+      skippedUnchanged: 12,
       failed: [],
     });
-    expect(await listWorkflows()).toHaveLength(10);
-    expect(await getScheduledTasks()).toHaveLength(11);
+    expect(await listWorkflows()).toHaveLength(11);
+    expect(await getScheduledTasks()).toHaveLength(12);
   });
 });

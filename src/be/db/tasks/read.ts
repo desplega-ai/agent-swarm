@@ -830,8 +830,8 @@ export interface TaskFilters {
 /**
  * The SQL twin of `sessionAccessForRoot` (../../session-shares). A session's
  * root is its topmost existing task; the session is hidden when the root has
- * an owner other than the user and no active share names the user or
- * everyone. Descending from hidden roots is linear in their tasks at any chain
+ * an owner other than the user, is not a schedule run (`scheduleId`), and no
+ * active share names the user or everyone. Descending from hidden roots is linear in their tasks at any chain
  * depth, and as a WHERE term it keeps paging and `COUNT(*)` on the same rows.
  * `parentTaskId` is fixed at insert to an existing task, so no parent cycle
  * (which would have no root) can form.
@@ -854,6 +854,7 @@ export function readableSessionCondition(
         WHERE (r.parentTaskId IS NULL
             OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r.parentTaskId))
           AND ${otherOwner}
+          AND r.scheduleId IS NULL
           AND NOT EXISTS (SELECT 1 FROM session_shares s
             WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND ${shareMatch})
         UNION ALL

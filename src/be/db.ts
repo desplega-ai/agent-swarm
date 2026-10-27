@@ -195,6 +195,7 @@ import {
   getLatestContextVersion,
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
+import { pageSearchSql } from "./db/page-search";
 import { getDb, getDbClient } from "./db/runtime";
 import {
   assertAssetKeyMovesAllowed,
@@ -6063,6 +6064,8 @@ export interface ScheduledTaskFilters {
   lastRunStatus?: "failed" | "succeeded";
   key?: string;
   keyPrefix?: string;
+  /** At most this many rows, in list order. */
+  limit?: number;
 }
 
 /**
@@ -6144,6 +6147,10 @@ export async function getScheduledTasks(
   }
 
   query += " ORDER BY lastRunAt IS NULL ASC, lastRunAt DESC, lastUpdatedAt DESC";
+  if (filters?.limit !== undefined) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
 
   const rows = await getDbClient().query<ScheduledTaskRow>(query, params);
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
@@ -7683,6 +7690,10 @@ export interface WorkflowFilters {
   consecutiveErrorsMin?: number;
   key?: string;
   keyPrefix?: string;
+  /** Matches the name, description or key anywhere, case-insensitive. */
+  q?: string;
+  /** At most this many rows, newest first. */
+  limit?: number;
 }
 
 export function listWorkflows(filters?: WorkflowFilters): Promise<Workflow[]>;
@@ -7728,7 +7739,16 @@ export async function listWorkflows(
     ) >= ?`;
     params.push(filters.consecutiveErrorsMin);
   }
+  if (filters?.q) {
+    const pattern = `%${literalPrefixPattern(filters.q)}`;
+    query += ` AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR "key" LIKE ? ESCAPE '\\')`;
+    params.push(pattern, pattern, pattern);
+  }
   query += " ORDER BY lastUpdatedAt DESC";
+  if (filters?.limit !== undefined) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
   const rows = await getDbClient().query<WorkflowRow>(query, params);
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
@@ -7904,10 +7924,12 @@ export async function createWorkflowRun(data: {
   parentStepId?: string;
   /** The parent step's `retryCount` when it started this run (migration 240). */
   parentStepAttempt?: number;
+  /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
+  triggeredByAgentId?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7917,6 +7939,7 @@ export async function createWorkflowRun(data: {
       data.createdBy ?? null,
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
+      data.triggeredByAgentId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -8652,6 +8675,8 @@ export interface PageListOptions {
   slim?: boolean;
   key?: string;
   keyPrefix?: string;
+  /** Matches the title, slug or description anywhere, case-insensitive. */
+  q?: string;
 }
 
 export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Promise<Page[]>;
@@ -8682,6 +8707,7 @@ export async function listPagesByAgent(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(opts.keyPrefix));
   }
+  query += pageSearchSql(opts?.q, params);
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
   const rows = await getDbClient().query<PageRow>(query, params);
@@ -8713,6 +8739,7 @@ export async function listAllPages(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(opts.keyPrefix));
   }
+  query += pageSearchSql(opts?.q, params);
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
   const rows = await getDbClient().query<PageRow>(query, params);
@@ -8724,10 +8751,10 @@ export async function listAllPages(
  * pager so the UI shows the real count, not just the current page's length.
  */
 export async function countAllPages(
-  filters?: Pick<PageListOptions, "key" | "keyPrefix">,
+  filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE 1=1";
-  const params: string[] = [];
+  const params: (string | number)[] = [];
   if (filters?.key) {
     query += ' AND "key" = ?';
     params.push(normalizeAssetKey(filters.key));
@@ -8735,6 +8762,7 @@ export async function countAllPages(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
+  query += pageSearchSql(filters?.q, params);
   const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }
@@ -8742,10 +8770,10 @@ export async function countAllPages(
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
 export async function countPagesByAgent(
   agentId: string,
-  filters?: Pick<PageListOptions, "key" | "keyPrefix">,
+  filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE agentId = ?";
-  const params: string[] = [agentId];
+  const params: (string | number)[] = [agentId];
   if (filters?.key) {
     query += ' AND "key" = ?';
     params.push(normalizeAssetKey(filters.key));
@@ -8753,6 +8781,7 @@ export async function countPagesByAgent(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
+  query += pageSearchSql(filters?.q, params);
   const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }

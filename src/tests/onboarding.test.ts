@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import {
   closeDb,
   createAgent,
+  createScheduledTask,
   createUser,
   getDbClient,
   getSwarmConfigs,
@@ -89,6 +90,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await Bun.sleep(0);
   const client = getDbClient();
+  await client.run("DELETE FROM scheduled_tasks");
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM agents");
   await client.run("DELETE FROM users");
@@ -130,22 +132,32 @@ async function insertTask(options: {
   status?: string;
   taskType?: string | null;
   requestedByUserId?: string | null;
+  parentTaskId?: string | null;
+  finishedAt?: string | null;
 }): Promise<void> {
   const now = new Date().toISOString();
   await getDbClient().run(
     `INSERT INTO agent_tasks (
-       id, task, status, source, taskType, requestedByUserId, swarmVersion, createdAt, lastUpdatedAt
-     ) VALUES (?, ?, ?, 'ui', ?, ?, '1.0.0', ?, ?)`,
+       id, task, status, source, taskType, requestedByUserId, parentTaskId, finishedAt,
+       swarmVersion, createdAt, lastUpdatedAt
+     ) VALUES (?, ?, ?, 'ui', ?, ?, ?, ?, '1.0.0', ?, ?)`,
     [
       options.id,
       `Task ${options.id}`,
       options.status ?? "in_progress",
       options.taskType ?? null,
       options.requestedByUserId ?? null,
+      options.parentTaskId ?? null,
+      options.finishedAt ?? null,
       now,
       now,
     ],
   );
+}
+
+/** A finish time before the follow-up window of the first task step, so only the tree decides. */
+function longAgo(): string {
+  return new Date(Date.now() - 60_000).toISOString();
 }
 
 async function expectExistingInstall(): Promise<void> {
@@ -572,9 +584,10 @@ describe("onboarding state", () => {
     expect(selected.status).toBe(200);
     expect(((await selected.json()) as { state: OnboardingState }).state.completedAt).toBeNull();
 
-    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
-      "first-task",
-    ]);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+      [longAgo(), "first-task"],
+    );
     const completed = (await (await request("/api/onboarding")).json()) as {
       state: OnboardingState;
     };
@@ -587,7 +600,7 @@ describe("onboarding state", () => {
 
   test("first_task PUT derives an already completed task before responding", async () => {
     await request("/api/onboarding");
-    await insertTask({ id: "already-completed", status: "completed" });
+    await insertTask({ id: "already-completed", status: "completed", finishedAt: longAgo() });
 
     const response = await put({
       action: "first_task",
@@ -600,6 +613,128 @@ describe("onboarding state", () => {
       method: "free_form",
     });
     expect(body.state.completedAt).not.toBeNull();
+  });
+
+  describe("first task tree", () => {
+    async function selectFirstTask(taskId: string): Promise<OnboardingState> {
+      const response = await put({ action: "first_task", taskId, method: "free_form" });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { state: OnboardingState }).state;
+    }
+
+    async function readState(): Promise<OnboardingState> {
+      return ((await (await request("/api/onboarding")).json()) as { state: OnboardingState })
+        .state;
+    }
+
+    async function firstTaskEvents(): Promise<string[]> {
+      await Bun.sleep(10);
+      return capturedTelemetry
+        .map((entry) => entry.event)
+        .filter((event) => event === "first_task_completed" || event === "completed");
+    }
+
+    test("a completed root with an open task under it is not done, until the tree settles", async () => {
+      await request("/api/onboarding");
+      // The lead completes the root task when it delegates. The worker's
+      // result goes to a lead follow-up, a grandchild of the root.
+      await insertTask({ id: "root", status: "completed", finishedAt: longAgo() });
+      await insertTask({
+        id: "worker",
+        status: "completed",
+        parentTaskId: "root",
+        finishedAt: longAgo(),
+      });
+      await insertTask({ id: "lead-follow-up", status: "pending", parentTaskId: "worker" });
+
+      let state = await selectFirstTask("root");
+      expect(state.steps.first_task.status).toBe("todo");
+      expect(state.completedAt).toBeNull();
+      await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+        "lead-follow-up",
+      ]);
+      state = await readState();
+      expect(state.steps.first_task.status).toBe("todo");
+      expect(await firstTaskEvents()).toEqual([]);
+
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [longAgo(), "lead-follow-up"],
+      );
+      state = await readState();
+      expect(state.steps.first_task).toMatchObject({ status: "done", method: "free_form" });
+      expect(state.completedAt).not.toBeNull();
+      expect(await firstTaskEvents()).toEqual(["first_task_completed", "completed"]);
+    });
+
+    test("a failed or cancelled task in the tree counts as settled", async () => {
+      await request("/api/onboarding");
+      await insertTask({ id: "root", status: "completed", finishedAt: longAgo() });
+      await insertTask({
+        id: "failed-child",
+        status: "failed",
+        parentTaskId: "root",
+        finishedAt: longAgo(),
+      });
+      await insertTask({
+        id: "cancelled-child",
+        status: "cancelled",
+        parentTaskId: "root",
+        finishedAt: longAgo(),
+      });
+      await insertTask({
+        id: "running-child",
+        status: "in_progress",
+        parentTaskId: "root",
+      });
+
+      expect((await selectFirstTask("root")).steps.first_task.status).toBe("todo");
+
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [longAgo(), "running-child"],
+      );
+      expect((await readState()).steps.first_task.status).toBe("done");
+    });
+
+    test("a task that just finished holds the step while its follow-up can still appear", async () => {
+      await request("/api/onboarding");
+      await insertTask({ id: "root", status: "completed", finishedAt: longAgo() });
+      await insertTask({
+        id: "worker",
+        status: "completed",
+        parentTaskId: "root",
+        finishedAt: new Date().toISOString(),
+      });
+
+      expect((await selectFirstTask("root")).steps.first_task.status).toBe("todo");
+
+      await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+        longAgo(),
+        "worker",
+      ]);
+      expect((await readState()).steps.first_task.status).toBe("done");
+    });
+
+    test("a deferral that waits to wake up holds the step", async () => {
+      await request("/api/onboarding");
+      await insertTask({ id: "root", status: "completed", finishedAt: longAgo() });
+      const schedule = await createScheduledTask({
+        name: `deferred-root-${crypto.randomUUID()}`,
+        taskTemplate: "Resume task root: check the result.",
+        targetType: "agent-task",
+        scheduleType: "one_time",
+        nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+        taskType: "deferred",
+        tags: ["deferred"],
+        parentTaskId: "root",
+      });
+
+      expect((await selectFirstTask("root")).steps.first_task.status).toBe("todo");
+
+      await getDbClient().run("UPDATE scheduled_tasks SET enabled = 0 WHERE id = ?", [schedule.id]);
+      expect((await readState()).steps.first_task.status).toBe("done");
+    });
   });
 
   test("PUT applies all onboarding transitions without duplicate completion telemetry", async () => {

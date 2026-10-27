@@ -183,6 +183,7 @@ const listScheduledTasks = route({
     targetType: z.enum(["agent-task", "workflow", "script"]).optional(),
     workflowId: z.string().uuid().optional(),
     scriptName: z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `slim` is the list-view shape (no full `taskTemplate`); default is full. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -295,6 +296,7 @@ export async function handleStats(
       targetType: parsed.query.targetType,
       workflowId: parsed.query.workflowId,
       scriptName: parsed.query.scriptName,
+      limit: parsed.query.limit,
     };
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const favoriteOpts = { favoriteScope, itemType: "schedule" as const };
