@@ -105,26 +105,33 @@ function statusBucket(state: unknown): Bucket {
   return "failing";
 }
 
+/** A required check from the rulesets. `appId` set: only that GitHub App's check run satisfies it. */
+type RequiredCheck = { name: string; appId: number | null };
+
 /**
- * Grade CI on the head. Check runs collapse to one bucket per name (worst wins), and
- * commit statuses fill in only required names that have no check run. `required` is the
- * base branch's required check list: a required name with no run or status is pending.
- * `required: null` means it could not be read, so the gate is unknown: it counts as one
- * pending check and CI never reads green. With no required checks, every check gates.
+ * Grade CI on the head. Tallies count one bucket per check name (worst wins) over check
+ * runs and the commit statuses of required names. Each required entry grades its own
+ * sources, worst wins: same-name check runs (only from `appId` when pinned) and same-name
+ * commit statuses. A status cannot be tied to an app, so for a pinned entry it can only
+ * pull the entry down (pending or failing), never satisfy it. A required entry with no
+ * source is pending. `required: null` (rulesets unreadable) or `statuses: null` (status
+ * read failed) leaves the gate unknown: it counts as one pending check and CI never reads
+ * green. With no required checks, every check gates.
  */
-function gradeChecks(runs: any[], statuses: any[], required: string[] | null) {
-  const byName = new Map<string, { bucket: Bucket; url: string | null }>();
-  const put = (name: string, bucket: Bucket, url: string | null) => {
-    const cur = byName.get(name);
-    if (!cur || RANK[bucket] > RANK[cur.bucket]) byName.set(name, { bucket, url });
-  };
-  for (const run of runs) put(String(run?.name ?? ""), runBucket(run), run?.html_url ?? null);
-  const runNames = new Set(byName.keys());
-  for (const s of statuses) {
+function gradeChecks(runs: any[], statuses: any[] | null, required: RequiredCheck[] | null) {
+  type Hit = { bucket: Bucket; url: string | null };
+  const worse = (cur: Hit | null, bucket: Bucket, url: string | null): Hit =>
+    !cur || RANK[bucket] > RANK[cur.bucket] ? { bucket, url } : cur;
+  const requiredNames = new Set((required ?? []).map((r) => r.name));
+  const byName = new Map<string, Hit>();
+  for (const run of runs) {
+    const name = String(run?.name ?? "");
+    byName.set(name, worse(byName.get(name) ?? null, runBucket(run), run?.html_url ?? null));
+  }
+  for (const s of statuses ?? []) {
     const name = String(s?.context ?? "");
-    if (required?.includes(name) && !runNames.has(name)) {
-      put(name, statusBucket(s?.state), s?.target_url ?? null);
-    }
+    if (!requiredNames.has(name)) continue;
+    byName.set(name, worse(byName.get(name) ?? null, statusBucket(s?.state), s?.target_url ?? null));
   }
 
   const summary = {
@@ -136,22 +143,35 @@ function gradeChecks(runs: any[], statuses: any[], required: string[] | null) {
     requiredPending: 0,
   };
   for (const { bucket } of byName.values()) summary[bucket]++;
+  // A required name with no run or status at all is one more pending check in the tallies.
+  for (const name of requiredNames) if (!byName.has(name)) summary.pending++;
   const requiredChecks =
     required === null
       ? null
-      : required.map((name) => {
-          const hit = byName.get(name);
-          if (!hit) summary.pending++;
-          return { name, state: hit ? hit.bucket : ("pending" as Bucket), url: hit?.url ?? null };
+      : required.map(({ name, appId }) => {
+          let hit: Hit | null = null;
+          for (const run of runs) {
+            if (String(run?.name ?? "") !== name) continue;
+            if (appId !== null && run?.app?.id !== appId) continue;
+            hit = worse(hit, runBucket(run), run?.html_url ?? null);
+          }
+          for (const s of statuses ?? []) {
+            if (String(s?.context ?? "") !== name) continue;
+            const bucket = statusBucket(s?.state);
+            if (appId !== null && bucket === "pass") continue;
+            hit = worse(hit, bucket, s?.target_url ?? null);
+          }
+          return { name, appId, state: hit ? hit.bucket : ("pending" as Bucket), url: hit?.url ?? null };
         });
-  if (requiredChecks === null) summary.pending++;
+  const unknown = requiredChecks === null || (requiredNames.size > 0 && statuses === null);
+  if (unknown) summary.pending++;
   for (const r of requiredChecks ?? []) {
     if (r.state === "failing") summary.requiredFailing++;
     if (r.state === "pending") summary.requiredPending++;
   }
 
   let ciGreen: boolean;
-  if (requiredChecks === null) ciGreen = false;
+  if (unknown || requiredChecks === null) ciGreen = false;
   else if (requiredChecks.length > 0)
     ciGreen = requiredChecks.every((r) => r.state === "pass" || r.state === "skipped");
   else ciGreen = summary.failing === 0 && summary.pending === 0;
@@ -164,22 +184,29 @@ function gradeChecks(runs: any[], statuses: any[], required: string[] | null) {
   };
 }
 
-/** Required status check names on `base`, from repository rulesets. Throws when unreadable. */
-async function requiredChecksFor(ctx: any, headers: any, api: string, base: string) {
+/** Required status checks on `base`, from repository rulesets, with their app pin. Throws when unreadable. */
+async function requiredChecksFor(
+  ctx: any,
+  headers: any,
+  api: string,
+  base: string,
+): Promise<RequiredCheck[]> {
   const rules = await gh(
     ctx,
     headers,
     `${api}/rules/branches/${encodeURIComponent(base)}?per_page=100`,
   );
   if (!Array.isArray(rules)) throw new Error("rules response is not a list");
-  const names = new Set<string>();
+  const out = new Map<string, RequiredCheck>();
   for (const rule of rules) {
     if (rule?.type !== "required_status_checks") continue;
     for (const c of rule.parameters?.required_status_checks ?? []) {
-      if (typeof c?.context === "string") names.add(c.context);
+      if (typeof c?.context !== "string") continue;
+      const appId = typeof c.integration_id === "number" ? c.integration_id : null;
+      out.set(c.context + "\u0000" + (appId ?? ""), { name: c.context, appId });
     }
   }
-  return [...names];
+  return [...out.values()];
 }
 
 /** All check runs on the head, paged: a required run past the first page must not read absent. */
@@ -228,7 +255,28 @@ function selfControls() {
       { status: "completed", conclusion: "failure", name: "unit" },
     ],
     [{ context: "deploy", state: "success" }],
-    ["build", "absent", "deploy"],
+    ["build", "absent", "deploy"].map((name) => ({ name, appId: null })),
+  );
+  const pin = [{ name: "gate", appId: 7 }];
+  const pinnedForeign = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "gate", app: { id: 8 } }],
+    [{ context: "gate", state: "success" }],
+    pin,
+  );
+  const pinnedOwn = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "gate", app: { id: 7 } }],
+    [],
+    pin,
+  );
+  const statusWorst = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "gate" }],
+    [{ context: "gate", state: "failure" }],
+    [{ name: "gate", appId: null }],
+  );
+  const statusUnread = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "gate" }],
+    null,
+    [{ name: "gate", appId: null }],
   );
   const unknownGate = gradeChecks(
     [{ status: "completed", conclusion: "success", name: "lint" }],
@@ -268,6 +316,9 @@ function selfControls() {
       unknownGate.requiredChecks === null &&
       unknownGate.checks.pending === 1,
     noRequiredAllGate: noRequired.ciGreen === true,
+    pinnedForeignAppNotGreen: pinnedForeign.ciGreen === false && pinnedOwn.ciGreen === true,
+    statusWorstWins: statusWorst.requiredChecks?.[0]?.state === "failing" && !statusWorst.ciGreen,
+    statusUnreadNotGreen: statusUnread.ciGreen === false && statusUnread.checks.pending === 1,
     latestReview: lr?.state === "APPROVED" && lr?.author === "b" && lr?.matchesHead === true,
     noReviews: latestReviewOf([], sha) === null,
   };
@@ -370,7 +421,7 @@ async function snapshot(
   repo: string,
   number: number,
   includeThreads: boolean,
-  rulesCache: Map<string, Promise<string[]>>,
+  rulesCache: Map<string, Promise<RequiredCheck[]>>,
   expectHead?: string,
 ) {
   const api = "https://api.github.com/repos/" + repo;
@@ -381,7 +432,7 @@ async function snapshot(
 
   const sha = pr.head && pr.head.sha ? pr.head.sha : null;
   const base = pr.base?.ref ?? null;
-  let required: string[] | null = null;
+  let required: RequiredCheck[] | null = null;
   let requiredChecksError: string | null = null;
   if (base) {
     const key = repo + "@" + base;
@@ -397,16 +448,17 @@ async function snapshot(
   }
 
   let checkList: any[] = [];
-  let statusList: any[] = [];
+  let statusList: any[] | null = [];
   if (sha) {
     checkList = await checkRunsOn(ctx, headers, api, sha);
-    const names = new Set(checkList.map((run) => run?.name));
-    if (required?.some((name) => !names.has(name))) {
+    // A required name grades its check runs and commit statuses together, so read both.
+    if (required && required.length > 0) {
       try {
         const combined = await gh(ctx, headers, api + "/commits/" + sha + "/status?per_page=100");
         statusList = Array.isArray(combined?.statuses) ? combined.statuses : [];
       } catch (error) {
-        // Missing required checks stay pending, so CI cannot read green; say why.
+        // An unread status could be a failing required one: CI stays not green; say why.
+        statusList = null;
         requiredChecksError =
           "could not read commit statuses: " + (error instanceof Error ? error.message : String(error));
       }
@@ -498,7 +550,7 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
   if (token) headers.Authorization = "Bearer " + token;
 
   // One rulesets read per repo and base branch, shared across a batch.
-  const rulesCache = new Map<string, Promise<string[]>>();
+  const rulesCache = new Map<string, Promise<RequiredCheck[]>>();
   const results: any[] = new Array(refs.length);
   let next = 0;
   async function worker() {
