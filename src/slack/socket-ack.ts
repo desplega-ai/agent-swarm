@@ -4,6 +4,7 @@ import {
   createSlackInboundDrain,
   isSlackSocketEventStored,
   recordSlackSocketAckNotReady,
+  recordSlackSocketEventRanInline,
 } from "./inbound-dispatch";
 
 /** @slack/socket-mode `sendWhileNotReadyError()`: the socket is down or reconnecting. */
@@ -16,6 +17,7 @@ export function isSocketNotReadyError(error: unknown): boolean {
 /**
  * Events whose effect is "last write wins". Run late from the drain they would
  * overwrite a newer event that already ran live, so they never wait in the queue.
+ * They run inline and leave only a dedup-key tombstone behind.
  */
 const ORDER_DEPENDENT_EVENTS = new Set(["assistant_thread_context_changed"]);
 
@@ -61,7 +63,10 @@ interface SocketAckOptions {
  * only by the in-memory `event_id` cache: losing the event is the worse failure.
  * Order-dependent events (`assistant_thread_context_changed`, last write wins)
  * take that inline path by design: queued, an older one could run after a newer
- * one that ran live and overwrite it.
+ * one that ran live and overwrite it. Their dedup key is stored first, with no
+ * payload and no way for the drain to claim it, so the in-memory cache is not
+ * the only thing standing between a redelivery and a restart: after one, an
+ * older context would otherwise overwrite a newer one.
  * Any other ack error still throws.
  *
  * Slack redelivers the unacked event with the same `event_id` and a
@@ -104,10 +109,12 @@ function tolerateSocketNotReadyAcks(
       } catch (error) {
         if (!isSocketNotReadyError(error)) throw error;
         recordSlackSocketAckNotReady();
-        if (await admitForDrain(payload, envelope)) {
+        const disposition = await dispose(payload, envelope);
+        if (disposition === "drain") {
           options.onAdmitted();
           throw error; // Bolt drops its copy; the receipt carries the event.
         }
+        if (disposition === "drop") throw error; // An earlier delivery already ran it.
         console.warn(
           `[Slack] socket ack failed (client not ready), processing inline: envelope_id=${envelope}`,
         );
@@ -141,9 +148,16 @@ function tolerateSocketNotReadyAcks(
   };
 }
 
-/** True when the event is now stored (or already was) and the drain owns it. */
-async function admitForDrain(payload: SocketEnvelope, envelope: string): Promise<boolean> {
-  if (isOrderDependentEvent(payload.body)) return false;
+type Disposition =
+  /** Stored as a pending receipt: the drain runs it. */
+  | "drain"
+  /** Its key was already stored: an earlier delivery owns it. */
+  | "drop"
+  /** Could not be stored for the drain: Bolt runs it inline. */
+  | "inline";
+
+async function dispose(payload: SocketEnvelope, envelope: string): Promise<Disposition> {
+  if (isOrderDependentEvent(payload.body)) return rememberInline(payload, envelope);
   try {
     const result = await admitSlackInbound({
       transport: "socket",
@@ -157,7 +171,7 @@ async function admitForDrain(payload: SocketEnvelope, envelope: string): Promise
       console.warn(
         `[Slack] socket ack failed (client not ready), event stored for the drain: envelope_id=${envelope}`,
       );
-      return true;
+      return "drain";
     }
     console.warn(
       `[Slack] could not store unacked event (${result.reason}): envelope_id=${envelope}`,
@@ -165,7 +179,31 @@ async function admitForDrain(payload: SocketEnvelope, envelope: string): Promise
   } catch (storeError) {
     console.warn("[Slack] could not persist unacked event:", storeError);
   }
-  return false;
+  return "inline";
+}
+
+/**
+ * An order-dependent event runs inline, but its key is stored first (no payload,
+ * nothing for the drain to claim) so a redelivery after a restart is dropped
+ * instead of overwriting a newer event that ran in between. A store failure
+ * still runs the event: losing it is the worse failure.
+ */
+async function rememberInline(payload: SocketEnvelope, envelope: string): Promise<Disposition> {
+  try {
+    const result = await recordSlackSocketEventRanInline(payload.body, {
+      retryNum: payload.retry_num,
+      retryReason: payload.retry_reason,
+    });
+    if (result === "duplicate") {
+      console.warn(
+        `[Slack] socket ack failed (client not ready), event already ran inline: envelope_id=${envelope}`,
+      );
+      return "drop";
+    }
+  } catch (storeError) {
+    console.warn("[Slack] could not remember unacked inline event:", storeError);
+  }
+  return "inline";
 }
 
 /**

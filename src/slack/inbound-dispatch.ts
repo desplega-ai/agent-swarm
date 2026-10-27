@@ -9,6 +9,7 @@ import {
   getNextSlackInboundAvailableAt,
   getSlackInboundReceiptStats,
   markInterruptedSlackInboundReceiptsUncertain,
+  recordSlackInboundInline,
   releaseSlackInboundReceipt,
   SLACK_INBOUND_LIMITS,
   type SlackInboundAdmission,
@@ -317,6 +318,34 @@ export async function isSlackSocketEventStored(
 ): Promise<boolean> {
   const key = socketEventKey(body);
   return key ? touchSlackInboundDuplicate(key.dedupKey, now) : false;
+}
+
+/**
+ * Remember a Socket Mode event that runs inline after a failed ack, so its
+ * redelivery is dropped by `isSlackSocketEventStored` even after a restart.
+ * Stores the dedup key only, never the payload. `invalid` when the envelope has
+ * no usable key (nothing to remember, the caller still runs it).
+ */
+export async function recordSlackSocketEventRanInline(
+  body: unknown,
+  retry: { retryNum?: number | null; retryReason?: string | null } = {},
+  now: Date = new Date(),
+): Promise<"recorded" | "duplicate" | "invalid"> {
+  const key = socketEventKey(body);
+  if (!key) return "invalid";
+  return recordSlackInboundInline(
+    {
+      dedupKey: key.dedupKey,
+      transport: "socket",
+      kind: "event",
+      payloadType: key.payloadType,
+      apiAppId: key.apiAppId,
+      eventId: key.eventId,
+      retryNum: retry.retryNum,
+      retryReason: retry.retryReason,
+    },
+    now,
+  );
 }
 
 export interface AdmitSlackInboundInput {

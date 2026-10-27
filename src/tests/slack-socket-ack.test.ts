@@ -446,21 +446,46 @@ describe("assistant events through Bolt", () => {
 
   test("a context_changed whose ack failed runs in arrival order, so the newer one wins", async () => {
     const { client, drain } = buildAssistantApp();
+    // Hold the drain: A's wake-up is lost to a busy or backing-off drain, so any
+    // work stored for it is only claimed after B ran live.
+    const wake = drain.wake;
+    drain.wake = async () => {};
     try {
-      // A fails its ack, B arrives and acks, then the drain runs and Slack redelivers A.
       setSocket(client, { isActive: () => false });
       await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"));
       setSocket(client, undefined);
       noSend(client);
       await deliverEvent(client, "Ev_CTX_B", contextChanged("C_B"));
+      drain.wake = wake;
       await drain.wake();
       await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"), 1);
       expect(saved).toEqual(["C_A", "C_B"]);
-      expect(
-        await getDbClient().get("SELECT 1 FROM slack_inbound_receipts WHERE event_id = ?", [
-          "Ev_CTX_A",
-        ]),
-      ).toBeNull();
+      // Nothing for the drain to claim, so it cannot replay A over B.
+      expect(await receiptFor("Ev_CTX_A")).toMatchObject({
+        state: "processed",
+        outcome_code: "ran_inline",
+      });
+    } finally {
+      drain.wake = wake;
+      api.stop();
+    }
+  });
+
+  test("a context_changed redelivered after a restart does not overwrite the newer context", async () => {
+    const { client } = buildAssistantApp();
+    try {
+      // A fails its ack and runs inline, then B runs live.
+      setSocket(client, { isActive: () => false });
+      await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"));
+      setSocket(client, undefined);
+      noSend(client);
+      await deliverEvent(client, "Ev_CTX_B", contextChanged("C_B"));
+      expect(saved).toEqual(["C_A", "C_B"]);
+
+      // The API restarts: the in-memory event_id cache is gone, the receipts are not.
+      resetEventDedup();
+      await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"), 1);
+      expect(saved).toEqual(["C_A", "C_B"]);
     } finally {
       api.stop();
     }
