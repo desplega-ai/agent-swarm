@@ -1010,6 +1010,7 @@ export async function handleWorkflows(
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
+        triggeredByAgentId: myAgentId,
         requestedByUserId: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
         detach: parsed.query.wait === "false",
         // Recorded in the run's own transaction, before the walk starts.

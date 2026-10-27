@@ -28,6 +28,12 @@ import docsSiteReleasesConfig from "../../../templates/workflows/docs-site-relea
 import docsSiteReleasesContent from "../../../templates/workflows/docs-site-releases/content.md" with {
   type: "text",
 };
+import dreamingConfig from "../../../templates/workflows/dreaming/config.json" with {
+  type: "text",
+};
+import dreamingContent from "../../../templates/workflows/dreaming/content.md" with {
+  type: "text",
+};
 import gscTopicMinerConfig from "../../../templates/workflows/gsc-topic-miner/config.json" with {
   type: "text",
 };
@@ -119,6 +125,7 @@ const BUILT_IN_WORKFLOW_SOURCES: readonly WorkflowTemplateSource[] = [
   },
   { config: asText(competitorRadarConfig), content: asText(competitorRadarContent) },
   { config: asText(docsSiteReleasesConfig), content: asText(docsSiteReleasesContent) },
+  { config: asText(dreamingConfig), content: asText(dreamingContent) },
   { config: asText(gscTopicMinerConfig), content: asText(gscTopicMinerContent) },
   { config: asText(linearDrainLoopConfig), content: asText(linearDrainLoopContent) },
   { config: asText(llmSafeReleaseContextConfig), content: asText(llmSafeReleaseContextContent) },

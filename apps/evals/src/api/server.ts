@@ -69,7 +69,7 @@ import {
   SUITE_ANALYTICS_SQL,
   SUITES_SQL,
 } from "./analytics-source.ts";
-import { serveBenchmarkIndex, serveBenchmarkSnapshot } from "./benchmark-routes.ts";
+import { serveBenchmarkIndex, serveBenchmarkSnapshot, snapshotDay } from "./benchmark-routes.ts";
 import {
   createConfig,
   effortLevelsFor,
@@ -582,6 +582,8 @@ export async function startServer(
       },
       "/api/public/benchmark": () => serveBenchmarkIndex(),
       "/api/public/benchmark/:version": (req) => serveBenchmarkSnapshot(req.params.version),
+      "/api/public/benchmark/:version/:snapshot": (req) =>
+        serveBenchmarkSnapshot(req.params.version, req.params.snapshot),
       "/health": () => json({ ok: true }),
       "/api/runs": {
         GET: async (req) => {
@@ -739,7 +741,9 @@ export async function startServer(
       },
       /**
        * What `bun src/cli.ts publish --suite <v> --run <id>` would write, or why it
-       * refuses, as JSON (`files` maps paths under `benchmark/<suite>/` to contents).
+       * refuses, as JSON (`files` maps paths under `benchmark/<suite>/<snapshot>/` to
+       * contents; `snapshot` is the dated directory, so a publish adds one and never
+       * overwrites an earlier week).
        * Read-only: writes nothing, so the weekly-matrix workflow can open the snapshot
        * PR. `harnessCommit` (40-hex) names the commit the snapshot records.
        */
@@ -765,6 +769,7 @@ export async function startServer(
           ...base,
           ok: true,
           publishedAt: snapshot.publishedAt,
+          snapshot: snapshotDay(snapshot.publishedAt),
           scenarios: snapshot.scenarios.length,
           configs: snapshot.configs.map((c) => c.configId),
           files: bundle.files,

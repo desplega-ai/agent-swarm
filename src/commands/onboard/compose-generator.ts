@@ -21,6 +21,10 @@ const ENV_INSTALL_METHOD = "      - INSTALL_METHOD=${INSTALL_METHOD}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_INSTALL_PRESET = "      - INSTALL_PRESET=${INSTALL_PRESET:-}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_ANONYMIZED_TELEMETRY = "      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_TELEMETRY_ENV = "      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_BOT_TOKEN = "      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_APP_TOKEN = "      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}";
@@ -231,6 +235,8 @@ export function generateCompose(state: OnboardState): string {
   lines.push(ENV_API_KEY);
   lines.push(ENV_INSTALL_METHOD);
   lines.push(ENV_INSTALL_PRESET);
+  lines.push(ENV_ANONYMIZED_TELEMETRY);
+  lines.push(ENV_TELEMETRY_ENV);
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
   lines.push("      - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}");
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
@@ -306,6 +312,8 @@ export function generateCompose(state: OnboardState): string {
     lines.push("    environment:");
     appendProviderEnvironment(lines, state, true);
     lines.push(ENV_API_KEY);
+    lines.push(ENV_ANONYMIZED_TELEMETRY);
+    lines.push(ENV_TELEMETRY_ENV);
     // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
     lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}");
     lines.push(`      - AGENT_ID=${svc.agentId}`);

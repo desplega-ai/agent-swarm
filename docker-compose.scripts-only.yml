@@ -111,6 +111,8 @@ services:
         condition: service_healthy
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       # The heartbeat reaper supersedes/fails any in_progress task whose lastUpdatedAt is
@@ -151,6 +153,8 @@ services:
         condition: service_healthy
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}
@@ -188,6 +192,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}
@@ -226,6 +232,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}

@@ -7904,10 +7904,12 @@ export async function createWorkflowRun(data: {
   parentStepId?: string;
   /** The parent step's `retryCount` when it started this run (migration 240). */
   parentStepAttempt?: number;
+  /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
+  triggeredByAgentId?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7917,6 +7919,7 @@ export async function createWorkflowRun(data: {
       data.createdBy ?? null,
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
+      data.triggeredByAgentId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");

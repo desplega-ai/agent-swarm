@@ -1,0 +1,19 @@
+{
+  "kind": "schedule",
+  "name": "dreaming-daily",
+  "displayName": "Dreaming",
+  "slug": "dreaming-daily",
+  "title": "Dreaming Daily Trigger",
+  "description": "Trigger the dreaming workflow once a day, unless a dreaming run already started in the last 20 hours.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": [],
+  "requires": [],
+  "runAllSeedersCandidate": true,
+  "autoEnableCandidate": true,
+  "tags": [
+    "memory",
+    "skills",
+    "self-improvement"
+  ]
+}
