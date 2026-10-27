@@ -61,7 +61,7 @@ const routeLabels: Record<string, string> = {
   lineage: "Lineage",
   "api-keys": "Provider keys",
   pages: "Pages",
-  file: "Comb",
+  file: "Files",
   people: "People",
   unmapped: "Unmapped",
 };

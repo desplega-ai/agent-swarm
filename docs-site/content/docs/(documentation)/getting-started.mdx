@@ -54,11 +54,13 @@ Or use the one-shot installer. It checks Docker and Compose v2, installs Bun whe
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
-# Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --dry-run
+# Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --no-agent-fs, --dry-run
 curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full --tunnel
 ```
 
 `--tunnel` exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`. It is off by default.
+
+A new install also runs two more services: `agent-fs` (shared files on local disk, read in the dashboard's [Comb](/docs/ui/comb)) and `tei` (a local embeddings server for memory search, so memory needs no second API key). Comb is on, and file links open in the dashboard. Neither service has a host port: the browser reaches agent-fs through the API at `/agentfs`. The bundle adds about 1 GB of RAM at idle, 2.5 GB of images and 1.5 GB of volumes, and the first boot downloads about 1.5 GB. Memory search uses keywords only until TEI is ready. Pass `--no-agent-fs` to the installer (or to `onboard --yes`) to skip both. Running the installer again on an existing install changes nothing: when `docker-compose.yml` exists, it skips onboarding and only starts the stack. See [agent-fs Co-deployment](/docs/guides/agent-fs-co-deployment#new-installs-onboard-bundle).
 
 Or in non-interactive mode with a preset:
 
@@ -99,7 +101,7 @@ Agent ID variables in `.env` are optional. Each container generates a UUID on fi
 
 ### Finish setup in the browser
 
-Open the dashboard and connect it to `http://localhost:3013` with your `API_KEY`. A new install redirects to `/setup`, a guided first run that checks the API, then walks through naming the swarm, AI providers, agents and their models, memory, integrations, and a first task. Existing installs skip it.
+Open the dashboard and connect it to `http://localhost:3013` with your `API_KEY`. A new install redirects to `/setup`, a guided first run that checks the API, then walks through naming the swarm, AI providers, agents and their models, memory, integrations, your files account (only while [Comb](/docs/ui/comb) is on), and a first task. Existing installs skip it.
 
 ## Option C: Local API + Docker Workers
 

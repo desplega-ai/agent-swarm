@@ -1,0 +1,29 @@
+swarm-agent-fs 326.3MiB 0.35%
+swarm-api 344.1MiB 0.12%
+swarm-lead 201.8MiB 0.36%
+swarm-tei 659.4MiB 0.31%
+swarm-worker-coder 155.8MiB 0.00%
+swarm-worker-content-reviewer 156.9MiB 0.28%
+swarm-worker-content-strategist 156.5MiB 0.33%
+swarm-worker-content-writer 152.1MiB 0.00%
+swarm-worker-discoverability-optimizer 170.1MiB 0.03%
+swarm-worker-forward-deployed-engineer 152.6MiB 0.01%
+swarm-worker-researcher 152MiB 0.00%
+swarm-worker-reviewer 162.1MiB 0.00%
+swarm-worker-tester 189.1MiB 0.31%
+swarm-worker-ux-principles 154.3MiB 0.34%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        3362         226           5        4473        4383
+ghcr.io/desplega-ai/agent-fs:0.18.5 1.85GB
+ghcr.io/desplega-ai/agent-swarm:latest 419MB
+ghcr.io/desplega-ai/agent-swarm-worker:latest 8.17GB
+ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4 685MB
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          4         4         11.12GB   0B (0%)
+Containers      14        14        2.283GB   0B (0%)
+Local Volumes   27        27        1.465GB   0B (0%)
+Build Cache     0         0         0B        0B
+inference_time="34.908981ms" inference_time="256.037875ms" inference_time="256.295984ms" inference_time="251.814054ms" inference_time="320.803065ms" inference_time="1.296479649s" inference_time="2.332266545s" inference_time="2.113145546s" inference_time="1.283806535s" inference_time="666.8868ms" inference_time="392.4327ms" inference_time="466.478658ms" inference_time="469.864347ms" inference_time="424.520477ms" agent-swarm_agent_fs_data
+agent-swarm_tei_data
+1.1G	/var/lib/docker/volumes/agent-swarm_tei_data/_data
+339M	/var/lib/docker/volumes/agent-swarm_agent_fs_data/_data

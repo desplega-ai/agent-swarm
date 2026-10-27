@@ -73,7 +73,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       // Generate and store embedding (async, best-effort)
       try {
         const provider = getEmbeddingProvider();
-        const embedding = await provider.embed(memory.content);
+        const embedding = await provider.embed(memory.content, { kind: "document" });
         if (embedding) {
           await store.updateEmbedding(memory.id, embedding, provider.name);
         }

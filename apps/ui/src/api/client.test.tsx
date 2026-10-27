@@ -3,13 +3,16 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 const TEST_CONNECTION = { id: "test", apiUrl: "https://api.example.test", apiKey: "" };
 // The client sends no request before a connection exists. A test sets this to null.
 let activeConnection: typeof TEST_CONNECTION | null = TEST_CONNECTION;
+// A test that needs a saved key sets one.
+let config = { apiUrl: "https://api.example.test", apiKey: "" };
 
 mock.module("@/lib/config", () => ({
-  getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
+  getConfig: () => config,
   getActiveConnection: () => activeConnection,
 }));
 
 const { api, ApprovalRespondError } = await import("./client");
+const { subscribeKeyRejection } = await import("./access-rejection");
 type ApprovalRespondError = InstanceType<typeof ApprovalRespondError>;
 
 const originalFetch = globalThis.fetch;
@@ -17,6 +20,64 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   activeConnection = TEST_CONNECTION;
+  config = { apiUrl: "https://api.example.test", apiKey: "" };
+});
+
+describe("a 401 from the API", () => {
+  const KEY = "aswt_token-1234";
+  const unauthorized = async () =>
+    new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+
+  /** Run `call`, return the access ids reported as rejected meanwhile. */
+  async function rejections(call: () => Promise<unknown>): Promise<string[]> {
+    const seen: string[] = [];
+    const stop = subscribeKeyRejection((id) => seen.push(id));
+    try {
+      await call().catch(() => undefined);
+    } finally {
+      stop();
+    }
+    return seen;
+  }
+
+  test("reports the saved key as rejected", async () => {
+    config = { apiUrl: "https://api.example.test", apiKey: KEY };
+    globalThis.fetch = unauthorized as unknown as typeof fetch;
+    expect(await rejections(() => api.whoami())).toEqual(["https://api.example.test|1234"]);
+  });
+
+  test("other statuses report nothing", async () => {
+    config = { apiUrl: "https://api.example.test", apiKey: KEY };
+    for (const status of [403, 404, 500]) {
+      globalThis.fetch = (async () => new Response("{}", { status })) as unknown as typeof fetch;
+      expect(await rejections(() => api.whoami())).toEqual([]);
+    }
+  });
+
+  test("checkAccess reads 401 as rejected, without reporting itself", async () => {
+    config = { apiUrl: "https://api.example.test", apiKey: KEY };
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return unauthorized();
+    }) as unknown as typeof fetch;
+    let result: string | undefined;
+    const seen = await rejections(async () => {
+      result = await api.checkAccess(config);
+    });
+    expect(result).toBe("rejected");
+    expect(seen).toEqual([]);
+    expect(urls).toEqual(["https://api.example.test/api/whoami"]);
+  });
+
+  test("checkAccess reads any other answer as accepted (an older API answers 404)", async () => {
+    for (const status of [200, 404, 500]) {
+      globalThis.fetch = (async () => new Response("{}", { status })) as unknown as typeof fetch;
+      expect(await api.checkAccess({ apiUrl: "https://api.example.test", apiKey: KEY })).toBe(
+        "accepted",
+      );
+    }
+  });
 });
 
 describe("before a connection exists", () => {

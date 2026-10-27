@@ -4,11 +4,22 @@ import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 // EmbeddingProvider — text to vector, swappable
 // ============================================================================
 
+/**
+ * What an input is for. Some models (nomic-embed) need a task prefix on each
+ * input: one for search queries, another for stored documents. No kind means
+ * no prefix.
+ */
+export type EmbeddingInputKind = "query" | "document";
+
+export interface EmbedOptions {
+  kind?: EmbeddingInputKind;
+}
+
 export interface EmbeddingProvider {
   readonly name: string;
   readonly dimensions: number;
-  embed(text: string): Promise<Float32Array | null>;
-  embedBatch(texts: string[]): Promise<(Float32Array | null)[]>;
+  embed(text: string, opts?: EmbedOptions): Promise<Float32Array | null>;
+  embedBatch(texts: string[], opts?: EmbedOptions): Promise<(Float32Array | null)[]>;
   /** True when the provider has a usable API key — no network call. */
   isConfigured(): boolean;
 }

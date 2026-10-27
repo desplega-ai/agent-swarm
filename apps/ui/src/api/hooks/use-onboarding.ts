@@ -7,6 +7,13 @@ import type {
   OnboardingState,
   OnboardingStepId,
 } from "../types";
+import {
+  ONBOARDING_STEPS,
+  type OnboardingStepDef,
+  visibleOnboardingSteps,
+} from "./visible-onboarding-steps";
+
+export { ONBOARDING_STEPS, type OnboardingStepDef, visibleOnboardingSteps };
 
 /**
  * First-run onboarding (`GET/PUT /api/onboarding`). The query resolves to
@@ -14,16 +21,6 @@ import type {
  * absent" and keep today's behavior.
  */
 export const ONBOARDING_QUERY_KEY = ["onboarding"] as const;
-
-export const ONBOARDING_STEPS: ReadonlyArray<{ id: OnboardingStepId; label: string }> = [
-  { id: "connect", label: "Connect" },
-  { id: "name", label: "Identity" },
-  { id: "ai", label: "AI Providers" },
-  { id: "agents", label: "Agents" },
-  { id: "memory", label: "Memory" },
-  { id: "integrations", label: "Integrations" },
-  { id: "first_task", label: "First task" },
-];
 
 type OnboardingQueryOptions = Pick<
   UseQueryOptions<
@@ -61,6 +58,28 @@ export function useOnboarding(options?: OnboardingQueryOptions) {
     refetchInterval: options?.refetchInterval ?? 0,
     retry: 1,
   });
+}
+
+function selectVisibleSteps(data: OnboardingResponse | null): ReadonlyArray<OnboardingStepDef> {
+  return visibleOnboardingSteps(data?.state, data?.signals);
+}
+
+/**
+ * The steps this API shows, in order. Reads the raw payload (before
+ * `withAllSteps` back-fills), so a step the API does not know stays hidden.
+ * Shares the `useOnboarding` cache; never polls on its own.
+ */
+export function useVisibleOnboardingSteps(options?: {
+  enabled?: boolean;
+}): ReadonlyArray<OnboardingStepDef> {
+  const { data } = useQuery({
+    queryKey: ONBOARDING_QUERY_KEY,
+    queryFn: () => api.fetchOnboarding(),
+    select: selectVisibleSteps,
+    enabled: options?.enabled ?? true,
+    retry: 1,
+  });
+  return data ?? visibleOnboardingSteps(null, null);
 }
 
 /**
@@ -112,16 +131,23 @@ export function isOnboardingOpen(data: OnboardingResponse | null | undefined): b
   return !isOnboardingFinished(data.state) && !data.state.dismissedAt;
 }
 
-/** Done steps: the one progress count of the header pill and the home card. */
-export function onboardingDoneCount(state: OnboardingState): number {
-  return ONBOARDING_STEPS.filter(({ id }) => state.steps[id].status === "done").length;
+/** Done steps among `steps`: the one progress count of the header pill and the home card. */
+export function onboardingDoneCount(
+  state: OnboardingState,
+  steps: ReadonlyArray<OnboardingStepDef>,
+): number {
+  return steps.filter(({ id }) => state.steps[id].status === "done").length;
 }
 
-/** Where Resume lands: the current step, unless it is already settled. */
-export function onboardingResumeStep(state: OnboardingState): OnboardingStepId {
+/** Where Resume lands: the current step, unless it is already settled or hidden. */
+export function onboardingResumeStep(
+  state: OnboardingState,
+  steps: ReadonlyArray<OnboardingStepDef>,
+): OnboardingStepId {
+  const shown = steps.some(({ id }) => id === state.currentStep);
   const current = state.steps[state.currentStep].status;
-  if (current !== "done" && current !== "skipped") return state.currentStep;
-  const next = ONBOARDING_STEPS.find(({ id }) => {
+  if (shown && current !== "done" && current !== "skipped") return state.currentStep;
+  const next = steps.find(({ id }) => {
     const status = state.steps[id].status;
     return status === "todo" || status === "failed";
   });

@@ -43,6 +43,15 @@ export function generateEnv(state: OnboardState): string {
   lines.push("MEMORY_RATERS=implicit-citation,explicit-self");
   lines.push("MEMORY_DEMOTION_FLOOR=1.0");
 
+  if (state.bundleAgentFs) {
+    lines.push("");
+    lines.push("# Bundled agent-fs (local disk) and TEI (memory embeddings); settings are in");
+    lines.push(
+      "# docker-compose.yml. Generate without them: agent-swarm onboard --yes --no-agent-fs",
+    );
+    if (state.teiImage) lines.push(`TEI_IMAGE=${state.teiImage}`);
+  }
+
   // ── Authentication ──
   lines.push("");
   lines.push("# === Authentication ===");

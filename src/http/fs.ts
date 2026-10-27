@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
 import { appendDraftTaskText } from "../be/db/tasks/draft-text";
+import { getUserGrant } from "../be/rbac-roles";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
@@ -14,10 +15,10 @@ import {
 } from "../be/task-attachment-store";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
-import { can, type RbacResource } from "../rbac";
+import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
-import { getCurrentRequestAuth } from "../utils/request-auth-context";
+import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { transcribeAudioNotes } from "../utils/transcription";
 import { requestPrincipal } from "./request-principal";
@@ -66,7 +67,20 @@ const agentFsCredentialStateSchema = z.object({
 
 const agentFsInviteStateSchema = z.object({
   orgId: z.string(),
-  invited: z.boolean(),
+  invited: z.boolean().describe("False only when the email already holds the requested role."),
+  status: z
+    .enum(["already_member", "added", "pending"])
+    .describe(
+      "already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.",
+    ),
+  inviteId: z.string().optional().describe("Pending invite id (status pending)."),
+  expiresAt: z.string().optional().describe("ISO time the accept link expires (status pending)."),
+  acceptUrl: z
+    .string()
+    .optional()
+    .describe(
+      "Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured.",
+    ),
 });
 
 const signedUrlResponseSchema = z.object({
@@ -112,22 +126,26 @@ const inviteMemberRoute = route({
   pattern: ["api", "fs", "members", "invite"],
   summary: "Invite an external member into the agent-fs shared org",
   description:
-    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.",
   tags: ["FS"],
   body: z.object({
     email: z.email(),
     role: z.enum(["viewer", "editor", "admin"]).default("editor"),
   }),
   responses: {
-    200: { description: "Invite state ({ orgId, invited })", schema: agentFsInviteStateSchema },
+    200: {
+      description: "Invite state ({ orgId, invited, status, acceptUrl? })",
+      schema: agentFsInviteStateSchema,
+    },
     400: { description: "Invalid body" },
+    403: { description: "A non-admin user token named an email other than its own" },
     500: { description: "Provisioning or invite failed" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated:
-      "Tenant API key is the org-owner credential; the invite runs under the API server's own bootstrap identity, no per-agent principal applies.",
-  },
+  // The operator key and grant-all users invite any email at any role. Other
+  // users may only join with their own account email, at a role the handler
+  // derives from their grant.
+  rbac: { permission: "fs.join.own" },
 });
 
 const listTaskFilesRoute = route({
@@ -234,6 +252,37 @@ const deleteTaskFileRoute = route({
   rbac: { permission: "task.fs.mutate" },
 });
 
+type InviteRole = "viewer" | "editor" | "admin";
+
+/**
+ * The email and role an invite runs with. The operator key and grant-all users
+ * keep the body as sent. Any other user joins only as itself: the body email
+ * must match the account email (ignoring case), the stored spelling is used,
+ * and the role is `editor` when the user may change task files, else `viewer`.
+ */
+async function resolveInvite(
+  req: IncomingMessage,
+  body: { email: string; role: InviteRole },
+): Promise<{ email: string; role: InviteRole } | { denied: string }> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || !isRbacEnabled()) return body;
+  const grant = await getUserGrant(auth.userId);
+  if (grant.grantsAll) return body;
+  const decision = can({
+    principal: { kind: "user", userId: auth.userId },
+    verb: "fs.join.own",
+    resource: { kind: "none" },
+    source: "http",
+  });
+  // Admission already required the role to hold `fs.join.own`.
+  if (!decision.allow) return { denied: decision.reason };
+  const ownEmail = auth.user.email?.trim();
+  if (!ownEmail || ownEmail.toLowerCase() !== body.email.trim().toLowerCase()) {
+    return { denied: "You can only join the shared drive with your own account email" };
+  }
+  return { email: ownEmail, role: grant.verbs.has("task.fs.mutate") ? "editor" : "viewer" };
+}
+
 export async function handleFs(
   req: IncomingMessage,
   res: ServerResponse,
@@ -264,8 +313,13 @@ export async function handleFs(
   if (inviteMemberRoute.match(req.method, pathSegments)) {
     const parsed = await inviteMemberRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const invite = await resolveInvite(req, parsed.body);
+    if ("denied" in invite) {
+      jsonError(res, invite.denied, 403);
+      return true;
+    }
     try {
-      const result = await inviteEmailToSharedOrg(parsed.body.email, parsed.body.role);
+      const result = await inviteEmailToSharedOrg(invite.email, invite.role);
       inviteMemberRoute.respond(res, 200, result);
     } catch (error) {
       const message = scrubSecrets(error instanceof Error ? error.message : String(error));

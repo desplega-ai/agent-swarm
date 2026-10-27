@@ -2,47 +2,50 @@ import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import {
   isOnboardingOpen,
-  ONBOARDING_STEPS,
   onboardingDoneCount,
   onboardingResumeStep,
   useOnboarding,
+  useVisibleOnboardingSteps,
 } from "@/api/hooks/use-onboarding";
 import { SetupChip } from "@/components/shared/setup-chip";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { STEP_STATUS_WORD, StepStatusGlyph, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 
-const TOTAL = ONBOARDING_STEPS.length;
-
 /** Header entry point while onboarding is open (minimized or not yet resumed). */
 export function SetupPill() {
   const { data } = useOnboarding();
+  const steps = useVisibleOnboardingSteps();
   const { resume, isPending } = useResumeSetup();
   const [open, setOpen] = useState(false);
+  // Setup writes swarm config: only an admin can finish it.
+  const canSetup = useCan("config.write.any");
 
-  if (!data || !isOnboardingOpen(data)) return null;
+  if (!canSetup || !data || !isOnboardingOpen(data)) return null;
   const { state } = data;
   // Pill, ring, and popover all count done steps ("Setup 3/7", "3 / 7 verified").
-  const done = onboardingDoneCount(state);
-  const resumeStep = onboardingResumeStep(state);
+  const done = onboardingDoneCount(state, steps);
+  const resumeStep = onboardingResumeStep(state, steps);
+  const total = steps.length;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Setup: ${done} of ${TOTAL} steps done`}
+          aria-label={`Setup: ${done} of ${total} steps done`}
           className={cn(
             "inline-flex h-8 shrink-0 items-center gap-2 rounded-full border border-primary/40 bg-card pr-3 pl-2 text-xs font-semibold whitespace-nowrap",
             "hover:bg-accent hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             "data-[state=open]:border-primary/60 data-[state=open]:bg-primary/10",
           )}
         >
-          <ProgressRing value={done} total={TOTAL} />
+          <ProgressRing value={done} total={total} />
           <span>
-            Setup {done}/{TOTAL}
+            Setup {done}/{total}
           </span>
         </button>
       </PopoverTrigger>
@@ -50,11 +53,11 @@ export function SetupPill() {
         <div className="flex items-center gap-2 border-b border-border-subtle bg-surface px-3.5 py-2.5">
           <p className="flex-1 text-sm font-semibold">Finish setting up</p>
           <SetupChip>
-            {done} / {TOTAL} verified
+            {done} / {total} verified
           </SetupChip>
         </div>
         <ul className="divide-y divide-border-subtle">
-          {ONBOARDING_STEPS.map(({ id, label }) => {
+          {steps.map(({ id, label }) => {
             const status = state.steps[id].status;
             return (
               <li key={id}>
@@ -83,7 +86,7 @@ export function SetupPill() {
         </ul>
         <div className="flex items-center gap-2 border-t border-border-subtle bg-surface px-3.5 py-2.5">
           <p className="flex-1 text-xs text-muted-foreground">
-            Resume opens step {stepNumber(resumeStep)}.
+            Resume opens step {stepNumber(resumeStep, steps)}.
           </p>
           <Button size="sm" disabled={isPending} onClick={() => void resume(resumeStep)}>
             Resume

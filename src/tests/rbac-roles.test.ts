@@ -16,7 +16,9 @@ import type { PermissionVerb } from "../rbac";
 const TEST_DB_PATH = "./test-rbac-roles.sqlite";
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const REQUESTER_VERBS = [
+  "comb.presence",
   "favorite.write.own",
+  "fs.join.own",
   "session.presence",
   "session.share",
   "task.action.own",
@@ -24,6 +26,7 @@ const REQUESTER_VERBS = [
   "task.create.own",
   "task.fs.mutate",
   "task.read.own",
+  "task.steer.own",
 ] satisfies PermissionVerb[];
 
 async function removeDbFiles() {
@@ -194,7 +197,12 @@ describe("ensureRbacSeedsSynced", () => {
     ensureRbacSeedsSynced({ quiet: true });
 
     const viewerVerbs = await roleVerbs("rbac-role-viewer");
-    expect(viewerVerbs).toEqual(["favorite.write.own", "session.presence"]);
+    expect(viewerVerbs).toEqual([
+      "comb.presence",
+      "favorite.write.own",
+      "fs.join.own",
+      "session.presence",
+    ]);
     for (const verb of viewerVerbs) expect(REQUESTER_VERBS).toContain(verb);
   });
 

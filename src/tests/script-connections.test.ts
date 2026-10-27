@@ -655,8 +655,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "244_api_key_validation.sql");
       // 245 alters scripts, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "245_script_executor.sql");
-      // 246 alters model_profiles (made by the skipped 220) and scheduled_tasks.
-      markMigrationApplied(database, "246_model_profiles_pr2.sql");
+      // 249 alters model_profiles (made by the skipped 220) and scheduled_tasks.
+      markMigrationApplied(database, "249_model_profiles_pr2.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

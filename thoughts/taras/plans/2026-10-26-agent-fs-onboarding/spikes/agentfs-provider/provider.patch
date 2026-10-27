@@ -1,0 +1,248 @@
+diff --git a/packages/core/src/config.ts b/packages/core/src/config.ts
+index 8183ae0..21ff58f 100644
+--- a/packages/core/src/config.ts
++++ b/packages/core/src/config.ts
+@@ -17,6 +17,15 @@ export function getEmbeddingMaxBytes(): number | undefined {
+   return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : undefined;
+ }
+ 
++/** Env-only settings of the `openai-compat` embedding provider. Empty means unset. */
++export function getEmbeddingCompatSettings(): { baseURL?: string; queryPrefix: string; documentPrefix: string } {
++  return {
++    baseURL: process.env.AGENT_FS_EMBEDDING_BASE_URL?.trim() || undefined,
++    queryPrefix: process.env.AGENT_FS_EMBEDDING_QUERY_PREFIX ?? "",
++    documentPrefix: process.env.AGENT_FS_EMBEDDING_DOCUMENT_PREFIX ?? "",
++  };
++}
++
+ export function getEmbeddingExcludeDrives(): string[] {
+   return [...new Set((process.env.AGENT_FS_EMBEDDING_EXCLUDE_DRIVES ?? "")
+     .split(",").map((id) => id.trim()).filter(Boolean))].sort();
+@@ -85,7 +94,7 @@ export interface AgentFSConfig {
+    */
+   s3: AgentFSStorageConfig;
+   embedding: {
+-    provider: "local" | "openai" | "gemini";
++    provider: "local" | "openai" | "gemini" | "openai-compat";
+     model: string;
+     apiKey: string;
+   };
+@@ -294,7 +303,7 @@ function applyEnvOverrides(config: AgentFSConfig): AgentFSConfig {
+       config.embedding.model = "";
+       config.embedding.apiKey = "";
+     }
+-    config.embedding.provider = env.EMBEDDING_PROVIDER as "local" | "openai" | "gemini";
++    config.embedding.provider = env.EMBEDDING_PROVIDER as AgentFSConfig["embedding"]["provider"];
+   }
+   if (env.EMBEDDING_MODEL) config.embedding.model = env.EMBEDDING_MODEL;
+   if (env.EMBEDDING_API_KEY) config.embedding.apiKey = env.EMBEDDING_API_KEY;
+diff --git a/packages/core/src/search/__tests__/openai-compat.test.ts b/packages/core/src/search/__tests__/openai-compat.test.ts
+new file mode 100644
+index 0000000..7f5b95c
+--- /dev/null
++++ b/packages/core/src/search/__tests__/openai-compat.test.ts
+@@ -0,0 +1,100 @@
++import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
++import { OpenAICompatEmbeddingProvider } from "../embeddings/openai-compat.js";
++import { createEmbeddingProviderFromEnv } from "../embeddings/index.js";
++import type { EmbeddingProvider } from "../embeddings/provider.js";
++import { embeddingFormat } from "../embedding-migration.js";
++
++type Seen = { auth: string | null; path: string; body: any };
++let seen: Seen[] = [];
++let server: ReturnType<typeof Bun.serve>;
++let baseURL: string;
++
++/** Deterministic 768-dim vector: slot 0 = text length, slot 1 = char-code sum. */
++const vec = (t: string) => Object.assign(new Array(768).fill(0), { 0: t.length, 1: [...t].reduce((a, c) => a + c.charCodeAt(0), 0) });
++
++beforeAll(() => {
++  server = Bun.serve({
++    port: 0,
++    async fetch(req) {
++      const body = await req.json();
++      seen.push({ auth: req.headers.get("authorization"), path: new URL(req.url).pathname, body });
++      const inputs: string[] = Array.isArray(body.input) ? body.input : [body.input];
++      // Out of order on purpose: the provider sorts by index.
++      const data = inputs.map((t, index) => ({ object: "embedding", index, embedding: vec(t) })).reverse();
++      return Response.json({ object: "list", data, model: body.model, usage: { prompt_tokens: 1, total_tokens: 1 } });
++    },
++  });
++  baseURL = `http://localhost:${server.port}/v1`;
++});
++afterAll(() => server.stop(true));
++beforeEach(() => { seen = []; });
++
++describe("OpenAICompatEmbeddingProvider", () => {
++  test("query request: model, query prefix, float encoding, no dimensions, no auth without key", async () => {
++    const p = new OpenAICompatEmbeddingProvider({ baseURL, model: "m1", queryPrefix: "search_query: " });
++    expect(await p.embedQuery("hi")).toEqual(vec("search_query: hi"));
++    expect(seen).toHaveLength(1);
++    expect(seen[0].path).toBe("/v1/embeddings");
++    expect(seen[0].auth).toBeNull();
++    expect(seen[0].body).toEqual({ model: "m1", input: "search_query: hi", encoding_format: "float" });
++  });
++
++  test("document request: prefix on every input, batches of at most 32, order kept", async () => {
++    const p = new OpenAICompatEmbeddingProvider({ baseURL, model: "m1", documentPrefix: "search_document: " });
++    const texts = Array.from({ length: 70 }, (_, i) => `t${i}`);
++    const out = await p.embedDocuments(texts, { title: "f.md" });
++    expect(out).toEqual(texts.map((t) => vec("search_document: " + t)));
++    expect(seen.map((s) => s.body.input.length)).toEqual([32, 32, 6]);
++    expect(seen[0].body.input[0]).toBe("search_document: t0");
++    expect(seen.every((s) => s.body.encoding_format === "float" && !("dimensions" in s.body))).toBe(true);
++  });
++
++  test("sends a bearer token only when a key is set", async () => {
++    const p = new OpenAICompatEmbeddingProvider({ baseURL, model: "m1", apiKey: "k-test" });
++    await p.embedQuery("x");
++    expect(seen[0].auth).toBe("Bearer k-test");
++  });
++
++  test("dimensions are 768, no mime or part support", () => {
++    const p: EmbeddingProvider = new OpenAICompatEmbeddingProvider({ baseURL, model: "m1" });
++    expect(p.dimensions).toBe(768);
++    expect(p.supportsMime).toBeUndefined();
++    expect(p.embedParts).toBeUndefined();
++  });
++
++  test("fingerprint changes with model or prefix, not with base URL", () => {
++    const f = (o: Partial<ConstructorParameters<typeof OpenAICompatEmbeddingProvider>[0]> = {}) =>
++      embeddingFormat(new OpenAICompatEmbeddingProvider({ baseURL, model: "m1", queryPrefix: "q", documentPrefix: "d", ...o }));
++    expect(f({ baseURL: "http://other:1/v1" })).toBe(f());
++    expect(f({ model: "m2" })).not.toBe(f());
++    expect(f({ queryPrefix: "q2" })).not.toBe(f());
++    expect(f({ documentPrefix: "d2" })).not.toBe(f());
++    expect(f()).toMatch(/^openai-compat-[0-9a-f]{8}:v2$/);
++  });
++});
++
++describe("factory wiring", () => {
++  const keys = ["EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
++    "AGENT_FS_EMBEDDING_BASE_URL", "AGENT_FS_EMBEDDING_QUERY_PREFIX", "AGENT_FS_EMBEDDING_DOCUMENT_PREFIX"];
++  const saved: Record<string, string | undefined> = {};
++  beforeEach(() => { for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; } });
++  afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
++
++  test("explicit EMBEDDING_PROVIDER=openai-compat builds the provider from env", async () => {
++    process.env.EMBEDDING_PROVIDER = "openai-compat";
++    process.env.AGENT_FS_EMBEDDING_BASE_URL = baseURL;
++    process.env.AGENT_FS_EMBEDDING_QUERY_PREFIX = "search_query: ";
++    const p = await createEmbeddingProviderFromEnv({ provider: "openai-compat", model: "m1", apiKey: "" });
++    expect(p?.name).toMatch(/^openai-compat-/);
++    await p!.embedQuery("z");
++    expect(seen[0].body.input).toBe("search_query: z");
++    expect(seen[0].auth).toBeNull();
++  });
++
++  test("missing base URL or model returns null", async () => {
++    process.env.EMBEDDING_PROVIDER = "openai-compat";
++    expect(await createEmbeddingProviderFromEnv({ provider: "openai-compat", model: "m1", apiKey: "" })).toBeNull();
++    process.env.AGENT_FS_EMBEDDING_BASE_URL = baseURL;
++    expect(await createEmbeddingProviderFromEnv({ provider: "openai-compat", model: "", apiKey: "" })).toBeNull();
++  });
++});
+diff --git a/packages/core/src/search/embeddings/index.ts b/packages/core/src/search/embeddings/index.ts
+index c109852..ab6f19e 100644
+--- a/packages/core/src/search/embeddings/index.ts
++++ b/packages/core/src/search/embeddings/index.ts
+@@ -1,5 +1,6 @@
+ import type { EmbeddingProvider } from "./provider.js";
+ import type { AgentFSConfig } from "../../config.js";
++import { getEmbeddingCompatSettings } from "../../config.js";
+ import type { TransformersResult } from "./embeddinggemma.js";
+ 
+ export const NOMIC_MODEL = "nomic-embed-text-v1.5";
+@@ -82,6 +83,13 @@ export async function createEmbeddingProvider(
+       const { GeminiEmbeddingProvider } = await import("./gemini.js");
+       return new GeminiEmbeddingProvider(config.apiKey);
+     }
++    case "openai-compat": {
++      const { baseURL, queryPrefix, documentPrefix } = getEmbeddingCompatSettings();
++      if (!baseURL) throw new Error("openai-compat needs AGENT_FS_EMBEDDING_BASE_URL.");
++      if (!config.model) throw new Error("openai-compat needs EMBEDDING_MODEL.");
++      const { OpenAICompatEmbeddingProvider } = await import("./openai-compat.js");
++      return new OpenAICompatEmbeddingProvider({ baseURL, model: config.model, apiKey: config.apiKey, queryPrefix, documentPrefix });
++    }
+     default:
+       throw new Error(`Unknown embedding provider: ${config.provider}`);
+   }
+diff --git a/packages/core/src/search/embeddings/openai-compat.ts b/packages/core/src/search/embeddings/openai-compat.ts
+new file mode 100644
+index 0000000..d9e296d
+--- /dev/null
++++ b/packages/core/src/search/embeddings/openai-compat.ts
+@@ -0,0 +1,73 @@
++import { createHash } from "node:crypto";
++import OpenAI from "openai";
++import type { EmbeddingProvider } from "./provider.js";
++import { requestBatches } from "./openai.js";
++
++export interface OpenAICompatOptions {
++  baseURL: string;
++  model: string;
++  /** Sent as a bearer token only when set. */
++  apiKey?: string;
++  queryPrefix?: string;
++  documentPrefix?: string;
++}
++
++/** TEI defaults to 32 inputs per request in older builds, 256 in 1.9.4. 32 is safe for both. */
++const MAX_INPUTS_PER_REQUEST = 32;
++const MAX_CHARS_PER_REQUEST = 250_000;
++
++/**
++ * Any server that speaks POST /v1/embeddings (TEI, vLLM, Ollama, LiteLLM).
++ * The model must return 768 dimensions natively: no `dimensions` is sent.
++ * `name` carries a hash of model + prefixes, because the re-embed fingerprint
++ * is only `<name>:v<rev>`. The base URL is left out so a host rename keeps the index.
++ */
++export class OpenAICompatEmbeddingProvider implements EmbeddingProvider {
++  readonly name: string;
++  readonly dimensions = 768;
++  private client: OpenAI;
++  private model: string;
++  private queryPrefix: string;
++  private documentPrefix: string;
++
++  constructor(opts: OpenAICompatOptions) {
++    this.model = opts.model;
++    this.queryPrefix = opts.queryPrefix ?? "";
++    this.documentPrefix = opts.documentPrefix ?? "";
++    const hash = createHash("sha256")
++      .update(JSON.stringify([this.model, this.queryPrefix, this.documentPrefix]))
++      .digest("hex")
++      .slice(0, 8);
++    this.name = `openai-compat-${hash}`;
++    // The SDK throws on an undefined key; the placeholder is never sent as a header
++    // when the caller passes no key (see defaultHeaders override below).
++    this.client = new OpenAI({
++      apiKey: opts.apiKey || "unused",
++      baseURL: opts.baseURL,
++      ...(opts.apiKey ? {} : { defaultHeaders: { Authorization: null as unknown as string } }),
++    });
++  }
++
++  async embedQuery(text: string): Promise<number[]> {
++    const result = await this.client.embeddings.create({
++      model: this.model,
++      input: this.queryPrefix + text,
++      encoding_format: "float",
++    });
++    return result.data[0].embedding;
++  }
++
++  async embedDocuments(texts: string[], _opts: { title: string }): Promise<number[][]> {
++    const vectors: number[][] = [];
++    const prefixed = texts.map((t) => this.documentPrefix + t);
++    for (const batch of requestBatches(prefixed, { inputs: MAX_INPUTS_PER_REQUEST, chars: MAX_CHARS_PER_REQUEST })) {
++      const result = await this.client.embeddings.create({
++        model: this.model,
++        input: batch,
++        encoding_format: "float",
++      });
++      vectors.push(...result.data.sort((a, b) => a.index - b.index).map((d) => d.embedding));
++    }
++    return vectors;
++  }
++}

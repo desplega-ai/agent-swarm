@@ -30,6 +30,37 @@ EMBEDDING_API_KEY=<resource-api-key>
 
 The Azure preset takes the resource name or URL and appends `/openai/v1`. The deployment must honor the `dimensions` parameter (`text-embedding-3-*` does, `text-embedding-ada-002` does not). A base URL without `/openai/v1` fails with "endpoint path not found". The legacy `/openai/deployments/<name>?api-version=` form is not supported.
 
+### Local embeddings with TEI
+
+Swarm memory runs on a local [Hugging Face Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server, with no paid key. With `nomic-ai/nomic-embed-text-v1.5`, start TEI with a larger request cap and a lower token budget:
+
+```bash
+docker run -d --name tei -p 8091:80 -v tei-data:/data \
+  ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4 \
+  --model-id nomic-ai/nomic-embed-text-v1.5 \
+  --max-client-batch-size 256 --max-batch-tokens 2048
+```
+
+Then point the swarm at it:
+
+```bash
+EMBEDDING_API_BASE_URL=http://tei:80/v1
+EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
+EMBEDDING_API_KEY=local-tei
+EMBEDDING_QUERY_PREFIX="search_query: "
+EMBEDDING_DOCUMENT_PREFIX="search_document: "
+```
+
+- `EMBEDDING_API_KEY` must be non-empty. TEI ignores it, but the swarm turns memory embeddings off without a key.
+- nomic-embed models need a task prefix on every input. The two prefix variables are used verbatim, so keep the trailing space. Unset means no prefix. Changing a prefix on an install with stored memories needs a re-embed.
+- TEI's default `--max-client-batch-size` is 32. The swarm falls back to one request per input when a server rejects a request for its batch size (HTTP 413, or 422 with "batch size" in the message), but `256` avoids the extra requests.
+- With default flags TEI can use enough memory to be killed on an 8 GB box. `--max-batch-tokens 2048` keeps its peak near 1 GiB.
+- The API does not wait for TEI. While TEI is down (first boot, a restart), new memories are saved with no vector and search finds them by keyword. When an embedding call works again after a failed one, the API embeds those memories in the background.
+- Keep the default 512 dimensions. TEI truncates nomic's Matryoshka output to 512 correctly. The `memory_vec` table keeps the size it had at first boot, so do not change `EMBEDDING_DIMENSIONS` on an existing install.
+- The `/setup` memory probe accepts a private URL (such as `http://tei:80/v1`) only for the **existing** preset, which tests the server's own `EMBEDDING_API_BASE_URL`. A URL typed into the custom preset must still be public.
+- When the deployment environment sets a local endpoint, `/setup` and Settings, Integrations, Memory show a **Local** provider beside the hosted presets. A hosted preset that passes its test stores its URL, model and key. When its model is not the deployment's model, it also stores empty prefixes, because the nomic prefixes apply to nomic only. A pick of Local tests the deployment's own setup, then deletes the stored embeddings rows (`POST /api/onboarding/memory` with `{"preset":"existing","restoreDefault":true}`). A failed test changes no config.
+- A switch of model does not embed stored memories again. Their vectors stay from the old model, so search by meaning matches them poorly after the switch.
+
 ### Memory Sources
 
 Memories are automatically created from:

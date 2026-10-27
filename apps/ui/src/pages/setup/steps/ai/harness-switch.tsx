@@ -1,5 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
@@ -7,8 +7,6 @@ import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { HarnessIcon } from "@/components/shared/harness-icon";
-import { SetupChip } from "@/components/shared/setup-chip";
-import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -24,10 +22,79 @@ import {
   dialLevelOfAnyHarness,
   dialSetting,
 } from "@/lib/model-dial";
+import { AgentRoleChip } from "../../components/agent-role-chip";
+
+const CHECKBOX = "size-4 shrink-0 rounded border-input accent-primary";
+
+/**
+ * Switch one agent. An agent-scope model on a dial level of its old harness
+ * moves to the same level of the new one in the same write, so the agent
+ * never runs its old harness's model id on the new harness.
+ */
+async function switchOne(
+  queryClient: QueryClient,
+  id: string,
+  target: ProviderName,
+  dialContext: DialContext,
+) {
+  const harness = dialHarness(target);
+  if (harness) {
+    // `fetchQuery` skips the query's `select`: unwrap the response here.
+    const { configs } = await queryClient.fetchQuery(resolvedConfigsQuery({ agentId: id }));
+    const model = configs.find((c) => c.key === "MODEL_OVERRIDE");
+    const effort = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
+    const level =
+      model?.scope === "agent" ? dialLevelOfAnyHarness(model.value, effort, dialContext) : null;
+    const setting = level ? dialSetting(harness, level, dialContext) : null;
+    if (setting) {
+      await api.updateAgentRuntime({
+        id,
+        harnessProvider: harness,
+        model: setting.model,
+        allowCustomModel: setting.custom,
+        reasoningEffort: setting.effort,
+      });
+      return;
+    }
+  }
+  await api.setAgentHarnessProvider(id, target);
+}
+
+/**
+ * Switch agents to `target`, toast the result, then refresh what the step
+ * reads. `all` says the list is every agent (the switch on the first credential).
+ */
+export async function switchAgentsTo(
+  queryClient: QueryClient,
+  ids: readonly string[],
+  target: ProviderName,
+  dialContext: DialContext,
+  all = false,
+): Promise<void> {
+  const targetName = HARNESS_LABEL[target] ?? target;
+  const results = await Promise.allSettled(
+    ids.map((id) => switchOne(queryClient, id, target, dialContext)),
+  );
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  const switched = ids.length - failures.length;
+  if (failures.length === 0) {
+    const agents = `${all && switched > 1 ? "all " : ""}${switched} agent${switched === 1 ? "" : "s"}`;
+    toast.success(`Switched ${agents} to ${targetName}. They pick it up within about 10 seconds.`);
+  } else {
+    const first = failures[0].reason instanceof Error ? failures[0].reason.message : "";
+    toast.error(`Switched ${switched} of ${ids.length} agents. ${first}`.trim());
+  }
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["agents"] }),
+    queryClient.invalidateQueries({ queryKey: ["configs"] }),
+    queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY }),
+  ]);
+}
 
 /**
  * R2: the rollup keys on the worker harness, so a key verifies only when some
- * worker runs the card's harness. Offer a per-agent switch (never global).
+ * worker runs the card's harness. Offer a per-agent switch. On the first
+ * credential the step switches every agent itself (`firstCredentialSwitch`).
  */
 export function HarnessSwitch({
   harnessPhrase,
@@ -51,7 +118,14 @@ export function HarnessSwitch({
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
 
+  // The lead first, then the other agents in the order the API lists them.
+  const listed = useMemo(
+    () => [...agents].sort((a, b) => Number(b.isLead) - Number(a.isLead)),
+    [agents],
+  );
   const count = checked.size;
+  const allChecked = agents.length > 0 && agents.every((a) => checked.has(a.id));
+  const someChecked = !allChecked && agents.some((a) => checked.has(a.id));
   // The carried level is the target harness's tier model: without the tiers
   // an agent on a dial level would switch with its old harness's model id.
   const tiersLoading = !dialContext.tiers && dialHarness(target) !== null;
@@ -66,85 +140,62 @@ export function HarnessSwitch({
     });
   }
 
-  /**
-   * Switch one agent. An agent-scope model on a dial level of its old harness
-   * moves to the same level of the new one in the same write, so the agent
-   * never runs its old harness's model id on the new harness.
-   */
-  async function switchOne(id: string) {
-    const harness = dialHarness(target);
-    if (harness) {
-      // `fetchQuery` skips the query's `select`: unwrap the response here.
-      const { configs } = await queryClient.fetchQuery(resolvedConfigsQuery({ agentId: id }));
-      const model = configs.find((c) => c.key === "MODEL_OVERRIDE");
-      const effort = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
-      const level =
-        model?.scope === "agent" ? dialLevelOfAnyHarness(model.value, effort, dialContext) : null;
-      const setting = level ? dialSetting(harness, level, dialContext) : null;
-      if (setting) {
-        await api.updateAgentRuntime({
-          id,
-          harnessProvider: harness,
-          model: setting.model,
-          allowCustomModel: setting.custom,
-          reasoningEffort: setting.effort,
-        });
-        return;
-      }
-    }
-    await api.setAgentHarnessProvider(id, target);
+  function toggleAll() {
+    setChecked(allChecked ? new Set() : new Set(agents.map((a) => a.id)));
   }
 
   async function switchAgents() {
     setBusy(true);
-    const ids = [...checked];
-    const results = await Promise.allSettled(ids.map(switchOne));
-    const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
-    const switched = ids.length - failures.length;
-    if (failures.length === 0) {
-      toast.success(
-        `Switched ${switched} agent${switched === 1 ? "" : "s"} to ${targetName}. They pick it up within about 10 seconds.`,
-      );
-    } else {
-      const first = failures[0].reason instanceof Error ? failures[0].reason.message : "";
-      toast.error(`Switched ${switched} of ${ids.length} agents. ${first}`.trim());
+    try {
+      await switchAgentsTo(queryClient, [...checked], target, dialContext);
+    } finally {
+      setChecked(new Set());
+      setBusy(false);
     }
-    setChecked(new Set());
-    setBusy(false);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["agents"] }),
-      queryClient.invalidateQueries({ queryKey: ["configs"] }),
-      queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY }),
-    ]);
   }
 
   return (
     <div className="space-y-2">
-      <StatusLine tone="warning">
-        No worker runs {harnessPhrase} yet. Switch some to use this key.
-      </StatusLine>
-      <ul className="max-h-48 divide-y divide-border-subtle overflow-y-auto rounded-lg border border-border">
-        {agents.map((agent) => (
-          <li key={agent.id}>
-            <label className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent/50 hover-linger transition-colors">
-              <input
-                type="checkbox"
-                checked={checked.has(agent.id)}
-                onChange={() => toggle(agent.id)}
-                className="size-4 shrink-0 rounded border-input accent-primary"
-              />
-              <span className="min-w-0 truncate font-medium">{agent.name}</span>
-              <SetupChip>{agent.isLead ? "Lead" : "Worker"}</SetupChip>
-              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                <HarnessIcon harness={agent.harnessProvider} />
-                {agent.harnessProvider
-                  ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
-                  : "unknown"}
-              </span>
-            </label>
-          </li>
-        ))}
-      </ul>
+      <p className="text-xs text-muted-foreground">
+        Switch agents to {harnessPhrase} to use this key.
+      </p>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <label className="flex items-center gap-2.5 border-b border-border-subtle px-3 py-2 text-sm font-medium hover:bg-accent/50 hover-linger transition-colors">
+          <input
+            type="checkbox"
+            checked={allChecked}
+            // Some agents checked: the box shows a dash, and a click checks every agent.
+            ref={(el) => {
+              if (el) el.indeterminate = someChecked;
+            }}
+            onChange={toggleAll}
+            className={CHECKBOX}
+          />
+          Select all
+        </label>
+        <ul className="max-h-48 divide-y divide-border-subtle overflow-y-auto">
+          {listed.map((agent) => (
+            <li key={agent.id}>
+              <label className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent/50 hover-linger transition-colors">
+                <input
+                  type="checkbox"
+                  checked={checked.has(agent.id)}
+                  onChange={() => toggle(agent.id)}
+                  className={CHECKBOX}
+                />
+                <span className="min-w-0 truncate font-medium">{agent.name}</span>
+                <AgentRoleChip isLead={agent.isLead} />
+                <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <HarnessIcon harness={agent.harnessProvider} />
+                  {agent.harnessProvider
+                    ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
+                    : "unknown"}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {targets.length > 1 ? (
           <Select value={target} onValueChange={(v) => setTarget(v as ProviderName)}>

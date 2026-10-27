@@ -1,7 +1,14 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import { closeDb, getDbClient, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
+import {
+  closeDb,
+  getDbClient,
+  getKeyStatuses,
+  getSwarmConfigs,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
 import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import type { OnboardingState } from "../be/onboarding";
 import { handleCodexOAuthDevice } from "../http/codex-oauth-device";
@@ -92,6 +99,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await getDbClient().run("DELETE FROM codex_oauth_device_flows");
   await getDbClient().run("DELETE FROM swarm_config");
+  await getDbClient().run("DELETE FROM api_key_status");
   fetchImpl = async () => {
     throw new Error("Unexpected fetch");
   };
@@ -231,6 +239,9 @@ describe("Codex device HTTP routes", () => {
     const onboarding = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
     const state = JSON.parse(onboarding[0]!.value) as OnboardingState;
     expect(state.steps.ai).toMatchObject({ status: "done", method: "codex_device" });
+    // The sign-in itself checks the account: the account list says "Signed in".
+    const statuses = await getKeyStatuses("CODEX_OAUTH", "global", null);
+    expect(statuses.map((s) => [s.keySuffix, s.keyIndex])).toEqual([["-full", 1]]);
   });
 
   test("throttles upstream polling to the requested interval", async () => {

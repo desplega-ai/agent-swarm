@@ -1,0 +1,20 @@
+--- scenarios ---
+A new person (typed mixed case)                      {"code":200,"status":"created","email":"ada-p1glut@x.com","role":"editor","invited":true} hasKey=true keyLsStatus=200
+A again, no recover (idempotent)                     {"code":200,"status":"exists","email":"ada-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+A typed lower-case, no recover                       {"code":200,"status":"exists","email":"ada-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+A recover=true                                       {"code":200,"status":"recovered","email":"ada-p1glut@x.com","role":"editor","invited":true} hasKey=true keyLsStatus=200
+  old key still works after recover? 401  new key: 200
+B registered, not member, no recover                 {"code":200,"status":"exists","email":"bob-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+  bob original key now sees drive? 200
+C registered non-member, recover=true                {"code":200,"status":"recovered","email":"cy-p1glut@x.com","role":"editor","invited":true} hasKey=true keyLsStatus=200
+D fresh register, invite fails                       {"code":200,"status":"registered-uninvited","email":"dee-p1glut@x.com","role":"editor","invited":false} hasKey=true keyLsStatus=404
+D retry (409 path, invite now ok)                    {"code":200,"status":"exists","email":"dee-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+D retry with recover                                 {"code":200,"status":"recovered","email":"dee-p1glut@x.com","role":"editor","invited":true} hasKey=true keyLsStatus=200
+E bootstrap email                                    {"code":409,"error":"reserved: bootstrap account"} hasKey=false keyLsStatus=no-key
+E bootstrap email upper-case                         {"code":409,"error":"reserved: bootstrap account"} hasKey=false keyLsStatus=no-key
+E agent domain                                       {"code":409,"error":"reserved: agent account domain"} hasKey=false keyLsStatus=no-key
+E invalid email                                      {"code":400,"error":"invalid email"} hasKey=false keyLsStatus=no-key
+E trailing space is trimmed                          {"code":200,"status":"exists","email":"ada-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+F member stored mixed, user types lower              {"code":200,"status":"exists","email":"Eli-p1glut@x.com","role":"editor","invited":true} hasKey=false keyLsStatus=no-key
+  original Comb key still fine? 200
+bootstrap still lists members: 200

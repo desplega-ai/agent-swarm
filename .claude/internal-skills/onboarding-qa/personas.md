@@ -44,5 +44,6 @@ Every persona has these facts:
 - Just ran the one-shot installer and clicked the `/setup` link it printed.
 - Has a Claude token (repo `.env` key `CLAUDE_CODE_OAUTH_TOKEN`) and, if a step asks for one, an OpenRouter key (`OPENROUTER_API_KEY`).
 - Fills "Who are you?" with `qa+<run>@desplega.ai`, company "Desplega Onboarding QA", website `desplega.ai`.
+- Expects the Files step (Comb on) to create the files account with that email. Never types another email there.
 - Reads labels, not docs. Clicks the most obvious primary action. Skips integrations it does not have.
 - Gives up on a step after about two minutes of confusion (log the confusion before you continue).

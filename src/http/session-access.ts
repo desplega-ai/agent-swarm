@@ -88,6 +88,30 @@ export async function hasSessionWrite(
   return hasSessionAccess(access, "write");
 }
 
+export const NOT_YOUR_TASK_DENIED =
+  "You can only change tasks you requested, or sessions shared with you to edit.";
+
+/**
+ * True when a user token without a grant-all role (RBAC on) changes a task it
+ * does not own: neither the task nor its session root names the user as
+ * requester, and the session is not shared with the user for writing. The
+ * session wall reads an ownerless root (Slack, schedules, operator key) as
+ * everyone's; for such a user it is not theirs to change. Operator, agent and
+ * admin callers are never denied here.
+ */
+export async function deniesNonOwnerTaskWrite(
+  req: IncomingMessage,
+  task: { id: string; requestedByUserId?: string | null },
+): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || !isRbacEnabled()) return false;
+  if (task.requestedByUserId === auth.userId) return false;
+  if ((await getUserGrant(auth.userId)).grantsAll) return false;
+  const root = await getSessionRoot(task.id);
+  if (!root?.requestedByUserId) return true;
+  return !hasSessionAccess(await sessionAccessForRoot(auth.userId, root), "write");
+}
+
 /**
  * The parent gate shared by `POST /api/tasks` and `POST /api/apps/{id}/actions/{name}`.
  * The child inherits the parent's thread context, so an agent caller must own or

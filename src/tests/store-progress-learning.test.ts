@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, type Mock, spyOn, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ZodType } from "zod";
 import {
@@ -10,6 +10,8 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
+import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 interface ToolResult {
@@ -73,7 +75,7 @@ function learningRows(taskId: string): MemoryRow[] {
 
 function learningData(result: ToolResult) {
   return result.structuredContent?.learning as
-    | { status: string; key?: string; error?: string }
+    | { status: string; key?: string; memoryId?: string; similarity?: number; error?: string }
     | undefined;
 }
 
@@ -284,5 +286,96 @@ describe("store-progress learning", () => {
     const progressOnly = await call({ taskId: t.id, learning: "Still too late" });
     expect(learningData(progressOnly)?.status).toBe("failed");
     expect(learningRows(t.id)).toHaveLength(0);
+  });
+});
+
+describe("store-progress learning near-duplicate guard", () => {
+  const vectors = new Map<string, Float32Array>();
+  let embedSpy: Mock<(text: string) => Promise<Float32Array | null>>;
+
+  /** Unit vector on `axis`, tilted toward `axis + 1` so its cosine to the bare axis is `cos`. */
+  function vector(axis: number, cos = 1): Float32Array {
+    const v = new Float32Array(EMBEDDING_DIMENSIONS);
+    v[axis] = cos;
+    v[axis + 1] = Math.sqrt(1 - cos ** 2);
+    return v;
+  }
+
+  /** Store a learning and give it its embedding now, not in the background. */
+  async function seed(text: string, embedding: Float32Array, workstream = "seeded") {
+    vectors.set(text, embedding);
+    const t = await task();
+    const result = await call({ taskId: t.id, learning: { text, workstream } });
+    const memoryId = learningData(result)!.memoryId!;
+    await getMemoryStore().updateEmbedding(memoryId, embedding, "test-embedding");
+    return { task: t, memoryId, key: learningData(result)!.key! };
+  }
+
+  beforeAll(() => {
+    embedSpy = spyOn(getEmbeddingProvider(), "embed").mockImplementation(
+      async (text: string) => vectors.get(text) ?? null,
+    );
+  });
+  afterAll(() => embedSpy.mockRestore());
+
+  test("a near duplicate in another workstream is not stored and rates the existing row", async () => {
+    const existing = await seed("Upsert scripts from file bytes\nPOST the raw file.", vector(10));
+    const text = "Byte-exact script upsert from a local file\nPOST it to the API.";
+    vectors.set(text, vector(10, 0.9));
+    const t = await task();
+    const result = await call({ taskId: t.id, learning: { text, workstream: "other" } });
+
+    expect(learningData(result)).toMatchObject({
+      status: "duplicate",
+      memoryId: existing.memoryId,
+      key: existing.key,
+    });
+    expect(learningData(result)?.similarity).toBeCloseTo(0.9, 2);
+    expect(message(result)).toContain(`Learning not stored: it matches ${existing.key}`);
+    expect(String(result.structuredContent?.nudge)).toContain(`memory-edit that memory instead`);
+    expect(String(result.structuredContent?.nudge)).toContain(existing.memoryId);
+    expect(learningRows(t.id)).toHaveLength(0);
+    const ratings = getDb()
+      .query<{ source: string; signal: number; taskId: string }, [string]>(
+        "SELECT source, signal, taskId FROM memory_rating WHERE memoryId = ?",
+      )
+      .all(existing.memoryId);
+    expect(ratings).toEqual([{ source: "learning-duplicate", signal: 1, taskId: t.id }]);
+  });
+
+  test("a related learning below the threshold is stored", async () => {
+    await seed("Retry flaky pushes once\nThe pre-push hook is slow.", vector(20));
+    const text = "Pre-push hooks take five minutes\nLet them finish.";
+    vectors.set(text, vector(20, 0.7));
+    const t = await task();
+    const result = await call({ taskId: t.id, learning: text });
+
+    expect(learningData(result)?.status).toBe("stored");
+    expect(learningRows(t.id)).toHaveLength(1);
+  });
+
+  test("a failed search falls through to the normal insert", async () => {
+    await seed("Kebab keys only\nSlugs are lowercase.", vector(30));
+    const text = "Keys are kebab case\nSlugs stay lowercase.";
+    vectors.set(text, vector(30, 0.95));
+    const searchSpy = spyOn(getMemoryStore(), "search").mockRejectedValue(new Error("vec down"));
+    try {
+      const t = await task();
+      const result = await call({ taskId: t.id, progress: "kept", learning: text });
+      expect(learningData(result)?.status).toBe("stored");
+      expect(learningRows(t.id)).toHaveLength(1);
+      expect((await getTaskById(t.id))?.progress).toBe("kept");
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+
+  test("an exact replay on the same task is replayed, not a duplicate", async () => {
+    const text = "Replay before similarity\nThe same task retrying is not a duplicate.";
+    const seeded = await seed(text, vector(40));
+    const replay = await call({ taskId: seeded.task.id, learning: { text, workstream: "seeded" } });
+
+    expect(learningData(replay)).toMatchObject({ status: "replayed", memoryId: seeded.memoryId });
+    expect(learningRows(seeded.task.id)).toHaveLength(1);
   });
 });

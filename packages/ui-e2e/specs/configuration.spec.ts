@@ -42,6 +42,43 @@ test("script executor selection persists and resets to native", async ({
   await clean.assertClean();
 });
 
+test("file link target saves dashboard and resets to not set", async ({
+  page,
+  api,
+  clean,
+  seed,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  await page.goto("/settings/configuration");
+  const target = page.locator("#setting-AGENT_FS_LINK_TARGET").getByRole("combobox");
+  await expect(target).toHaveText("Not set");
+
+  try {
+    await target.click();
+    await page.getByRole("option", { name: "dashboard", exact: true }).click();
+    await expect(page.getByText("Saved AGENT_FS_LINK_TARGET", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(target).toHaveText("dashboard");
+    const saved = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    expect(saved.configs.find((config) => config.key === "AGENT_FS_LINK_TARGET")?.value).toBe(
+      "dashboard",
+    );
+
+    await target.click();
+    await page.getByRole("option", { name: "Not set", exact: true }).click();
+    await expect(page.getByText("Reset AGENT_FS_LINK_TARGET to its default")).toBeVisible();
+    await expect(target).toHaveText("Not set");
+    const reset = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    expect(reset.configs.some((config) => config.key === "AGENT_FS_LINK_TARGET")).toBe(false);
+  } finally {
+    const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    const config = configs.find((entry) => entry.key === "AGENT_FS_LINK_TARGET");
+    if (config) await api.delete(`/api/config/${config.id}`);
+  }
+
+  await clean.assertClean();
+});
+
 test("configuration flips STEERING_ENABLED and persists it", async ({ page, api, clean, seed }) => {
   test.skip(!seed, "remote run without seed");
   await page.goto("/settings/configuration");

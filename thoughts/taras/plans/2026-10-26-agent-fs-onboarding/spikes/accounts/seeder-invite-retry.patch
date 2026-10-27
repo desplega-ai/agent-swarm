@@ -1,0 +1,51 @@
+--- a/src/be/seed/agent-fs-provision.ts
++++ b/src/be/seed/agent-fs-provision.ts
+@@ -113,10 +113,19 @@
+     shared.orgId,
+   );
+ 
++  let transientFailures = 0;
+   for (const invite of item.invites) {
+     const currentRole = currentRoles.get(invite.email.toLowerCase());
+     if (currentRole && roleRank(currentRole) >= roleRank(invite.role)) continue;
+-    await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
++    const outcome = await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
++    if (outcome === "transient-failure") transientFailures++;
++  }
++  // "no-account" is not a failure to retry: agent-fs has no pending invites, and the person's
++  // account is created later by POST /api/fs/me/account, which invites in the same call.
++  // A transient failure (network, 5xx other than not-found, 401/403) must not store the hash,
++  // so the next boot re-runs the invites.
++  if (transientFailures > 0) {
++    throw new Error(`agent-fs invites failed for ${transientFailures} member(s); will retry on next boot`);
+   }
+ 
+   await upsertSwarmConfig({
+@@ -396,7 +405,7 @@
+   headers: Record<string, string>,
+   orgId: string,
+   invite: InviteTarget,
+-): Promise<void> {
++): Promise<"invited" | "no-account" | "transient-failure"> {
+   try {
+     await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}/members/invite`, {
+       method: "POST",
+@@ -404,6 +413,7 @@
+       body: invite,
+       allowConflict: true,
+     });
++    return "invited";
+   } catch (error) {
+     console.warn(
+       scrubSecrets(
+@@ -412,6 +422,10 @@
+         }`,
+       ),
+     );
++    // agent-fs answers an unregistered invitee with HTTP 500 "User with email ... not found".
++    const noAccount =
++      error instanceof AgentFsRequestError && error.status === 500 && /not found/i.test(error.message);
++    return noAccount ? "no-account" : "transient-failure";
+   }
+ }
+ 

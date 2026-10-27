@@ -1,0 +1,79 @@
+## IDLE (after boot settle)
+swarm-agent-fs 276.2MiB 0.13%
+swarm-api 208.1MiB 0.74%
+swarm-lead 151.5MiB 0.22%
+swarm-tei 674.7MiB 0.38%
+swarm-worker-coder 142MiB 0.00%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        3178         431           5        4452        4567
+
+## MEMORY: index 12 notes (swarm scope), wait for async embedding via TEI
+{"queued":true,"memoryIds":["7ae40d33-a828-4d86-9d3b-69cae886d7db"]}{"queued":true,"memoryIds":["63c31049-1ee8-4edb-84ef-c70a9192705d"]}{"queued":true,"memoryIds":["7014e37c-f719-423c-a25c-eba3d134ee8c"]}{"queued":true,"memoryIds":["55435d07-e198-4bad-b9b8-939862d635bc"]}{"queued":true,"memoryIds":["11466e37-08e1-4d3b-a134-0c0522769f0c"]}{"queued":true,"memoryIds":["477b90b8-ce56-4377-89cf-3bc709314da0"]}{"queued":true,"memoryIds":["01c88832-f8e9-4ef6-a7dd-6a6fdac12f17"]}{"queued":true,"memoryIds":["acdbfc27-f4f2-47b4-9766-899391c0c567"]}{"queued":true,"memoryIds":["f1340230-1a31-4a55-b7ea-e8e9640dff30"]}{"queued":true,"memoryIds":["7a4b1448-1934-4950-9018-b55b74143bea"]}{"queued":true,"memoryIds":["d63b5614-dcf3-4980-b272-141944f6afc6"]}{"queued":true,"memoryIds":["4c8ad777-4d4b-4a78-a615-e9d91be7e00b"]}
+health(first): {"retrievalMode": "fallback"}
+searchable after .825038427 s
+health(last): {"retrievalMode": "fallback"}
+Q: how do I publish a release
+   deploy-runbook   sim=1.500 src=fts
+   onboarding-faq   sim=0.750 src=fts
+   hiring           sim=0.500 src=fts
+Q: feline resting near the window
+   incident-2026    sim=1.500 src=fts
+   cat-habits       sim=0.750 src=fts
+   deploy-runbook   sim=0.500 src=fts
+Q: who do I ask about money back
+   incident-2026    sim=1.500 src=fts
+Q: connect our team chat
+   hiring           sim=1.500 src=fts
+   slack-setup      sim=0.750 src=fts
+   security         sim=0.500 src=fts
+Q: keep copies of the database
+   db-backup        sim=1.500 src=fts
+   incident-2026    sim=0.750 src=fts
+   cat-habits       sim=0.500 src=fts
+Q: the system went down because workers disconnected
+   incident-2026    sim=1.500 src=fts
+   cat-habits       sim=0.750 src=fts
+   deploy-runbook   sim=0.500 src=fts
+
+## AGENT-FS: write 20 files with the lead's agent key, then semantic search
+agent key length: 67 (value not printed)
+me:
+   {'email': '3db4610d-a403-406f-840e-fb08dc2e9b1f@swarm.local'} orgs: 0
+200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 
+20 writes done in 8.158186266 s
+first semantic hit after 8.643915452 s total
+Q: feline resting near the window
+  [vec-search] /notes/cat.md 0.81 | /notes/coffee.md 0.60 | /notes/security.md 0.59
+  [search] /notes/cat.md 1.00 | /notes/coffee.md 0.98 | /notes/outage.md 0.95
+Q: how do I publish a new version
+  [vec-search] /notes/release.md 0.67 | /notes/roadmap.md 0.66 | /notes/chat.md 0.61
+  [search] /notes/roadmap.md 0.96 | /notes/chat.md 0.95 | /notes/wizard.md 0.94
+Q: who do I ask to get my money back
+  [vec-search] /notes/refunds.md 0.79 | /notes/legal.md 0.62 | /notes/support.md 0.61
+  [search] /notes/refunds.md 1.00 | /notes/support.md 0.97 | /notes/outage.md 0.94
+Q: connect our team chat
+  [vec-search] /notes/chat.md 0.73 | /notes/security.md 0.67 | /notes/support.md 0.66
+  [search] /notes/security.md 0.98 | /notes/chat.md 0.98 | /notes/pricing.md 0.96
+Q: keep copies of the database
+  [vec-search] /notes/backup.md 0.81 | /notes/security.md 0.67 | /notes/data.md 0.66
+  [search] /notes/backup.md 1.00 | /notes/cat.md 0.96 | /notes/coffee.md 0.95
+Q: the system went down because agents disconnected
+  [vec-search] /notes/outage.md 0.77 | /notes/support.md 0.67 | /notes/cat.md 0.66
+  [search] /notes/outage.md 1.00 | /notes/cat.md 0.98 | /notes/coffee.md 0.95
+Q: when do new hires get equipment
+  [vec-search] /notes/onboard-staff.md 0.75 | /notes/coffee.md 0.61 | /notes/wizard.md 0.61
+  [search] /notes/onboard-staff.md 1.00 | /notes/coffee.md 0.49 | /notes/wizard.md 0.48
+
+## PEAKS during agent-fs writes + search
+  peak swarm-agent-fs: 315 MiB, cpu 192%
+  peak swarm-api: 212 MiB, cpu 3%
+  peak swarm-tei: 680 MiB, cpu 3%
+
+## IDLE again
+swarm-agent-fs 313.4MiB 0.30%
+swarm-api 207.2MiB 0.02%
+swarm-lead 146.2MiB 0.01%
+swarm-tei 680.4MiB 0.30%
+swarm-worker-coder 136.9MiB 0.00%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        3153         437           5        4470        4592

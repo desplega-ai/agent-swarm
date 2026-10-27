@@ -89,6 +89,36 @@ export function getAgentFsLiveUrl(): string {
   return (raw || DEFAULT_AGENT_FS_LIVE_URL).replace(/\/+$/, "");
 }
 
+/** Where people-facing agent-fs file links point: Comb in the dashboard, or the live app. */
+export type AgentFsLinkTarget = "dashboard" | "live";
+
+/**
+ * The operator's `AGENT_FS_LINK_TARGET` choice (trimmed, lowercased). Null when
+ * unset, blank, or invalid: every surface then keeps its automatic behavior.
+ */
+export function readAgentFsLinkTarget(): AgentFsLinkTarget | null {
+  const raw = process.env.AGENT_FS_LINK_TARGET?.trim().toLowerCase();
+  return raw === "dashboard" || raw === "live" ? raw : null;
+}
+
+/**
+ * The base URL (no trailing slash) that a people-facing file link starts with,
+ * per {@link readAgentFsLinkTarget}. `dashboard` uses `APP_URL` when one is
+ * configured (and, for attachments, Comb is on), else the live app. Null when
+ * no target is set: the caller keeps its current code path.
+ *
+ * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`,
+ * and an explicit `dashboard` is the operator's choice.
+ */
+export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string | null {
+  const target = readAgentFsLinkTarget();
+  if (target === null) return null;
+  if (target === "dashboard" && getConfiguredAppUrls().length > 0) {
+    if (surface === "prompt" || isCombEnabled()) return getAppUrl();
+  }
+  return getAgentFsLiveUrl();
+}
+
 /**
  * Optional fallback agent-fs `org_id` for attachments that store only `path`.
  * Strictly opt-in — when neither env var is set, the renderer keeps the
@@ -164,6 +194,15 @@ export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
 export function isCombEnabled(): boolean {
   const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
   return isEnvFlagEnabled("COMB_ENABLED", false) && Boolean(apiUrl);
+}
+
+/**
+ * `AGENT_FS_PROXY`: the API serves agent-fs at `/agentfs/*` (plus the public
+ * `/share/*` and `/site/*` pages), and Comb uses `<public API URL>/agentfs`.
+ * Read per request, so a config upsert applies without a restart. Off by default.
+ */
+export function isAgentFsProxyEnabled(): boolean {
+  return isEnvFlagEnabled("AGENT_FS_PROXY", false);
 }
 
 /**

@@ -95,6 +95,10 @@ export interface OnboardState {
   containerEngine: ContainerEnginePreference;
   outputDir: string;
   nonInteractive: boolean;
+  /** Bundle agent-fs (local disk) and TEI. Only `--yes` without `--no-agent-fs` sets it. */
+  bundleAgentFs: boolean;
+  /** TEI image override for the host arch; `null` keeps the compose default (amd64). */
+  teiImage: string | null;
   error: string | null;
   logs: LogLine[];
 }
@@ -114,6 +118,7 @@ export interface OnboardProps {
   maxConcurrentTasks?: string;
   pullPolicy?: string;
   containerEngine?: string;
+  noAgentFs?: boolean;
 }
 
 export type PullPolicy = "always" | "missing" | "never";
@@ -212,6 +217,8 @@ export const INITIAL_STATE: OnboardState = {
   containerEngine: "auto",
   outputDir: process.cwd(),
   nonInteractive: false,
+  bundleAgentFs: false,
+  teiImage: null,
   error: null,
   logs: [],
 };

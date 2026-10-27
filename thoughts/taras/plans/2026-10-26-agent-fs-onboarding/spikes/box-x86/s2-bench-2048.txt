@@ -1,0 +1,11 @@
+CONFIG max-batch-tokens=2048
+calibrated tokens per text: 373
+idle: 560.6MiB / 4GiB 0.28%
+batch=1 conc=1 reqs=12 wall=8.7s texts/s=1.38 tok/s=514 req_lat_p50=0.73s max=0.77s peak_mem/cpu=598.8MiB / 4GiB 391.89%
+batch=1 conc=4 reqs=24 wall=19.2s texts/s=1.25 tok/s=467 req_lat_p50=3.19s max=3.29s peak_mem/cpu=631.7MiB / 4GiB 400.02%
+batch=8 conc=1 reqs=6 wall=43.0s texts/s=1.12 tok/s=416 req_lat_p50=7.26s max=7.38s peak_mem/cpu=749MiB / 4GiB 396.68%
+batch=8 conc=4 reqs=12 wall=92.0s texts/s=1.04 tok/s=389 req_lat_p50=29.15s max=32.09s peak_mem/cpu=750.2MiB / 4GiB 392.88%
+batch=32 conc=1 reqs=4 wall=124.6s texts/s=1.03 tok/s=383 req_lat_p50=31.41s max=31.97s peak_mem/cpu=755.7MiB / 4GiB 396.65%
+batch=32 conc=4 reqs=8 wall=251.3s texts/s=1.02 tok/s=380 req_lat_p50=125.55s max=125.77s peak_mem/cpu=764.5MiB / 4GiB 397.85%
+short query n=100 p50=38.2ms p95=46.5ms max=73.5ms
+after: 578.6MiB / 4GiB 54.92%

@@ -1,0 +1,14 @@
+== --max-batch-tokens 4096
+READY after 26.766937451s
+2026-10-26T01:14:30.365730Z ERROR text_embeddings_backend: backends/src/lib.rs:489: Could not start ORT backend: Could not start backend: Fa
+2026-10-26T01:14:31.106774Z  INFO text_embeddings_router: router/src/lib.rs:302: Warming up model
+2026-10-26T01:14:54.728015Z  INFO text_embeddings_router::http::server: router/src/http/server.rs:1878: Starting HTTP server: 0.0.0.0:80
+2026-10-26T01:14:54.728034Z  INFO text_embeddings_router::http::server: router/src/http/server.rs:1879: Ready
+2.699GiB
+== --max-batch-tokens 2048
+READY after 10.080523135s
+2026-10-26T01:14:57.829887Z ERROR text_embeddings_backend: backends/src/lib.rs:489: Could not start ORT backend: Could not start backend: Fa
+2026-10-26T01:14:58.315296Z  INFO text_embeddings_router: router/src/lib.rs:302: Warming up model
+2026-10-26T01:15:06.479952Z  INFO text_embeddings_router::http::server: router/src/http/server.rs:1878: Starting HTTP server: 0.0.0.0:80
+2026-10-26T01:15:06.479962Z  INFO text_embeddings_router::http::server: router/src/http/server.rs:1879: Ready
+1012MiB

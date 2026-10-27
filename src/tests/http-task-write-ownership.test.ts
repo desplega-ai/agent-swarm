@@ -10,6 +10,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createUser,
   getTaskById,
   initDb,
   startTask,
@@ -27,7 +28,9 @@ const ownerId = "aaaa0000-0000-4000-8000-000000000b01";
 const otherId = "bbbb0000-0000-4000-8000-000000000b02";
 const creatorId = "cccc0000-0000-4000-8000-000000000b03";
 const leadId = "dddd0000-0000-4000-8000-000000000b04";
-const userId = "eeee0000-0000-4000-8000-000000000b05";
+// A real user row: a new user gets the built-in admin role, so with RBAC on
+// it may cancel any task, ownerless ones included.
+let userId: string;
 
 type Caller =
   | { as: "operator"; agentId?: string }
@@ -85,6 +88,7 @@ beforeAll(async () => {
   await createAgent({ id: otherId, name: "Other", isLead: false, status: "idle" });
   await createAgent({ id: creatorId, name: "Creator", isLead: false, status: "idle" });
   await createAgent({ id: leadId, name: "Lead", isLead: true, status: "idle" });
+  userId = (await createUser({ name: "Dashboard User" })).id;
 
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const caller = JSON.parse(String(req.headers["x-test-caller"])) as Caller;

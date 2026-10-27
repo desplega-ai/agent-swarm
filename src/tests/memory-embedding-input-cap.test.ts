@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   MAX_EMBEDDING_INPUT_CHARS,
   OpenAIEmbeddingProvider,
@@ -110,5 +119,117 @@ describe("embedding input cap", () => {
 
     expect(vectors.map(embeddedLength)).toEqual([3, null, 5]);
     expect(requests).toEqual([["one", "three"]]);
+  });
+});
+
+// A TEI server started with the default --max-client-batch-size 32. TEI answers
+// a bigger request with a 422 and this body. TEI also answers 422 for other
+// validation errors, such as a `dimensions` value the model cannot serve.
+const TEI_MAX_BATCH = 32;
+let teiServer: ReturnType<typeof Bun.serve>;
+let teiBaseUrl: string;
+let teiOtherError: string | null = null;
+let teiPayloadTooLarge = false;
+const teiRequests: string[][] = [];
+
+function teiProvider(): OpenAIEmbeddingProvider {
+  return new OpenAIEmbeddingProvider({
+    apiKey: "local-tei",
+    model: "nomic-ai/nomic-embed-text-v1.5",
+    dimensions: 4,
+  });
+}
+
+describe("batch-size rejections", () => {
+  let savedBaseUrl: string | undefined;
+
+  beforeAll(() => {
+    teiServer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as { input: string | string[] };
+        const inputs = Array.isArray(body.input) ? body.input : [body.input];
+        teiRequests.push(inputs);
+        if (teiPayloadTooLarge && inputs.length > 1) {
+          return new Response("payload too large", { status: 413 });
+        }
+        if (teiOtherError) {
+          return Response.json({ error: teiOtherError, error_type: "Validation" }, { status: 422 });
+        }
+        if (inputs.length > TEI_MAX_BATCH) {
+          return Response.json(
+            {
+              error: `batch size ${inputs.length} > maximum allowed batch size ${TEI_MAX_BATCH}`,
+              error_type: "Validation",
+            },
+            { status: 422 },
+          );
+        }
+        return Response.json({
+          object: "list",
+          data: inputs.map((input, index) => ({
+            object: "embedding",
+            index,
+            embedding: [input.length, 0, 0, 1],
+          })),
+          model: "nomic-ai/nomic-embed-text-v1.5",
+          usage: { prompt_tokens: 1, total_tokens: 1 },
+        });
+      },
+    });
+    teiBaseUrl = `http://127.0.0.1:${teiServer.port}/v1`;
+  });
+
+  afterAll(() => {
+    teiServer.stop(true);
+  });
+
+  beforeEach(() => {
+    teiRequests.length = 0;
+    teiOtherError = null;
+    teiPayloadTooLarge = false;
+    savedBaseUrl = process.env.EMBEDDING_API_BASE_URL;
+    process.env.EMBEDDING_API_BASE_URL = teiBaseUrl;
+  });
+
+  afterEach(() => {
+    process.env.EMBEDDING_API_BASE_URL = savedBaseUrl;
+  });
+
+  test("a 422 for the batch size embeds every input one by one", async () => {
+    const texts = Array.from({ length: 70 }, (_, i) => `chunk ${i}`);
+    const vectors = await teiProvider().embedBatch(texts);
+
+    expect(vectors.map(embeddedLength)).toEqual(texts.map((text) => text.length));
+    expect(teiRequests[0]).toHaveLength(70);
+    expect(teiRequests.slice(1)).toHaveLength(70);
+    expect(teiRequests.slice(1).every((r) => r.length === 1)).toBe(true);
+  });
+
+  test("a 413 also embeds every input one by one", async () => {
+    teiPayloadTooLarge = true;
+
+    const vectors = await teiProvider().embedBatch(["one", "three"]);
+    expect(vectors.map(embeddedLength)).toEqual([3, 5]);
+    expect(teiRequests).toEqual([["one", "three"], ["one"], ["three"]]);
+  });
+
+  test("a 422 with another message is one logged failure and no per-input calls", async () => {
+    teiOtherError = "`dimensions` set to 4 but the model only supports 768, 512, 256, 128, 64";
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const texts = Array.from({ length: 70 }, (_, i) => `chunk ${i}`);
+      const vectors = await teiProvider().embedBatch(texts);
+
+      expect(vectors.every((vector) => vector === null)).toBe(true);
+      expect(teiRequests).toHaveLength(1);
+      const failures = errors.mock.calls.filter((call) =>
+        String(call[0]).includes("Batch embedding failed"),
+      );
+      expect(failures).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

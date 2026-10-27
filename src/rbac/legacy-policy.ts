@@ -340,6 +340,7 @@ export const LEGACY_POLICY = {
   "mcp-oauth.authorize.any": anyAuthenticated,
   "kv.write.any": leadOrOwnNamespace,
   "comb.presence": operatorOrUser,
+  "fs.join.own": anyAuthenticated,
   "page.delete.any": leadOrResourceOwner,
   "app.manage": anyAuthenticated,
   "app.use": anyAuthenticated,

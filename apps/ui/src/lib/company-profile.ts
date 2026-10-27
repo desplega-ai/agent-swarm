@@ -18,7 +18,7 @@ export interface ProfileOption<V extends string = string> {
 }
 
 export const TEAM_SIZES = [
-  { value: "1", label: "Just me" },
+  { value: "1", label: "Solo" },
   { value: "2-10", label: "2-10" },
   { value: "11-50", label: "11-50" },
   { value: "51+", label: "51+" },
@@ -39,8 +39,8 @@ export const USE_CASES = [
   { value: "ops", label: "Ops and incidents", group: "build" },
   { value: "data", label: "Data work", group: "build" },
   { value: "content", label: "Write content", group: "business" },
-  { value: "research", label: "Research and reports", group: "business" },
-  { value: "seo", label: "Get found online", group: "business" },
+  { value: "research", label: "Research", group: "business" },
+  { value: "seo", label: "SEO", group: "business" },
   { value: "docs", label: "Docs and support", group: "business" },
   { value: "admin", label: "Inbox and admin", group: "business" },
 ] as const;

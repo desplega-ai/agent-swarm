@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateCompose as generateTemplateCompose } from "../../apps/templates-ui/src/lib/compose-generator.ts";
+import { readAgentFsImageTag } from "../../scripts/agent-fs-version-utils.ts";
+import { applyPins, PINS } from "../../scripts/bump-agent-fs.ts";
+import { AGENT_FS_VERSION } from "../commands/onboard/agent-fs-version.ts";
 import { generateCompose } from "../commands/onboard/compose-generator.ts";
 import { getPresetById, PRESETS } from "../commands/onboard/presets.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
+import { BASELINE_CASES, baselineState } from "./fixtures/onboard/baseline-states.ts";
 
 function makeState(overrides: Partial<OnboardState>): OnboardState {
   return { ...INITIAL_STATE, ...overrides };
@@ -377,5 +384,140 @@ describe("generateCompose", () => {
     const yaml = generateCompose(devState);
     expect(yaml).toContain("depends_on:");
     expect(yaml).toContain("condition: service_healthy");
+  });
+});
+
+describe("generateCompose with the agent-fs bundle flag", () => {
+  const serviceHeaders = (yaml: string) =>
+    yaml.split("\nvolumes:\n")[0]?.match(/^ {2}[a-z][\w-]+:$/gm) ?? [];
+  const serviceBlock = (yaml: string, name: string) =>
+    yaml.split(`\n  ${name}:\n`)[1]?.split(/\n {2}[a-z][\w-]+:\n|\nvolumes:\n/)[0] ?? "";
+
+  test("INITIAL_STATE keeps the bundle off", () => {
+    expect(INITIAL_STATE.bundleAgentFs).toBe(false);
+    expect(INITIAL_STATE.teiImage).toBeNull();
+  });
+
+  for (const { name, state } of BASELINE_CASES) {
+    test(`flag off: ${name} compose equals the pre-bundle output`, async () => {
+      const expected = await Bun.file(
+        new URL(`./fixtures/onboard/${name}.compose.yml.txt`, import.meta.url),
+      ).text();
+      const yaml = generateCompose(state);
+      expect(yaml).toBe(expected);
+      for (const s of ["agent-fs", "tei", "COMB_ENABLED", "EMBEDDING_", "AGENT_FS_"]) {
+        expect(yaml).not.toContain(s);
+      }
+    });
+  }
+
+  for (const { name, state } of BASELINE_CASES) {
+    test(`flag on: ${name} adds agent-fs and tei without changing the rest`, () => {
+      const off = generateCompose(state);
+      const yaml = generateCompose({ ...state, bundleAgentFs: true });
+      const agents = serviceHeaders(off).filter((h) => h !== "  swarm-api:");
+
+      expect(serviceHeaders(yaml)).toEqual([...serviceHeaders(off), "  agent-fs:", "  tei:"]);
+      expect(yaml).toMatch(/\n {2}agent_fs_data:\n {2}tei_data:\n$/);
+      expect(yaml.match(/^ {4}pull_policy: /gm)).toHaveLength(agents.length + 3);
+      expect(yaml.match(new RegExp(`pull_policy: ${state.pullPolicy}`, "g"))).toHaveLength(
+        agents.length + 3,
+      );
+
+      // Every line of the flag-off output survives, in order.
+      const onLines = yaml.split("\n");
+      let cursor = 0;
+      for (const line of off.split("\n")) {
+        const found = onLines.indexOf(line, cursor);
+        expect(found).toBeGreaterThanOrEqual(cursor);
+        cursor = found + 1;
+      }
+
+      // API: proxy, Comb, dashboard links, TEI memory with quoted prefixes.
+      const api = serviceBlock(yaml, "swarm-api");
+      for (const line of [
+        "      - AGENT_FS_API_URL=http://agent-fs:7433",
+        "      - AGENT_FS_PROXY=true",
+        "      - COMB_ENABLED=true",
+        "      - AGENT_FS_LINK_TARGET=dashboard",
+        "      - EMBEDDING_API_BASE_URL=http://tei:80/v1",
+        "      - EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5",
+        "      - EMBEDDING_API_KEY=local-tei",
+        '      - "EMBEDDING_QUERY_PREFIX=search_query: "',
+        '      - "EMBEDDING_DOCUMENT_PREFIX=search_document: "',
+      ]) {
+        expect(api.split("\n")).toContain(line);
+      }
+      expect(api).toContain(
+        "    depends_on:\n      agent-fs:\n        condition: service_healthy\n      tei:\n        condition: service_started\n",
+      );
+
+      // Every agent reaches agent-fs and builds dashboard links.
+      expect(yaml.match(/^ {6}- AGENT_FS_API_URL=http:\/\/agent-fs:7433$/gm)).toHaveLength(
+        agents.length + 1,
+      );
+      for (const header of agents) {
+        const agent = serviceBlock(yaml, header.trim().slice(0, -1));
+        expect(agent).toContain("      - AGENT_FS_API_URL=http://agent-fs:7433\n");
+        expect(agent).toContain("      - APP_URL=https://app.agent-swarm.dev\n");
+        expect(agent).toContain("      - AGENT_FS_LINK_TARGET=dashboard\n");
+      }
+
+      // agent-fs: local disk, no MinIO, no host port.
+      const afs = serviceBlock(yaml, "agent-fs");
+      expect(afs).toContain("AGENT_FS_STORAGE_PROVIDER=local");
+      expect(afs).toContain("AGENT_FS_LOCAL_ROOT=/data/storage");
+      expect(afs).toContain("      - agent_fs_data:/data");
+      expect(afs).toContain(
+        `AGENT_FS_PUBLIC_URL=\${PUBLIC_MCP_BASE_URL:-http://localhost:${state.apiPort || 3013}}/agentfs`,
+      );
+      expect(afs).toContain("node -e");
+      expect(afs).not.toContain("ports:");
+
+      // tei: no host port, the OOM and batch flags, a 2 GB cap.
+      const tei = serviceBlock(yaml, "tei");
+      expect(tei).toContain(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+        'image: "${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}"',
+      );
+      expect(tei).toContain('"--max-batch-tokens", "2048"');
+      expect(tei).toContain('"--max-client-batch-size", "256"');
+      expect(tei).toContain("mem_limit: 2g");
+      expect(tei).not.toContain("ports:");
+
+      expect(yaml).not.toContain("minio");
+      expect(yaml).not.toContain("platform:");
+      expect(yaml).not.toContain("EMBEDDING_DIMENSIONS");
+    });
+  }
+
+  test("flag on: the agent-fs pin equals the Helm chart tag", async () => {
+    const values = new URL("../../charts/agent-swarm/values.yaml", import.meta.url);
+    const tag = readAgentFsImageTag(await Bun.file(values).text(), "values.yaml");
+    expect(AGENT_FS_VERSION).toBe(tag);
+    const yaml = generateCompose({ ...baselineState("solo"), bundleAgentFs: true });
+    expect(yaml).toContain(`    image: "ghcr.io/desplega-ai/agent-fs:${tag}"\n`);
+  });
+
+  test("bump-agent-fs rewrites the onboard pin and keeps the closing quote", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bump-agent-fs-"));
+    try {
+      const repo = new URL("../../", import.meta.url);
+      const onboardPath = "src/commands/onboard/agent-fs-version.ts";
+      // Copy the onboard file even if PINS drops it, so the failure is the stale version.
+      for (const path of new Set([onboardPath, ...PINS.map((pin) => pin.path)])) {
+        await Bun.write(join(root, path), Bun.file(new URL(path, repo)));
+      }
+      const onboard = join(root, onboardPath);
+      expect(await Bun.file(onboard).text()).toContain(
+        `export const AGENT_FS_VERSION = "${AGENT_FS_VERSION}";`,
+      );
+      await applyPins("9.9.9", root);
+      const bumped = await Bun.file(onboard).text();
+      expect(bumped).toContain('export const AGENT_FS_VERSION = "9.9.9";');
+      expect(bumped).not.toContain(`"${AGENT_FS_VERSION}"`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

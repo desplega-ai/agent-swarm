@@ -65,7 +65,7 @@ export function showReviewEntry(path: string, stat: ReviewStat): boolean {
 export function reviewRangeNotice(range: DiffRange, path: string, stat: ReviewStat): string | null {
   const current = stat.currentVersion;
   if (current === undefined) return "This file has no versions to compare.";
-  if (!showReviewEntry(path, stat)) return "Comb compares versions of text files only.";
+  if (!showReviewEntry(path, stat)) return "Files compares versions of text files only.";
   if (range.to > current)
     return `This file has no v${range.to}. The latest version is v${current}.`;
   return null;

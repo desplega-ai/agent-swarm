@@ -41,6 +41,7 @@ import {
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useCan } from "@/lib/use-can";
 
 export interface TaskComposerProps {
   /**
@@ -123,6 +124,9 @@ export function TaskComposer({
 }: TaskComposerProps) {
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
+  // The role's verbs: a follow-up creates a task, steering needs its own verb.
+  const mayCreate = useCan("task.create.own");
+  const maySteer = useCan("task.steer.own");
   const [internalDraft, setInternalDraft] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -218,7 +222,7 @@ export function TaskComposer({
 
   // Steering carries text only, so a message with attachments goes out as a
   // follow-up task instead.
-  const steerTarget = attachments.length === 0 && canSteer ? targetTask : null;
+  const steerTarget = attachments.length === 0 && canSteer && maySteer ? targetTask : null;
 
   const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);
@@ -258,6 +262,7 @@ export function TaskComposer({
     );
   }
 
+  if (!mayCreate) return null;
   return (
     <ComposerDock
       value={draft}

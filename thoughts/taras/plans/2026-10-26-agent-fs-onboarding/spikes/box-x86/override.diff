@@ -1,0 +1,68 @@
+--- override.before.yml	2026-10-26 02:33:56
++++ work/docker-compose.override.yml	2026-10-26 02:30:51
+@@ -4,3 +4,65 @@
+   swarm-api:
+     environment:
+       - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
++      # --- agent-fs bundle prototype (afo spike) ---
++      - AGENT_FS_API_URL=http://agent-fs:7433
++      - COMB_ENABLED=true
++      - EMBEDDING_API_BASE_URL=http://tei:80/v1
++      - EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
++      - EMBEDDING_DIMENSIONS=768
++      - EMBEDDING_API_KEY=local-tei-no-key
++      - DESPLEGA_TELEMETRY_ENV=onboarding-qa
++    depends_on:
++      agent-fs:
++        condition: service_healthy
++      tei:
++        condition: service_healthy
++
++  agent-fs:
++    image: ghcr.io/desplega-ai/agent-fs:0.18.5
++    container_name: swarm-agent-fs
++    platform: linux/amd64
++    environment:
++      - AGENT_FS_HOME=/data
++      - HOST=0.0.0.0
++      - SERVER_HOST=0.0.0.0
++      - PORT=7433
++      - SERVER_PORT=7433
++      - AGENT_FS_STORAGE_PROVIDER=local
++      - AGENT_FS_LOCAL_ROOT=/data/storage
++      - EMBEDDING_PROVIDER=local
++    volumes:
++      - agent_fs_data:/data
++    healthcheck:
++      # The image has no curl or wget. Probe with node fetch (same as docker-compose.example.yml).
++      test:
++        [
++          "CMD-SHELL",
++          "node -e \"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
++        ]
++      interval: 10s
++      timeout: 5s
++      retries: 30
++      start_period: 10s
++    restart: unless-stopped
++
++  tei:
++    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
++    container_name: swarm-tei
++    # --max-batch-tokens 2048 is required: the default (16384) makes the CPU warmup
++    # allocate more than 5 GB and the kernel OOM-kills the container on an 8 GB host.
++    command: ["--model-id", "nomic-ai/nomic-embed-text-v1.5", "--max-batch-tokens", "2048"]
++    volumes:
++      - tei_data:/data
++    healthcheck:
++      # The TEI image ships curl.
++      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]
++      interval: 10s
++      timeout: 5s
++      retries: 30
++      start_period: 20s
++    restart: unless-stopped
++
++volumes:
++  agent_fs_data:
++  tei_data:

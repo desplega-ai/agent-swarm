@@ -51,12 +51,13 @@ import { invalidateFavoriteQueries } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useUsers } from "@/api/hooks/use-users";
 import { useWhoami } from "@/api/hooks/use-whoami";
-import type { User } from "@/api/types";
+import type { User, WhoamiGrants } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { isUserTokenApiKey } from "@/lib/config";
 import { CURRENT_USER_CARD_KEY } from "@/lib/dashboard-user";
 import { uiDeploymentConfig } from "@/lib/deployment-config";
+import { GrantsContext, type GrantsState } from "@/lib/use-can";
 
 export { CURRENT_USER_CARD_KEY } from "@/lib/dashboard-user";
 
@@ -73,6 +74,13 @@ export interface CurrentUserContextValue {
    * `setUserId` and `clearUser` become no-ops while locked.
    */
   locked: boolean;
+  /**
+   * The caller's RBAC grants from whoami. `undefined` on operator-key tabs,
+   * while whoami is pending, and on APIs that do not send them. Read them
+   * through `useCan` / `useIsAdmin` (`@/lib/use-can`), which treat unknown
+   * grants as "show everything".
+   */
+  grants: WhoamiGrants | undefined;
 }
 
 const CurrentUserContext = createContext<CurrentUserContextValue | null>(null);
@@ -237,6 +245,13 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     storedUserId,
   ]);
 
+  const grants = tokenLocked ? whoamiQuery.data?.grants : undefined;
+  const grantsPending = tokenLocked && whoamiQuery.isPending;
+  const grantsState = useMemo<GrantsState>(
+    () => ({ operatorTab: !tokenLocked, pending: grantsPending, grants }),
+    [tokenLocked, grantsPending, grants],
+  );
+
   const value: CurrentUserContextValue = {
     state,
     userId: state === "ready" ? (user?.id ?? null) : null,
@@ -244,9 +259,14 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     setUserId,
     clearUser,
     locked,
+    grants,
   };
 
-  return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;
+  return (
+    <CurrentUserContext.Provider value={value}>
+      <GrantsContext.Provider value={grantsState}>{children}</GrantsContext.Provider>
+    </CurrentUserContext.Provider>
+  );
 }
 
 export function useCurrentUser(): CurrentUserContextValue {

@@ -10,7 +10,7 @@ import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OAuthInlineConnect } from "@/pages/connections/components/oauth-inline-connect";
-import { type BusinessTool, COMING_SOON_TOOLS } from "./catalog";
+import { type BusinessTool, OTHER_TOOLS } from "./catalog";
 import { StepLine } from "./pane-parts";
 
 /** The first active OAuth authorization of a provider across its apps, or null. */
@@ -80,12 +80,12 @@ export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
   );
 }
 
-/** "More coming": the tools whose guided setup ships later. */
-export function ComingSoonPane() {
+/** "Any other tool": tools that connect from Connections until their guided setup ships. */
+export function OtherToolsPane() {
   return (
     <div className="space-y-4">
       <ul className="space-y-2">
-        {COMING_SOON_TOOLS.map((tool) => (
+        {OTHER_TOOLS.map((tool) => (
           <li key={tool.name} className="flex items-center gap-2 text-sm">
             <BrandLogo src={tool.logo} className="size-4" />
             <span className="font-medium">{tool.name}</span>
@@ -93,7 +93,7 @@ export function ComingSoonPane() {
           </li>
         ))}
       </ul>
-      <OpenConnections note="Connect them from Connections for now." />
+      <OpenConnections note="Connect these, or any other tool with an API, from Connections." />
     </div>
   );
 }
