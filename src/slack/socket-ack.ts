@@ -63,10 +63,13 @@ interface SocketAckOptions {
  * only by the in-memory `event_id` cache: losing the event is the worse failure.
  * Order-dependent events (`assistant_thread_context_changed`, last write wins)
  * take that inline path by design: queued, an older one could run after a newer
- * one that ran live and overwrite it. Their dedup key is stored first, with no
- * payload and no way for the drain to claim it, so the in-memory cache is not
- * the only thing standing between a redelivery and a restart: after one, an
- * older context would otherwise overwrite a newer one.
+ * one that ran live and overwrite it. Their dedup key is stored alongside, off
+ * the ack path (Bolt runs the listener once the ack settles, so awaiting the
+ * write would let a newer live event run first), with no payload and no way for
+ * the drain to claim it. The in-memory cache is then not the only thing standing
+ * between a redelivery and a restart: after one, an older context would
+ * otherwise overwrite a newer one. A crash before that write lands loses only
+ * this protection, and a redelivery in that window can run twice.
  * Any other ack error still throws.
  *
  * Slack redelivers the unacked event with the same `event_id` and a
@@ -153,11 +156,16 @@ type Disposition =
   | "drain"
   /** Its key was already stored: an earlier delivery owns it. */
   | "drop"
-  /** Could not be stored for the drain: Bolt runs it inline. */
+  /** Not stored for the drain (store failure, or order-dependent): Bolt runs it inline. */
   | "inline";
 
 async function dispose(payload: SocketEnvelope, envelope: string): Promise<Disposition> {
-  if (isOrderDependentEvent(payload.body)) return rememberInline(payload, envelope);
+  if (isOrderDependentEvent(payload.body)) {
+    // Not awaited: Bolt runs the listener once the ack settles, so a slow or
+    // blocked write would hold this event behind a newer one that ran live.
+    void rememberInline(payload, envelope);
+    return "inline";
+  }
   try {
     const result = await admitSlackInbound({
       transport: "socket",
@@ -183,27 +191,24 @@ async function dispose(payload: SocketEnvelope, envelope: string): Promise<Dispo
 }
 
 /**
- * An order-dependent event runs inline, but its key is stored first (no payload,
+ * An order-dependent event runs inline. Its key is stored alongside (no payload,
  * nothing for the drain to claim) so a redelivery after a restart is dropped
- * instead of overwriting a newer event that ran in between. A store failure
- * still runs the event: losing it is the worse failure.
+ * instead of overwriting a newer event that ran in between. The write is
+ * best-effort and off the ack path: it never delays the event, and a store
+ * failure only costs the restart protection, never the event.
  */
-async function rememberInline(payload: SocketEnvelope, envelope: string): Promise<Disposition> {
+async function rememberInline(payload: SocketEnvelope, envelope: string): Promise<void> {
   try {
     const result = await recordSlackSocketEventRanInline(payload.body, {
       retryNum: payload.retry_num,
       retryReason: payload.retry_reason,
     });
     if (result === "duplicate") {
-      console.warn(
-        `[Slack] socket ack failed (client not ready), event already ran inline: envelope_id=${envelope}`,
-      );
-      return "drop";
+      console.warn(`[Slack] inline event key was already stored: envelope_id=${envelope}`);
     }
   } catch (storeError) {
     console.warn("[Slack] could not remember unacked inline event:", storeError);
   }
-  return "inline";
 }
 
 /**

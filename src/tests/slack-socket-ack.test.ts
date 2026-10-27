@@ -471,6 +471,52 @@ describe("assistant events through Bolt", () => {
     }
   });
 
+  test("a context_changed runs in arrival order while its tombstone write is blocked by a DB transaction", async () => {
+    const { client } = buildAssistantApp();
+    // A real transaction holds the write lock: A's tombstone write queues behind it.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => {};
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const lock = getDbClient().transaction(async (tx) => {
+      await tx.run("DELETE FROM slack_inbound_receipts WHERE 0");
+      locked();
+      await held;
+    });
+    try {
+      await lockTaken;
+      setSocket(client, { isActive: () => false });
+      await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"));
+      // A does not wait for its own tombstone.
+      expect(saved).toEqual(["C_A"]);
+
+      setSocket(client, undefined);
+      noSend(client);
+      await deliverEvent(client, "Ev_CTX_B", contextChanged("C_B"));
+      release();
+      await lock;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(saved).toEqual(["C_A", "C_B"]);
+
+      // The tombstone still lands once the lock is gone, and drops a post-restart redelivery.
+      expect(await receiptFor("Ev_CTX_A")).toMatchObject({
+        state: "processed",
+        outcome_code: "ran_inline",
+      });
+      resetEventDedup();
+      await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"), 1);
+      expect(saved).toEqual(["C_A", "C_B"]);
+    } finally {
+      release();
+      await lock;
+      api.stop();
+    }
+  });
+
   test("a context_changed redelivered after a restart does not overwrite the newer context", async () => {
     const { client } = buildAssistantApp();
     try {
