@@ -823,10 +823,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const user = authUser(getRequestAuth(req));
     if (user) {
-      const [grant, roles] = await Promise.all([
-        getUserGrant(user.id),
-        listUserRoles(user.id),
-      ]);
+      const [grant, roles] = await Promise.all([getUserGrant(user.id), listUserRoles(user.id)]);
       const grantsAll = !isRbacEnabled() || grant.grantsAll;
       whoamiRoute.respond(res, 200, {
         kind: "user",
