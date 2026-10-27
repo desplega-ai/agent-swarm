@@ -1,3 +1,4 @@
+import { AGENT_FS_VERSION } from "./agent-fs-version.ts";
 import { composeCommandText, engineForCommands } from "./container-engine.ts";
 import { expandServices } from "./service-names.ts";
 import type { OnboardState } from "./types.ts";
@@ -70,6 +71,91 @@ const ENV_GITLAB_EMAIL = "      - GITLAB_EMAIL=${GITLAB_EMAIL}";
 const ENV_SENTRY_AUTH_TOKEN = "      - SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SENTRY_ORG = "      - SENTRY_ORG=${SENTRY_ORG}";
+
+// ── Bundled agent-fs + TEI (`onboard --yes`, flag `bundleAgentFs`) ──
+const APP_URL = "https://app.agent-swarm.dev";
+const AGENT_FS_INTERNAL_URL = "http://agent-fs:7433";
+const TEI_MODEL = "nomic-ai/nomic-embed-text-v1.5";
+// Compose `${PUBLIC_MCP_BASE_URL:-http://localhost:<port>}`; the caller appends `<port>}`.
+const ENV_AGENT_FS_PUBLIC_URL_PREFIX =
+  "      - AGENT_FS_PUBLIC_URL=${PUBLIC_MCP_BASE_URL:-http://localhost:";
+const TEI_IMAGE_EXPRESSION =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+  "${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}";
+
+/** The API side of the bundle: agent-fs proxy, Comb, dashboard links, TEI memory. */
+function appendBundleApiEnvironment(lines: string[]) {
+  lines.push(`      - AGENT_FS_API_URL=${AGENT_FS_INTERNAL_URL}`);
+  lines.push("      - AGENT_FS_PROXY=true");
+  lines.push("      - COMB_ENABLED=true");
+  lines.push("      - AGENT_FS_LINK_TARGET=dashboard");
+  lines.push("      - EMBEDDING_API_BASE_URL=http://tei:80/v1");
+  lines.push(`      - EMBEDDING_MODEL=${TEI_MODEL}`);
+  lines.push("      - EMBEDDING_API_KEY=local-tei");
+  // Quoted: unquoted, `KEY=search_query: ` parses as a mapping and drops the trailing space.
+  lines.push('      - "EMBEDDING_QUERY_PREFIX=search_query: "');
+  lines.push('      - "EMBEDDING_DOCUMENT_PREFIX=search_document: "');
+}
+
+function appendBundleServices(lines: string[], state: OnboardState, apiPort: number) {
+  lines.push("");
+  lines.push("  agent-fs:");
+  lines.push(`    image: "ghcr.io/desplega-ai/agent-fs:${AGENT_FS_VERSION}"`);
+  lines.push("    container_name: swarm-agent-fs");
+  lines.push(`    pull_policy: ${state.pullPolicy}`);
+  lines.push("");
+  lines.push("    environment:");
+  lines.push("      - AGENT_FS_HOME=/data");
+  lines.push("      - AGENT_FS_STORAGE_PROVIDER=local");
+  lines.push("      - AGENT_FS_LOCAL_ROOT=/data/storage");
+  lines.push("      - HOST=0.0.0.0");
+  lines.push("      - SERVER_HOST=0.0.0.0");
+  lines.push("      - PORT=7433");
+  lines.push("      - SERVER_PORT=7433");
+  lines.push("      - EMBEDDING_PROVIDER=local");
+  // The browser reaches agent-fs through the API proxy, on the tunnel URL when there is one.
+  lines.push(`${ENV_AGENT_FS_PUBLIC_URL_PREFIX}${apiPort}}/agentfs`);
+  lines.push(`      - AGENT_FS_APP_URL=${APP_URL}`);
+  lines.push("");
+  lines.push("    volumes:");
+  lines.push("      - agent_fs_data:/data");
+  lines.push("");
+  lines.push("    healthcheck:");
+  lines.push("      # The agent-fs image has no curl or wget.");
+  lines.push(
+    `      test: ["CMD-SHELL", "node -e \\"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\\""]`,
+  );
+  lines.push("      interval: 10s");
+  lines.push("      timeout: 5s");
+  lines.push("      retries: 30");
+  lines.push("      start_period: 10s");
+  lines.push("");
+  lines.push("    restart: unless-stopped");
+
+  lines.push("");
+  lines.push("  tei:");
+  lines.push(`    image: "${TEI_IMAGE_EXPRESSION}"`);
+  lines.push("    container_name: swarm-tei");
+  lines.push(`    pull_policy: ${state.pullPolicy}`);
+  // --max-batch-tokens 2048: the default warmup passed 5.4 GB and was OOM-killed on an 8 GB box.
+  // --max-client-batch-size 256: the default 32 rejects documents with more than 32 chunks.
+  lines.push(
+    `    command: ["--model-id", "${TEI_MODEL}", "--max-batch-tokens", "2048", "--max-client-batch-size", "256"]`,
+  );
+  lines.push("    mem_limit: 2g");
+  lines.push("");
+  lines.push("    volumes:");
+  lines.push("      - tei_data:/data");
+  lines.push("");
+  lines.push("    healthcheck:");
+  lines.push('      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]');
+  lines.push("      interval: 10s");
+  lines.push("      timeout: 5s");
+  lines.push("      retries: 30");
+  lines.push("      start_period: 180s");
+  lines.push("");
+  lines.push("    restart: unless-stopped");
+}
 
 function appendProviderEnvironment(lines: string[], state: OnboardState, includeHarness: boolean) {
   if (includeHarness) lines.push(ENV_HARNESS_PROVIDER);
@@ -155,7 +241,7 @@ export function generateCompose(state: OnboardState): string {
   lines.push("      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}");
   appendProviderEnvironment(lines, state, false);
   lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
-  lines.push("      - APP_URL=https://app.agent-swarm.dev");
+  lines.push(`      - APP_URL=${APP_URL}`);
 
   if (state.integrations.slack) {
     lines.push("      - SLACK_DISABLE=false");
@@ -166,6 +252,19 @@ export function generateCompose(state: OnboardState): string {
 
   if (state.integrations.github) {
     lines.push("      - GITHUB_DISABLE=false");
+  }
+
+  if (state.bundleAgentFs) {
+    appendBundleApiEnvironment(lines);
+    lines.push("");
+    // The boot seeder provisions agent-fs, so it must be up first. TEI only needs to
+    // start: a first boot downloads 1.1 GB of weights, and memory falls back to
+    // keyword search until it is ready.
+    lines.push("    depends_on:");
+    lines.push("      agent-fs:");
+    lines.push("        condition: service_healthy");
+    lines.push("      tei:");
+    lines.push("        condition: service_started");
   }
 
   lines.push("");
@@ -238,6 +337,12 @@ export function generateCompose(state: OnboardState): string {
       lines.push(ENV_SENTRY_ORG);
     }
 
+    if (state.bundleAgentFs) {
+      lines.push(`      - AGENT_FS_API_URL=${AGENT_FS_INTERNAL_URL}`);
+      lines.push(`      - APP_URL=${APP_URL}`);
+      lines.push("      - AGENT_FS_LINK_TARGET=dashboard");
+    }
+
     lines.push("");
     lines.push("    ports:");
     lines.push(`      - "${port}:3000"`);
@@ -255,6 +360,8 @@ export function generateCompose(state: OnboardState): string {
     lines.push("    restart: unless-stopped");
   }
 
+  if (state.bundleAgentFs) appendBundleServices(lines, state, port);
+
   // ── Volumes section ──
   lines.push("");
   lines.push("volumes:");
@@ -263,6 +370,10 @@ export function generateCompose(state: OnboardState): string {
   lines.push("  swarm_shared:");
   for (const svc of expanded) {
     lines.push(`  swarm_${svc.sanitizedName}:`);
+  }
+  if (state.bundleAgentFs) {
+    lines.push("  agent_fs_data:");
+    lines.push("  tei_data:");
   }
 
   return `${lines.join("\n")}\n`;

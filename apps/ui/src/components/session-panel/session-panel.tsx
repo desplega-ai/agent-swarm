@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useStoredSessionsView } from "@/hooks/use-sessions-view";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { contextKeyPrefix, newSessionContextKey, sessionLabel, withContextFooter } from "./model";
 import { ScreenshotButton } from "./screenshot-button";
@@ -252,6 +253,8 @@ function NewSession({
   screenshotTarget: (() => HTMLElement | null) | null;
   onStarted: (rootTaskId: string) => void;
 }) {
+  // A Viewer reads sessions but cannot start one.
+  const mayCreate = useCan("task.create.own");
   const { userId, composerProps } = useStartSession({
     contextKey,
     buildTask: (typed) => withContextFooter(typed, contextFooter),
@@ -261,26 +264,29 @@ function NewSession({
     <>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6">
         <p className="max-w-xs text-center text-sm text-muted-foreground">
-          Ask about this page or leave feedback. The lead picks it up with this page's context
-          attached.
+          {mayCreate
+            ? "Ask about this page or leave feedback. The lead picks it up with this page's context attached."
+            : "Your role can read sessions but not start them. Ask an admin for the Requester role."}
         </p>
       </div>
-      <ComposerDock
-        {...composerProps}
-        placeholder={userId ? "Message the swarm…" : "Pick an identity to send messages."}
-        sendLabel="Start session"
-        extraActions={
-          screenshotTarget ? (
-            <ScreenshotButton
-              getTarget={screenshotTarget}
-              disabled={composerProps.disabled || composerProps.isPending}
-              onCaptured={(file) =>
-                composerProps.onAttachmentsChange?.([...(composerProps.attachments ?? []), file])
-              }
-            />
-          ) : null
-        }
-      />
+      {mayCreate ? (
+        <ComposerDock
+          {...composerProps}
+          placeholder={userId ? "Message the swarm…" : "Pick an identity to send messages."}
+          sendLabel="Start session"
+          extraActions={
+            screenshotTarget ? (
+              <ScreenshotButton
+                getTarget={screenshotTarget}
+                disabled={composerProps.disabled || composerProps.isPending}
+                onCaptured={(file) =>
+                  composerProps.onAttachmentsChange?.([...(composerProps.attachments ?? []), file])
+                }
+              />
+            ) : null
+          }
+        />
+      ) : null}
     </>
   );
 }

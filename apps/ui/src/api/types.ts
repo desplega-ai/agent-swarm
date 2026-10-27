@@ -562,14 +562,6 @@ export interface UserIdentity {
   externalId: string;
 }
 
-/**
- * Coarse user-role union. The backend stores `role` as a free-form string;
- * this union captures the values the UI currently reasons about and gives a
- * declarative type for future RBAC (e.g. `NavItem.minRole`). Loosened to
- * `string` on the `User` row since the wire value is not constrained.
- */
-export type UserRole = "admin" | "member" | "viewer";
-
 export interface User {
   id: string;
   name: string;
@@ -609,6 +601,16 @@ export interface UserResponse {
 export interface WhoamiResponse {
   kind: "operator" | "user";
   user: User | null;
+  /** The caller's RBAC grants. Absent on APIs older than 2.6.1. */
+  grants?: WhoamiGrants;
+}
+
+/** RBAC grants from whoami. `grantsAll` is also true when RBAC is off. */
+export interface WhoamiGrants {
+  grantsAll: boolean;
+  verbs: string[];
+  /** Role names, e.g. `["requester"]`. */
+  roles: string[];
 }
 
 export interface MintTokenResponse {
@@ -621,6 +623,48 @@ export interface ConnectorCodeResponse {
   code: string;
   expiresAt: string;
   connectUrl: string;
+}
+
+/** The roles `POST /api/invites` accepts. */
+export type InviteRole = "requester" | "viewer" | "admin";
+
+/** `POST /api/invites` body. */
+export interface CreateInviteInput {
+  email: string;
+  name?: string;
+  role: InviteRole;
+}
+
+/** `POST /api/invites` 201. `inviteUrl` carries the one-time code: never log it. */
+export interface CreateInviteResponse {
+  user: User | null;
+  inviteUrl: string;
+  /** Absent on older APIs. */
+  appUrl?: string;
+  expiresAt: string;
+  /** `local` when teammates' browsers likely cannot reach the API URL. */
+  apiReachable: "public" | "local";
+}
+
+/** `POST /api/invites/exchange` 200. */
+export interface InviteExchangeResponse {
+  token: string;
+  userId: string;
+}
+
+/** One role of `GET /api/rbac/roles`. */
+export interface RbacRole {
+  id: string;
+  name: string;
+  description: string | null;
+  isBuiltin: boolean;
+  grantsAll: boolean;
+  primary: boolean;
+  verbs: string[];
+}
+
+export interface RbacRolesResponse {
+  roles: RbacRole[];
 }
 
 export interface McpUserConfigResponse {
@@ -3951,6 +3995,7 @@ export type OnboardingStepId =
   | "agents"
   | "memory"
   | "integrations"
+  | "files"
   | "first_task";
 
 export type OnboardingStepStatus = "todo" | "done" | "skipped" | "failed";
@@ -3986,6 +4031,18 @@ export type OnboardingMemoryPreset =
   | "azure"
   | "custom"
   | "existing";
+
+/**
+ * Where the embeddings endpoint runs: `local` (the server or its private
+ * network), the hosted preset whose host it calls, or `custom`.
+ */
+export type OnboardingMemoryProvider =
+  | "local"
+  | "openai"
+  | "openrouter"
+  | "vercel"
+  | "azure"
+  | "custom";
 
 export type OnboardingIntegrationMethod =
   | "slack"
@@ -4027,7 +4084,21 @@ export interface OnboardingProviderSignal {
 
 export interface OnboardingSignals {
   providers: OnboardingProviderSignal[];
-  embeddings: { configured: boolean; dimensions: number };
+  embeddings: {
+    configured: boolean;
+    dimensions: number;
+    /** The model memory search uses. Null while off, absent on an older API. */
+    model?: string | null;
+    /** The endpoint runs on the server or its private network. Absent on an older API. */
+    local?: boolean;
+    /** Where the endpoint runs, from its host. Null while off, absent on an older API. */
+    provider?: OnboardingMemoryProvider | null;
+    /**
+     * The local setup of the deployment (its environment), also while a stored
+     * hosted setup replaces it. Null without one, absent on an older API.
+     */
+    localDefault?: { model: string } | null;
+  };
   integrations: {
     slack: boolean;
     github: boolean;
@@ -4038,6 +4109,8 @@ export interface OnboardingSignals {
   };
   agents: { leadsOnline: number; workersOnline: number };
   firstTask: { id: string; status: string } | null;
+  /** The Files step applies (Comb is on). Absent on an API from before the step. */
+  files?: { enabled: boolean };
 }
 
 export interface OnboardingResponse {
@@ -4052,6 +4125,7 @@ export type OnboardingAction =
   | { action: "complete"; step: "ai"; method: OnboardingAiMethod }
   | { action: "complete"; step: "agents"; method: OnboardingAgentsMethod }
   | { action: "complete"; step: "integrations"; method: OnboardingIntegrationMethod }
+  | { action: "complete"; step: "files"; method: "created" | "connected" }
   | { action: "skip"; step: Exclude<OnboardingStepId, "connect"> }
   | { action: "fail"; step: OnboardingStepId; errorClass: OnboardingErrorClass }
   | { action: "first_task"; taskId: string; method: "suggestion" | "free_form" }
@@ -4065,6 +4139,11 @@ export interface OnboardingMemoryTestRequest {
   model?: string;
   apiKey?: string;
   reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+  /**
+   * With preset `existing`: test the deployment's own setup, and when it
+   * works, delete the stored embeddings config so it applies again.
+   */
+  restoreDefault?: boolean;
 }
 
 export interface OnboardingMemoryTestResponse {

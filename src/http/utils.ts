@@ -255,19 +255,38 @@ export function wireHttpSpanLifecycle(
   });
 }
 
+/**
+ * Redact invite codes and agent-fs share tokens from logs and traces.
+ * Share paths also accept the `/agentfs` proxy prefix.
+ */
+export function redactShareTokenInPath(pathname: string): string {
+  const segments = pathname.split("/");
+  if (segments[1] === "invite" && segments[2]) {
+    segments[2] = "[REDACTED]";
+    return segments.join("/");
+  }
+  const at = segments[1] === "agentfs" ? 2 : 1;
+  if ((segments[at] === "share" || segments[at] === "site") && segments[at + 1]) {
+    segments[at + 1] = "[REDACTED]";
+    return segments.join("/");
+  }
+  return pathname;
+}
+
 export function safeRequestUrlForLog(rawUrl: string | undefined): string {
   if (!rawUrl) return "";
 
   try {
     const url = new URL(rawUrl, "http://localhost");
+    const pathname = redactShareTokenInPath(url.pathname);
     const params = Array.from(url.searchParams.keys());
-    if (params.length === 0) return url.pathname;
+    if (params.length === 0) return pathname;
 
     const redactedQuery = params.map((key) => `${key}=[REDACTED]`).join("&");
-    return `${url.pathname}?${redactedQuery}`;
+    return `${pathname}?${redactedQuery}`;
   } catch {
     const pathOnly = rawUrl.split("?")[0] || rawUrl;
-    return scrubSecrets(pathOnly);
+    return scrubSecrets(redactShareTokenInPath(pathOnly));
   }
 }
 

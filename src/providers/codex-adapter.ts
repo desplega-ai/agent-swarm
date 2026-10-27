@@ -1613,8 +1613,13 @@ export class CodexSession implements ProviderSession {
       "invalid 'refresh_token'",
     ];
     if (authPatterns.some((p) => normalized.includes(p))) {
+      const slot = this.config.codexSlot;
+      const guidance =
+        slot === undefined
+          ? "Codex authentication failed — check OPENAI_API_KEY or ChatGPT login."
+          : `Codex pool slot ${slot} authentication failed — re-run agent-swarm codex-login --slot ${slot}.`;
       return {
-        message: `[auth-error] Codex authentication failed — check OPENAI_API_KEY or ChatGPT login. Original error: ${raw}`,
+        message: `[auth-error] ${guidance} Original error: ${raw}`,
         category: "authentication_failed",
       };
     }

@@ -38,6 +38,9 @@ export const BUILTIN_ROLES = [
       "favorite.write.own",
       "session.share",
       "session.presence",
+      "task.steer.own",
+      "comb.presence",
+      "fs.join.own",
     ],
   },
   {
@@ -46,7 +49,7 @@ export const BUILTIN_ROLES = [
     description: "Read-only: no task, approval or script writes.",
     isBuiltin: true,
     grantsAll: false,
-    verbs: ["favorite.write.own", "session.presence"],
+    verbs: ["favorite.write.own", "session.presence", "comb.presence", "fs.join.own"],
   },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 

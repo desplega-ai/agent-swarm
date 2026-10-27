@@ -183,7 +183,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
           content !== undefined || oldString !== undefined || newString !== undefined;
         if (result.changed && (newKey === undefined || contentEdited)) {
           const provider = getEmbeddingProvider();
-          const embedding = await provider.embed(result.memory.content);
+          const embedding = await provider.embed(result.memory.content, { kind: "document" });
           if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
           try {
             // Edit path: prune links derived from removed content (sequel links survive).

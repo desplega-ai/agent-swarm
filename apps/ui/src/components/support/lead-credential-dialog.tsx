@@ -16,6 +16,7 @@ import {
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useLeadCredentialIssue } from "@/hooks/use-lead-credential-issue";
 import { CONFIGURATION_KEYS } from "@/lib/configuration-catalog";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 
 const CREDENTIAL_DOCS_URL = "https://docs.agent-swarm.dev/docs/guides/harness-configuration";
@@ -29,8 +30,10 @@ export function LeadCredentialDialog() {
   const { data: onboarding } = useOnboarding();
   const setupOpen = isOnboardingOpen(onboarding);
   const { resume } = useResumeSetup();
+  // Fixing a credential writes swarm config: only an admin can act on it.
+  const canFix = useCan("config.write.any");
 
-  if (!issue) return null;
+  if (!canFix || !issue) return null;
 
   const configurationKey = issue.missing.find((key) => CONFIGURATION_KEYS.includes(key));
   const configurationPath = configurationKey

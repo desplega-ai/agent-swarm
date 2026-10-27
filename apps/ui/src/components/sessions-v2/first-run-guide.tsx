@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { isTypingTarget, OPEN_OVERLAY, type ShortcutKeyEvent } from "@/lib/approval-shortcuts";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { focusQuietly } from "./pane/quiet-focus";
 import { useLastValue } from "./sidebar/point-menu";
@@ -211,10 +212,15 @@ export function useFirstRunGuide() {
   // until the onboarding payload answers.
   const { config } = useConfig();
   const onboarding = useOnboarding();
-  const setupHolds = onboarding.isPending
-    ? null
-    : Boolean(isOnboardingOpen(onboarding.data) && onboarding.data?.state.firstTaskId) ||
-      wasSetupVisited(config.apiUrl);
+  // Setup only holds the guide for an admin: nobody else is sent through it.
+  const canSetup = useCan("config.write.any");
+  let setupHolds: boolean | null = false;
+  if (canSetup) {
+    setupHolds = onboarding.isPending
+      ? null
+      : Boolean(isOnboardingOpen(onboarding.data) && onboarding.data?.state.firstTaskId) ||
+        wasSetupVisited(config.apiUrl);
+  }
   useEffect(() => {
     if (param !== "1" && param !== "0") return;
     if (param === "1") setWaiting((prev) => prev ?? { step: 0, firstRun: false });

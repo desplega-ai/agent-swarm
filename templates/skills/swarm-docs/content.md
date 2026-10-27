@@ -118,7 +118,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Overview](https://docs.agent-swarm.dev/docs/ui)
 - [Sessions](https://docs.agent-swarm.dev/docs/ui/sessions)
 - [Configuration](https://docs.agent-swarm.dev/docs/ui/configuration)
-- [Comb (beta)](https://docs.agent-swarm.dev/docs/ui/comb)
+- [Comb](https://docs.agent-swarm.dev/docs/ui/comb)
 - [Integrations](https://docs.agent-swarm.dev/docs/integrations)
 - [Slack Integration](https://docs.agent-swarm.dev/docs/integrations/slack)
 - [GitHub App Integration](https://docs.agent-swarm.dev/docs/integrations/github)

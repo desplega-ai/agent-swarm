@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import os from "node:os";
 import { Select } from "@inkjs/ui";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -35,6 +36,7 @@ import { PostTaskStep } from "./onboard/steps/post-task.tsx";
 import { PrereqCheckStep } from "./onboard/steps/prereq-check.tsx";
 import { ReviewStep } from "./onboard/steps/review.tsx";
 import { StartStep } from "./onboard/steps/start.tsx";
+import { teiImageForArch } from "./onboard/tei-image.ts";
 import {
   getStepProgress,
   INITIAL_STATE,
@@ -61,6 +63,7 @@ export function Onboard({
   maxConcurrentTasks,
   pullPolicy,
   containerEngine,
+  noAgentFs = false,
 }: OnboardProps) {
   const { exit } = useApp();
   const [state, setState] = useState<OnboardState>(() => {
@@ -229,8 +232,15 @@ export function Onboard({
       addLog(`Integrations: ${enabled.join(", ")}`);
     }
 
+    const bundleAgentFs = !noAgentFs;
+    if (bundleAgentFs) {
+      addLog("Bundling agent-fs and TEI (local files and memory; --no-agent-fs to skip)");
+    }
+
     goToStep("generate", {
       nonInteractive: true,
+      bundleAgentFs,
+      teiImage: bundleAgentFs ? teiImageForArch(os.arch()) : null,
       deployType: "local",
       presetId: selectedPreset.id,
       services: selectedPreset.services,
@@ -250,7 +260,7 @@ export function Onboard({
       sentryToken: process.env.SENTRY_AUTH_TOKEN || "",
       sentryOrg: process.env.SENTRY_ORG || "",
     });
-  }, [yes, preset, state.step, addLog, goToStep, goToError]);
+  }, [yes, preset, noAgentFs, state.step, addLog, goToStep, goToError]);
 
   // Interactive welcome: auto-advance after detecting existing setup
   useEffect(() => {

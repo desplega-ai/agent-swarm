@@ -77,7 +77,13 @@ import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
-import { resolveSessionActor, type SessionActor, sessionAccessFor } from "./session-access";
+import {
+  deniesNonOwnerTaskWrite,
+  NOT_YOUR_TASK_DENIED,
+  resolveSessionActor,
+  type SessionActor,
+  sessionAccessFor,
+} from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -660,7 +666,7 @@ const triageSessionListRoute = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
-  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
+  rbac: { permission: "favorite.write.own" },
 });
 
 const SESSION_MOVE_LIMIT = 200;
@@ -671,10 +677,7 @@ const SessionMoveResultSchema = z.object({
   moved: z.array(z.string()),
   skipped: z.array(z.object({ rootTaskId: z.string(), reason: z.string() })),
 });
-const sessionMoveRbac = {
-  ungated:
-    "per-session access, per-task task.fs.mutate, and asset-key write checks in the handler, as PATCH /api/assets/task/{id}/key",
-};
+const sessionMoveRbac = { permission: "task.fs.mutate" } as const;
 const sessionMoveResponses = {
   400: { description: "Invalid namespace or request" },
   403: { description: "Personal destination not authorized" },
@@ -759,6 +762,7 @@ async function checkSessionMove(
     const access = await sessionAccessFor(actor, root.id);
     if (access === "none") return { reason: SESSION_MOVE_UNAVAILABLE };
     if (!hasSessionAccess(access, "write")) return { reason: "Session write access required" };
+    if (await deniesNonOwnerTaskWrite(req, root)) return { reason: NOT_YOUR_TASK_DENIED };
   }
   if (root.parentTaskId) return { reason: "Task is not a session root" };
   const sourceError = sourceMoveError(options.destination ?? null, root);

@@ -5,7 +5,7 @@ import { FirstTaskComposer } from "./first-task/first-message-card";
 
 /**
  * Step 7: one secondary status line (the lead, the agent count), then a big
- * centered composer. The composer shows while the lead is still starting, and
+ * composer, centered in the height under the header (a bit above the middle). The composer shows while the lead is still starting, and
  * enables once the lead is online. With no verified key it warns, not blocks.
  */
 export function StepFirstTask({ onboarding, act }: StepProps) {
@@ -13,7 +13,7 @@ export function StepFirstTask({ onboarding, act }: StepProps) {
   const readiness = leadReadiness(agentsQ.data, onboarding.signals.providers);
 
   return (
-    <div className="flex flex-col gap-5 pt-2 sm:pt-6">
+    <div className="flex flex-1 flex-col justify-center gap-5 pt-2 pb-16 short:pb-2">
       {onboarding.state.firstTaskId ? null : (
         <LeadStatusLine agents={agentsQ.data} loading={agentsQ.isPending} readiness={readiness} />
       )}

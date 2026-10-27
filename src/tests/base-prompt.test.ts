@@ -43,6 +43,10 @@ const ENV_KEYS = [
   "SLACK_SIGNING_SECRET",
   "STEERING_ENABLED",
   "AGENT_FS_API_URL",
+  "AGENT_FS_LINK_TARGET",
+  "AGENT_FS_LIVE_URL",
+  "APP_URL",
+  "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
 ] as const;
 
@@ -502,6 +506,47 @@ describe("getBasePrompt: outputs section", () => {
       `Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`,
     );
     expect(result).not.toContain(NO_AGENT_FS_LINE);
+  });
+
+  test("AGENT_FS_LINK_TARGET=dashboard with APP_URL links people to <APP_URL>/file/~/", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    process.env.APP_URL = "http://localhost:5274/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+    );
+    expect(result).not.toContain("AGENT_FS_LIVE_URL}/file/~/");
+  });
+
+  test("AGENT_FS_LINK_TARGET=dashboard without APP_URL falls back to the live base", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `https://live.example.test/file/~/<org>/<drive>/<path>`.",
+    );
+  });
+
+  test("AGENT_FS_LINK_TARGET=live uses the default live host", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "live";
+    process.env.APP_URL = "http://localhost:5274";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `https://live.agent-fs.dev/file/~/<org>/<drive>/<path>`.",
+    );
+  });
+
+  test("an invalid AGENT_FS_LINK_TARGET keeps the exact old sentence", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "Dashboard2";
+    process.env.APP_URL = "http://localhost:5274";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      `Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`,
+    );
   });
 
   test("uses the no_agent_fs variant when AGENT_FS_API_URL is unset", async () => {
@@ -1202,9 +1247,7 @@ describe("getBasePrompt: harness tool discovery", () => {
 
   test.each([
     "pi",
-    "codex",
     "claude-managed",
-    "opencode",
     "acp",
   ])("%s without tool search gets direct-tool guidance", async (provider) => {
     const result = await getBasePrompt({
@@ -1227,6 +1270,30 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain("`tool_search` and `code_exec`");
     expect(result).toContain("`store-progress` is `store_progress`");
     expect(result).toContain('import { store_progress } from "agent-swarm"');
+  });
+
+  test("codex gets exec guidance with the normalized tool name", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "codex",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain("await tools.mcp__agent_swarm__store_progress({ ... })");
+    expect(result).toContain("`ALL_TOOLS`");
+  });
+
+  test("opencode gets execute guidance with the bracketed tool path", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "opencode",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain('await tools.swarm["store-progress"]({ ... })');
+    expect(result).toContain("`search({ query })`");
   });
 
   test("omitted tool-search capability defaults to direct tools", async () => {

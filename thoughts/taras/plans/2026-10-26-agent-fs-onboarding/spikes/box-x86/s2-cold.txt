@@ -1,0 +1,33 @@
+ready_after_s 182.120023638
+2026-10-26T01:10:53.939683Z  INFO text_embeddings_router: router/src/main.rs:216: Args { model_id: "nom**-**/*****-*****-****-v1.5", revision: None, tokenization_workers: None, dtype: None, served_model_name: None, pooli
+2026-10-26T01:10:54.029577Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:42: Starting download
+2026-10-26T01:10:54.029603Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:18: Downloading `1_Pooling/config.json`
+2026-10-26T01:10:54.299060Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:18: Downloading `sentence_bert_config.json`
+2026-10-26T01:10:54.535822Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:18: Downloading `config_sentence_transformers.json`
+2026-10-26T01:10:54.773480Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:18: Downloading `config.json`
+2026-10-26T01:10:55.009131Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:18: Downloading `tokenizer.json`
+2026-10-26T01:10:55.270442Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:72: Model artifacts downloaded in 1.240866209s
+2026-10-26T01:10:55.287014Z  INFO text_embeddings_router: router/src/lib.rs:234: Maximum number of tokens per request: 8192
+2026-10-26T01:10:55.287252Z  INFO text_embeddings_core::tokenization: core/src/tokenization.rs:38: Starting 3 tokenization workers
+2026-10-26T01:10:55.287354Z  INFO text_embeddings_router: router/src/lib.rs:284: Starting model backend
+2026-10-26T01:10:55.467848Z  INFO text_embeddings_backend: backends/src/lib.rs:751: Downloading `onnx/model.onnx`
+2026-10-26T01:11:22.411633Z  INFO text_embeddings_backend: backends/src/lib.rs:755: Successfully downloaded `onnx/model.onnx` in 26.943748 s
+2026-10-26T01:11:22.411688Z  INFO text_embeddings_backend: backends/src/lib.rs:468: Model ONNX weights downloaded in 27.124322636s
+2026-10-26T01:11:22.411700Z  INFO text_embeddings_backend: backends/src/lib.rs:476: Downloading `tokenizer_config.json`
+2026-10-26T01:11:22.646029Z ERROR text_embeddings_backend: backends/src/lib.rs:489: Could not start ORT backend: Could not start backend: Failed to parse `config.json`: duplicate field `hidden_size` at line 38 column 10
+2026-10-26T01:11:22.646052Z  INFO text_embeddings_backend: backends/src/lib.rs:672: Downloading `model.safetensors`
+2026-10-26T01:11:50.694245Z  INFO text_embeddings_backend: backends/src/lib.rs:507: Model weights downloaded in 28.048189368s
+2026-10-26T01:11:50.694271Z  INFO download_dense_modules: text_embeddings_backend: backends/src/lib.rs:843: Downloading `modules.json`
+2026-10-26T01:11:50.930034Z  INFO text_embeddings_backend: backends/src/lib.rs:519: Dense modules downloaded in 235.763797ms
+2026-10-26T01:11:50.930377Z  INFO text_embeddings_backend_candle: backends/candle/src/lib.rs:356: Starting NomicBert model on Cpu
+2026-10-26T01:11:51.346492Z  INFO text_embeddings_router: router/src/lib.rs:302: Warming up model
+1.1G	/var/lib/docker/volumes/tei_probe/_data
+2026-10-26T01:11:22.646052Z  INFO text_embeddings_backend: backends/src/lib.rs:672: Downloading `model.safetensors`
+2026-10-26T01:11:50.694245Z  INFO text_embeddings_backend: backends/src/lib.rs:507: Model weights downloaded in 28.048189368s
+2026-10-26T01:11:50.694271Z  INFO download_dense_modules: text_embeddings_backend: backends/src/lib.rs:843: Downloading `modules.json`
+2026-10-26T01:11:50.930034Z  INFO text_embeddings_backend: backends/src/lib.rs:519: Dense modules downloaded in 235.763797ms
+2026-10-26T01:11:50.930377Z  INFO text_embeddings_backend_candle: backends/candle/src/lib.rs:356: Starting NomicBert model on Cpu
+2026-10-26T01:11:51.346492Z  INFO text_embeddings_router: router/src/lib.rs:302: Warming up model
+tei-probe 0B / 0B 0.00%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        2130        5539           5         345        5615

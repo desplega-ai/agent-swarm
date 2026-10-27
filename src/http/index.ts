@@ -70,6 +70,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
+import { handleAgentFsProxy } from "./agentfs-proxy";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
@@ -148,6 +149,7 @@ import {
   getPathSegments,
   httpServerSemconvAttributes,
   parseQueryParams,
+  redactShareTokenInPath,
   safeRequestUrlForLog,
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
@@ -320,7 +322,7 @@ const httpServer = createHttpServer(async (req, res) => {
           spanName,
           {
             "http.request.method": req.method ?? "",
-            "url.path": reqPath,
+            "url.path": redactShareTokenInPath(reqPath),
             "url.scheme": semconv["url.scheme"],
             "http.route": httpRoute,
             "server.address": semconv["server.address"],
@@ -375,6 +377,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePoolKeys(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
+        () => handleAgentFsProxy(req, res),
         () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),

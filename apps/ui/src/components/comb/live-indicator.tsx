@@ -32,20 +32,20 @@ function liveReason(state: LiveState, hasStream: boolean, relayed: boolean): str
   switch (state) {
     case "live":
       return relayed
-        ? "Another Comb tab holds the change stream for this drive and sends its changes to this tab."
+        ? "Another Files tab holds the change stream for this drive and sends its changes to this tab."
         : "Changes from agents and teammates show without a reload.";
     case "connecting":
-      return "Comb checks for changes every 10 s until the change stream connects.";
+      return "Files checks for changes every 10 s until the change stream connects.";
     case "retrying":
-      return "The change stream dropped. Comb checks every 10 s while it reconnects.";
+      return "The change stream dropped. Files checks every 10 s while it reconnects.";
     case "stopped":
-      return "agent-fs refused the change stream. Comb checks for changes every 10 s.";
+      return "agent-fs refused the change stream. Files checks for changes every 10 s.";
     case "paused":
       return "The change stream pauses while this tab is in the background.";
     case "off":
       return hasStream
-        ? "Comb checks for changes every 10 s."
-        : "This agent-fs server has no change stream. Comb checks for changes every 10 s.";
+        ? "Files checks for changes every 10 s."
+        : "This agent-fs server has no change stream. Files checks for changes every 10 s.";
   }
 }
 

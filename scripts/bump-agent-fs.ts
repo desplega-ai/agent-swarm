@@ -31,8 +31,13 @@ type Pin = {
 
 const COMPOSE_IMAGE_PATTERN = new RegExp(`(ghcr\\.io/${AGENT_FS_IMAGE}:)(\\S+)`, "g");
 
-const PINS: Pin[] = [
+export const PINS: Pin[] = [
   { path: "Dockerfile.worker", pattern: /^(ARG AGENT_FS_VERSION=)(\S+)$/m },
+  {
+    path: "src/commands/onboard/agent-fs-version.ts",
+    // Quote-safe: COMPOSE_IMAGE_PATTERN's \S+ would also eat the closing quote.
+    pattern: /^(export const AGENT_FS_VERSION = ")([^"]+)/m,
+  },
   { path: "docker-compose.local.yml", pattern: COMPOSE_IMAGE_PATTERN },
   { path: "docker-compose.example.yml", pattern: COMPOSE_IMAGE_PATTERN },
   { path: "docker-compose.scripts-only.yml", pattern: COMPOSE_IMAGE_PATTERN },
@@ -109,16 +114,21 @@ function currentVersions(text: string, pattern: RegExp): string[] {
   return [...text.matchAll(new RegExp(pattern.source, flags))].map((match) => match[2] ?? "");
 }
 
-async function applyPins(version: string): Promise<void> {
+/**
+ * Rewrite every pin under `root` to `version`. Throws on a missing file or a
+ * pin that does not match, before or after the rewrite; returns one summary
+ * line per pin.
+ */
+export async function applyPins(version: string, root = "."): Promise<string[]> {
   const rendered: string[] = [];
   for (const pin of PINS) {
-    const file = Bun.file(pin.path);
+    const file = Bun.file(`${root}/${pin.path}`);
     if (!(await file.exists()))
-      fail(`${pin.path} not found; update PINS in scripts/bump-agent-fs.ts.`);
+      throw new Error(`${pin.path} not found; update PINS in scripts/bump-agent-fs.ts.`);
     const original = await file.text();
     const before = currentVersions(original, pin.pattern);
     if (before.length === 0) {
-      fail(
+      throw new Error(
         `${pin.path} has no agent-fs pin matching the expected layout; update PINS in scripts/bump-agent-fs.ts.`,
       );
     }
@@ -126,23 +136,29 @@ async function applyPins(version: string): Promise<void> {
     const after = currentVersions(updated, pin.pattern);
     const stale = after.filter((found) => found !== version);
     if (stale.length > 0) {
-      fail(
+      throw new Error(
         `${pin.path} still carries ${stale.join(", ")} after rewrite; the pin pattern needs fixing.`,
       );
     }
-    if (updated !== original) await Bun.write(pin.path, updated);
+    if (updated !== original) await Bun.write(file, updated);
     const from = [...new Set(before)].join(", ");
     rendered.push(
       `${updated === original ? "unchanged" : "updated  "}  ${pin.path}  (${from} -> ${version})`,
     );
   }
-  console.log(rendered.join("\n"));
+  return rendered;
 }
 
-const args = process.argv.slice(2);
-const requested = args.find((arg) => !arg.startsWith("--"));
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const requested = args.find((arg) => !arg.startsWith("--"));
 
-const target = await resolveTarget(requested);
-await preflight(target);
-await applyPins(target);
-console.log(`agent-fs pins now at ${target}. Review with: git diff`);
+  const target = await resolveTarget(requested);
+  await preflight(target);
+  try {
+    console.log((await applyPins(target)).join("\n"));
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+  console.log(`agent-fs pins now at ${target}. Review with: git diff`);
+}

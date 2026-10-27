@@ -30,6 +30,28 @@ export class AgentFsError extends Error {
   }
 }
 
+/**
+ * The swarm credential for `endpoint` when it is this swarm's own agent-fs
+ * proxy (`<API URL>/agentfs`, same origin), else undefined. The proxy asks
+ * for it on register. Any other agent-fs host never gets the swarm key.
+ */
+export function swarmProxyCredential(
+  endpoint: string,
+  connection: { apiUrl: string; apiKey: string },
+): string | undefined {
+  if (!connection.apiKey) return undefined;
+  try {
+    const target = new URL(trimEndpoint(endpoint));
+    const api = new URL(connection.apiUrl);
+    const proxyPath = `${api.pathname.replace(/\/+$/, "")}/agentfs`;
+    return target.origin === api.origin && target.pathname === proxyPath
+      ? connection.apiKey
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True for a 401: the key is unknown to agent-fs (revoked or reset). */
 export function isAgentFsAuthError(error: unknown): boolean {
   return error instanceof AgentFsError && error.status === 401;
@@ -104,11 +126,20 @@ export class AgentFsClient {
     this.#apiKey = opts.apiKey;
   }
 
-  /** Create an agent-fs user. Public route. A taken email answers 409 (`CONFLICT`). */
-  static async register(opts: { endpoint: string; email: string }): Promise<RegisterResponse> {
+  /**
+   * Create an agent-fs user. A taken email answers 409 (`CONFLICT`). Through
+   * the swarm's `/agentfs` proxy the route needs the swarm credential
+   * (`swarmKey`, see `swarmProxyCredential`). Sent nowhere else.
+   */
+  static async register(opts: {
+    endpoint: string;
+    email: string;
+    swarmKey?: string;
+  }): Promise<RegisterResponse> {
     const res = await send(`${trimEndpoint(opts.endpoint)}/auth/register`, {
       method: "POST",
       body: { email: opts.email },
+      apiKey: opts.swarmKey,
     });
     return res.json() as Promise<RegisterResponse>;
   }

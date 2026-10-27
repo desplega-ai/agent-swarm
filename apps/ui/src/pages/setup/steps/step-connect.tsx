@@ -1,12 +1,10 @@
-import { ExternalLink, Plug, RotateCw, UserRound, XCircle } from "lucide-react";
+import { Plug, RotateCw, UserRound, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useStatus } from "@/api/hooks/use-status";
 import type { OnboardingResponse } from "@/api/types";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { Spinner } from "@/components/kibo-ui/spinner";
-import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { FadeIn } from "@/components/shared/fade-in";
 import { LocalNetworkHelp, LocalNetworkNotice } from "@/components/shared/local-network-help";
 import { SecretInput } from "@/components/shared/secret-input";
@@ -37,6 +35,9 @@ export interface StepConnectProps {
   setContinueBlocker: StepProps["setContinueBlocker"];
   /** Continue submits "Who are you?" (pick or create the user), then the shell moves on. */
   setContinueAction: StepProps["setContinueAction"];
+  /** The connected swarm shows the connect form again, to connect another one. */
+  changing: boolean;
+  onChanging: (changing: boolean) => void;
 }
 
 export function StepConnect({
@@ -45,12 +46,23 @@ export function StepConnect({
   act,
   setContinueBlocker,
   setContinueAction,
+  changing,
+  onChanging,
 }: StepConnectProps) {
-  const { isConfigured } = useConfig();
+  const { config, isConfigured } = useConfig();
   if (!isConfigured) return <ConnectForm onConnected={onConnected} />;
+  if (changing) {
+    return (
+      <ConnectForm
+        onConnected={onConnected}
+        changeFrom={config.apiUrl}
+        onCancel={() => onChanging(false)}
+      />
+    );
+  }
   return (
-    <div className="space-y-3">
-      <ConnectedSummary onboarding={onboarding} act={act} />
+    <div className="space-y-4">
+      <ConnectedSummary onboarding={onboarding} act={act} onChange={() => onChanging(true)} />
       <WhoAreYou setContinueBlocker={setContinueBlocker} setContinueAction={setContinueAction} />
     </div>
   );
@@ -59,9 +71,11 @@ export function StepConnect({
 function ConnectedSummary({
   onboarding,
   act,
+  onChange,
 }: {
   onboarding: OnboardingResponse | null;
   act?: StepProps["act"];
+  onChange: () => void;
 }) {
   const { config, connectionLocked } = useConfig();
   const { data: status } = useStatus({ pollIntervalMs: 30_000 });
@@ -79,33 +93,41 @@ function ConnectedSummary({
   // The API host until step 2 names the swarm. The stored connection keeps
   // its own name for the connection switcher.
   const swarmName = swarmDisplayName(status?.identity.name);
-  const name = swarmName === DEFAULT_SWARM_NAME ? connectionName(config.apiUrl) : swarmName;
+  const host = connectionName(config.apiUrl);
+  const name = swarmName === DEFAULT_SWARM_NAME ? host : swarmName;
+  // One light line, not a card: the connection is done, the form below is the work.
   return (
-    <SetupCard
-      icon={<Plug className="size-4" />}
-      title={name}
-      description={
-        <span className="block truncate font-mono text-[12px]" title={config.apiUrl}>
-          {config.apiUrl}
+    <div className="flex justify-center">
+      <div className="inline-flex h-9 max-w-full min-w-0 items-center gap-2 rounded-full border border-border bg-card pr-1.5 pl-3 text-sm shadow-xs">
+        <StatusIcon tone="done" label={`Connected to ${name}`} />
+        <span className="min-w-0 truncate">
+          <span className="text-muted-foreground">Connected to </span>
+          <span className="font-medium">{name}</span>
         </span>
-      }
-      actions={
-        connectionLocked ? null : (
-          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
-            {/* A new tab keeps setup open in this one. */}
-            <Link
-              to={setupExitHref("/settings/connections")}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Manage
-              <ExternalLink />
-            </Link>
+        {/* The address once the swarm has a name of its own. */}
+        {name !== host ? (
+          <span
+            className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground sm:inline"
+            title={config.apiUrl}
+          >
+            {config.apiUrl}
+          </span>
+        ) : null}
+        {connectionLocked ? (
+          <span className="w-1.5" />
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="shrink-0 rounded-full text-muted-foreground"
+            onClick={onChange}
+          >
+            Change
           </Button>
-        )
-      }
-      status={<StatusIcon tone="done" label={`Connected to ${name}`} />}
-    />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -252,10 +274,22 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : "Connection failed";
 }
 
-function ConnectForm({ onConnected }: { onConnected: () => void }) {
-  const { addConnection, switchConnection, setupLink, clearSetupLink } = useConfig();
-  // The install link (`/setup?apiUrl=&apiKey=`) fills the fields.
-  const [apiUrl, setApiUrl] = useState(setupLink?.apiUrl ?? "http://localhost:3013");
+function ConnectForm({
+  onConnected,
+  changeFrom,
+  onCancel,
+}: {
+  onConnected: () => void;
+  /** The address of the connected swarm, when the operator changes it. */
+  changeFrom?: string;
+  /** Back to the connected swarm. */
+  onCancel?: () => void;
+}) {
+  const { connections, addConnection, switchConnection, setupLink, clearSetupLink } = useConfig();
+  // The install link (`/setup?apiUrl=&apiKey=`) fills the fields. A change
+  // starts from the current address, but the key is typed again: it must
+  // not go to a new host by itself.
+  const [apiUrl, setApiUrl] = useState(setupLink?.apiUrl ?? changeFrom ?? "http://localhost:3013");
   const [apiKey, setApiKey] = useState(setupLink?.apiKey ?? "");
   const [probe, setProbe] = useState<Probe>({ phase: "idle" });
 
@@ -302,9 +336,15 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         });
         return;
       }
-      // Named after its host. The connection switcher can rename it.
-      const created = addConnection({ name: connectionName(url), apiUrl: url, apiKey });
-      switchConnection(created.id);
+      // A saved connection with the same address and key is used again, so a
+      // change back does not save a copy. A new one is named after its host
+      // (the connection switcher can rename it).
+      const saved = connections.find(
+        (c) => c.apiUrl.replace(/\/+$/, "") === url && c.apiKey === apiKey,
+      );
+      switchConnection(
+        saved?.id ?? addConnection({ name: connectionName(url), apiUrl: url, apiKey }).id,
+      );
       clearSetupLink();
     } catch (err) {
       setProbe({
@@ -322,6 +362,20 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
     <SetupCard
       icon={<Plug className="size-4" />}
       title="API connection"
+      actions={
+        onCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={onCancel}
+            disabled={running}
+          >
+            Cancel
+          </Button>
+        ) : null
+      }
       status={
         <StatusIcon
           tone={running ? "busy" : probe.phase === "error" ? "error" : "none"}

@@ -34,10 +34,10 @@ test("Comb is off without agent-fs", { tag: "@local" }, async ({ page, api, swar
   expect(send.status).toBe(404);
 
   await page.goto("/file");
-  await expect(page.getByRole("heading", { name: "Comb is off" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Files is off" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Configuration" })).toBeVisible();
-  // The sidebar has no Comb item. The header breadcrumb reads "Comb" as plain text.
-  await expect(page.getByRole("link", { name: /^Comb\b/ })).toHaveCount(0);
+  // The sidebar has no Files item. The header breadcrumb reads "Files" as plain text.
+  await expect(page.getByRole("link", { name: /^Files\b/ })).toHaveCount(0);
   await clean.assertClean();
 });
 
@@ -97,7 +97,7 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
     expect(written.ok, "the human writes the seed file").toBe(true);
 
     await page.goto("/file");
-    await expect(page.getByRole("link", { name: /^Comb\b/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Files\b/ })).toBeVisible();
     await page.getByRole("tab", { name: "Paste a key" }).click();
     await page.getByRole("textbox", { name: "agent-fs key" }).fill(human.apiKey);
     await page.getByRole("button", { name: "Connect", exact: true }).click();

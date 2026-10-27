@@ -1,0 +1,147 @@
+diff -ruN a/src/be/rbac-roles.ts b/src/be/rbac-roles.ts
+--- a/src/be/rbac-roles.ts	2026-10-26 02:02:35
++++ b/src/be/rbac-roles.ts	2026-10-26 02:19:54
+@@ -38,6 +38,8 @@
+       "favorite.write.own",
+       "session.share",
+       "session.presence",
++      "task.steer.own",
++      "comb.presence",
+     ],
+   },
+   {
+@@ -46,7 +48,7 @@
+     description: "Read-only: no task, approval or script writes.",
+     isBuiltin: true,
+     grantsAll: false,
+-    verbs: ["favorite.write.own", "session.presence"],
++    verbs: ["favorite.write.own", "session.presence", "comb.presence"],
+   },
+ ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
+ 
+diff -ruN a/src/http/inbox-state.ts b/src/http/inbox-state.ts
+--- a/src/http/inbox-state.ts	2026-10-26 02:02:35
++++ b/src/http/inbox-state.ts	2026-10-26 02:19:54
+@@ -61,6 +61,7 @@
+     401: { description: "Unauthorized" },
+   },
+   auth: { apiKey: true },
++  rbac: { permission: "favorite.write.own" },
+ });
+ 
+ const bulkUpsertState = route({
+@@ -82,7 +83,7 @@
+     401: { description: "Unauthorized" },
+   },
+   auth: { apiKey: true },
+-  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
++  rbac: { permission: "favorite.write.own" },
+ });
+ 
+ // ─── Handler ─────────────────────────────────────────────────────────────────
+diff -ruN a/src/http/sessions.ts b/src/http/sessions.ts
+--- a/src/http/sessions.ts	2026-10-26 02:02:35
++++ b/src/http/sessions.ts	2026-10-26 02:19:54
+@@ -660,7 +660,7 @@
+     401: { description: "Unauthorized" },
+   },
+   auth: { apiKey: true },
+-  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
++  rbac: { permission: "favorite.write.own" },
+ });
+ 
+ const SESSION_MOVE_LIMIT = 200;
+@@ -671,10 +671,7 @@
+   moved: z.array(z.string()),
+   skipped: z.array(z.object({ rootTaskId: z.string(), reason: z.string() })),
+ });
+-const sessionMoveRbac = {
+-  ungated:
+-    "per-session access, per-task task.fs.mutate, and asset-key write checks in the handler, as PATCH /api/assets/task/{id}/key",
+-};
++const sessionMoveRbac = { permission: "task.fs.mutate" } as const;
+ const sessionMoveResponses = {
+   400: { description: "Invalid namespace or request" },
+   403: { description: "Personal destination not authorized" },
+diff -ruN a/src/http/tasks.ts b/src/http/tasks.ts
+--- a/src/http/tasks.ts	2026-10-26 02:02:35
++++ b/src/http/tasks.ts	2026-10-26 02:19:54
+@@ -279,6 +279,7 @@
+   path: "/api/tasks",
+   pattern: ["api", "tasks"],
+   session: bodyTask("parentTaskId"),
++  rbac: { permission: "task.create.own" },
+   summary: "Create a new task",
+   tags: ["Tasks"],
+   body: z
+@@ -411,6 +412,7 @@
+   path: "/api/tasks/{id}/cancel",
+   pattern: ["api", "tasks", null, "cancel"],
+   session: { taskParam: "id" },
++  rbac: { permission: "task.cancel.own" },
+   summary: "Cancel a pending or in-progress task",
+   tags: ["Tasks"],
+   params: z.object({ id: z.string() }),
+@@ -687,6 +689,7 @@
+   path: "/api/tasks/{id}/pause",
+   pattern: ["api", "tasks", null, "pause"],
+   session: { taskParam: "id" },
++  rbac: { permission: "task.action.own" },
+   summary: "Pause an in-progress task",
+   tags: ["Tasks"],
+   params: z.object({ id: z.string() }),
+@@ -703,6 +706,7 @@
+   path: "/api/tasks/{id}/resume",
+   pattern: ["api", "tasks", null, "resume"],
+   session: { taskParam: "id" },
++  rbac: { permission: "task.action.own" },
+   summary: "Resume a paused task",
+   tags: ["Tasks"],
+   params: z.object({ id: z.string() }),
+@@ -777,9 +781,7 @@
+     404: { description: "Task not found" },
+   },
+   auth: { apiKey: true },
+-  rbac: {
+-    ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
+-  },
++  rbac: { permission: "task.action.own" },
+ });
+ 
+ async function canSteerTask(
+diff -ruN a/src/http/telemetry-ui.ts b/src/http/telemetry-ui.ts
+--- a/src/http/telemetry-ui.ts	2026-10-26 02:02:35
++++ b/src/http/telemetry-ui.ts	2026-10-26 02:19:54
+@@ -32,7 +32,7 @@
+     401: { description: "Unauthorized" },
+     403: { description: "Guest page sessions cannot send events" },
+   },
+-  rbac: { ungated: "any authenticated dashboard user; event name allowlisted" },
++  rbac: { permission: "favorite.write.own" },
+ });
+ 
+ const enableTelemetry = route({
+--- a/scripts/check-rbac-coverage.ts	2026-10-26 02:02:35
++++ b/scripts/check-rbac-coverage.ts	2026-10-26 02:19:54
+@@ -264,7 +264,6 @@
+   "PATCH /@swarm/api/{path}": BACKLOG_REASON,
+   "PATCH /api/agents/{id}/harness-provider": BACKLOG_REASON,
+   "PATCH /api/agents/{id}/runtime": BACKLOG_REASON,
+-  "PATCH /api/inbox-state": BACKLOG_REASON,
+   "PATCH /api/keys/name": BACKLOG_REASON,
+   "PATCH /api/tasks/{id}/vcs": BACKLOG_REASON,
+   "PATCH /api/users/{id}": BACKLOG_REASON,
+@@ -320,13 +319,9 @@
+   "POST /api/scripts/run": BACKLOG_REASON,
+   "POST /api/session-costs": BACKLOG_REASON,
+   "POST /api/session-logs": BACKLOG_REASON,
+-  "POST /api/tasks": BACKLOG_REASON,
+-  "POST /api/tasks/{id}/cancel": BACKLOG_REASON,
+   "POST /api/tasks/{id}/context": BACKLOG_REASON,
+   "POST /api/tasks/{id}/finish": BACKLOG_REASON,
+-  "POST /api/tasks/{id}/pause": BACKLOG_REASON,
+   "POST /api/tasks/{id}/progress": BACKLOG_REASON,
+-  "POST /api/tasks/{id}/resume": BACKLOG_REASON,
+   "POST /api/tasks/{id}/supersede": BACKLOG_REASON,
+   "POST /api/trackers/jira/refresh": BACKLOG_REASON,
+   "POST /api/trackers/jira/webhook-register": BACKLOG_REASON,

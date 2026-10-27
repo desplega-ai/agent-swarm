@@ -1,9 +1,13 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 
-mock.module("@/api/hooks/use-onboarding", () => ({ useOnboarding: () => ({ data: null }) }));
+mock.module("@/api/hooks/use-onboarding", () => ({
+  isOnboardingOpen: () => false,
+  useOnboarding: () => ({ data: null }),
+  useOnboardingOwnsFirstRun: () => false,
+}));
 mock.module("@/lib/runtime-pools", () => ({ useRuntimePoolsGate: () => ({ open: false }) }));
 mock.module("@/components/shared/animated-reveal", () =>
   require("../../components/shared/animated-reveal"),
@@ -22,6 +26,12 @@ mock.module("@/components/ui/tooltip", () => ({
 }));
 mock.module("@/hooks/use-url-search-state", () => require("../../hooks/use-url-search-state"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+let isAdmin = true;
+// The real module (full export shape), with the admin check under test control.
+mock.module("@/lib/use-can", () => ({
+  ...require("../../lib/use-can"),
+  useIsAdmin: () => isAdmin,
+}));
 
 const { SettingsLayout } = await import("./settings-layout");
 
@@ -36,9 +46,26 @@ function render() {
 }
 
 describe("SettingsLayout", () => {
+  afterEach(() => {
+    isAdmin = true;
+  });
+
   test("the side rail only shows from lg, so tablet widths keep the content column", () => {
     const html = render();
     expect(html).toContain("hidden lg:block");
     expect(html).not.toContain("md:block");
+  });
+
+  test("an admin sees the admin-only pages", () => {
+    const html = render();
+    expect(html).toContain("Secrets");
+    expect(html).toContain("Configuration");
+  });
+
+  test("a non-admin sees only Appearance and Connections", () => {
+    isAdmin = false;
+    const html = render();
+    const labels = [...html.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1]);
+    expect(labels).toEqual(["Connections", "Appearance"]);
   });
 });

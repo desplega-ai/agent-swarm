@@ -1,0 +1,11 @@
+1 1.077GiB / 7.564GiB
+2 5.472GiB / 7.564GiB
+3 0B / 0B
+DIED
+true
+2026-10-26T01:14:13.861699Z  INFO download_artifacts: text_embeddings_core::download: core/src/download.rs:42: Starting download
+2026-10-26T01:14:13.882391Z  INFO text_embeddings_core::tokenization: core/src/tokenization.rs:38: Starting 3 tokenization workers
+2026-10-26T01:14:13.882483Z  INFO text_embeddings_router: router/src/lib.rs:284: Starting model backend
+2026-10-26T01:14:14.043428Z ERROR text_embeddings_backend: backends/src/lib.rs:489: Could not start ORT backend: Could not start backend: Failed to parse `confi
+2026-10-26T01:14:14.045198Z  INFO text_embeddings_backend_candle: backends/candle/src/lib.rs:356: Starting NomicBert model on Cpu
+2026-10-26T01:14:14.810722Z  INFO text_embeddings_router: router/src/lib.rs:302: Warming up model

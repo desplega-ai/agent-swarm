@@ -30,6 +30,7 @@ TUNNEL_WARMUP_SECONDS=240
 
 DRY_RUN=0
 TUNNEL=0
+NO_AGENT_FS=0
 INSTALL_DIR="${AGENT_SWARM_DIR:-$DEFAULT_DIR}"
 PRESET="${AGENT_SWARM_PRESET:-$DEFAULT_PRESET}"
 CLI_VERSION="${AGENT_SWARM_CLI_VERSION:-$DEFAULT_CLI_VERSION}"
@@ -50,6 +51,8 @@ Options:
   --version <ver>    @desplega.ai/agent-swarm npm version to run (default: latest)
   --tunnel           Expose the API publicly with localtunnel (lt.desplega.ai) and
                      set PUBLIC_MCP_BASE_URL. Off by default. See "Tunnel" below.
+  --no-agent-fs      Skip the bundled agent-fs (files, Comb) and TEI (memory
+                     embeddings) services. New installs only.
   --dry-run          Print every command instead of running it
   -h, --help         Show this help
 
@@ -69,17 +72,20 @@ What it does:
   1. Checks for Docker and Docker Compose v2 (exits with an install link if missing).
   2. Installs Bun from ${BUN_INSTALL_URL} if bun is not on PATH.
   3. Runs \`bunx @desplega.ai/agent-swarm@<version> onboard --yes --preset full\`
-     in the install directory: a lead and 10 workers. That writes docker-compose.yml and .env and runs
+     in the install directory: a lead and 10 workers, plus agent-fs (files on local
+     disk, read in the dashboard's Comb) and TEI (local memory embeddings), unless
+     --no-agent-fs. That writes docker-compose.yml and .env and runs
      \`docker compose up -d\`. If docker-compose.yml already exists, it skips
-     onboarding and only runs \`docker compose up -d\`.
+     onboarding and only runs \`docker compose up -d\`, so an existing install
+     keeps its services.
   4. Waits for http://localhost:<port>/health.
   5. Prints the dashboard link to /setup with the API URL and key filled in.
 
 Tunnel (--tunnel):
   Runs \`lt --port <port>\` in the background (pid in .agent-swarm/tunnel.pid, log in
   .agent-swarm/tunnel.log), writes the public URL to PUBLIC_MCP_BASE_URL in .env,
-  adds docker-compose.override.yml to pass it to the API, restarts the API and
-  sends warm-up requests (the first request through a fresh tunnel can hang).
+  adds docker-compose.override.yml to pass it to the API, restarts the API (and
+  agent-fs, when the stack has it) and sends warm-up requests (the first request through a fresh tunnel can hang).
   The URL is random and changes whenever the tunnel restarts, including after a
   reboot. Anyone with the URL can reach your API; every route except /health
   still needs the API key. Re-running with --tunnel replaces the tunnel. Stop it:
@@ -136,6 +142,7 @@ parse_args() {
       --version) [ $# -ge 2 ] || die "--version needs a value"; CLI_VERSION="$2"; shift 2 ;;
       --version=*) CLI_VERSION="${1#*=}"; shift ;;
       --tunnel) TUNNEL=1; shift ;;
+      --no-agent-fs) NO_AGENT_FS=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown option: $1 (see --help)" ;;
@@ -211,9 +218,22 @@ onboard() {
     return 0
   fi
   local spec="${CLI_PACKAGE:-@desplega.ai/agent-swarm@${CLI_VERSION}}"
+  local extra=()
+  [ "$NO_AGENT_FS" -eq 1 ] && extra+=(--no-agent-fs)
   say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
   run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
-    --container-engine docker </dev/null
+    --container-engine docker ${extra[@]+"${extra[@]}"} </dev/null
+}
+
+# Whether the stack runs the bundled agent-fs service. A dry run writes no
+# docker-compose.yml, so it assumes what onboard would have generated.
+has_agent_fs_service() {
+  local file="${INSTALL_DIR}/docker-compose.yml"
+  if [ -f "$file" ]; then
+    grep -qE '^  agent-fs:$' "$file"
+  else
+    [ "$DRY_RUN" -eq 1 ] && [ "$NO_AGENT_FS" -eq 0 ]
+  fi
 }
 
 # Read KEY=value from .env (last match wins, like Compose).
@@ -355,8 +375,15 @@ YAML
     fi
   fi
 
-  say "Restarting the API with PUBLIC_MCP_BASE_URL=${url}"
-  compose_up swarm-api
+  # agent-fs reads PUBLIC_MCP_BASE_URL from .env for AGENT_FS_PUBLIC_URL, so
+  # recreate it too.
+  if has_agent_fs_service; then
+    say "Restarting the API and agent-fs with PUBLIC_MCP_BASE_URL=${url}"
+    compose_up swarm-api agent-fs
+  else
+    say "Restarting the API with PUBLIC_MCP_BASE_URL=${url}"
+    compose_up swarm-api
+  fi
   wait_for_health "http://localhost:${port}"
 
   # A fresh tunnel name has no TLS certificate yet. The tunnel server gets one

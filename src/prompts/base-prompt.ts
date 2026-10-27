@@ -22,6 +22,7 @@
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName, RequestCompositionPartInput } from "../types";
+import { resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -73,6 +74,26 @@ function claudeMdSourcePath(provider: string): string {
 
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
+
+/**
+ * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
+ * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
+ * with its own call shape, so the generic lines are wrong for them.
+ */
+function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
+  switch (provider) {
+    case "amp":
+      return "system.agent.tool_discovery.amp";
+    case "codex":
+      return "system.agent.tool_discovery.codex";
+    case "opencode":
+      return "system.agent.tool_discovery.opencode";
+    default:
+      return hasToolSearch
+        ? "system.agent.tool_discovery.search"
+        : "system.agent.tool_discovery.direct";
+  }
+}
 
 export function areSlackPromptToolsEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -265,7 +286,11 @@ export const getBasePromptWithParts = async (
     const outputsEvent = agentFsConfigured
       ? "system.agent.outputs"
       : "system.agent.outputs.no_agent_fs";
-    const outputsResult = await resolveTemplateAsync(outputsEvent, {});
+    const outputsResult = await resolveTemplateAsync(
+      outputsEvent,
+      // Unset AGENT_FS_LINK_TARGET keeps the literal the agent expands in its shell.
+      { fileLinkBase: resolveAgentFsLinkBase("prompt") ?? `\${AGENT_FS_LIVE_URL}` },
+    );
     prompt += outputsResult.text;
     section(outputsEvent, grown());
   }
@@ -295,14 +320,7 @@ export const getBasePromptWithParts = async (
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
-    // Amp's MCP tools sit behind its own `tool_search` + `code_exec` with
-    // underscored names, so the generic "load with your tool search" line is not enough.
-    const discoveryEvent =
-      provider === "amp"
-        ? "system.agent.tool_discovery.amp"
-        : hasToolSearch
-          ? "system.agent.tool_discovery.search"
-          : "system.agent.tool_discovery.direct";
+    const discoveryEvent = toolDiscoveryEvent(provider, hasToolSearch);
     const discoveryResult = await resolveTemplateAsync(discoveryEvent, {});
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",

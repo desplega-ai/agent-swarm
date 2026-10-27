@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { useVisibleOnboardingSteps } from "@/api/hooks/use-onboarding";
 import type { OnboardingAgentsMethod } from "@/api/types";
 import { setupStepHref, stepNumber } from "@/components/onboarding/step-status";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -20,6 +21,7 @@ function isAgentsMethod(method: string | null): method is OnboardingAgentsMethod
 /** Step 4: the model level of each agent. Continue applies Optimal where none is set. */
 export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
+  const steps = useVisibleOnboardingSteps();
   const { data: agents = [], isPending } = useAgents();
   // Same query as step 3: the OpenRouter key decides how dsh routes.
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
@@ -32,6 +34,13 @@ export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAct
   async function onComplete(method: OnboardingAgentsMethod) {
     await act({ action: "complete", step: "agents", method });
   }
+  // A settled step needs no action: Continue moves on, as before.
+  const onSkip =
+    step.status === "done" || step.status === "skipped"
+      ? null
+      : async () => {
+          await act({ action: "skip", step: "agents" });
+        };
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
@@ -45,7 +54,7 @@ export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAct
             action={
               <Button asChild variant="outline" size="sm">
                 <Link to={setupStepHref("ai")} replace>
-                  Go to step {stepNumber("ai")}
+                  Go to step {stepNumber("ai", steps)}
                 </Link>
               </Button>
             }
@@ -60,6 +69,7 @@ export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAct
           presence={presence}
           completed={completed}
           onComplete={onComplete}
+          onSkip={onSkip}
           setContinueAction={setContinueAction}
         />
       </div>

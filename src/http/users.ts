@@ -20,6 +20,8 @@
  *   DELETE /api/users/:id/mcp-tokens/:tokenId
  *   POST   /api/users/:id/connector-codes
  *   POST   /api/connector/exchange                   (public: the code is the credential)
+ *   POST   /api/invites
+ *   POST   /api/invites/exchange                     (public: the code is the credential)
  *   POST   /api/users/:id/merge
  *   GET    /api/users/:id/events
  *   POST   /api/users/:id/identities
@@ -31,7 +33,10 @@ import { z } from "zod";
 import {
   createConnectorCode,
   DEFAULT_CONNECTOR_CODE_LABEL,
+  DEFAULT_INVITE_CODE_LABEL,
+  deleteUnusedInviteCodes,
   exchangeConnectorCode,
+  INVITE_CODE_TTL_MS,
 } from "../be/connector-codes";
 import {
   createUser,
@@ -45,8 +50,15 @@ import {
   updateUser,
   upsertBudget,
 } from "../be/db";
-import { assertNotLastAdmin, LastAdminError } from "../be/rbac-roles";
 import {
+  assertNotLastAdmin,
+  getUserGrant,
+  LastAdminError,
+  listUserRoles,
+  setUserRoles,
+} from "../be/rbac-roles";
+import {
+  findUserByEmail,
   getUserIdentities,
   type IdentityEvent,
   linkIdentity,
@@ -57,12 +69,16 @@ import {
   revokeToken,
   unlinkIdentity,
 } from "../be/users";
+import { isRbacEnabled } from "../rbac";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
+import { DEFAULT_APP_URL } from "../utils/constants";
+import { assertUrlSafe } from "../utils/egress-guard";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
+import { ensureRoleManager } from "./user-roles";
 import { jsonError } from "./utils";
 
 // ─── Response composition ────────────────────────────────────────────────────
@@ -172,6 +188,15 @@ const whoamiRoute = route({
         // `components.schemas.User` to `object | null` for every consumer;
         // the union keeps nullability local to this response field.
         user: z.union([UserSchema, z.null()]),
+        // Optional so older clients and older servers stay compatible. The
+        // dashboard hides what the caller cannot do; the server still gates.
+        grants: z
+          .object({
+            grantsAll: z.boolean(),
+            verbs: z.array(z.string()),
+            roles: z.array(z.string()),
+          })
+          .optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -448,6 +473,80 @@ const exchangeConnectorCodeRoute = route({
   },
 });
 
+const INVITE_ROLES = ["requester", "viewer", "admin"] as const;
+
+const createInviteRoute = route({
+  method: "post",
+  path: "/api/invites",
+  pattern: ["api", "invites"],
+  summary: "Invite a teammate with a one-time API link",
+  description:
+    "Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.",
+  tags: ["Users"],
+  body: z.object({
+    email: z.email(),
+    name: z.string().trim().min(1).max(200).optional(),
+    role: z.enum(INVITE_ROLES).default("requester"),
+  }),
+  responses: {
+    201: {
+      description: "The invited user, API link, dashboard URL, expiry and API reachability",
+      schema: z.object({
+        user: ComposedUserSchema.nullable(),
+        inviteUrl: z.string(),
+        appUrl: z.string(),
+        expiresAt: z.string(),
+        apiReachable: z.enum(["public", "local"]),
+      }),
+    },
+    401: { description: "Unauthorized" },
+    403: { description: "Not allowed to manage roles" },
+    409: { description: "The email belongs to an active or suspended user" },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "user.role.manage" },
+});
+
+const openInviteRoute = route({
+  method: "get",
+  path: "/invite/{code}",
+  pattern: ["invite", null],
+  summary: "Open an invite in the configured dashboard",
+  description:
+    "Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.",
+  tags: ["Users"],
+  params: z.object({ code: z.string() }),
+  responses: {
+    302: { description: "Redirect to the dashboard", unstructured: "Dashboard redirect" },
+    404: { description: "Malformed code (code_invalid)" },
+  },
+  auth: { apiKey: false },
+});
+
+const exchangeInviteCodeRoute = route({
+  method: "post",
+  path: "/api/invites/exchange",
+  pattern: ["api", "invites", "exchange"],
+  summary: "Exchange an invite code for the invited user's MCP token",
+  description:
+    "Unauthenticated: the single-use invite code is the credential. Rate limited per IP. Activates the invited user. Unknown, expired, used and connector codes, and codes for users who are no longer invited, all return 404 code_invalid.",
+  tags: ["Users"],
+  body: z.object({ code: z.string().min(1).max(256) }),
+  // Public route: cap the body before it is buffered and parsed.
+  maxBodyBytes: 1024,
+  responses: {
+    200: {
+      description: "Minted MCP token for the invited user",
+      schema: z.object({ token: z.string(), userId: z.string() }),
+    },
+    404: { description: "Code unknown, malformed, expired, already used or not an invite" },
+    413: { description: "Request body too large" },
+    429: { description: "Rate limited" },
+  },
+  auth: { apiKey: false },
+  rbac: { ungated: "the one-time invite code is the credential" },
+});
+
 const connectorDiscoveryRoute = route({
   method: "get",
   path: "/api/connector/discovery",
@@ -681,6 +780,35 @@ export function _resetConnectorExchangeRateLimitForTests(): void {
   connectorExchangeRateLimiter.reset();
 }
 
+/** 10 invite exchanges per minute per client IP. */
+const inviteExchangeRateLimiter = createIpRateLimiter({
+  capacity: 10,
+  refillPerMs: 10 / 60_000,
+});
+
+export function _resetInviteExchangeRateLimitForTests(): void {
+  inviteExchangeRateLimiter.reset();
+}
+
+/**
+ * `local` when teammates' browsers likely cannot reach the API: a loopback or
+ * private IP host, a single-label name (a compose service such as
+ * `swarm-api`), or a `.local` / `.internal` / `.lan` name.
+ */
+function apiReachability(apiUrl: string): "public" | "local" {
+  let host: string;
+  try {
+    host = assertUrlSafe(apiUrl, { allowInsecure: true }).hostname.toLowerCase();
+  } catch {
+    return "local";
+  }
+  if (!host.includes(".") && !host.includes(":")) return "local";
+  if (/\.(local|internal|lan|home\.arpa)\.?$/.test(host)) return "local";
+  return "public";
+}
+
+class InviteUserExistsError extends Error {}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleUsers(
@@ -695,9 +823,26 @@ export async function handleUsers(
     if (!parsed) return true;
     const auth = getRequestAuth(req);
     if (auth?.kind === "user") {
-      whoamiRoute.respond(res, 200, { kind: "user", user: auth.user });
+      const [grant, roles] = await Promise.all([
+        getUserGrant(auth.user.id),
+        listUserRoles(auth.user.id),
+      ]);
+      const grantsAll = !isRbacEnabled() || grant.grantsAll;
+      whoamiRoute.respond(res, 200, {
+        kind: "user",
+        user: auth.user,
+        grants: {
+          grantsAll,
+          verbs: grantsAll ? [] : [...grant.verbs].sort(),
+          roles: roles.map((role) => role.name),
+        },
+      });
     } else {
-      whoamiRoute.respond(res, 200, { kind: "operator", user: null });
+      whoamiRoute.respond(res, 200, {
+        kind: "operator",
+        user: null,
+        grants: { grantsAll: true, verbs: [], roles: [] },
+      });
     }
     return true;
   }
@@ -930,6 +1075,130 @@ export async function handleUsers(
       exchangeConnectorCodeRoute.respond(res, 200, { ...result, version });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to exchange code", 500);
+    }
+    return true;
+  }
+
+  // ─── POST /api/invites ─────────────────────────────────────────────────────
+  if (createInviteRoute.match(req.method, pathSegments)) {
+    const parsed = await createInviteRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    // Same gate as PUT /api/users/{id}/roles: an invite assigns a role, so a
+    // custom role holding user.role.manage must not hand out admin.
+    if (!(await ensureRoleManager(req, res))) return true;
+    const actor = getOperatorActor(req, res);
+    if (!actor) return true;
+    const { email, name, role } = parsed.body;
+    const actorUserId = actor.kind === "user" ? actor.id : null;
+
+    let invited: { userId: string; code: string; expiresAt: string };
+    try {
+      invited = await getDbClient().transaction(async () => {
+        const existing = await findUserByEmail(email);
+        if (existing && existing.status !== "invited") throw new InviteUserExistsError();
+        let userId: string;
+        if (existing) {
+          userId = existing.id;
+          await deleteUnusedInviteCodes(userId);
+        } else {
+          const user = await createUser({
+            name: name ?? (email.split("@")[0] || email),
+            email,
+            status: "invited",
+          });
+          userId = user.id;
+          await recordIdentityEvent(userId, "identity_added", actor, null, {
+            email,
+            source: "invite",
+          });
+        }
+        const { before, after } = await setUserRoles(userId, [role], actorUserId);
+        if (before.join(",") !== after.join(",")) {
+          await recordIdentityEvent(
+            userId,
+            "profile_changed",
+            actor,
+            { rbacRoles: before },
+            { rbacRoles: after },
+          );
+        }
+        const { code, expiresAt } = await createConnectorCode(
+          userId,
+          DEFAULT_INVITE_CODE_LABEL,
+          actor,
+          new Date(),
+          { kind: "invite", ttlMs: INVITE_CODE_TTL_MS },
+        );
+        return { userId, code, expiresAt };
+      });
+    } catch (err) {
+      if (err instanceof InviteUserExistsError) {
+        jsonError(res, "user_exists", 409);
+        return true;
+      }
+      // Never echo the error: it must not carry the code or the link.
+      jsonError(res, "Failed to create invite", 500);
+      return true;
+    }
+
+    const apiUrl = await resolveMcpBaseUrl();
+    const appUrl = (await resolveAppUrl()) ?? DEFAULT_APP_URL;
+    const inviteUrl = `${apiUrl}/invite/${invited.code}`;
+    createInviteRoute.respond(res, 201, {
+      user: await composeUser(invited.userId),
+      inviteUrl,
+      appUrl,
+      expiresAt: invited.expiresAt,
+      apiReachable: apiReachability(apiUrl),
+    });
+    return true;
+  }
+
+  // GET /invite/:code only redirects. Link previews must not consume invites.
+  if (openInviteRoute.match(req.method, pathSegments)) {
+    const parsed = await openInviteRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { code } = parsed.params;
+    if (!/^[A-Za-z0-9_-]{16,256}$/.test(code)) {
+      jsonError(res, "code_invalid", 404);
+      return true;
+    }
+    const apiUrl = await resolveMcpBaseUrl();
+    const appUrl = (await resolveAppUrl()) ?? DEFAULT_APP_URL;
+    res.writeHead(302, {
+      Location: `${appUrl}/join?swarm=${encodeURIComponent(apiUrl)}#code=${code}`,
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end();
+    return true;
+  }
+
+  // ─── POST /api/invites/exchange ────────────────────────────────────────────
+  if (exchangeInviteCodeRoute.match(req.method, pathSegments)) {
+    if (!inviteExchangeRateLimiter.take(clientIp(req))) {
+      res.setHeader("Retry-After", "6");
+      jsonError(res, "rate_limited", 429);
+      return true;
+    }
+    const parsed = await exchangeInviteCodeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    // Same generated shape as connector codes; reject anything else before hashing.
+    if (!CONNECTOR_CODE_PATTERN.test(parsed.body.code)) {
+      jsonError(res, "code_invalid", 404);
+      return true;
+    }
+
+    try {
+      const result = await exchangeConnectorCode(parsed.body.code, { kind: "invite" });
+      if (!result) {
+        jsonError(res, "code_invalid", 404);
+        return true;
+      }
+      exchangeInviteCodeRoute.respond(res, 200, result);
+    } catch {
+      jsonError(res, "Failed to exchange code", 500);
     }
     return true;
   }

@@ -216,9 +216,15 @@ agent-fs is the shared drive between agents and people. Documents (reports, dige
 Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. Report missing variables.
-Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
+Give people the live app link \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
-  variables: [],
+  variables: [
+    {
+      name: "fileLinkBase",
+      description:
+        "Base URL of people-facing file links (AGENT_FS_LINK_TARGET); the literal AGENT_FS_LIVE_URL shell reference when unset",
+    },
+  ],
   category: "system",
 });
 
@@ -438,6 +444,24 @@ registerTemplate({
   header: "",
   defaultBody:
     'Swarm tools are not in your tool list. Reach them through `tool_search` and `code_exec`. Their names use underscores, so `store-progress` is `store_progress`. Find one with `tool_search`, then call it from `code_exec`: `import { store_progress } from "agent-swarm"; text(JSON.stringify(await store_progress({ ... })));`. Pass the tool\'s arguments as one object.',
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.codex",
+  header: "",
+  defaultBody:
+    "Swarm tools are not in your tool list. Call them from `exec` on the `tools` object, with dashes turned into underscores: `store-progress` is `await tools.mcp__agent_swarm__store_progress({ ... })`. Call a tool you know by that name directly. To find one, filter `ALL_TOOLS` by `name` and `description`.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.opencode",
+  header: "",
+  defaultBody:
+    'Swarm tools are not in your tool list. Call them from `execute` under `tools.swarm`, by their exact names: `store-progress` is `await tools.swarm["store-progress"]({ ... })`. To find one, use `search({ query })` inside `execute`.',
   variables: [],
   category: "system",
 });

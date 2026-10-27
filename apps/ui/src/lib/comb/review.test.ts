@@ -117,7 +117,7 @@ describe("reviewRangeNotice", () => {
     ).toBe("This file has no versions to compare.");
     expect(
       reviewRangeNotice({ from: 1, to: 2 }, "/a.png", { ...md, contentType: "image/png" }),
-    ).toBe("Comb compares versions of text files only.");
+    ).toBe("Files compares versions of text files only.");
   });
 });
 

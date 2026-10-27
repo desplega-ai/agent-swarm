@@ -1,0 +1,380 @@
+{
+  "home|whoami|GET /api/whoami": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "home|status|GET /status": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "home|stats|GET /api/stats": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "home|agents|GET /api/agents": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "home|onboarding state|GET /api/onboarding": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "home|UI telemetry relay|POST /api/telemetry/ui-event": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "tasks|list tasks|GET /api/tasks": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "tasks|task detail (own)|GET /api/tasks/{own}": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "tasks|create task|POST /api/tasks": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "201",
+    "operator": "201"
+  },
+  "tasks|create follow-up (parentTaskId own)|POST /api/tasks": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "201",
+    "operator": "201"
+  },
+  "tasks|create task with model override|POST /api/tasks": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "201",
+    "operator": "201"
+  },
+  "tasks|create draft|POST /api/tasks": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "201",
+    "operator": "201"
+  },
+  "tasks|promote-draft (own)|POST /api/tasks/{draft}/promote-draft": {
+    "viewer": "403 adm",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "tasks|upload attachment (own)|POST /api/fs/tasks/{own}/files": {
+    "viewer": "403 adm",
+    "requester": "201",
+    "admin": "201",
+    "operator": "201"
+  },
+  "tasks|cancel (own)|POST /api/tasks/{own}/cancel": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "tasks|cancel (foreign)|POST /api/tasks/{foreign}/cancel": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "403 ses",
+    "operator": "200"
+  },
+  "tasks|pause (own)|POST /api/tasks/{own}/pause": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "tasks|pause (foreign)|POST /api/tasks/{foreign}/pause": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "403 ses",
+    "operator": "400"
+  },
+  "tasks|resume (own)|POST /api/tasks/{own}/resume": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "tasks|resume (foreign)|POST /api/tasks/{foreign}/resume": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "403 ses",
+    "operator": "400"
+  },
+  "tasks|steer (own)|POST /api/tasks/{own}/steer": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "tasks|steer (foreign)|POST /api/tasks/{foreign}/steer": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "403 ses",
+    "operator": "200"
+  },
+  "tasks|title (own)|PATCH /api/tasks/{own}/title": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|list sessions|GET /api/sessions": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|session tree|GET /api/sessions": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|session detail (own root)|GET /api/sessions/{own}": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|share session (own)|PUT /api/sessions/{own}/shares": {
+    "viewer": "403 adm",
+    "requester": "200",
+    "admin": "200",
+    "operator": "409"
+  },
+  "sessions|session-triage|POST /api/session-triage": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "400"
+  },
+  "sessions|session-moves|POST /api/session-moves": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|session-moves/prefix|POST /api/session-moves/prefix": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "sessions|inbox-state list|GET /api/inbox-state": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|inbox-state upsert|PATCH /api/inbox-state": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|inbox-state upsert for ANOTHER user|PATCH /api/inbox-state": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|inbox-state bulk|PATCH /api/inbox-state/bulk": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "sessions|favorites set|PUT /api/favorites": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "comb|realtime ticket|POST /api/realtime/ticket": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "comb|comb review batch|POST /api/comb/review-batches": {
+    "viewer": "403 adm",
+    "requester": "404",
+    "admin": "404",
+    "operator": "404"
+  },
+  "comb|fs members invite|POST /api/fs/members/invite": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "500",
+    "operator": "500"
+  },
+  "comb|rooms/get|POST /api/rooms/get": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "comb|page feedback|POST /api/pages/afo-missing/feedback": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "404",
+    "operator": "404"
+  },
+  "people|list users|GET /api/users": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|get roles (self-or-other)|GET /api/users/{me}/roles": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|list rbac roles|GET /api/rbac/roles": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|create user|POST /api/users": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|patch user|PATCH /api/users/{user}": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|mint token|POST /api/users/{user}/mcp-tokens": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|add identity|POST /api/users/{user}/identities": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|merge users|POST /api/users/{user}/merge": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "people|set roles|PUT /api/users/{user}/roles": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "setup|onboarding view step|PUT /api/onboarding": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "setup|onboarding memory test|POST /api/onboarding/memory": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "settings|config list|GET /api/config": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "settings|config put|PUT /api/config": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "settings|config delete|DELETE /api/config/{id}": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "settings|db-query (Debug page)|POST /api/db-query": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "settings|extensions list|GET /api/extensions": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "settings|telemetry enable|POST /api/telemetry/enable": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "memory|memory keys|GET /api/memory/keys": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "memory|memory list|POST /api/memory/list": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  },
+  "memory|memory search|POST /api/memory/search": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "400",
+    "operator": "400"
+  },
+  "apps|apps list|GET /api/apps": {
+    "viewer": "200",
+    "requester": "200",
+    "admin": "200",
+    "operator": "200"
+  },
+  "apps|app detail|GET /api/apps/afo-missing": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "404",
+    "operator": "404"
+  },
+  "apps|ranking|GET /api/ranking": {
+    "viewer": "403 adm",
+    "requester": "403 adm",
+    "admin": "200",
+    "operator": "200"
+  }
+}

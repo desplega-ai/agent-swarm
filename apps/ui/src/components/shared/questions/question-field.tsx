@@ -106,7 +106,11 @@ export function SegmentLabel({
   );
 }
 
-/** Option chips (few, short) or option rows (with descriptions), single or multi. */
+/**
+ * Option chips (few, short) or option rows (with descriptions), single or
+ * multi. `layout="grid"` puts many short options (no descriptions) in a
+ * compact grid of equal tiles instead of full-width rows.
+ */
 export function OptionChoices({
   question,
   options,
@@ -116,6 +120,7 @@ export function OptionChoices({
   cursor,
   showKeys,
   disabled,
+  layout = "auto",
 }: {
   question: ApprovalQuestion;
   options: Options;
@@ -125,14 +130,23 @@ export function OptionChoices({
   cursor: number;
   showKeys: boolean;
   disabled: boolean;
+  layout?: "auto" | "grid";
 }) {
-  const rows = options.some((option) => option.description) || options.length > 8;
+  const described = options.some((option) => option.description);
+  const grid = layout === "grid" && !described;
+  const rows = !grid && (described || options.length > 8);
   return (
     <div
       {...(multi
         ? { role: "group", "aria-label": question.label }
         : { role: "radiogroup", "aria-label": question.label })}
-      className={cn(rows ? "flex flex-col gap-1.5" : "flex flex-wrap gap-2")}
+      className={cn(
+        grid
+          ? "grid grid-cols-2 gap-2 sm:grid-cols-3"
+          : rows
+            ? "flex flex-col gap-1.5"
+            : "flex flex-wrap gap-2",
+      )}
     >
       {options.map((option, index) => {
         const isSelected = selected.includes(option.value);
@@ -151,8 +165,8 @@ export function OptionChoices({
             className={cn(
               "group/opt relative flex items-center gap-2 border text-left text-sm transition-[background-color,border-color,color,box-shadow,scale] duration-150 ease-snappy outline-none",
               "focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50 active:scale-[0.96] motion-reduce:active:scale-100",
-              rows
-                ? "min-h-11 w-full rounded-lg px-3 py-2 sm:min-h-10"
+              rows || grid
+                ? "min-h-11 w-full min-w-0 rounded-lg px-3 py-2 sm:min-h-10"
                 : "min-h-11 rounded-full px-3.5 py-1.5 sm:min-h-8",
               isSelected
                 ? "border-primary/60 bg-primary/10 text-foreground"

@@ -47,6 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { peerColorVar } from "@/lib/comb/presence";
+import { useCan } from "@/lib/use-can";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { PeoplePill } from "../pane/people-pill";
 import { useSessionItem } from "../pane/session-header";
@@ -272,7 +273,9 @@ function DetailHeader({
 
   const { access, owner } = detail;
   // The owner and Can edit rename (SPEC R8.2). An older server sends no access: full access.
-  const canRename = access !== "read";
+  // Renaming is a task action: a Viewer's role does not hold it.
+  const canAct = useCan("task.action.own");
+  const canRename = canAct && access !== "read";
   const shareOwner = access === "owner" && owner ? owner : null;
   const shares = useSessionShares(detail.root.id, shareOwner !== null);
   const { canTriage, actions, doneOrBack, laterOrBack } = useSessionTriageActions({

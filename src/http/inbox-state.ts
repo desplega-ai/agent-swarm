@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getDbClient, listInboxState, upsertInboxState } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
+import { isRbacEnabled } from "../rbac";
 import { InboxItemStateSchema, InboxItemStatusSchema, InboxItemTypeSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -59,8 +62,10 @@ const upsertState = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: { description: "A non-admin user token wrote another user's state" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "favorite.write.own" },
 });
 
 const bulkUpsertState = route({
@@ -80,12 +85,25 @@ const bulkUpsertState = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: { description: "A non-admin user token wrote another user's state" },
   },
   auth: { apiKey: true },
-  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
+  rbac: { permission: "favorite.write.own" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+const OTHER_USER_STATE_DENIED = "You can only change your own inbox state";
+
+/**
+ * True when a user token without a grant-all role names another user's
+ * `userId`. Operator-key and admin callers keep writing any user's state.
+ */
+async function writesOtherUsersState(req: IncomingMessage, userId: string): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || auth.userId === userId || !isRbacEnabled()) return false;
+  return !(await getUserGrant(auth.userId)).grantsAll;
+}
 
 export async function handleInboxState(
   req: IncomingMessage,
@@ -108,6 +126,10 @@ export async function handleInboxState(
   if (bulkUpsertState.match(req.method, pathSegments)) {
     const parsed = await bulkUpsertState.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await writesOtherUsersState(req, parsed.body.userId)) {
+      jsonError(res, OTHER_USER_STATE_DENIED, 403);
+      return true;
+    }
     try {
       const items = await getDbClient().transaction(async () => {
         const rows = [];
@@ -126,6 +148,10 @@ export async function handleInboxState(
   if (upsertState.match(req.method, pathSegments)) {
     const parsed = await upsertState.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await writesOtherUsersState(req, parsed.body.userId)) {
+      jsonError(res, OTHER_USER_STATE_DENIED, 403);
+      return true;
+    }
     try {
       const item = await upsertInboxState({
         userId: parsed.body.userId,

@@ -1,5 +1,5 @@
 ---
-title: "Comb (beta)"
+title: "Comb"
 description: "Review agent-written agent-fs files in the dashboard: comment on passages, mention teammates, send comments to the swarm, and review the changes"
 ---
 
@@ -31,8 +31,9 @@ Set these on the API server, in **Settings → Configuration** or in the deploym
 | `COMB_ENABLED` | `true`. The flag has no effect until `AGENT_FS_API_URL` is set. |
 | `AGENT_FS_PUBLIC_URL` | The agent-fs URL that browsers use. It defaults to `AGENT_FS_API_URL`. Set it when the API reaches agent-fs on an internal hostname. In Docker Compose the API uses `http://agent-fs:7433`, and the browser needs `http://localhost:7433`. |
 | `APP_URL` | The dashboard URL. Slack messages and lead prompts link to Comb only when it is set. |
+| `AGENT_FS_PROXY` | Optional, default `false`. `true` makes the API serve agent-fs at `/agentfs`, so the browser reaches agent-fs through the API and agent-fs needs no public port. Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api). |
 
-A saved value reloads the API. The dashboard reads the new state on its next status poll, 30 seconds at most. The sidebar then shows **Comb** with a beta badge, and `/file` opens the swarm drive.
+A saved value reloads the API. The dashboard reads the new state on its next status poll, 30 seconds at most. The sidebar then shows **Comb**, and `/file` opens the swarm drive.
 
 The swarm drive is the shared org and drive that the API provisions in agent-fs (`AGENT_FS_DEFAULT_ORG_ID`, `AGENT_FS_DEFAULT_DRIVE_ID`). Comb shows only this drive.
 
@@ -45,6 +46,8 @@ Each person connects their own agent-fs identity in their own browser. The swarm
    - **Create with my email** registers a new agent-fs account and saves its key in this browser only.
    - **Paste a key** uses an agent-fs key (`af_...`) that you already have. Use it for an account that you also use with the agent-fs CLI.
 3. Comb checks that you can read the swarm drive. If you cannot, the swarm API invites your agent-fs account as an editor.
+
+On a new install, the **Files** step of `/setup` does this for you. It creates your agent-fs account with the email you gave in step 1, invites it to the swarm drive, and saves the key in this browser. When the email already has an account, the step asks for its key. The step shows only while Comb is on.
 
 An existing drive member keeps their role. A viewer can read files and comments but cannot comment. When a viewer tries, Comb shows "You have view-only access". **Disconnect** in the page header removes the key from the browser.
 
@@ -231,6 +234,16 @@ With Comb on, agent-fs links in the dashboard open in Comb while you are connect
 
 When `APP_URL` is set, Slack attachment links and the lead's follow-up prompts point at `APP_URL/file/~/<org>/<drive>/<path>`. Without `APP_URL`, they keep the agent-fs link.
 
+`AGENT_FS_LINK_TARGET` overrides this automatic choice for task attachment links and for the file links that agents give people:
+
+| Value | Effect |
+| --- | --- |
+| unset | The automatic choice above. Agents are told to link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`. |
+| `dashboard` | Links point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links need Comb on and an explicit `APP_URL` (or `DASHBOARD_URL`); otherwise they use the live app. The agent prompt uses the worker's own `APP_URL`, so set `APP_URL` in each worker's environment: a saved `APP_URL` config row does not reach workers. |
+| `live` | Links point at the agent-fs live app (`AGENT_FS_LIVE_URL`, default `https://live.agent-fs.dev`). |
+
+Citations and the context preamble always use the live app link. A saved value reaches running workers at their next poll.
+
 ## Turn off Comb
 
 Set `COMB_ENABLED` to `false`. Within one status poll (30 seconds at most):
@@ -256,7 +269,7 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 **"Comb is off" after you set the flag.** `AGENT_FS_API_URL` is not set on the API, or the dashboard has not polled yet. Wait 30 seconds and reload.
 
-**"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL`. Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
+**"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL` (or `<public API URL>/agentfs` with `AGENT_FS_PROXY=true`). Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
 
 **The header shows "Polling" instead of "Live".** Hover the status for the reason. Common causes: agent-fs is older than 0.15.0, a proxy buffers the event stream, or you have more than 8 open streams.
 

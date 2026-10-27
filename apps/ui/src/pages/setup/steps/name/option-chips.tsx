@@ -62,7 +62,7 @@ export function OptionChips<T extends string>({
               onClick={() => onValueChange(option.value)}
               onKeyDown={(event) => onKeyDown(event, index)}
               className={cn(
-                "flex min-h-11 items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm transition-[background-color,border-color,color] duration-150 ease-snappy outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:min-h-8",
+                "flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1 text-[0.8125rem] transition-[background-color,border-color,color] duration-150 ease-snappy outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:min-h-8",
                 selected
                   ? "border-primary/60 bg-primary/10 font-medium text-foreground"
                   : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:bg-muted/60 hover:text-foreground",
@@ -71,13 +71,13 @@ export function OptionChips<T extends string>({
               <span
                 aria-hidden
                 className={cn(
-                  "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                  "flex size-3.5 shrink-0 items-center justify-center rounded-full border",
                   selected
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-muted-foreground/40",
                 )}
               >
-                {selected ? <Check className="size-3" strokeWidth={3} /> : null}
+                {selected ? <Check className="size-2.5" strokeWidth={3} /> : null}
               </span>
               {option.label}
             </button>

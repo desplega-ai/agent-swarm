@@ -82,7 +82,11 @@ const agent = {
   lastUpdatedAt: "",
 } as unknown as AgentWithTasks;
 
-async function mount(tiers: readonly ModelTierPreview[] | null, targets: string[] = ["codex"]) {
+async function mount(
+  tiers: readonly ModelTierPreview[] | null,
+  targets: string[] = ["codex"],
+  agents: AgentWithTasks[] = [agent],
+) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -94,7 +98,7 @@ async function mount(tiers: readonly ModelTierPreview[] | null, targets: string[
           <HarnessSwitch
             harnessPhrase="Codex"
             targets={targets as never}
-            agents={[agent]}
+            agents={agents}
             dialContext={{ openrouter: false, catalog: null, tiers }}
           />
         </TooltipProvider>
@@ -109,9 +113,14 @@ const switchButton = (container: HTMLElement) =>
     (b) => b.textContent?.includes("Switch") || b.textContent?.includes("Loading model tiers"),
   );
 
+const selectAll = (container: HTMLElement) =>
+  [...container.querySelectorAll("label")]
+    .find((label) => label.textContent?.includes("Select all"))
+    ?.querySelector("input");
+
 async function switchAgent(container: HTMLElement) {
   await act(async () => {
-    container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+    container.querySelector<HTMLInputElement>('li input[type="checkbox"]')?.click();
   });
   await act(async () => {
     switchButton(container)?.click();
@@ -130,6 +139,42 @@ beforeEach(() => {
 });
 
 describe("HarnessSwitch", () => {
+  test("Select all checks every agent, and clears them when all are checked", async () => {
+    const lead = { ...agent, id: "agent-2", name: "Lead", isLead: true } as AgentWithTasks;
+    const view = await mount(tierRows(), ["codex"], [agent, lead]);
+    // One agent checked: the box shows a dash, and a click checks every agent.
+    await act(async () => {
+      view.container.querySelector<HTMLInputElement>('li input[type="checkbox"]')?.click();
+    });
+    expect(selectAll(view.container)?.indeterminate).toBe(true);
+    await act(async () => selectAll(view.container)?.click());
+    expect(selectAll(view.container)?.checked).toBe(true);
+    expect(switchButton(view.container)?.textContent).toContain("Switch 2 agents to Codex");
+    await act(async () => selectAll(view.container)?.click());
+    expect(selectAll(view.container)?.checked).toBe(false);
+    expect(switchButton(view.container)?.textContent).toContain("Switch 0 agents to Codex");
+    await view.unmount();
+  });
+
+  test("lists the lead first, with its own tag; the workers keep their order", async () => {
+    const worker2 = { ...agent, id: "agent-3", name: "Worker 2" } as AgentWithTasks;
+    const lead = { ...agent, id: "agent-2", name: "Lead agent", isLead: true } as AgentWithTasks;
+    const view = await mount(tierRows(), ["codex"], [agent, worker2, lead]);
+    const rows = [...view.container.querySelectorAll("li")];
+    expect(rows.map((li) => li.querySelector(".font-medium")?.textContent)).toEqual([
+      "Lead agent",
+      "Worker",
+      "Worker 2",
+    ]);
+    const tag = (li: Element) => li.querySelector('[data-slot="badge"]');
+    expect(tag(rows[0])?.textContent).toBe("Lead");
+    expect(tag(rows[0])?.className).toContain("bg-primary/10");
+    expect(tag(rows[0])?.querySelector("svg")).not.toBeNull();
+    expect(tag(rows[1])?.textContent).toBe("Worker");
+    expect(tag(rows[1])?.className).not.toContain("primary");
+    await view.unmount();
+  });
+
   test("waits for the model tiers: no switch before the level can carry over", async () => {
     const view = await mount(null);
     const button = switchButton(view.container);

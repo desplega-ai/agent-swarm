@@ -125,17 +125,21 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
       key: z.string().optional(),
       memoryId: z.string().optional(),
       workstream: z.string().optional(),
+      similarity: z.number().optional(),
       error: z.string().optional(),
     })
     .optional()
     .describe(
-      "Present when the call carried a learning: stored, replayed (same text already stored for this task), or failed with error.",
+      "Present when the call carried a learning: stored, replayed (same text already stored for this task), duplicate (an existing swarm memory at key/memoryId says the same; similarity is the raw cosine), or failed with error.",
     ),
 });
 
 function learningSentence(result: TaskLearningResult): string {
   if (result.status === "stored") return `Learning stored at ${result.key}.`;
   if (result.status === "replayed") return `Learning already stored at ${result.key}; skipped.`;
+  if (result.status === "duplicate") {
+    return `Learning not stored: it matches ${result.key} (similarity ${result.similarity}).`;
+  }
   return `Learning not stored: ${result.error}.`;
 }
 

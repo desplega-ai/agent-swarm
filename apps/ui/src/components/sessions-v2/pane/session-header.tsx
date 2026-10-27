@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { groupCrumb, isNoGroupKey } from "@/lib/session-groups";
 import { itemFromDetail, userName } from "@/lib/sessions-v2";
+import { useCan } from "@/lib/use-can";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "../group-crumb-icon";
 import { PeoplePill } from "./people-pill";
@@ -135,6 +136,8 @@ export function SessionHeader({
   const session = useSessionItem(detail);
 
   const { owner, access } = detail;
+  // Renaming is a task action: a Viewer's role does not hold it.
+  const canAct = useCan("task.action.own");
   const sharedBy =
     owner && owner.id !== me && (access === "read" || access === "write")
       ? `Shared by ${owner.name} · ${access === "write" ? "can edit" : "can view"}`
@@ -198,7 +201,7 @@ export function SessionHeader({
             <SessionTitle
               detail={detail}
               // The owner and Can edit rename (SPEC R8.2). An older server sends no access: full access.
-              canRename={access !== "read"}
+              canRename={canAct && access !== "read"}
               renaming={renaming}
               onRenamingChange={onRenamingChange}
             />

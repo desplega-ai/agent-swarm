@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.310
+ARG CLAUDE_CODE_VERSION=2.1.311
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793025586-g9211b5
-ARG AMP_SHA512_AMD64=4dfa3253f3008d9b836144f060c2b6fd5679eda089fa30da9289cacfba6ee4ede129f86239485ab61c9536cf557aaf115ff2a309d2cfb1f24b5aec6513fcb3be
-ARG AMP_SHA512_ARM64=b22addf7db8eea051e440fc757c7929dbd3ec5f1d84af9218064fbce307d81c77d4ea19032d92212c976ca31bfa61ce3594ef9c7f5e616269bf05d26d1cd9187
+ARG AMP_VERSION=0.0.1793073650-g23dd39
+ARG AMP_SHA512_AMD64=5052e7e177ffb016bc3fe482e7494efb2b969bce93647c3f10460ab64d059e0952b9a598a90aded2b92b1324a612e2f821d8677aa46a4434d0b54e809ece5725
+ARG AMP_SHA512_ARM64=322cb99342276ae9ddddbc3b013c951506d1b919aba9279f9feab2d773fdd537d7c83d8c2935c3d0c873d0fda71b78e2d9ebae9425e35cac86c386ab64b909fa
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -592,7 +592,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.0.40
+ARG CURSOR_SDK_VERSION=1.1.0
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -624,7 +624,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.103
+ARG COPILOT_CLI_VERSION=1.0.104
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -664,9 +664,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.34.0
-ARG KIRO_CLI_SHA256_AMD64=1a703c4e5a0cdfb4990d9476a0b0d4255a7802946f01220edaa717e8d7bdca05
-ARG KIRO_CLI_SHA256_ARM64=cec3271921f47e692edf7f8454e8130abaa75894a3d09e0bcd60f6bb7c71b30f
+ARG KIRO_CLI_VERSION=2.34.2
+ARG KIRO_CLI_SHA256_AMD64=b30a6873fac7e66467e9908cd346cd0f7c54d32eed17cd80f9b81df3c17a9d16
+ARG KIRO_CLI_SHA256_ARM64=dbfb5795f15b7db4e91b0f6860f8909ae0838f0ad7cd9a4daf0881d60b896043
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \

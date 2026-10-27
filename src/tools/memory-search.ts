@@ -120,7 +120,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       // Try vector search first
       const provider = getEmbeddingProvider();
       const store = getMemoryStore();
-      const queryEmbedding = await provider.embed(query);
+      const queryEmbedding = await provider.embed(query, { kind: "query" });
 
       const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
       const candidates = await searchMemoryCandidates(

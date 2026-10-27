@@ -2,7 +2,13 @@ import { telemetry } from "../telemetry";
 import { ProviderNameSchema } from "../types";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { z } from "../utils/zod-openapi";
-import { getDbClient, getSwarmConfigs, getTaskById, upsertSwarmConfig } from "./db";
+import {
+  deleteSwarmConfigByKey,
+  getDbClient,
+  getSwarmConfigs,
+  getTaskById,
+  upsertSwarmConfig,
+} from "./db";
 import { validateConfigValue } from "./swarm-config-guard";
 
 const ONBOARDING_CONFIG_KEY = "onboarding_state";
@@ -14,6 +20,7 @@ export const OnboardingStepIdSchema = z.enum([
   "agents",
   "memory",
   "integrations",
+  "files",
   "first_task",
 ]);
 export type OnboardingStepId = z.infer<typeof OnboardingStepIdSchema>;
@@ -54,6 +61,19 @@ export const OnboardingMemoryPresetSchema = z.enum([
   "custom",
   "existing",
 ]);
+/**
+ * Where the embeddings endpoint runs: `local` (this server or its private
+ * network), the hosted preset whose host it calls, or `custom` (another host).
+ */
+export const OnboardingMemoryProviderSchema = z.enum([
+  "local",
+  "openai",
+  "openrouter",
+  "vercel",
+  "azure",
+  "custom",
+]);
+export type OnboardingMemoryProvider = z.infer<typeof OnboardingMemoryProviderSchema>;
 export const OnboardingIntegrationMethodSchema = z.enum([
   "slack",
   "github",
@@ -62,6 +82,8 @@ export const OnboardingIntegrationMethodSchema = z.enum([
   "linear_oauth",
   "jira_oauth",
 ]);
+/** `created`: the Files step registered a new agent-fs account. `connected`: it reused one. */
+export const OnboardingFilesMethodSchema = z.enum(["created", "connected"]);
 export const OnboardingFirstTaskMethodSchema = z.enum(["suggestion", "free_form"]);
 export const OnboardingStepMethodSchema = z.union([
   OnboardingConnectMethodSchema,
@@ -70,6 +92,7 @@ export const OnboardingStepMethodSchema = z.union([
   OnboardingAgentsMethodSchema,
   OnboardingMemoryPresetSchema,
   OnboardingIntegrationMethodSchema,
+  OnboardingFilesMethodSchema,
   OnboardingFirstTaskMethodSchema,
 ]);
 export type OnboardingStepMethod = z.infer<typeof OnboardingStepMethodSchema>;
@@ -98,6 +121,7 @@ const OnboardingMemoryStepStateSchema = onboardingStepStateSchema(OnboardingMemo
 const OnboardingIntegrationStepStateSchema = onboardingStepStateSchema(
   OnboardingIntegrationMethodSchema,
 );
+const OnboardingFilesStepStateSchema = onboardingStepStateSchema(OnboardingFilesMethodSchema);
 const OnboardingFirstTaskStepStateSchema = onboardingStepStateSchema(
   OnboardingFirstTaskMethodSchema,
 );
@@ -118,6 +142,7 @@ export const OnboardingStateSchema = z.object({
     agents: OnboardingAgentsStepStateSchema,
     memory: OnboardingMemoryStepStateSchema,
     integrations: OnboardingIntegrationStepStateSchema,
+    files: OnboardingFilesStepStateSchema,
     first_task: OnboardingFirstTaskStepStateSchema,
   }),
 });
@@ -139,6 +164,21 @@ export const OnboardingSignalsSchema = z.object({
   embeddings: z.object({
     configured: z.boolean(),
     dimensions: z.number().int().positive(),
+    /** The embedding model memory search uses. Null while it is off. */
+    model: z.string().nullable(),
+    /**
+     * The endpoint runs on this server or its private network (loopback, a
+     * private address, or a single-label host such as `tei`). False while off.
+     */
+    local: z.boolean(),
+    /** Where the endpoint runs, from its host only (never the URL). Null while off. */
+    provider: OnboardingMemoryProviderSchema.nullable(),
+    /**
+     * The local setup of the deployment environment, also while a stored
+     * hosted setup replaces it, so `/setup` can offer it again: the model of
+     * its local endpoint. Null when the environment has no local endpoint.
+     */
+    localDefault: z.object({ model: z.string() }).nullable(),
   }),
   integrations: z.object({
     slack: z.boolean(),
@@ -153,6 +193,8 @@ export const OnboardingSignalsSchema = z.object({
     workersOnline: z.number().int().nonnegative(),
   }),
   firstTask: z.object({ id: z.string(), status: z.string() }).nullable(),
+  /** The Files step applies: Comb is on, so the browser can create an agent-fs account. */
+  files: z.object({ enabled: z.boolean() }),
 });
 export type OnboardingSignals = z.infer<typeof OnboardingSignalsSchema>;
 
@@ -200,8 +242,15 @@ export const OnboardingActionSchema = z.union([
     .strict(),
   z
     .object({
+      action: z.literal("complete"),
+      step: z.literal("files"),
+      method: OnboardingFilesMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("skip"),
-      step: z.enum(["name", "ai", "agents", "memory", "integrations", "first_task"]),
+      step: z.enum(["name", "ai", "agents", "memory", "integrations", "files", "first_task"]),
     })
     .strict(),
   z
@@ -243,8 +292,18 @@ export const OnboardingMemoryRequestSchema = z
     model: z.string().trim().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     reuseKey: z.enum(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]).optional(),
+    /**
+     * With preset `existing`: test the setup of the deployment environment,
+     * and when it works, delete the stored embeddings config so that setup
+     * applies again. A failed test changes no config.
+     */
+    restoreDefault: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !body.restoreDefault || body.preset === "existing", {
+    message: "restoreDefault needs preset existing",
+    path: ["restoreDefault"],
+  });
 export type OnboardingMemoryRequest = z.infer<typeof OnboardingMemoryRequestSchema>;
 
 export const OnboardingMemoryResponseSchema = z.object({
@@ -320,6 +379,7 @@ function freshState(now: string, autoCompleted: boolean): OnboardingState {
       agents: emptyStep(),
       memory: emptyStep(),
       integrations: emptyStep(),
+      files: emptyStep(),
       first_task: emptyStep(),
     },
   };
@@ -535,6 +595,20 @@ function deriveState(
   return changed;
 }
 
+/**
+ * The response view of the state. Without Comb the Files step cannot run, so a
+ * stored `todo` reads as `skipped`. Response only: never persisted and never a
+ * `step_skipped` event, so installs without Comb send no funnel noise and the
+ * step comes back as `todo` once Comb is turned on.
+ */
+function presentState(state: OnboardingState, signals: OnboardingSignals): OnboardingState {
+  if (signals.files.enabled || state.steps.files.status !== "todo") return state;
+  return {
+    ...state,
+    steps: { ...state.steps, files: { ...state.steps.files, status: "skipped" } },
+  };
+}
+
 export class OnboardingTaskNotFoundError extends Error {}
 
 async function applyAction(
@@ -612,7 +686,8 @@ export async function readOrUpdateOnboarding(
     const read = await client.transaction(async () => await loadAndDerive(loadSignals, []), {
       readOnly: true,
     });
-    if (!read.dirty) return { state: read.state, signals: read.signals };
+    if (!read.dirty)
+      return { state: presentState(read.state, read.signals), signals: read.signals };
   }
 
   return await client.transaction(async () => {
@@ -627,14 +702,43 @@ export async function readOrUpdateOnboarding(
     }
     if (dirty) await persistState(state);
     queueTelemetry(events);
-    return { state, signals };
+    return { state: presentState(state, signals), signals };
   });
 }
+
+/** The embeddings rows a memory probe writes or deletes. */
+export const EMBEDDING_PREFIX_KEYS = [
+  "EMBEDDING_QUERY_PREFIX",
+  "EMBEDDING_DOCUMENT_PREFIX",
+] as const;
+export const EMBEDDING_CONFIG_KEYS = [
+  "EMBEDDING_API_BASE_URL",
+  "EMBEDDING_MODEL",
+  "EMBEDDING_API_KEY",
+  ...EMBEDDING_PREFIX_KEYS,
+] as const;
+
+/**
+ * The config change of a passed memory probe:
+ * - `save`: store the tested endpoint. `prefixes` sets a task prefix to an
+ *   empty value (`""`), or deletes its stored row (`null`).
+ * - `restore`: delete the stored embeddings rows, so the deployment
+ *   environment applies again.
+ */
+export type MemoryConfigChange =
+  | {
+      kind: "save";
+      baseUrl: string;
+      model: string;
+      apiKey?: string;
+      prefixes: ReadonlyArray<{ key: (typeof EMBEDDING_PREFIX_KEYS)[number]; value: "" | null }>;
+    }
+  | { kind: "restore" };
 
 export async function updateOnboardingMemory(
   preset: OnboardingMemoryPreset,
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
-  saveConfig?: { baseUrl: string; model: string; apiKey?: string },
+  change?: MemoryConfigChange,
 ): Promise<boolean> {
   return await getDbClient().transaction(async () => {
     const events: PendingTelemetry[] = [];
@@ -642,11 +746,11 @@ export async function updateOnboardingMemory(
     let dirty = loaded.dirty;
     const eventsForState = loaded.state.autoCompleted ? [] : events;
 
-    if (saveConfig) {
+    if (change?.kind === "save") {
       const configValues = [
-        ["EMBEDDING_API_BASE_URL", saveConfig.baseUrl],
-        ["EMBEDDING_MODEL", saveConfig.model],
-        ...(saveConfig.apiKey ? [["EMBEDDING_API_KEY", saveConfig.apiKey]] : []),
+        ["EMBEDDING_API_BASE_URL", change.baseUrl],
+        ["EMBEDDING_MODEL", change.model],
+        ...(change.apiKey ? [["EMBEDDING_API_KEY", change.apiKey]] : []),
       ] as const;
       for (const [key, value] of configValues) {
         const validationError = validateConfigValue(key, value);
@@ -655,17 +759,23 @@ export async function updateOnboardingMemory(
       await upsertSwarmConfig({
         scope: "global",
         key: "EMBEDDING_API_BASE_URL",
-        value: saveConfig.baseUrl,
+        value: change.baseUrl,
       });
-      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: saveConfig.model });
-      if (saveConfig.apiKey) {
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: change.model });
+      if (change.apiKey) {
         await upsertSwarmConfig({
           scope: "global",
           key: "EMBEDDING_API_KEY",
-          value: saveConfig.apiKey,
+          value: change.apiKey,
           isSecret: true,
         });
       }
+      for (const { key, value } of change.prefixes) {
+        if (value === null) await deleteSwarmConfigByKey("global", null, key);
+        else await upsertSwarmConfig({ scope: "global", key, value });
+      }
+    } else if (change?.kind === "restore") {
+      for (const key of EMBEDDING_CONFIG_KEYS) await deleteSwarmConfigByKey("global", null, key);
     }
 
     if (result.ok) {
@@ -676,7 +786,7 @@ export async function updateOnboardingMemory(
 
     if (dirty) await persistState(loaded.state);
     queueTelemetry(events);
-    return saveConfig !== undefined;
+    return change !== undefined;
   });
 }
 

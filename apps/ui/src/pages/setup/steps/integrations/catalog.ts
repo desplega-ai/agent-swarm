@@ -10,9 +10,9 @@ import { httpUrlError } from "../../components/http-url";
  *   plus the field specs each pane edits. Labels, placeholders, and secret
  *   flags come from the Settings catalog (`lib/integrations-catalog.ts`).
  * - "Business tools": Gmail and Microsoft 365 connect inline over the OAuth
- *   presets. One "More coming" row lists the rest, which open Connections in
- *   a new tab until their presets ship. Connecting one does not complete the
- *   step.
+ *   presets. One "Any other tool" row lists more tools, which connect from
+ *   Connections (a new tab) until their presets ship. Connecting one does not
+ *   complete the step.
  */
 
 export type CoreIntegrationId = keyof OnboardingSignals["integrations"];
@@ -56,7 +56,7 @@ export interface CoreIntegration extends SetupItemBase {
 export interface BusinessTool extends SetupItemBase {
   group: "business";
   id: BusinessToolId;
-  /** Absent: a generic icon ("More coming"). */
+  /** Absent: a generic icon ("Any other tool"). */
   logo?: string;
   /** OAuth preset that connects it inline. Absent: set up in Connections. */
   oauthPresetId?: "google" | "microsoft";
@@ -162,30 +162,41 @@ const BUSINESS_TOOLS: BusinessTool[] = [
   {
     group: "business",
     id: "more",
-    name: "More coming",
-    purpose: "Guided setup for these tools ships later.",
+    name: "Any other tool",
+    purpose: "CRM, docs, support, payments: connect them from Connections.",
     docsUrl: CONNECTIONS_DOCS,
   },
 ];
 
 /** A business tool with no guided setup yet. It connects from Connections. */
-export interface ComingSoonTool {
+export interface OtherTool {
   name: string;
   purpose: string;
   logo: string;
 }
 
-export const COMING_SOON_TOOLS: ComingSoonTool[] = [
-  { name: "Figma", purpose: "Design files and comments.", logo: "/integration-logos/figma.svg" },
+export const OTHER_TOOLS: OtherTool[] = [
+  { name: "Attio", purpose: "CRM records, notes, and lists.", logo: "/provider-logos/attio.svg" },
   {
-    name: "Stripe",
-    purpose: "Payments, customers, and subscriptions.",
-    logo: "/integration-logos/stripe.svg",
+    name: "HubSpot",
+    purpose: "Contacts, deals, and marketing.",
+    logo: "/integration-logos/hubspot.svg",
   },
   {
     name: "Salesforce",
     purpose: "Accounts, leads, and opportunities.",
     logo: "/integration-logos/salesforce.svg",
+  },
+  { name: "Notion", purpose: "Pages, docs, and databases.", logo: "/integration-logos/notion.svg" },
+  {
+    name: "Intercom",
+    purpose: "Support conversations and contacts.",
+    logo: "/integration-logos/intercom.svg",
+  },
+  {
+    name: "Stripe",
+    purpose: "Payments, customers, and subscriptions.",
+    logo: "/integration-logos/stripe.svg",
   },
   {
     name: "Shopify",
@@ -197,6 +208,7 @@ export const COMING_SOON_TOOLS: ComingSoonTool[] = [
     purpose: "Meeting notes and transcripts.",
     logo: "/integration-logos/granola.svg",
   },
+  { name: "Figma", purpose: "Design files and comments.", logo: "/integration-logos/figma.svg" },
 ];
 
 export type SetupGroup = { label: string; items: SetupIntegration[] };

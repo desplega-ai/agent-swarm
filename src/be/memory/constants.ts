@@ -72,6 +72,12 @@ export function minSimilarity(): number {
   return numEnv("MEMORY_MIN_SIMILARITY", 0.1);
 }
 
+// Raw cosine at or above which a store-progress learning is a near duplicate of
+// an existing swarm memory and is not stored. Measured on production
+// `/learnings` rows: a confirmed twin pair scored 0.877, the closest distinct
+// pair 0.705.
+export const LEARNING_DUPLICATE_MIN_SIMILARITY = 0.8;
+
 // Reranking parameters
 export function accessBoostMaxMultiplier(): number {
   return numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5);
