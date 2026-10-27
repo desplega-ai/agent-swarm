@@ -496,6 +496,28 @@ class ApiClient {
     return config.apiUrl;
   }
 
+  /**
+   * GET a list endpoint with query params. Cmd+K search uses it: `signal`
+   * aborts the request a newer keystroke made stale.
+   */
+  async getList<T>(
+    path: string,
+    params: Record<string, string | number | undefined>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") search.set(key, String(value));
+    }
+    const qs = search.toString();
+    const res = await fetch(`${this.getBaseUrl()}${path}${qs ? `?${qs}` : ""}`, {
+      headers: this.getHeaders(),
+      signal,
+    });
+    if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status}`);
+    return res.json();
+  }
+
   async fetchModelsCatalog(): Promise<ModelsCatalogResponse> {
     const url = `${this.getBaseUrl()}/api/models-catalog`;
     const res = await fetch(url, { headers: this.getHeaders() });
