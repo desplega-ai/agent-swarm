@@ -479,8 +479,7 @@ function PaletteBody({ close }: { close: () => void }) {
   const location = useLocation();
   const gate = usePaletteGate();
   const listRef = useRef<HTMLDivElement>(null);
-  const apiUrl = getConfig().apiUrl;
-  const [recents, setRecents] = useState<RecentItem[]>(() => readRecents(apiUrl));
+  const [recents, setRecents] = useState<RecentItem[]>(() => readRecents(getConfig()));
 
   const [chipScope, setChipScope] = useState<PaletteScopeId>("all");
   const parsed = parseScope(search);
@@ -500,7 +499,7 @@ function PaletteBody({ close }: { close: () => void }) {
 
   const openTarget = useCallback(
     (target: OpenTarget, newTab: boolean) => {
-      setRecents(pushRecent(apiUrl, target));
+      setRecents(pushRecent(getConfig(), target));
       if (newTab) {
         window.open(target.href, "_blank", "noopener,noreferrer");
         return;
@@ -508,7 +507,7 @@ function PaletteBody({ close }: { close: () => void }) {
       close();
       void navigate(target.href);
     },
-    [apiUrl, close, navigate],
+    [close, navigate],
   );
 
   function run(action: () => void) {

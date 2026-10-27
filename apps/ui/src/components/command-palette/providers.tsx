@@ -36,8 +36,10 @@ import type {
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { combPath } from "@/lib/comb/paths";
 import type { SnippetPart } from "@/lib/comb/search";
+import { paletteSearchKey } from "@/lib/command-palette/identity";
 import type { PaletteNav, SearchProviderId } from "@/lib/command-palette/route-meta";
 import { taskResult } from "@/lib/command-palette/task-result";
+import { getConfig } from "@/lib/config";
 
 /** One search hit. */
 export interface PaletteResult {
@@ -98,7 +100,8 @@ const STALE_MS = 15_000;
 /**
  * A provider backed by one API list call. The query key carries the text, so
  * a new keystroke starts a new query; react-query aborts the old one through
- * `signal` once nothing observes it.
+ * `signal` once nothing observes it. It also carries the swarm and user
+ * (`paletteSearchKey`), so a cached answer never serves another user's search.
  */
 function apiSearch<T>(
   id: SearchProviderId,
@@ -107,7 +110,7 @@ function apiSearch<T>(
 ): SearchProvider["useSearch"] {
   return function useApiSearch(query, limit) {
     const result = useQuery({
-      queryKey: ["command-palette", id, query, limit],
+      queryKey: paletteSearchKey(getConfig(), id, query, limit),
       queryFn: ({ signal }) => fetchRows(query, limit, signal),
       select: (rows) => rows.map(toResult),
       placeholderData: keepPreviousData,
