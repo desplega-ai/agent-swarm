@@ -108,7 +108,20 @@ async function main(): Promise<void> {
     console.log("ingest skipped: UI_E2E_INGEST_URL or UI_E2E_INGEST_BEARER is not set");
     return;
   }
-  if (!(await postPayloads(payloads, url, bearer))) process.exitCode = 1;
+  if (!(await postPayloads(payloads, url, bearer, { delaysMs: retryDelays() }))) {
+    process.exitCode = 1;
+  }
+}
+
+// Comma-separated waits in ms, e.g. "0,0". Unset keeps the default backoff.
+function retryDelays(): number[] | undefined {
+  const raw = process.env.UI_E2E_INGEST_RETRY_DELAYS_MS;
+  if (!raw) return undefined;
+  const delays = raw.split(",").map((value) => Number(value.trim()));
+  if (delays.some((delay) => !Number.isFinite(delay) || delay < 0)) {
+    throw new Error(`Invalid UI_E2E_INGEST_RETRY_DELAYS_MS: ${raw}`);
+  }
+  return delays;
 }
 
 main().catch((error) => {
