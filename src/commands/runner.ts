@@ -2716,6 +2716,8 @@ export interface RunningTask {
   assistantText?: { value?: string };
   /** Last progress value, retained until the final API writes settle. */
   finalProgress?: { value?: string };
+  /** Latest cost snapshot captured from `result` events before completion settles. */
+  lastCost?: { value?: CostData };
   /** Last time `reconcileActiveTasks` read this task's server-side status. */
   lastReconcileAt?: number;
   /** When the runner asked the session to abort (cancel or reconcile). */
@@ -4555,6 +4557,7 @@ async function spawnProviderProcess(
   // session promise resolves (see `trackAssistantText`).
   const assistantTextHolder: { value?: string } = {};
   const finalProgressHolder: { value?: string } = {};
+  const lastCostHolder: { value?: CostData } = {};
 
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
@@ -4763,6 +4766,11 @@ async function spawnProviderProcess(
           break;
         }
         case "result":
+          lastCostHolder.value = {
+            ...event.cost,
+            taskId: realTaskId,
+            sessionId: opts.runnerSessionId,
+          };
           {
             // Mid-session snapshot — fires on each streamed "result" event,
             // necessarily before `ProviderResult.appliedReasoningEffort` exists
@@ -4970,6 +4978,7 @@ async function spawnProviderProcess(
         }
 
         // Retain cost data for the concurrent final API writes.
+        result.cost ??= lastCostHolder.value;
         if (result.cost) {
           result.cost = { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId };
           sessionSpan.setAttributes({
@@ -5132,6 +5141,7 @@ async function spawnProviderProcess(
     model: model || undefined,
     assistantText: assistantTextHolder,
     finalProgress: finalProgressHolder,
+    lastCost: lastCostHolder,
   };
   runningTaskForSessionInit = runningTask;
   if (pendingHarnessVariant !== undefined) {
@@ -5148,7 +5158,7 @@ async function spawnProviderProcess(
       runningTask.result ??= r;
     })
     .catch(() => {
-      runningTask.result ??= { exitCode: 1, isError: true };
+      runningTask.result ??= { exitCode: 1, isError: true, cost: lastCostHolder.value };
     });
 
   return runningTask;
@@ -5318,6 +5328,7 @@ export async function reconcileActiveTasks(
         exitCode: 1,
         isError: true,
         sessionId: task.session.sessionId,
+        cost: task.lastCost?.value,
         failureReason: "runner exited without result: provider session did not settle after abort",
       };
     }

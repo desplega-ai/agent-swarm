@@ -1041,6 +1041,8 @@ export class PiMonoSession implements ProviderSession {
   private emptyTurnReprompted = false;
   /** `abort()` was called: never prompt a session someone is trying to stop. */
   private abortRequested = false;
+  /** Pending `waitForIdle()` resolvers released when `agent_end` fires or `abort()` is called. */
+  private idleResolvers = new Set<() => void>();
   /** Removes this session's own models.json once the session ends. */
   private disposeModels: () => Promise<void>;
   /** Fed each assistant request's prompt size; steers the one-time context-bound note. */
@@ -1249,6 +1251,14 @@ export class PiMonoSession implements ProviderSession {
       case "tool_execution_end":
         if (this.pendingTerminalStoreProgress.delete(event.toolCallId) && !event.isError) {
           this.terminalStoreProgressDone = true;
+          const snapshotCost = this.safeBuildCostData(false);
+          if (snapshotCost) {
+            this.emit({
+              type: "result",
+              cost: snapshotCost,
+              isError: false,
+            });
+          }
         }
         this.emit({
           type: "raw_log",
@@ -1354,6 +1364,24 @@ export class PiMonoSession implements ProviderSession {
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      if (this.abortRequested && this.terminalStoreProgressDone) {
+        const cost = this.safeBuildCostData(false);
+        if (cost) {
+          this.emit({
+            type: "result",
+            cost,
+            isError: false,
+          });
+        }
+        return {
+          exitCode: 0,
+          sessionId: this._sessionId,
+          cost,
+          output: this.lastAssistantText || undefined,
+          isError: false,
+          appliedReasoningEffort: this.appliedReasoningEffort,
+        };
+      }
       // Defense-in-depth: AWS SDK failures surface as structured events (handled
       // above in runSession), not thrown exceptions, so this catch is for genuine
       // unexpected throws (MCP / transport / etc). Still classify in case an AWS
@@ -1368,9 +1396,11 @@ export class PiMonoSession implements ProviderSession {
       }
       this.emit({ type: "raw_stderr", content: `[pi-mono] Error: ${errorMessage}\n` });
 
+      const cost = this.safeBuildCostData(true);
       return {
         exitCode: 1,
         sessionId: this._sessionId,
+        cost,
         isError: true,
         errorCategory: awsCatchError?.category,
         failureReason: scrubSecrets(awsCatchError?.message ?? errorMessage),
@@ -1453,14 +1483,36 @@ export class PiMonoSession implements ProviderSession {
         return;
       }
 
-      // Subscribe and wait for agent_end
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        this.idleResolvers.delete(finish);
+        resolve();
+      };
+
+      // Subscribe and wait for agent_end (or abort)
       const unsub = this.agentSession.subscribe((event) => {
         if (event.type === "agent_end") {
-          unsub();
-          resolve();
+          finish();
         }
       });
+      this.idleResolvers.add(finish);
+      if (this.abortRequested) {
+        finish();
+      }
     });
+  }
+
+  private safeBuildCostData(isError: boolean): CostData | undefined {
+    try {
+      const stats = this.agentSession.getSessionStats();
+      if (!stats) return undefined;
+      return { ...this.buildCostData(stats), isError };
+    } catch {
+      return undefined;
+    }
   }
 
   private buildCostData(stats: SessionStats): CostData {
@@ -1502,6 +1554,9 @@ export class PiMonoSession implements ProviderSession {
 
   async abort(): Promise<void> {
     this.abortRequested = true;
+    for (const resolve of [...this.idleResolvers]) {
+      resolve();
+    }
     await this.agentSession.abort();
   }
 

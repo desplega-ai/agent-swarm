@@ -1238,9 +1238,7 @@ describe("getBasePrompt: harness tool discovery", () => {
 
   test.each([
     "pi",
-    "codex",
     "claude-managed",
-    "opencode",
     "acp",
   ])("%s without tool search gets direct-tool guidance", async (provider) => {
     const result = await getBasePrompt({
@@ -1263,6 +1261,30 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain("`tool_search` and `code_exec`");
     expect(result).toContain("`store-progress` is `store_progress`");
     expect(result).toContain('import { store_progress } from "agent-swarm"');
+  });
+
+  test("codex gets exec guidance with the normalized tool name", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "codex",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain("await tools.mcp__agent_swarm__store_progress({ ... })");
+    expect(result).toContain("`ALL_TOOLS`");
+  });
+
+  test("opencode gets execute guidance with the bracketed tool path", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "opencode",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain('await tools.swarm["store-progress"]({ ... })');
+    expect(result).toContain("`search({ query })`");
   });
 
   test("omitted tool-search capability defaults to direct tools", async () => {
