@@ -1,9 +1,11 @@
 /**
  * A Socket Mode ack that fails because the client is not ready must not lose
  * the event: Bolt acks before it runs listeners and drops the event when the
- * ack throws. Drives a real Bolt App through a real SocketModeReceiver.
+ * ack throws. The event is stored as a pending receipt before anything runs and
+ * a durable drain hands it back to Bolt. Drives a real Bolt App through a real
+ * SocketModeReceiver.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
 import { closeDb, getDbClient, initDb } from "../be/db";
@@ -11,12 +13,17 @@ import { createAssistant } from "../slack/assistant";
 import { _resetForTests as resetEventDedup, wasEventSeen } from "../slack/event-dedup";
 import {
   getSlackInboundDiagnostics,
+  isAdmittedSlackDelivery,
+  recoverSlackInboundAfterRestart,
   resetSlackInboundCountersForTests,
   slackInboundOutcomeMiddleware,
 } from "../slack/inbound-dispatch";
-import { tolerateSocketNotReadyAcks } from "../slack/socket-ack";
+import { installSocketAckRecovery } from "../slack/socket-ack";
 
 type SocketClient = SocketModeReceiver["client"];
+type Drain = ReturnType<typeof installSocketAckRecovery>;
+
+const drains: Drain[] = [];
 
 const TEST_DB_PATH = "./test-slack-socket-ack.sqlite";
 const testGlobals = globalThis as typeof globalThis & {
@@ -66,15 +73,21 @@ function setSocket(client: SocketClient, socket: { isActive: () => boolean } | u
   (client as unknown as { websocket?: { isActive: () => boolean } }).websocket = socket;
 }
 
-function buildApp(): { client: SocketClient; runs: string[]; errors: unknown[] } {
+function buildApp(options: { failListener?: boolean } = {}): {
+  client: SocketClient;
+  drain: Drain;
+  runs: string[];
+  errors: unknown[];
+} {
   const receiver = new SocketModeReceiver({ appToken: "xapp-test", logLevel: LogLevel.ERROR });
-  tolerateSocketNotReadyAcks(receiver.client);
   const app = new App({
     receiver,
     socketMode: true,
     logLevel: LogLevel.ERROR,
     authorize: async () => ({ botToken: "xoxb-test", botId: "B_TEST", botUserId: "U_BOT" }),
   });
+  const drain = installSocketAckRecovery(receiver.client, app);
+  drains.push(drain);
   const runs: string[] = [];
   const errors: unknown[] = [];
   app.error(async (error) => {
@@ -82,16 +95,17 @@ function buildApp(): { client: SocketClient; runs: string[]; errors: unknown[] }
   });
   app.use(slackInboundOutcomeMiddleware());
   // Mirrors the dedup at the top of the message handler (src/slack/handlers.ts).
-  app.event("message", async ({ body }) => {
-    if (wasEventSeen(body.event_id)) return;
-    runs.push(body.event_id);
+  app.event("message", async ({ body, event }) => {
+    if (!isAdmittedSlackDelivery() && wasEventSeen(body.event_id)) return;
+    if (options.failListener) throw new Error("listener failed before any side effect");
+    runs.push(body.event_id ?? (event as { text?: string }).text ?? "");
   });
   // Mirrors actions.ts: acks first, then does the work.
   app.view("follow_up_submit", async ({ ack, body }) => {
     await ack();
     runs.push(`view:${body.view.id}`);
   });
-  return { client: receiver.client, runs, errors };
+  return { client: receiver.client, drain, runs, errors };
 }
 
 /** Deliver an envelope the way SocketModeClient does: emit `slack_event` with its ack. */
@@ -155,6 +169,16 @@ async function deliverViewSubmission(client: SocketClient, viewId: string): Prom
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
+const noSend = (client: SocketClient) => {
+  (client as unknown as { send: () => Promise<void> }).send = async () => {};
+};
+
+const receiptFor = (eventId: string) =>
+  getDbClient().get<{ state: string; outcome_code: string | null; attempts: number }>(
+    "SELECT state, outcome_code, attempts FROM slack_inbound_receipts WHERE event_id = ?",
+    [eventId],
+  );
+
 describe("Socket Mode ack failures", () => {
   beforeEach(async () => {
     resetEventDedup();
@@ -162,55 +186,116 @@ describe("Socket Mode ack failures", () => {
     await getDbClient().run("DELETE FROM slack_inbound_receipts");
   });
 
-  test("a not-ready ack still runs the listener once, and the retry is dropped", async () => {
-    const { client, runs } = buildApp();
+  afterEach(() => {
+    for (const drain of drains.splice(0)) drain.stop();
+  });
+
+  test("a not-ready ack stores the event, the drain runs it once, and the retry is dropped", async () => {
+    const { client, drain, runs } = buildApp();
     setSocket(client, { isActive: () => false });
 
     await deliver(client, "Ev_NOT_READY");
+    await drain.wake();
     expect(runs).toEqual(["Ev_NOT_READY"]);
+    expect(await receiptFor("Ev_NOT_READY")).toMatchObject({ state: "processed", attempts: 1 });
 
     // Slack redelivers the unacked event with the same event_id once the socket is back.
     setSocket(client, undefined);
-    (client as unknown as { send: () => Promise<void> }).send = async () => {};
+    noSend(client);
     await deliver(client, "Ev_NOT_READY", 1);
+    await drain.wake();
     expect(runs).toEqual(["Ev_NOT_READY"]);
 
     const { outcomes } = await getSlackInboundDiagnostics();
     expect(outcomes.socket.ackNotReady).toBe(1);
-    expect(outcomes.socket.processed).toBe(1); // the retry never reaches Bolt
+    expect(outcomes.socket.processed).toBe(1); // the drain's run; the retry never reaches Bolt
     expect(outcomes.http.ackNotReady).toBe(0);
   });
 
-  test("a retry after a restart is still dropped, because the key was persisted", async () => {
+  test("an event stored before the process died runs after the restart", async () => {
     const first = buildApp();
+    // The process dies after the receipt is stored and before anything runs.
+    first.drain.stop();
     setSocket(first.client, { isActive: () => false });
-    await deliver(first.client, "Ev_RESTART");
-    expect(first.runs).toEqual(["Ev_RESTART"]);
+    await deliver(first.client, "Ev_CRASH");
+    expect(first.runs).toEqual([]);
+    expect(await receiptFor("Ev_CRASH")).toMatchObject({ state: "pending" });
 
-    const stored = await getDbClient().get<{ state: string; outcome_code: string }>(
-      "SELECT state, outcome_code FROM slack_inbound_receipts WHERE event_id = ?",
-      ["Ev_RESTART"],
-    );
-    expect(stored).toMatchObject({ state: "processed", outcome_code: "ack_not_ready" });
+    // Slack redelivers; the stored receipt owns the event, so Bolt never sees it.
+    setSocket(first.client, undefined);
+    noSend(first.client);
+    await deliver(first.client, "Ev_CRASH", 1);
+    expect(first.runs).toEqual([]);
 
     // Restart: the in-memory dedup cache and the whole Bolt app are rebuilt.
     resetEventDedup();
     const second = buildApp();
-    (second.client as unknown as { send: () => Promise<void> }).send = async () => {};
-    await deliver(second.client, "Ev_RESTART", 1);
-    expect(second.runs).toEqual([]);
+    await recoverSlackInboundAfterRestart();
+    await second.drain.wake();
+    expect(second.runs).toEqual(["Ev_CRASH"]);
+    expect(await receiptFor("Ev_CRASH")).toMatchObject({ state: "processed" });
     expect(second.errors).toEqual([]);
 
     const row = await getDbClient().get<{ duplicate_count: number }>(
       "SELECT duplicate_count FROM slack_inbound_receipts WHERE event_id = ?",
-      ["Ev_RESTART"],
+      ["Ev_CRASH"],
     );
     expect(row?.duplicate_count).toBe(1);
   });
 
+  test("a listener that fails before any side effect leaves a retryable receipt, not a processed one", async () => {
+    const { client, drain, runs } = buildApp({ failListener: true });
+    setSocket(client, { isActive: () => false });
+
+    await deliver(client, "Ev_FAILS");
+    await drain.wake();
+    expect(runs).toEqual([]);
+    const row = await getDbClient().get<{ state: string; available_at: string }>(
+      "SELECT state, available_at FROM slack_inbound_receipts WHERE event_id = ?",
+      ["Ev_FAILS"],
+    );
+    expect(row?.state).toBe("pending");
+    expect(new Date(row?.available_at ?? 0).getTime()).toBeGreaterThan(Date.now());
+
+    // The redelivery is still dropped: the receipt owns the retry.
+    setSocket(client, undefined);
+    noSend(client);
+    await deliver(client, "Ev_FAILS", 1);
+    expect(runs).toEqual([]);
+  });
+
+  test("an event that cannot be stored runs inline instead of being lost", async () => {
+    const { client, runs } = buildApp();
+    setSocket(client, { isActive: () => false });
+
+    // No event_id: no dedup key, so no receipt.
+    client.emit("slack_event", {
+      ack: (response?: Record<string, unknown>) => clientSend(client)("env-no-id", response),
+      envelope_id: "env-no-id",
+      type: "events_api",
+      body: {
+        type: "event_callback",
+        api_app_id: "A_TEST",
+        event: {
+          type: "message",
+          channel: "C_TEST",
+          ts: "1.000009",
+          user: "U_HUMAN",
+          text: "inline",
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(runs).toEqual(["inline"]);
+    const rows = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM slack_inbound_receipts",
+    );
+    expect(rows?.n).toBe(0);
+  });
+
   test("a retry whose original was never recorded still runs", async () => {
     const { client, runs } = buildApp();
-    (client as unknown as { send: () => Promise<void> }).send = async () => {};
+    noSend(client);
     await deliver(client, "Ev_NEVER_SEEN", 1);
     expect(runs).toEqual(["Ev_NEVER_SEEN"]);
   });
@@ -239,7 +324,7 @@ describe("Socket Mode ack failures", () => {
 
   test("a healthy modal submission still runs", async () => {
     const { client, runs } = buildApp();
-    (client as unknown as { send: () => Promise<void> }).send = async () => {};
+    noSend(client);
 
     await deliverViewSubmission(client, "V_OK");
     expect(runs).toEqual(["view:V_OK"]);
@@ -270,9 +355,12 @@ describe("assistant events through Bolt", () => {
     saved = [];
   });
 
-  function buildAssistantApp(): SocketClient {
+  afterEach(() => {
+    for (const drain of drains.splice(0)) drain.stop();
+  });
+
+  function buildAssistantApp(): { client: SocketClient; drain: Drain } {
     const receiver = new SocketModeReceiver({ appToken: "xapp-test", logLevel: LogLevel.ERROR });
-    tolerateSocketNotReadyAcks(receiver.client);
     const app = new App({
       receiver,
       socketMode: true,
@@ -280,6 +368,8 @@ describe("assistant events through Bolt", () => {
       clientOptions: { slackApiUrl: api.url },
       authorize: async () => ({ botToken: "xoxb-test", botId: "B_TEST", botUserId: "U_BOT" }),
     });
+    const drain = installSocketAckRecovery(receiver.client, app);
+    drains.push(drain);
     app.use(slackInboundOutcomeMiddleware());
     // Bolt's default store reads and writes thread metadata through the Slack API.
     app.assistant(
@@ -295,7 +385,7 @@ describe("assistant events through Bolt", () => {
         },
       }),
     );
-    return receiver.client;
+    return { client: receiver.client, drain };
   }
 
   const threadStarted = {
@@ -321,14 +411,15 @@ describe("assistant events through Bolt", () => {
   });
 
   test("a redelivered thread_started after a failed ack does not greet twice", async () => {
-    const client = buildAssistantApp();
+    const { client, drain } = buildAssistantApp();
     try {
       setSocket(client, { isActive: () => false });
       await deliverEvent(client, "Ev_STARTED", threadStarted);
+      await drain.wake();
       expect(api.calls.filter((c) => c === "chat.postMessage")).toHaveLength(1);
 
       setSocket(client, undefined);
-      (client as unknown as { send: () => Promise<void> }).send = async () => {};
+      noSend(client);
       await deliverEvent(client, "Ev_STARTED", threadStarted, 1);
       expect(api.calls.filter((c) => c === "chat.postMessage")).toHaveLength(1);
     } finally {
@@ -337,13 +428,14 @@ describe("assistant events through Bolt", () => {
   });
 
   test("a stale context_changed redelivery does not overwrite newer context", async () => {
-    const client = buildAssistantApp();
+    const { client, drain } = buildAssistantApp();
     try {
-      // A runs without an ack, B arrives and acks, then Slack redelivers A.
+      // A is stored without an ack and drained, B arrives and acks, then Slack redelivers A.
       setSocket(client, { isActive: () => false });
       await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"));
+      await drain.wake();
       setSocket(client, undefined);
-      (client as unknown as { send: () => Promise<void> }).send = async () => {};
+      noSend(client);
       await deliverEvent(client, "Ev_CTX_B", contextChanged("C_B"));
       await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"), 1);
       expect(saved).toEqual(["C_A", "C_B"]);
@@ -353,9 +445,9 @@ describe("assistant events through Bolt", () => {
   });
 
   test("a stale context_changed redelivery is dropped by the listener when it was not stored", async () => {
-    const client = buildAssistantApp();
+    const { client } = buildAssistantApp();
     try {
-      (client as unknown as { send: () => Promise<void> }).send = async () => {};
+      noSend(client);
       await deliverEvent(client, "Ev_CTX_A", contextChanged("C_A"));
       await deliverEvent(client, "Ev_CTX_B", contextChanged("C_B"));
       // No retry_num, so the stored-key check is skipped: the listener's own dedup must hold.

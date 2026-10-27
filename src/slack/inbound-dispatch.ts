@@ -9,7 +9,6 @@ import {
   getNextSlackInboundAvailableAt,
   getSlackInboundReceiptStats,
   markInterruptedSlackInboundReceiptsUncertain,
-  recordSlackInboundDelivered,
   releaseSlackInboundReceipt,
   SLACK_INBOUND_LIMITS,
   type SlackInboundAdmission,
@@ -308,34 +307,11 @@ function socketEventKey(body: unknown): Extract<SlackInboundKeyResult, { ok: tru
 }
 
 /**
- * Persist the dedup key of a Socket Mode event whose ack failed, before its
- * listeners run. An in-memory cache does not survive a restart; this key does
- * (until retention), so a redelivery after the restart is still recognised.
- * Returns "recorded" on first sight, "duplicate" when already stored, and
- * "skipped" for a body with no event key.
+ * Is this Socket Mode event already stored as a receipt (admitted after a
+ * failed ack)? Counts the sighting. A stored receipt is owned by the drain, so
+ * a redelivery needs no second run.
  */
-export async function recordSlackSocketUnackedEvent(
-  body: unknown,
-  now: Date = new Date(),
-): Promise<"recorded" | "duplicate" | "skipped"> {
-  const key = socketEventKey(body);
-  if (!key) return "skipped";
-  return recordSlackInboundDelivered(
-    {
-      dedupKey: key.dedupKey,
-      transport: "socket",
-      kind: "event",
-      payloadType: key.payloadType,
-      apiAppId: key.apiAppId,
-      eventId: key.eventId,
-      outcomeCode: "ack_not_ready",
-    },
-    now,
-  );
-}
-
-/** Has this Socket Mode event already run after a failed ack? Counts the sighting. */
-export async function wasSlackSocketEventUnacked(
+export async function isSlackSocketEventStored(
   body: unknown,
   now: Date = new Date(),
 ): Promise<boolean> {
