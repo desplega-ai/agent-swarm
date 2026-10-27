@@ -20,7 +20,8 @@ export type HarnessCost = {
   /** Distinct `costSource` values, comma-joined (harness, pricing-table, unpriced). */
   costSource: string;
 };
-export type HarnessFailureKind = "setup" | "timeout" | "credential" | "task";
+/** `auth-chain`: the codex CLI ran but its rotated OAuth chain could not be persisted. */
+export type HarnessFailureKind = "setup" | "timeout" | "credential" | "task" | "auth-chain";
 export type HarnessAttempt = {
   status: "pass" | "fail";
   durationMs: number;
