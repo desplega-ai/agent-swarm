@@ -4,10 +4,10 @@ import { parseFlags } from "./cli.ts";
 import {
   type ArtifactRecord,
   buildShardPayload,
-  type IngestPayload,
   type RunContext,
   type Summary,
 } from "./ingest-payload.ts";
+import { postPayloads } from "./ingest-post.ts";
 
 interface Options {
   summaries: string;
@@ -75,75 +75,6 @@ function runContext(): RunContext {
     runner: "ci",
     ...(serverUrl && runId ? { ciUrl: `${serverUrl}/${repo}/actions/runs/${runId}` } : {}),
   };
-}
-
-function redact(value: string, bearer: string): string {
-  return value.replaceAll(bearer, "[redacted]");
-}
-
-function compact(value: unknown, bearer: string): string {
-  return redact(JSON.stringify(value), bearer).slice(0, 500);
-}
-
-function responseDetails(body: unknown, bearer: string): string | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const record = body as Record<string, unknown>;
-  if ("result" in record) return compact(record.result, bearer);
-  const error = record.error;
-  if (typeof error === "object" && error !== null) {
-    const message = (error as Record<string, unknown>).message;
-    if (typeof message === "string") return redact(message, bearer).slice(0, 500);
-  }
-  return undefined;
-}
-
-async function postPayloads(
-  payloads: IngestPayload[],
-  url: string,
-  bearer: string,
-): Promise<boolean> {
-  const host = new URL(url).host;
-  console.log(`ingest host: ${host}`);
-  let succeeded = true;
-
-  for (const payload of payloads) {
-    let status = 0;
-    let body: unknown;
-    let durationMs = 0;
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          "Content-Type": "application/json",
-          "X-Swarm-Timeout-Ms": "180000",
-        },
-        body: JSON.stringify(payload),
-      });
-      status = response.status;
-      body = await response.json();
-      if (typeof body === "object" && body !== null) {
-        const responseBody = body as Record<string, unknown>;
-        if (typeof responseBody.durationMs === "number") durationMs = responseBody.durationMs;
-      }
-    } catch (error) {
-      body = { error: { message: error instanceof Error ? error.message : String(error) } };
-    }
-
-    const ok =
-      status === 200 &&
-      typeof body === "object" &&
-      body !== null &&
-      (body as Record<string, unknown>).ok === true;
-    console.log(
-      `shard ${payload.run.shardIndex}: HTTP ${status} ok=${ok} durationMs=${durationMs}`,
-    );
-    const details = responseDetails(body, bearer);
-    if (details) console.log(details);
-    if (!ok) succeeded = false;
-  }
-
-  return succeeded;
 }
 
 async function main(): Promise<void> {
