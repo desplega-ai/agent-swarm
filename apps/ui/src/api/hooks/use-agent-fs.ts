@@ -434,7 +434,8 @@ export function agentFsCommentsKey(
 }
 
 function connectedClient(access: AgentFsAccess): AgentFsClient {
-  if (!access.client) throw new AgentFsError(0, "NOT_CONNECTED", "Comb is not connected");
+  if (!access.client)
+    throw new AgentFsError(0, "NOT_CONNECTED", "This browser is not connected to agent-fs");
   return access.client;
 }
 

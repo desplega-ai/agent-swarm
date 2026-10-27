@@ -9,7 +9,7 @@ import { baseName, parentFolder } from "./paths";
 export const DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_CONCURRENT_UPLOADS = 3;
 /** The version message of an uploaded file. */
-export const UPLOAD_MESSAGE = "Uploaded from Comb";
+export const UPLOAD_MESSAGE = "Uploaded from Files";
 
 /** The server's limit from `/health`, or agent-fs's default. */
 export function uploadLimitBytes(maxUploadBytes: number | null | undefined): number {

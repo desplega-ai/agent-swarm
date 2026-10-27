@@ -41,8 +41,8 @@ export default function CombPage() {
       return (
         <EmptyState
           icon={FolderOpen}
-          title="Comb is off"
-          description="Comb shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Comb needs agent-fs."
+          title="Files is off"
+          description="Files shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Files needs agent-fs."
           action={
             <>
               <Button asChild size="sm">

@@ -171,7 +171,7 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
         <SetupCard
           icon={<FolderOpen className="size-5" />}
           title="Your files account is ready."
-          description={email ? `Connected as ${email}.` : "Comb is connected in this browser."}
+          description={email ? `Connected as ${email}.` : "Files is connected in this browser."}
           actions={
             <Button asChild variant="outline" size="sm">
               {/* A new tab keeps setup open in this one. */}
@@ -257,7 +257,7 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
         </AlertCallout>
       ) : state === "disabled" ? (
         <AlertCallout tone="warning" icon={AlertCircle}>
-          Comb is off on this swarm. Skip this step.
+          Files is off on this swarm. Skip this step.
         </AlertCallout>
       ) : state === "needs-connect" && !driveReady ? (
         <AlertCallout tone="warning" icon={AlertCircle}>

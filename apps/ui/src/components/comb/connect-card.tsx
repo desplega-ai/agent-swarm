@@ -112,7 +112,7 @@ export function ConnectCard() {
       <CardHeader>
         <CardTitle>Connect agent-fs</CardTitle>
         <CardDescription>
-          Comb reads the swarm drive with your own agent-fs identity.
+          Files reads the swarm drive with your own agent-fs identity.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

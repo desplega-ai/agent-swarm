@@ -84,7 +84,7 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   files: {
     title: "Share files with agents",
     description:
-      "Agents save their work in agent-fs, the shared drive of your swarm. You review it in Comb.",
+      "Agents save their work in agent-fs, the shared drive of your swarm. You review it in Files.",
   },
   first_task: {
     title: "Run your first task",

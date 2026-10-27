@@ -1382,7 +1382,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "COMB_ENABLED",
-        label: "Comb",
+        label: "Files",
         description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
         kind: "boolean",
         defaultValue: "false",
@@ -1392,7 +1392,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_LINK_TARGET",
         label: "File link target",
         description:
-          "Where agents and task attachments link people for files. dashboard opens Comb at APP_URL and needs Comb on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+          "Where agents and task attachments link people for files. dashboard opens Files at APP_URL and needs Files on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
         kind: "enum",
         options: ["live", "dashboard"],
         docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
@@ -1410,7 +1410,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_PROXY",
         label: "Serve agent-fs through the API",
         description:
-          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Comb then uses <public API URL>/agentfs.",
+          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Files then uses <public API URL>/agentfs.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/agent-fs-co-deployment`,

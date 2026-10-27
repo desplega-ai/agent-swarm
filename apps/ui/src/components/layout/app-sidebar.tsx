@@ -145,7 +145,7 @@ const navGroups: NavGroup[] = [
       },
       { title: "Apps", path: "/apps", icon: LayoutGridIcon, adminOnly: true },
       {
-        title: "Comb",
+        title: "Files",
         path: "/file",
         icon: FolderOpenIcon,
         requires: "comb",
