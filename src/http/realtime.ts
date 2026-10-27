@@ -4,8 +4,8 @@ import { findUserById } from "../be/users";
 import { can } from "../rbac";
 import bundle from "../realtime/browser.generated.txt" with { type: "text" };
 import { issueRealtimeTicket } from "../realtime/tickets";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { dashboardUserIdHeader } from "./favorite-owner";
+import { isOperatorAuth, requestPrincipal, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -52,15 +52,14 @@ export async function handleRealtimeTicket(
   // checks its own verb and access when the socket joins it.
   const parsed = await realtimeTicketRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
-  const auth = getRequestAuth(req);
-  if (!auth || auth.kind === "agent" || auth.kind === "guest" || auth.kind === "controller") {
-    jsonError(res, "Presence requires dashboard authentication", 403);
-    return true;
-  }
-  const principal =
-    auth.kind === "operator"
-      ? ({ kind: "operator" } as const)
-      : ({ kind: "user", userId: auth.userId } as const);
+  const auth = requireAuthKind(
+    req,
+    res,
+    ["operator", "user"],
+    "Presence requires dashboard authentication",
+  );
+  if (!auth) return true;
+  const principal = (await requestPrincipal(req, undefined))!;
   const allowed = (verb: "comb.presence" | "session.presence") =>
     can({ principal, verb, resource: { kind: "none" }, source: "http" }).allow;
   if (!allowed("comb.presence") && !allowed("session.presence")) {
@@ -68,7 +67,7 @@ export async function handleRealtimeTicket(
     return true;
   }
   let dashboardUserId: string | undefined;
-  if (auth.kind === "operator" && !auth.page) {
+  if (isOperatorAuth(auth) && !auth.page) {
     const picked = dashboardUserIdHeader(req);
     const user = picked ? await findUserById(picked) : null;
     if (user?.status === "active") dashboardUserId = user.id;

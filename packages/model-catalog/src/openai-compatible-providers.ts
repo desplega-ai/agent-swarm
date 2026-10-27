@@ -141,7 +141,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
       {
         id: "qwen3.8-flash",
         name: "Qwen3.8 Flash",
-        contextWindow: 262144,
+        contextWindow: 1048576,
         maxOutputTokens: 131072,
         input: TEXT_IMAGE,
         reasoning: true,

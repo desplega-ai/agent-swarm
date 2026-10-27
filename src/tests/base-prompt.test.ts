@@ -992,6 +992,33 @@ describe("getTaskContextPrompt: repository section", () => {
     expect(result).toContain("git stash apply <ref>");
   });
 
+  test("caps auto-stashed work at the newest five entries and counts older entries", async () => {
+    const result = await getTaskContextPrompt({
+      ...minimalArgs,
+      traits: localTraits,
+      repoContext: {
+        clonePath: CLONE_PATH,
+        autoStashes: Array.from({ length: 8 }, (_, i) => ({
+          ref: `stash@{${i}}`,
+          message: `swarm-autostash entry ${i}`,
+        })),
+      },
+    });
+    expect(result).toContain("Pending auto-stashed work exists in this repo:");
+    expect(result.match(/stash@\{\d+\}/g)).toEqual([
+      "stash@{0}",
+      "stash@{1}",
+      "stash@{2}",
+      "stash@{3}",
+      "stash@{4}",
+    ]);
+    expect(result).toContain(
+      "- ...and 3 older swarm-autostash entries (run git stash list to see all)",
+    );
+    expect(result).toContain("git stash apply <ref>");
+    expect(result).toContain("git stash pop <ref>");
+  });
+
   test("says nothing about stashes when the list is empty", async () => {
     const result = await getTaskContextPrompt({
       ...minimalArgs,

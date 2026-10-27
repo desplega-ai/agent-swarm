@@ -115,6 +115,10 @@ services:
       - ANONYMIZED_TELEMETRY=false
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
+      # Experiment runs are test traffic: keep them out of install metrics and
+      # new-org alerts. A source-built image has no .git, so it would report
+      # production.
+      - DESPLEGA_TELEMETRY_ENV=test
       # The heartbeat reaper supersedes/fails any in_progress task whose lastUpdatedAt is
       # older than HEARTBEAT_STALL_NO_SESSION_MIN (5 min) with no active session, and spawns
       # a "resume" follow-up. That would eat the triage scenario's deliberately stale
@@ -162,6 +166,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000001
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=lead
       - AGENT_NAME=lead
       - MCP_BASE_URL=http://api:3013
@@ -201,6 +206,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000002
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=worker
       - AGENT_NAME=analyst
       - SYSTEM_PROMPT=You are the swarm's analyst — a data-oriented light coder. You excel at writing small TypeScript scripts to gather, aggregate, and summarize data. Return compact, structured results.
@@ -241,6 +247,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000003
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=worker
       - AGENT_NAME=marketer
       - SYSTEM_PROMPT=You are the swarm's marketer. You turn analysis and data into crisp, compelling copy. Keep outputs short and punchy.

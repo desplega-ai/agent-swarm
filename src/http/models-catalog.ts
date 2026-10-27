@@ -22,10 +22,11 @@ import {
 } from "../be/model-catalog-store";
 import { previewModelTiers } from "../be/model-tier-resolution";
 import { requestModelCatalogRefresh } from "../be/pricing-refresh";
-import { can, type RbacPrincipal } from "../rbac";
+import { can } from "../rbac";
 import { MODEL_TIERS, ProviderNameSchema } from "../types";
 import { isUnknownModelError } from "../utils/harness-model-error";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -268,25 +269,12 @@ async function ensureCatalogWriter(
   res: ServerResponse,
   verb: "models.catalog.write" | "models.harness-support.write" = "models.catalog.write",
 ): Promise<{ userId: string | null; agentId: string | null } | null> {
-  const auth = getRequestAuth(req);
   const header = req.headers["x-agent-id"];
-  const agentId =
-    auth?.kind === "agent" ? auth.agentId : Array.isArray(header) ? header[0] : header;
-  let principal: RbacPrincipal;
-  if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-  } else if (auth?.kind === "guest") {
-    principal = { kind: "guest" };
-  } else if (agentId) {
-    // An X-Agent-ID wins over the shared API key: a worker holds that key, so treating it as the
-    // operator would let any worker skip the verb's lead-only rule.
-    const agent = await getAgentById(agentId);
-    principal = { kind: "agent", agentId, isLead: agent?.isLead ?? false };
-  } else if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-  } else {
-    principal = { kind: "agent", agentId: "", isLead: false };
-  }
+  // An X-Agent-ID wins over the shared API key: a worker holds that key, so treating it as the
+  // operator would let any worker skip the verb's lead-only rule.
+  const principal = await agentFirstPrincipal(req, Array.isArray(header) ? header[0] : header, {
+    unauthenticatedFallback: "anonymous-agent",
+  });
   const decision = can({
     principal,
     verb,
@@ -304,7 +292,7 @@ async function ensureCatalogWriter(
     return null;
   }
   return {
-    userId: auth?.kind === "user" ? auth.userId : null,
+    userId: authUserId(getRequestAuth(req)) ?? null,
     agentId: principal.kind === "agent" && principal.agentId ? principal.agentId : null,
   };
 }

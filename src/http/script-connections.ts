@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
-import { getAgentById, getDbClient } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import {
   createOAuthApp,
   deleteAuthorizationById,
@@ -54,7 +54,6 @@ import {
   listOAuthPresets,
 } from "@/oauth/presets";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
-import { can } from "@/rbac";
 import {
   CredentialBindingSchema,
   placeholderForConfigKey,
@@ -67,9 +66,9 @@ import {
   type IntegrationType,
 } from "@/telemetry";
 import type { OAuthApp } from "@/tracker/types";
-import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
+import { ensureHttpPermission } from "./config";
 import { staticOAuthCallbackUri } from "./oauth-callback";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -1059,40 +1058,18 @@ const integrationsSurfaceCache = new Map<
 
 class SurfaceNotFoundError extends Error {}
 
-function singleHeader(req: IncomingMessage, name: string): string | undefined {
-  const raw = req.headers[name];
-  return Array.isArray(raw) ? raw[0] : raw;
-}
-
 async function ensureConnectionAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
 ): Promise<boolean> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator" || auth?.kind === "user") return true;
-  if (auth?.kind === "guest") {
-    jsonError(res, "Forbidden", 403);
-    return false;
-  }
-
-  const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
-  const decision = can({
-    principal: {
-      kind: "agent",
-      agentId: callerAgentId ?? "",
-      isLead: agent?.isLead ?? false,
-    },
-    verb: "script-connection.manage",
-    resource: { kind: "none" },
-    source: "http",
-  });
-  if (!decision.allow) {
-    jsonError(res, "Only the lead can manage script connections.", 403);
-    return false;
-  }
-  return true;
+  return ensureHttpPermission(
+    req,
+    res,
+    "script-connection.manage",
+    "Only the lead can manage script connections.",
+    agentId,
+  );
 }
 
 /**
@@ -1107,26 +1084,7 @@ async function ensureVerbAdmin(
   verb: "oauth-app.manage" | "oauth-authorization.manage",
   denyMessage: string,
 ): Promise<boolean> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator" || auth?.kind === "user") return true;
-  if (auth?.kind === "guest") {
-    jsonError(res, "Forbidden", 403);
-    return false;
-  }
-
-  const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
-  const decision = can({
-    principal: { kind: "agent", agentId: callerAgentId ?? "", isLead: agent?.isLead ?? false },
-    verb,
-    resource: { kind: "none" },
-    source: "http",
-  });
-  if (!decision.allow) {
-    jsonError(res, denyMessage, 403);
-    return false;
-  }
-  return true;
+  return ensureHttpPermission(req, res, verb, denyMessage, agentId);
 }
 
 async function ensureOAuthAppAdmin(

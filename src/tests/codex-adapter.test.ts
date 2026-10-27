@@ -409,8 +409,10 @@ describe("Codex app-server session", () => {
     });
     const result = await session.waitForCompletion();
     const threadStart = requests.find((request) => request.method === "thread/start");
+    // Regression: an ephemeral thread has no rollout, so `spawn_agent` with
+    // `fork_context` fails with "no rollout found for thread id".
     expect(threadStart?.params).toMatchObject({
-      ephemeral: true,
+      ephemeral: false,
       config: { model: "gpt-5.4" },
     });
     const steer = requests.find((request) => request.method === "turn/steer");

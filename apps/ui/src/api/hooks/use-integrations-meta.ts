@@ -60,6 +60,9 @@ export function useEnvPresence(keys: string[]) {
     queryKey: ["config", "env-presence", stableKey],
     queryFn: () => fetchEnvPresence(keys),
     staleTime: 5_000,
+    // A new tab restores a persisted snapshot that can still be fresh. Callers
+    // gate on presence read after mount (the org-name prompt), so ask the server.
+    refetchOnMount: "always",
     enabled: keys.length > 0,
   });
 }

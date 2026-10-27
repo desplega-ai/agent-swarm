@@ -5,6 +5,7 @@ import { RoomOperationSchema } from "../realtime/document";
 import { changeRoom, decodeRoomSnapshot, getRoom, resetRoom, roomView } from "../realtime/rooms";
 import { KvNamespaceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, isOperatorAuth } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -163,8 +164,8 @@ export async function handleRooms(
       {
         ...info,
         callOrigin: "http",
-        userId: auth?.kind === "user" ? auth.userId : undefined,
-        isOperator: auth?.kind === "operator",
+        userId: authUserId(auth),
+        isOperator: isOperatorAuth(auth),
       },
       false,
     );
@@ -203,8 +204,8 @@ export async function handleRooms(
       {
         ...info,
         callOrigin: "http",
-        userId: auth?.kind === "user" ? auth.userId : undefined,
-        isOperator: auth?.kind === "operator",
+        userId: authUserId(auth),
+        isOperator: isOperatorAuth(auth),
       },
       false,
     );
@@ -238,8 +239,8 @@ export async function handleRooms(
       {
         ...info,
         callOrigin: "http",
-        userId: auth?.kind === "user" ? auth.userId : undefined,
-        isOperator: auth?.kind === "operator",
+        userId: authUserId(auth),
+        isOperator: isOperatorAuth(auth),
       },
       true,
     );
@@ -276,8 +277,8 @@ export async function handleRooms(
       {
         ...info,
         callOrigin: "http",
-        userId: auth?.kind === "user" ? auth.userId : undefined,
-        isOperator: auth?.kind === "operator",
+        userId: authUserId(auth),
+        isOperator: isOperatorAuth(auth),
       },
       true,
     );

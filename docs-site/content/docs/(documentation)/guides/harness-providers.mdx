@@ -10,6 +10,8 @@ This guide documents the harness-provider contract used by agent-swarm workers, 
 
 A *harness provider* is the runtime that actually drives an LLM: it owns the subprocess (or in-process SDK) that reads the user prompt, talks to the model, invokes tools, and streams events back. The swarm treats providers as plug-ins behind a single TypeScript interface (`ProviderAdapter`). Workers select one at boot via `HARNESS_PROVIDER`.
 
+For workers with a local environment, repository context in the prompt lists only the five newest `swarm-autostash` entries. When older entries exist, it adds their count and directs the agent to `git stash list` to see all entries. Restore guidance remains in the prompt; this display limit does not change stored stashes.
+
 <Callout type="info">
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
@@ -263,6 +265,8 @@ Queued input counts as delivered only after Codex accepts its turn. If the sessi
 
 The worker does not use a shared app-server daemon. It does not resume native Codex threads. Follow-up task continuity uses the swarm context preamble.
 
+The worker starts each thread non-ephemeral, so codex writes a rollout under `~/.codex/sessions`. Sub-agent spawns that fork the parent's context read that rollout. The adapter removes rollouts older than 7 days when a session starts.
+
 #### Codex hook delivery for legacy exec sessions
 
 `src/hooks/codex-hook.ts` still supports legacy `codex exec` sessions. The worker image registers the hook for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each one delivered, and injects the rendered envelope through hook output.
@@ -447,7 +451,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1793073650-g23dd39`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1793104576-gc52692`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.

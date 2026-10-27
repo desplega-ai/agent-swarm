@@ -509,7 +509,9 @@ async function writeScript(plan: ScriptPlan, agentId: string, actor: Actor) {
   });
   // Embedding calls out to a provider; never inside the write lock.
   const script = result.script;
-  getDbClient().afterCommit(() => embedScript(script));
+  getDbClient().afterCommit(async () => {
+    await embedScript(script);
+  });
   return script.id;
 }
 

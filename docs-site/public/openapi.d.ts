@@ -726,7 +726,10 @@ export interface paths {
         /** List apps */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    q?: string;
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -2253,6 +2256,8 @@ export interface paths {
             parameters: {
                 query?: {
                     include?: "tasks";
+                    q?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -15448,6 +15453,7 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    q?: string;
                     limit?: number;
                     offset?: number | null;
                     fields?: "full" | "slim";
@@ -22852,6 +22858,7 @@ export interface paths {
                     targetType?: "agent-task" | "workflow" | "script";
                     workflowId?: string;
                     scriptName?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -26342,6 +26349,8 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    q?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;

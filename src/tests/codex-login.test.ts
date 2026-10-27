@@ -1,6 +1,7 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 
 import { resolveCodexLoginConfig, runCodexLogin } from "../commands/codex-login.js";
+import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 
 describe("resolveCodexLoginConfig", () => {
   it("uses defaults without prompts when not interactive", async () => {
@@ -436,6 +437,193 @@ describe("runCodexLogin", () => {
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("could not lift the auth-failure bench"),
     );
+    expect(exit).not.toHaveBeenCalled();
+  });
+});
+
+describe("runCodexLogin duplicate accounts", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function credentials(userId: string | null, accountId = "team-account"): CodexOAuthCredentials {
+    const payload = { "https://api.openai.com/auth": { chatgpt_user_id: userId } };
+    return {
+      access: `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.fixture`,
+      refresh: "fixture-refresh",
+      expires: Date.now() + 3600000,
+      accountId,
+    };
+  }
+
+  const loginCredentials = credentials("user-a-shared");
+  const sameUser = { slot: 0, creds: credentials("user-a-shared") };
+
+  it.each([
+    {
+      name: "warns for an automatically selected slot",
+      slot: undefined,
+      existing: [sameUser],
+      creds: loginCredentials,
+      storedSlot: 1,
+      warningSlots: [0],
+    },
+    {
+      name: "warns for another explicitly selected slot",
+      slot: 2,
+      existing: [sameUser],
+      creds: loginCredentials,
+      storedSlot: 2,
+      warningSlots: [0],
+    },
+    {
+      name: "does not warn when replacing the same slot",
+      slot: 0,
+      existing: [sameUser],
+      creds: loginCredentials,
+      storedSlot: 0,
+      warningSlots: [],
+    },
+    {
+      name: "does not confuse Team users with matching key suffixes",
+      slot: 2,
+      existing: [{ slot: 0, creds: credentials("user-b-shared") }],
+      creds: loginCredentials,
+      storedSlot: 2,
+      warningSlots: [],
+    },
+    {
+      name: "does not confuse the same user on different accounts",
+      slot: 2,
+      existing: [{ slot: 0, creds: credentials("user-a-shared", "other-account") }],
+      creds: loginCredentials,
+      storedSlot: 2,
+      warningSlots: [],
+    },
+    {
+      name: "does not infer a duplicate from an existing token without a user ID",
+      slot: 2,
+      existing: [{ slot: 0, creds: credentials(null) }],
+      creds: loginCredentials,
+      storedSlot: 2,
+      warningSlots: [],
+    },
+    {
+      name: "does not infer a duplicate from a new token without a user ID",
+      slot: 2,
+      existing: [sameUser],
+      creds: credentials(null),
+      storedSlot: 2,
+      warningSlots: [],
+    },
+    {
+      name: "lists every duplicate slot except the one being replaced",
+      slot: 2,
+      existing: [sameUser, { ...sameUser, slot: 2 }, { ...sameUser, slot: 3 }],
+      creds: loginCredentials,
+      storedSlot: 2,
+      warningSlots: [0, 3],
+    },
+  ])("$name", async ({ slot, existing, creds, storedSlot, warningSlots }) => {
+    const calls: string[] = [];
+    const error = mock((_message: string) => calls.push("warning"));
+    const exit = mock(() => {});
+    const store = mock(async () => {
+      calls.push("store");
+    });
+
+    await runCodexLogin([], {
+      resolveConfig: async () => ({ apiUrl: "http://localhost:3013", apiKey: "fixture", slot }),
+      login: async () => creds,
+      loadAllSlots: async () => existing,
+      store,
+      readAuthFence: async () => 0,
+      clearAuthBench: async () => false,
+      log: () => {},
+      error,
+      exit,
+    });
+
+    expect(store).toHaveBeenCalledWith("http://localhost:3013", "fixture", creds, storedSlot);
+    expect(exit).not.toHaveBeenCalled();
+    if (warningSlots.length > 0) {
+      expect(error).toHaveBeenCalledWith(
+        `Warning: This ChatGPT user already has Codex credentials in slot(s) ${warningSlots.join(", ")}. ` +
+          `This login will also be stored in slot ${storedSlot}. ` +
+          `To replace existing credentials, re-run agent-swarm codex-login --slot ${warningSlots[0]}.`,
+      );
+      expect(calls).toEqual(["warning", "store"]);
+      const warning = error.mock.calls[0]?.[0] ?? "";
+      expect(warning).not.toContain(creds.access);
+      expect(warning).not.toContain(creds.refresh);
+    } else {
+      expect(error).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rechecks the pool after the browser login completes", async () => {
+    const error = mock(() => {});
+    const store = mock(async () => {});
+    const loadAllSlots = mock(async () => [{ slot: 0, creds: credentials("another-user") }]);
+
+    await runCodexLogin([], {
+      resolveConfig: async () => ({ apiUrl: "http://localhost:3013", apiKey: "fixture" }),
+      login: async () => {
+        loadAllSlots.mockResolvedValue([sameUser]);
+        return loginCredentials;
+      },
+      loadAllSlots,
+      store,
+      readAuthFence: async () => 0,
+      clearAuthBench: async () => false,
+      log: () => {},
+      error,
+      exit: () => {},
+    });
+
+    expect(loadAllSlots).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("credentials in slot(s) 0."));
+    expect(store).toHaveBeenCalledWith("http://localhost:3013", "fixture", loginCredentials, 1);
+  });
+
+  it.each([
+    "HTTP 503",
+    "network error",
+  ])("warns and stores credentials when the slot lookup fails with %s", async (failure) => {
+    const fetchSlots = mock(async () => {
+      if (failure === "network error") throw new Error("Network error");
+      return new Response("Service unavailable", { status: 503 });
+    });
+    globalThis.fetch = fetchSlots;
+    const calls: string[] = [];
+    const error = mock((_message: string) => calls.push("warning"));
+    const exit = mock(() => {});
+    const store = mock(async () => {
+      calls.push("store");
+    });
+
+    await runCodexLogin([], {
+      resolveConfig: async () => ({ apiUrl: "http://localhost:3013", apiKey: "fixture", slot: 2 }),
+      login: async () => loginCredentials,
+      store,
+      readAuthFence: async () => 0,
+      clearAuthBench: async () => false,
+      log: () => {},
+      error,
+      exit,
+    });
+
+    expect(error).toHaveBeenCalledWith(
+      "Warning: Could not check existing Codex slots for duplicate accounts.",
+    );
+    expect(fetchSlots).toHaveBeenCalledWith(
+      "http://localhost:3013/api/config/resolved?includeSecrets=true",
+      { headers: { Authorization: "Bearer fixture" } },
+    );
+    expect(calls).toEqual(["warning", "store"]);
+    expect(store).toHaveBeenCalledWith("http://localhost:3013", "fixture", loginCredentials, 2);
     expect(exit).not.toHaveBeenCalled();
   });
 });

@@ -103,7 +103,7 @@ export const SEED_SCRIPTS: SeedScript[] = [
   {
     name: "gh-pr-snapshot",
     description:
-      "One-call GitHub pull request snapshot: title, state, draft, mergeable, CI check tallies (passed/failed/pending) and review tallies (approved/changes-requested/pending).",
+      "One-call GitHub pull request snapshot: title, state, draft, mergeable, head SHA, CI check tallies (passed/failed/pending), the base branch's required checks from rulesets with a ciGreen verdict, review tallies, and optional unresolved threads. Batch mode takes up to 10 PRs.",
     intent:
       "Triage a GitHub PR's status in a single call instead of running several gh pr view / gh pr checks / gh api invocations.",
     source: asText(ghPrSnapshotSrc),

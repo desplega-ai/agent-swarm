@@ -153,6 +153,9 @@ const listWorkflowsRoute = route({
     lastRunStatus: WorkflowRunStatusSchema.optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
+    /** Matches the name, description or key anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `full` restores the legacy shape (includes `definition`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -622,6 +625,8 @@ export async function handleWorkflows(
       lastRunStatus: parsed.query.lastRunStatus,
       key: parsed.query.key,
       keyPrefix: parsed.query.keyPrefix,
+      q: parsed.query.q,
+      limit: parsed.query.limit,
     };
     // List responses default to slim (no `definition`); `?fields=full` restores it.
     if (parsed.query.fields === "full") {
