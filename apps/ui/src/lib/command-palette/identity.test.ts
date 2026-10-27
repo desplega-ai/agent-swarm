@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { deriveStorageKey } from "../../hooks/use-dismissible-card-key";
 import { CURRENT_USER_CARD_KEY } from "../dashboard-user";
-import { paletteSearchKey } from "./identity";
+import { paletteIdentity, paletteSearchKey } from "./identity";
 import { pushRecent, readRecents } from "./recents";
 
 GlobalRegistrator.register();
@@ -49,5 +49,20 @@ describe("palette identity", () => {
     ).not.toEqual(keyB);
     // The raw key never lands in the cache key.
     expect(JSON.stringify(keyA)).not.toContain(swarm.apiKey);
+  });
+
+  test("keys sharing a swarm and last four characters stay apart", () => {
+    // User-bound tokens carry no dashboard user, so only the key tells them apart.
+    const first = { apiUrl: swarm.apiUrl, apiKey: `aswt_${"a".repeat(20)}9999` };
+    const second = { apiUrl: swarm.apiUrl, apiKey: `aswt_${"b".repeat(20)}9999` };
+    expect(paletteIdentity(first)).not.toEqual(paletteIdentity(second));
+    expect(paletteSearchKey(first, "tasks", "deploy", 8)).not.toEqual(
+      paletteSearchKey(second, "tasks", "deploy", 8),
+    );
+    pushRecent(first, { kind: "tasks", title: "Private task", href: "/tasks/a" });
+    expect(readRecents(second)).toEqual([]);
+    // Neither the key nor its tail lands in an identity or a storage key name.
+    expect(paletteIdentity(first)).not.toContain(first.apiKey.slice(-4));
+    expect(Object.keys(localStorage).join("\n")).not.toContain(first.apiKey.slice(-4));
   });
 });

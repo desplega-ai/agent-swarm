@@ -1,5 +1,6 @@
 // Relative imports: the root `bun test` run resolves no `@/` alias.
 import { dashboardUserIdFor } from "../dashboard-user";
+import { sha256Hex } from "../sha256";
 
 /** The connection the palette searches through. */
 export interface PaletteConnection {
@@ -8,14 +9,22 @@ export interface PaletteConnection {
 }
 
 /**
- * Who the palette searches as: the swarm, the key's last four characters (the
- * non-sensitive preview the server stores as `tokenPreview`) and the picked
+ * Who the palette searches as: the swarm, a credential id and the picked
  * dashboard user. Search results and recents are keyed by it, so one person's
  * private tasks never answer for another on the same swarm and browser.
+ *
+ * The credential id is the first 128 bits of the key's SHA-256: one-way, so
+ * the raw key never reaches a query key or a storage key name, and collision
+ * resistant, because a user-bound token carries no dashboard user and only
+ * the key tells two of them apart.
  */
 export function paletteIdentity(connection: PaletteConnection): string {
   const user = dashboardUserIdFor(connection) ?? "";
-  return [connection.apiUrl, connection.apiKey.slice(-4), user].join("|");
+  return [connection.apiUrl, credentialId(connection.apiKey), user].join("|");
+}
+
+function credentialId(apiKey: string): string {
+  return sha256Hex(apiKey).slice(0, 32);
 }
 
 /** First query-key segment of every palette search; never persisted. */
