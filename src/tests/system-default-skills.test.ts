@@ -54,6 +54,12 @@ describe("system-default skills", () => {
     expect(skills.find((skill) => skill.name === "script-workflows")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
+    const modernizePrSkill = skills.find((skill) => skill.name === "modernize-pr");
+    expect(modernizePrSkill?.systemDefault).toBe(true);
+    // The push must stay lease-guarded and closing must stay a human call.
+    expect(modernizePrSkill?.content).toContain("--force-with-lease=");
+    expect(modernizePrSkill?.content).toContain("git range-diff");
+    expect(modernizePrSkill?.content).toContain("Never close it yourself.");
     const pagesSkill = skills.find((skill) => skill.name === "pages");
     expect(pagesSkill?.systemDefault).toBe(true);
     // The merged `pages` skill must keep advertising the taste baseline in its
