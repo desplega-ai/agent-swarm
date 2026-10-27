@@ -67,6 +67,19 @@ describe("public benchmark routes", () => {
     });
   });
 
+  test("orders by publish date across suite versions, not by suite version", async () => {
+    await publish("1.10", "2026-10-01T00:00:00.000Z");
+    await publish("1.0", "2026-10-20T00:00:00.000Z");
+    await publish("1.2", "2026-10-20T00:00:00.000Z");
+    const index = await listBenchmarkVersions(dir);
+    expect(index.versions.map((v) => `${v.suiteVersion}@${v.snapshot}`)).toEqual([
+      "1.2@2026-10-20",
+      "1.0@2026-10-20",
+      "1.10@2026-10-01",
+    ]);
+    expect(index.latest).toBe("1.2");
+  });
+
   test("an empty or missing directory lists nothing", async () => {
     expect(await listBenchmarkVersions(join(dir, "missing"))).toEqual({
       versions: [],

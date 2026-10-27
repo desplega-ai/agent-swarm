@@ -61,7 +61,7 @@ async function readDir(dir: string): Promise<string[]> {
 
 export async function listBenchmarkVersions(dir = benchmarkDir()): Promise<BenchmarkIndex> {
   const versions: BenchmarkVersion[] = [];
-  const suites = (await readDir(dir)).filter((e) => VERSION_RE.test(e)).sort(byVersionDesc);
+  const suites = (await readDir(dir)).filter((e) => VERSION_RE.test(e));
   for (const suiteVersion of suites) {
     const days = (await readDir(join(dir, suiteVersion))).filter((e) => SNAPSHOT_RE.test(e));
     for (const snapshot of days.sort().reverse()) {
@@ -77,6 +77,12 @@ export async function listBenchmarkVersions(dir = benchmarkDir()): Promise<Bench
       versions.push({ suiteVersion, snapshot, publishedAt });
     }
   }
+  // Newest publish first across suite versions; a same-day tie goes to the higher suite.
+  versions.sort(
+    (a, b) =>
+      (a.snapshot < b.snapshot ? 1 : a.snapshot > b.snapshot ? -1 : 0) ||
+      byVersionDesc(a.suiteVersion, b.suiteVersion),
+  );
   return { versions, latest: versions[0]?.suiteVersion ?? null };
 }
 
