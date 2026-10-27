@@ -39,3 +39,15 @@ export function paletteSearchKey(
 ) {
   return [PALETTE_QUERY_ROOT, paletteIdentity(connection), providerId, query, limit] as const;
 }
+
+/**
+ * `keepPreviousData` within one identity. The palette keeps the last answer
+ * on screen while the next keystroke loads, but never across a user or swarm
+ * switch: the previous identity's results could name their private tasks.
+ */
+export function keepPreviousWithin(identity: string) {
+  return <T>(
+    previous: T | undefined,
+    previousQuery: { queryKey: readonly unknown[] } | undefined,
+  ): T | undefined => (previousQuery?.queryKey[1] === identity ? previous : undefined);
+}

@@ -68,6 +68,7 @@ import {
   SEARCH_PROVIDER_IDS,
   type SearchProviderId,
 } from "@/lib/command-palette/route-meta";
+import { usePaletteIdentity } from "@/lib/command-palette/use-palette-identity";
 import { getConfig } from "@/lib/config";
 import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { taskListTitle } from "@/lib/task-title";
@@ -466,9 +467,26 @@ export function CommandMenu() {
       commandProps={{ shouldFilter: false, loop: true }}
     >
       {/* Radix unmounts the content while closed: no palette query runs then. */}
-      {open ? <PaletteBody close={close} /> : null}
+      {open ? <PaletteSession close={close} /> : null}
     </CommandDialog>
   );
+}
+
+/**
+ * The palette for one swarm and user. A switch, in this tab or another,
+ * remounts the body: recents, scope chip and search observers start fresh,
+ * so nothing the previous user saw stays on screen. The typed text goes too.
+ */
+function PaletteSession({ close }: { close: () => void }) {
+  const { setSearch } = useRequired(useContext(SearchContext));
+  const identity = usePaletteIdentity(getConfig);
+  const shown = useRef(identity);
+  useEffect(() => {
+    if (shown.current === identity) return;
+    shown.current = identity;
+    setSearch("");
+  }, [identity, setSearch]);
+  return <PaletteBody key={identity} close={close} />;
 }
 
 function PaletteBody({ close }: { close: () => void }) {
