@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { runBootScrubSweep } from "../be/boot-scrub-sweep";
-import { closeDb, getKv, initDb, upsertKv } from "../be/db";
+import { closeDb, getDbClient, getKv, initDb, upsertKv } from "../be/db";
 import { getMemoryStore } from "../be/memory";
 import { registerStoredSecret } from "../be/secret-registry";
 import dreamingApply from "../be/seed-scripts/catalog/dreaming-apply";
@@ -12,7 +12,9 @@ import { randomToken } from "./synthetic-secret-helpers";
 
 // Lifecycle: a memory body is copied into a dreaming pre-image, then the value is registered as a secret and
 // the boot sweep redacts the memory. No read of the pre-image (generic KV read or SQL hex of kv_entries) may
-// still recover the value, and an authorized rollback still restores the pre-image.
+// still recover the value, and an authorized rollback still restores the pre-image. The same holds for every
+// other dreaming-v2 copy (legacy hex pre-images, trim and heartbeat state, drafts, results), including on an
+// install that already finished the previous sweep version.
 
 const TEST_DB_PATH = "./test-dreaming-preimage-scrub.sqlite";
 const NS = "dreaming-v2";
@@ -39,11 +41,6 @@ const ctx = {
       store().edit({ id: memoryId, ...(rest as any) }),
   },
 } as any;
-
-const hexHas = (hx: unknown, needle: string) =>
-  Buffer.from(String(hx ?? ""), "hex")
-    .toString("utf8")
-    .includes(needle);
 
 async function editAndApply(runId: string, content: string) {
   const memory = await store().store({
@@ -89,32 +86,87 @@ describe("dreaming memory pre-images follow the memory's redaction", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("after the value is registered and swept, no pre-image read recovers it", async () => {
+  test("after the value is registered and swept, no dreaming-v2 read recovers it", async () => {
     const value = randomToken(32);
     const runId = "preimage-scrub-run";
     await editAndApply(runId, `Project reference ${value}. Keep these notes.`);
     const key = `preimage:${runId}:A1`;
     const kvHex = `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = ? AND key = ?`;
-    // Positive control: before cleanup the pre-image holds the value.
-    expect(hexHas(executeReadOnlyQuery(kvHex, [NS, key]).rows[0]?.[0], value)).toBe(true);
+    const storedText = (ns: string, k: string) =>
+      Buffer.from(String(executeReadOnlyQuery(kvHex, [ns, k]).rows[0]?.[0] ?? ""), "hex").toString(
+        "utf8",
+      );
+    // Independent of the sweep's decoder: the stored text plus every hex field decoded.
+    const recoverable = (ns: string, k: string) => {
+      const text = storedText(ns, k);
+      const hexFields = [...text.matchAll(/"\w+Hex":"([0-9a-fA-F]*)"/g)].map((m) =>
+        Buffer.from(m[1] ?? "", "hex").toString("utf8"),
+      );
+      return [text, ...hexFields].some((t) => t.includes(value));
+    };
 
-    // memtax-create writes the same kind of copy under its own prefix; a non-pre-image key stays untouched.
-    const memtaxKey = `memtax-create:pre:${runId}:m1`;
-    const otherKey = `memtax-create:writes:${runId}`;
-    for (const k of [memtaxKey, otherKey]) {
-      await ctx.swarm.kv_set({
-        namespace: NS,
-        key: k,
-        value: { rows: [{ id: "m1", content: `copy ${value}` }] },
-      });
+    // A legacy apply pre-image kept a hex copy of the body, which hides the value from a plain scrub.
+    const hex = (t: string) => Buffer.from(t, "utf8").toString("hex");
+    const legacyBody = `Legacy reference ${value}.\nsecond line`;
+    const legacyKey = `preimage:legacy-run:A1`;
+    // Every other dreaming-v2 family that copies text: memtax, trim and heartbeat pre-images, state, drafts, results.
+    const copies: Record<string, unknown> = {
+      [legacyKey]: {
+        kind: "memory-edit",
+        rows: [{ id: "m-legacy", content: legacyBody, contentHex: hex(legacyBody) }],
+      },
+      [`memtax-create:pre:${runId}:m1`]: { rows: [{ id: "m1", content: `copy ${value}` }] },
+      [`trim-preimage:${runId}:agent-1:soulMd`]: { text: `soul ${value}` },
+      "trim-state:agent-1:soulMd": { afterSha: "x", afterText: `trimmed soul ${value}` },
+      [`hb-preimage:${runId}`]: { text: `heartbeat ${value}` },
+      [`hb-draft:${runId}`]: { text: `draft ${value}` },
+      "hb-state:lead": { afterSha: "y", afterText: `heartbeat after ${value}` },
+      [`result:${runId}:lane-c`]: { summary: `lane result ${value}` },
+    };
+    // Negative controls: a legacy hex row without the value keeps its bytes; another namespace is out of scope.
+    const cleanKey = "preimage:clean-run:A1";
+    const cleanValue = {
+      kind: "memory-edit",
+      rows: [{ id: "m-clean", content: "plain", contentHex: hex("plain") }],
+    };
+    for (const [k, v] of Object.entries({ ...copies, [cleanKey]: cleanValue })) {
+      await ctx.swarm.kv_set({ namespace: NS, key: k, value: v });
     }
+    await ctx.swarm.kv_set({
+      namespace: "other-ns",
+      key: "note",
+      value: { text: `kept ${value}` },
+    });
+    const cleanBefore = storedText(NS, cleanKey);
 
+    // Positive controls: before the sweep every copy holds the value; the legacy one only through its hex.
+    for (const k of [key, ...Object.keys(copies)]) expect(recoverable(NS, k)).toBe(true);
+    const legacyStored = JSON.parse(storedText(NS, legacyKey));
+    legacyStored.rows[0].content = "plain";
+    await ctx.swarm.kv_set({ namespace: NS, key: legacyKey, value: legacyStored });
+    expect(storedText(NS, legacyKey)).not.toContain(value);
+    expect(recoverable(NS, legacyKey)).toBe(true);
+
+    // The install already finished the previous version, which never swept dreaming-v2.
+    await getDbClient().run(
+      `INSERT INTO seed_state (kind, key, seededHash, seededAt) VALUES ('maintenance', 'boot-scrub-v9', 'done', datetime('now'))`,
+    );
     registerStoredSecret(value, "config:DREAMING_PREIMAGE_TEST_SECRET");
-    const stats = await runBootScrubSweep({ reembed: false, version: 990001 });
+    const stats = await runBootScrubSweep({ reembed: false });
+    expect(stats).not.toBeNull();
     expect(stats?.find((s) => s.table === "agent_memory")?.changed).toBe(1);
-    expect(stats?.find((s) => s.table === "kv_entries")?.changed).toBe(2);
-    expect(hexHas(executeReadOnlyQuery(kvHex, [NS, memtaxKey]).rows[0]?.[0], value)).toBe(false);
-    expect(hexHas(executeReadOnlyQuery(kvHex, [NS, otherKey]).rows[0]?.[0], value)).toBe(true);
+    expect(stats?.find((s) => s.table === "kv_entries")?.changed).toBe(
+      1 + Object.keys(copies).length,
+    );
+    for (const k of [key, ...Object.keys(copies)]) expect(recoverable(NS, k)).toBe(false);
+    // The legacy row's hex is folded into its plain field (stored bytes, redacted), not kept beside it.
+    const legacyAfter = JSON.parse(storedText(NS, legacyKey)).rows[0];
+    expect(legacyAfter.contentHex).toBeUndefined();
+    expect(legacyAfter.content).toBe(
+      legacyBody.replace(value, "[REDACTED:config:DREAMING_PREIMAGE_TEST_SECRET]"),
+    );
+    expect(storedText(NS, cleanKey)).toBe(cleanBefore);
+    expect(recoverable("other-ns", "note")).toBe(true);
 
     // A non-lead generic KV read: no field, decoded or not, carries the value.
     const pre: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key });
@@ -122,8 +174,6 @@ describe("dreaming memory pre-images follow the memory's redaction", () => {
     expect(row?.contentHex).toBeUndefined();
     expect(JSON.stringify(pre)).not.toContain(value);
     expect(String(row?.content)).toContain("[REDACTED:");
-    // Arbitrary SQL against kv_entries: the stored bytes are redacted too.
-    expect(hexHas(executeReadOnlyQuery(kvHex, [NS, key]).rows[0]?.[0], value)).toBe(false);
   });
 
   test("an authorized rollback still restores the pre-image from the kv row", async () => {

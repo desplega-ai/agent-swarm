@@ -33,7 +33,7 @@ import { getDbClient } from "./db";
 import type { DbExecutor, DbParam } from "./db-client";
 import { getMemoryStore } from "./memory";
 import type { MemoryScrubFields } from "./memory/types";
-import { breaksJsonValidity } from "./scrub-json";
+import { breaksJsonValidity, foldHexCopies } from "./scrub-json";
 import { sealJson } from "./sealed-json";
 
 const DEFAULT_BATCH_SIZE = 200;
@@ -57,6 +57,11 @@ type SweepTarget = {
   idColumn?: string;
   /** Static SQL filter limiting the sweep to some rows of the table. */
   where?: string;
+  /**
+   * Undo an encoding the scrubber cannot see through, before scrubbing. The
+   * decoded form is written only when the scrub then redacts something.
+   */
+  decode?: (value: string) => string;
 };
 
 /** Swept in this order. Each row has a unique TEXT key (`idColumn`, default `id`). */
@@ -80,13 +85,15 @@ export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
     columns: ["triggerData", "context", "error"],
     replay: { context: "context_replay" },
   },
-  // Dreaming memory pre-images copy memory bodies for rollback, so they follow the memory's redaction.
+  // Every dreaming-v2 row copies swarm text (memory and profile pre-images, trim and heartbeat
+  // state, drafts, results), so the whole namespace follows the source rows' redaction. Legacy rows
+  // also kept a hex copy (`contentHex`), which is folded back into its plain field before scrubbing.
   {
     table: "kv_entries",
     columns: ["value"],
     idColumn: "key",
-    where:
-      "namespace = 'dreaming-v2' AND (key GLOB 'preimage:*' OR key GLOB 'memtax-create:pre:*')",
+    where: "namespace = 'dreaming-v2'",
+    decode: foldHexCopies,
   },
 ];
 
@@ -227,11 +234,12 @@ async function sweepTarget(
           after[col] = value ?? null;
           continue;
         }
-        const cleaned = scrub(value);
-        after[col] = cleaned;
-        if (cleaned !== value) {
+        const decoded = target.decode ? target.decode(value) : value;
+        const cleaned = scrub(decoded);
+        after[col] = cleaned === decoded ? value : cleaned;
+        if (cleaned !== decoded) {
           differs = true;
-          if (breaksJsonValidity(value, cleaned)) breaksJson = true;
+          if (breaksJsonValidity(decoded, cleaned)) breaksJson = true;
         }
       }
       if (!differs) continue;

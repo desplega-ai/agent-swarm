@@ -30,3 +30,40 @@ export function scrubJsonValue(value: unknown): ScrubbedText {
   // Every string leaf went through scrubSecrets; the brand holds.
   return JSON.stringify(scrubObject(value)) as ScrubbedText;
 }
+
+/**
+ * Fold every `<field>Hex` string of a JSON value back into `<field>` (UTF-8)
+ * and drop the hex. A hex copy hides a secret from the scrubber, so a sweep
+ * decodes it first. Returns the input unchanged when it is not JSON or holds
+ * no hex copy.
+ */
+export function foldHexCopies(value: string): string {
+  if (!value.includes('Hex"')) return value;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return value;
+  }
+  let folded = false;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    for (const [k, v] of Object.entries(obj)) {
+      const field = /^(.+)Hex$/.exec(k)?.[1];
+      if (field && typeof v === "string" && /^(?:[0-9a-fA-F]{2})*$/.test(v)) {
+        obj[field] = Buffer.from(v, "hex").toString("utf8");
+        delete obj[k];
+        folded = true;
+      } else {
+        walk(v);
+      }
+    }
+  };
+  walk(parsed);
+  return folded ? JSON.stringify(parsed) : value;
+}

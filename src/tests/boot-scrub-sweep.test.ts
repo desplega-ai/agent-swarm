@@ -428,7 +428,7 @@ describe("boot retro-sweep upgrade from v8", () => {
       ).toBe(`credential echo: [REDACTED:${name}]`);
       expect(
         await db.get("SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
-          bootScrubDoneKey(9),
+          bootScrubDoneKey(SCRUBBER_RULES_VERSION),
         ]),
       ).not.toBeNull();
       expect(await runBootScrubSweep({ reembed: false })).toBeNull();
