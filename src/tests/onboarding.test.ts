@@ -1470,6 +1470,42 @@ describe("onboarding memory: the deployment's local setup", () => {
     }
   });
 
+  test("a stored private endpoint keeps the SSRF check", async () => {
+    let hits = 0;
+    const stored = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    setDeploymentEnv("https://embeddings.example.com/v1");
+    try {
+      // A config writer stores a loopback URL over the deployment's endpoint.
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_BASE_URL",
+        value: stored.baseUrl,
+      });
+      await loadGlobalConfigsIntoEnv(true);
+      expect(process.env.EMBEDDING_API_BASE_URL).toBe(stored.baseUrl);
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing" },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+      expect(hits).toBe(0);
+    } finally {
+      stored.server.stop(true);
+      __resetInjectedEnvTracking();
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   test("a failed restore test keeps the stored setup", async () => {
     const local = startEmbeddingServer(() => new Response("model loading", { status: 503 }));
     setDeploymentEnv(local.baseUrl);

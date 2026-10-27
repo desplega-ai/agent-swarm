@@ -331,10 +331,14 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
       : (body.model ?? preset?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small");
 
   // Preset `existing` tests the server's own EMBEDDING_API_BASE_URL. When it is
-  // set, the URL is operator config, not request input, so a private endpoint
-  // (a local TEI at http://tei:80/v1) is allowed. Every URL that can come from
-  // the request still passes the SSRF check.
-  const configuredEndpoint = body.preset === "existing" && !!baseUrl;
+  // the deployment environment's value, the URL is operator config, not request
+  // input, so a private endpoint (a local TEI at http://tei:80/v1) is allowed. A
+  // value stored through `/api/config` and every URL that can come from the
+  // request still pass the SSRF check.
+  const configuredEndpoint =
+    body.preset === "existing" &&
+    !!baseUrl &&
+    baseUrl === getDeploymentEnvValue("EMBEDDING_API_BASE_URL");
   let endpoint: URL;
   try {
     endpoint = configuredEndpoint
