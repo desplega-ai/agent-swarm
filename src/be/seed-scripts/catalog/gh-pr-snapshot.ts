@@ -225,6 +225,29 @@ async function checkRunsOn(ctx: any, headers: any, api: string, sha: string) {
   return out;
 }
 
+/**
+ * Every commit status on the head, paged. A required status past the first page must not read
+ * absent, so a malformed page or a read that stops short of `total_count` throws instead.
+ */
+async function commitStatusesOn(ctx: any, headers: any, api: string, sha: string) {
+  const out: any[] = [];
+  let total = 0;
+  for (let page = 1; page <= 5; page++) {
+    const res: any = await gh(ctx, headers, `${api}/commits/${sha}/status?per_page=100&page=${page}`);
+    if (!res || !Array.isArray(res.statuses)) throw new Error(`status page ${page} is malformed`);
+    if (typeof res.total_count !== "number" || !Number.isFinite(res.total_count)) {
+      throw new Error(`status page ${page} has no numeric total_count`);
+    }
+    total = res.total_count;
+    out.push(...res.statuses);
+    if (out.length >= res.total_count || res.statuses.length < 100) break;
+  }
+  if (out.length < total) {
+    throw new Error(`read ${out.length} of ${total} statuses within 5 pages`);
+  }
+  return out;
+}
+
 /** Latest submitted review (PENDING drafts excluded) and whether it was left on the current head. */
 function latestReviewOf(list: any[], headSha: string | null) {
   const submitted = list.filter((r) => r && r.state && r.state !== "PENDING");
@@ -454,10 +477,9 @@ async function snapshot(
     // A required name grades its check runs and commit statuses together, so read both.
     if (required && required.length > 0) {
       try {
-        const combined = await gh(ctx, headers, api + "/commits/" + sha + "/status?per_page=100");
-        statusList = Array.isArray(combined?.statuses) ? combined.statuses : [];
+        statusList = await commitStatusesOn(ctx, headers, api, sha);
       } catch (error) {
-        // An unread status could be a failing required one: CI stays not green; say why.
+        // An unread or partial status read could hide a failing required one: CI stays not green.
         statusList = null;
         requiredChecksError =
           "could not read commit statuses: " + (error instanceof Error ? error.message : String(error));
