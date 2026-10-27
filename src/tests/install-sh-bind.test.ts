@@ -36,8 +36,8 @@ async function existingInstall(ports: string) {
   await Bun.write(join(installDir, ".env"), "API_KEY=k\nMCP_BASE_URL=http://localhost:3013\n");
 }
 
-async function install() {
-  const stubs = await makeDeployStubs(dir);
+async function install(env: Record<string, string> = {}) {
+  const stubs = await makeDeployStubs(dir, env);
   const r = await runChild(
     ["bash", INSTALL_SH, "--dir", installDir, "--no-tunnel", "--bind", "127.0.0.1"],
     { env: stubs.env },
@@ -110,6 +110,42 @@ describe("install.sh --bind", () => {
       ]);
       expect(r.out).toContain("Rewriting 2 port mapping(s)");
       expect(r.out).toContain(BOUND);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "stops the stack when onboard fails after starting it on every interface",
+    async () => {
+      const r = await install({ FAKE_ONBOARD_FAIL: "1" });
+      expect(r.exitCode).not.toBe(0);
+      expect(await r.stubs.history()).toContain("0.0.0.0:3013->3013/tcp");
+      expect(await r.stubs.ports()).toEqual([]);
+      expect(r.out).not.toContain(BOUND);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "stops the stack when the installer is terminated after onboard starts it",
+    async () => {
+      const r = await install({ FAKE_ONBOARD_FAIL: "term" });
+      expect(r.exitCode).not.toBe(0);
+      expect(await r.stubs.history()).toContain("0.0.0.0:3013->3013/tcp");
+      expect(await r.stubs.ports()).toEqual([]);
+      expect(r.out).not.toContain(BOUND);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "stops the stack when the generated compose file names another host address",
+    async () => {
+      const r = await install({ FAKE_ONBOARD_API_PORT: "0.0.0.0:3013:3013" });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.out).toContain("publishes ports that ignore --bind: 0.0.0.0:3013:3013");
+      expect(await r.stubs.history()).toContain("0.0.0.0:3013->3013/tcp");
+      expect(await r.stubs.ports()).toEqual([]);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

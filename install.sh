@@ -48,6 +48,9 @@ INSTALL_DIR="${AGENT_SWARM_DIR:-$DEFAULT_DIR}"
 PRESET="${AGENT_SWARM_PRESET:-$DEFAULT_PRESET}"
 CLI_VERSION="${AGENT_SWARM_CLI_VERSION:-$DEFAULT_CLI_VERSION}"
 LT_VERSION="${AGENT_SWARM_LT_VERSION:-$DEFAULT_LT_VERSION}"
+# 1 from just before the first `docker compose up` under --bind until
+# assert_ports_bound passes. While it is 1, on_exit stops the stack.
+PORTS_UNCHECKED=0
 CLI_PACKAGE="${AGENT_SWARM_CLI_PACKAGE:-}"
 
 usage() {
@@ -73,7 +76,7 @@ Options:
                      in .env). Docker-published ports bypass host firewalls such as ufw.
                      An older docker-compose.yml gets its port mappings rewritten (backup
                      in docker-compose.yml.bak). Fails, stopping the stack, if a running
-                     port still listens elsewhere.
+                     port still listens elsewhere, or if the install fails before that check.
   --no-agent-fs      Skip the bundled agent-fs (files, Comb) and TEI (memory
                      embeddings) services. New installs only.
   --dry-run          Print every command instead of running it
@@ -346,9 +349,22 @@ assert_ports_bound() {
       'index($0, a) != 1 && index($0, b) != 1' || true)"
   if [ -n "$exposed" ]; then
     docker compose stop </dev/null || true
+    PORTS_UNCHECKED=0
     die "ports are still published outside ${BIND_ADDRESS} ($(echo "$exposed" | tr '\n' ' ')), so the stack was stopped. Check the ports: sections of docker-compose.yml and any override file."
   fi
   say "Publishing ports on ${BIND_ADDRESS} only"
+}
+
+# EXIT trap under --bind. A CLI release before AGENT_SWARM_BIND_ADDRESS starts
+# the stack inside onboard with ports on every interface, so any exit before
+# assert_ports_bound passes (a failed onboard, a hard error, Ctrl-C) stops it.
+on_exit() {
+  local code=$?
+  if [ "$PORTS_UNCHECKED" -eq 1 ] &&
+    (cd "$INSTALL_DIR" && docker compose stop </dev/null >/dev/null 2>&1); then
+    warn "stopped the stack: its ports were not confirmed on ${BIND_ADDRESS}"
+  fi
+  exit "$code"
 }
 
 # Whether the stack runs the bundled agent-fs service. A dry run writes no
@@ -599,12 +615,20 @@ main() {
   # Exported so the first `docker compose up` (inside onboard) already binds
   # there, when the CLI release supports it. A compose file without the bind
   # prefix gets it and the stack is recreated; then the running ports are checked.
-  [ -z "$BIND_ADDRESS" ] || export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
+  # Until that check passes, on_exit stops the stack on any exit.
+  if [ -n "$BIND_ADDRESS" ]; then
+    export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      PORTS_UNCHECKED=1
+      trap on_exit EXIT
+    fi
+  fi
   onboard
   if [ -n "$BIND_ADDRESS" ]; then
     set_env_value AGENT_SWARM_BIND_ADDRESS "$BIND_ADDRESS"
     if bind_compose_ports; then compose_up; fi
     assert_ports_bound
+    PORTS_UNCHECKED=0
   fi
 
   local port api_key local_url dash_url
