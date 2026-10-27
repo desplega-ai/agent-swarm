@@ -146,6 +146,7 @@ function EmailInput({
   error,
   autoFocus,
   helper,
+  onBlur,
 }: {
   id: string;
   value: string;
@@ -153,6 +154,7 @@ function EmailInput({
   error: string | null;
   autoFocus?: boolean;
   helper: string;
+  onBlur?: () => void;
 }) {
   return (
     <SettingsRow
@@ -170,6 +172,7 @@ function EmailInput({
           placeholder="ada@acme.com"
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           aria-invalid={error ? true : undefined}
           className="pr-10"
         />
@@ -236,6 +239,9 @@ export function IdentityForm({
   const [jobFunction, setJobFunction] = useState<string | null>(null);
   // Enter in a field: show what is missing.
   const [attempted, setAttempted] = useState(false);
+  // A typed address that is not valid shows its error once focus leaves the
+  // field (a click on the held Continue too), not while the person types.
+  const [leftEmail, setLeftEmail] = useState(false);
   const finePointer = useFinePointer();
   // The name fields wait for a typing pause, so they do not flash in and out
   // while a returning user types their address.
@@ -569,7 +575,8 @@ export function IdentityForm({
             id="identity-email"
             value={email}
             onChange={setEmail}
-            error={attempted ? emailProblem : null}
+            onBlur={() => setLeftEmail(true)}
+            error={attempted || (leftEmail && email.trim()) ? emailProblem : null}
             autoFocus={autoFocus}
             helper={emailHint(email)}
           />

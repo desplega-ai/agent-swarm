@@ -285,6 +285,9 @@ function SetupFlow() {
   // True from a successful connect until the shell knows whether step 1 must
   // still ask "Who are you?". Step 1 stays on screen the whole time.
   const [afterConnect, setAfterConnect] = useState(false);
+  // "Change" on step 1: the connect form again, over the connected swarm.
+  const [changingConnection, setChangingConnection] = useState(false);
+  const connecting = !isConfigured || changingConnection;
   const identityPick = useIdentityPick();
 
   const visibleSteps = useVisibleOnboardingSteps({ enabled: isConfigured });
@@ -301,7 +304,7 @@ function SetupFlow() {
   // Wait for the identity checks before a resume picks the step (and writes `?step=`).
   const choosingStep = isConfigured && !afterConnect && !paramStep && identityPick.resolving;
   const stepId: OnboardingStepId =
-    !isConfigured || afterConnect ? "connect" : (paramStep ?? resumeStep);
+    connecting || afterConnect ? "connect" : (paramStep ?? resumeStep);
   const index = stepNumber(stepId, steps);
   const stepParam = String(index);
   const currentStep = data?.state.currentStep;
@@ -498,7 +501,7 @@ function SetupFlow() {
   const settled = status === "done" || status === "skipped";
   // A check that runs wins over a pass: a step tests again (memory) before it cheers.
   const hexyMood: HexyMood =
-    stepId === "connect" && !isConfigured
+    stepId === "connect" && connecting
       ? "welcome"
       : checkingShown
         ? "busy"
@@ -515,9 +518,12 @@ function SetupFlow() {
       ? { label: "Go to dashboard", blockedBy: null, onClick: () => void leave() }
       : {
           label: "Continue",
-          blockedBy:
-            blocker?.reason ??
-            (settled || action?.unlocks ? null : unsettledReason(stepId, status, data, aiKeySaved)),
+          blockedBy: changingConnection
+            ? unsettledReason("connect", status, data, aiKeySaved)
+            : (blocker?.reason ??
+              (settled || action?.unlocks
+                ? null
+                : unsettledReason(stepId, status, data, aiKeySaved))),
           onClick: () => void continueStep(),
           enterKey: true,
         };
@@ -532,7 +538,7 @@ function SetupFlow() {
             statuses={statuses}
             current={stepId}
             // Right after a connect the shell picks the step; the stepper waits.
-            onSelect={data && !afterConnect ? goTo : undefined}
+            onSelect={data && !afterConnect && !changingConnection ? goTo : undefined}
           />
         }
         onMinimize={data ? () => void leave("minimize") : undefined}
@@ -558,7 +564,7 @@ function SetupFlow() {
             tip={
               stepId !== "connect"
                 ? undefined
-                : !isConfigured
+                : connecting
                   ? INSTALL_TIP
                   : identityPick.needed
                     ? undefined
@@ -574,13 +580,14 @@ function SetupFlow() {
                 title={copy.title}
                 description={
                   stepId === "connect"
-                    ? connectDescription(isConfigured, identityPick.needed)
+                    ? connectDescription(!connecting, identityPick.needed)
                     : copy.description
                 }
               />
               <div className="flex flex-1 flex-col">
                 {Body === null ? (
-                  <div className="flex flex-col gap-4">
+                  // Centered in the height under the header, like step 7.
+                  <div className="flex flex-1 flex-col justify-center gap-4 pt-2 pb-16 short:pb-2">
                     {/* No swarm yet: the landing's install prompt is the first way in.
                         An install link already fills the form, so it skips the prompt. */}
                     {!isConfigured && !setupLink ? (
@@ -591,8 +598,13 @@ function SetupFlow() {
                     ) : null}
                     <StepConnect
                       onboarding={data ?? null}
-                      onConnected={() => void handleConnected()}
+                      onConnected={() => {
+                        setChangingConnection(false);
+                        void handleConnected();
+                      }}
                       act={data ? act : undefined}
+                      changing={changingConnection}
+                      onChanging={setChangingConnection}
                       {...setters.connect}
                     />
                   </div>
