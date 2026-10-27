@@ -84,7 +84,7 @@ describe("against the committed models.dev snapshot", () => {
     expect(fable?.id).toBe("claude-fable-5-1");
     expect(fable?.inputPerM).not.toBeNull();
     const haiku = await lookupModelCost("claude", "haiku");
-    expect(haiku?.id).toBe("claude-haiku-4-5");
+    expect(haiku?.id).toBe("claude-haiku-5-5");
     const sonnet = await lookupModelCost("claude", "sonnet");
     expect(sonnet?.id).toBe("claude-sonnet-5-5");
     expect(sonnet?.inputPerM).toBe(2);

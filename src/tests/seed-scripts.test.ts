@@ -15,6 +15,7 @@ import dreamingApply from "../be/seed-scripts/catalog/dreaming-apply";
 import dreamingHeartbeat from "../be/seed-scripts/catalog/dreaming-heartbeat";
 import dreamingMemtaxCreate from "../be/seed-scripts/catalog/dreaming-memtax-create";
 import dreamingTrim from "../be/seed-scripts/catalog/dreaming-trim";
+import ghPrSnapshot from "../be/seed-scripts/catalog/gh-pr-snapshot";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
@@ -1102,6 +1103,252 @@ describe("seed-scripts catalog", () => {
       recentlyFailedTasks: 1,
       stuckInProgressOnOfflineAgents: 1,
     });
+  });
+});
+
+describe("gh-pr-snapshot grades CI against the base branch's required checks", () => {
+  const HEAD = "a".repeat(40);
+
+  /** Fake GitHub: one PR on `main`, the given rulesets reply, check runs and statuses. */
+  function fakeGitHub(opts: {
+    rules: unknown;
+    rulesStatus?: number;
+    runs: unknown[];
+    statuses?: unknown[];
+    statusStatus?: number;
+    /** Raw combined-status body per page, replacing the paged `statuses` answer. */
+    statusPage?: (page: number) => unknown;
+  }) {
+    const urls: string[] = [];
+    const route = (url: string): { status: number; body: unknown } => {
+      urls.push(url);
+      if (url.includes("/rules/branches/"))
+        return { status: opts.rulesStatus ?? 200, body: opts.rules };
+      if (url.includes("/check-runs"))
+        return { status: 200, body: { total_count: opts.runs.length, check_runs: opts.runs } };
+      if (url.includes("/status")) {
+        const page = Number(new URL(url).searchParams.get("page") ?? "1");
+        const all = opts.statuses ?? [];
+        const body = opts.statusPage
+          ? opts.statusPage(page)
+          : { total_count: all.length, statuses: all.slice((page - 1) * 100, page * 100) };
+        return { status: opts.statusStatus ?? 200, body };
+      }
+      if (url.includes("/reviews")) return { status: 200, body: [] };
+      if (url.endsWith("/pulls/7")) {
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "t",
+            state: "open",
+            draft: false,
+            mergeable: true,
+            mergeable_state: "clean",
+            head: { sha: HEAD },
+            base: { ref: "main", repo: { default_branch: "main" } },
+            requested_reviewers: [],
+            html_url: "https://github.com/owner/repo/pull/7",
+          },
+        };
+      }
+      return { status: 404, body: { message: "Not Found" } };
+    };
+    // Both fetch styles, so an older revision of the script runs and fails on its answers.
+    const stdlib = {
+      fetch: async (url: string) => {
+        const r = route(url);
+        return new Response(JSON.stringify(r.body), { status: r.status });
+      },
+      fetchJson: async (url: string) => route(url).body,
+    };
+    return { ctx: { stdlib }, urls };
+  }
+
+  const run = (ctx: unknown) =>
+    ghPrSnapshot({ repo: "owner/repo", number: 7, token: "t" }, ctx) as Promise<any>;
+  const ok = (name: string) => ({ name, status: "completed", conclusion: "success" });
+  const failed = (name: string) => ({ name, status: "completed", conclusion: "failure" });
+  const requiresEntries = (...entries: { context: string; integration_id?: number }[]) => [
+    { type: "pull_request", parameters: {} },
+    { type: "required_status_checks", parameters: { required_status_checks: entries } },
+  ];
+  const requires = (...names: string[]) =>
+    requiresEntries(...names.map((context) => ({ context })));
+
+  test("a required check with no run on the head reads as pending, not green", async () => {
+    const { ctx, urls } = fakeGitHub({ rules: requires("Merge Gate"), runs: [ok("lint")] });
+    const out = await run(ctx);
+    expect(out.error).toBeUndefined();
+    expect(urls.some((u) => u.includes("/rules/branches/main"))).toBe(true);
+    expect(out.requiredChecks).toEqual([
+      { name: "Merge Gate", appId: null, state: "pending", url: null },
+    ]);
+    expect(out.checks).toEqual({ passed: 1, failed: 0, pending: 1 });
+    expect(out.checksSummary.requiredPending).toBe(1);
+    expect(out.ciGreen).toBe(false);
+    expect(out.controls.ok).toBe(true);
+  });
+
+  test("a failing required check named other than Merge Gate counts as required-failing", async () => {
+    const { ctx } = fakeGitHub({ rules: requires("ci", "e2e"), runs: [ok("ci"), failed("e2e")] });
+    const out = await run(ctx);
+    expect(out.checksSummary.requiredFailing).toBe(1);
+    expect(out.requiredChecks.find((r: any) => r.name === "e2e").state).toBe("failing");
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("duplicate check names collapse to the worst result", async () => {
+    const { ctx } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci"), failed("ci"), ok("lint")],
+    });
+    const out = await run(ctx);
+    expect(out.checks).toEqual({ passed: 1, failed: 1, pending: 0 });
+    expect(out.requiredChecks).toEqual([{ name: "ci", appId: null, state: "failing", url: null }]);
+  });
+
+  test("an unreadable ruleset is surfaced and CI never reads green", async () => {
+    const { ctx } = fakeGitHub({
+      rules: { message: "Resource not accessible by personal access token" },
+      rulesStatus: 403,
+      runs: [ok("Merge Gate")],
+    });
+    const out = await run(ctx);
+    expect(out.error).toBeUndefined();
+    expect(out.requiredChecks).toBeNull();
+    expect(out.requiredChecksError).toContain("403");
+    expect(out.checks.pending).toBe(1);
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("control: every required check passing reads green, a required status counts", async () => {
+    const { ctx } = fakeGitHub({
+      rules: requires("ci", "deploy"),
+      runs: [ok("ci"), failed("optional-lint")],
+      statuses: [{ context: "deploy", state: "success", target_url: "https://ci.example/1" }],
+    });
+    const out = await run(ctx);
+    expect(out.requiredChecks).toEqual([
+      { name: "ci", appId: null, state: "pass", url: null },
+      { name: "deploy", appId: null, state: "pass", url: "https://ci.example/1" },
+    ]);
+    expect(out.checks).toEqual({ passed: 2, failed: 1, pending: 0 });
+    expect(out.ciGreen).toBe(true);
+  });
+
+  test("a required check pinned to an app is satisfied only by that app's check run", async () => {
+    const rules = requiresEntries({ context: "Merge Gate", integration_id: 15368 });
+    const fromApp = (id: number) => ({ ...ok("Merge Gate"), app: { id } });
+    const foreign = await run(fakeGitHub({ rules, runs: [fromApp(999)] }).ctx);
+    expect(foreign.requiredChecks).toEqual([
+      { name: "Merge Gate", appId: 15368, state: "pending", url: null },
+    ]);
+    expect(foreign.ciGreen).toBe(false);
+    // A passing commit status of that name cannot be tied to the app, so it does not satisfy it.
+    const status = await run(
+      fakeGitHub({
+        rules,
+        runs: [fromApp(999)],
+        statuses: [{ context: "Merge Gate", state: "success" }],
+      }).ctx,
+    );
+    expect(status.ciGreen).toBe(false);
+    const own = await run(fakeGitHub({ rules, runs: [fromApp(15368)] }).ctx);
+    expect(own.requiredChecks[0].state).toBe("pass");
+    expect(own.ciGreen).toBe(true);
+    expect(own.controls.ok).toBe(true);
+  });
+
+  test("a failing commit status is not hidden by a passing check run of the same name", async () => {
+    const { ctx, urls } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci")],
+      statuses: [{ context: "ci", state: "failure", target_url: "https://ci.example/2" }],
+    });
+    const out = await run(ctx);
+    expect(urls.some((u) => u.includes("/status"))).toBe(true);
+    expect(out.requiredChecks).toEqual([
+      { name: "ci", appId: null, state: "failing", url: "https://ci.example/2" },
+    ]);
+    expect(out.checksSummary.requiredFailing).toBe(1);
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("an unreadable commit status read never reads green", async () => {
+    const { ctx } = fakeGitHub({ rules: requires("ci"), runs: [ok("ci")], statusStatus: 500 });
+    const out = await run(ctx);
+    expect(out.error).toBeUndefined();
+    expect(out.requiredChecksError).toContain("could not read commit statuses");
+    expect(out.checks.pending).toBe(1);
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("a failing required status on page two is not hidden by a passing check run", async () => {
+    const filler = Array.from({ length: 100 }, (_, i) => ({ context: `s${i}`, state: "success" }));
+    const { ctx, urls } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci")],
+      statuses: [
+        ...filler,
+        { context: "ci", state: "failure", target_url: "https://ci.example/3" },
+      ],
+    });
+    const out = await run(ctx);
+    expect(out.ciGreen).toBe(false);
+    expect(urls.some((u) => u.includes("/status") && u.includes("page=2"))).toBe(true);
+    expect(out.requiredChecksError).toBeNull();
+    expect(out.requiredChecks).toEqual([
+      { name: "ci", appId: null, state: "failing", url: "https://ci.example/3" },
+    ]);
+  });
+
+  test("a malformed commit status payload never reads green", async () => {
+    for (const body of [{ total_count: 1, statuses: "nope" }, { statuses: [] }, null]) {
+      const out = await run(
+        fakeGitHub({ rules: requires("ci"), runs: [ok("ci")], statusPage: () => body }).ctx,
+      );
+      expect(out.ciGreen).toBe(false);
+      expect(out.error).toBeUndefined();
+      expect(out.requiredChecksError).toContain("could not read commit statuses");
+      expect(out.checks.pending).toBe(1);
+    }
+  });
+
+  test("a status read capped before total_count never reads green", async () => {
+    const page = Array.from({ length: 100 }, (_, i) => ({ context: `s${i}`, state: "success" }));
+    const { ctx, urls } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci")],
+      statusPage: () => ({ total_count: 600, statuses: page }),
+    });
+    const out = await run(ctx);
+    expect(out.ciGreen).toBe(false);
+    expect(urls.filter((u) => u.includes("/status")).length).toBe(5);
+    expect(out.requiredChecksError).toContain("read 500 of 600 statuses");
+    expect(out.checks.pending).toBe(1);
+  });
+
+  test("a later status page that lowers total_count never reads green", async () => {
+    const page = Array.from({ length: 100 }, (_, i) => ({ context: `s${i}`, state: "success" }));
+    const { ctx, urls } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci")],
+      statusPage: (n) => ({ total_count: n === 1 ? 300 : 100, statuses: page }),
+    });
+    const out = await run(ctx);
+    expect(out.ciGreen).toBe(false);
+    expect(urls.filter((u) => u.includes("/status")).length).toBe(2);
+    expect(out.requiredChecksError).toContain("status page 2 changed total_count from 300 to 100");
+    expect(out.checks.pending).toBe(1);
+  });
+
+  test("control: a branch with no required checks gates on every check", async () => {
+    const green = await run(fakeGitHub({ rules: [], runs: [ok("lint")] }).ctx);
+    expect(green.requiredChecks).toEqual([]);
+    expect(green.ciGreen).toBe(true);
+    const red = await run(fakeGitHub({ rules: [], runs: [ok("lint"), failed("tsc")] }).ctx);
+    expect(red.ciGreen).toBe(false);
   });
 });
 

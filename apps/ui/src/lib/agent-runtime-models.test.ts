@@ -73,9 +73,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
 
   test("Pi and Opencode read <provider>/<id>, the id may hold more slashes", () => {
     const openrouter = "openrouter/deepseek/deepseek-v4.1-flash";
-    // pi and opencode pass the model's own effort values through.
-    expect(effortLevelsFor("pi", openrouter)).toEqual(["low", "high", "max"]);
-    expect(effortLevelsFor("opencode", openrouter)).toEqual(["low", "high", "max"]);
+    // pi and opencode pass the model's own effort values through (`none` is off).
+    expect(effortLevelsFor("pi", openrouter)).toEqual(["off", "low", "high", "max"]);
+    expect(effortLevelsFor("opencode", openrouter)).toEqual(["off", "low", "high", "max"]);
     // A bare id names no provider: unknown.
     expect(effortLevelsFor("pi", "deepseek-v4-flash")).toEqual([]);
   });
@@ -104,9 +104,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
       "high",
       "max",
     ]);
-    expect(effortLevelsFor("dsh", "deepseek-v4-pro")).toEqual(["off", "high", "max"]);
-    // dsh's own id for V4.1 Flash is not in the catalog: no level is claimed for it.
-    expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual([]);
+    expect(effortLevelsFor("dsh", "deepseek-v4-pro")).toEqual(["off", "low", "high", "max"]);
+    // dsh's own id for V4.1 Flash reads its `deepseek` section row.
+    expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual(["off", "low", "high", "max"]);
   });
 
   test("amp: a mode names no model, so only a pinned provider/model takes effort", () => {

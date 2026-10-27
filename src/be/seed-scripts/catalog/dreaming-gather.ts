@@ -306,7 +306,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
     blockerDigest.taskState = taskState;
   }
 
-  // Night number + workflow changes since the previous scheduled run (KV snapshot, else workflow_versions).
+  // Night number + workflow changes since the previous real run (KV snapshot, else workflow_versions).
+  // A real run is any non-dry run of this workflow: the seeded daily schedule fires trigger-workflow, which records
+  // triggerType 'manual', so filtering on triggerType would never find a previous night. Dry = the same rule as `dryRun` above.
   let night: any = { number: null, previousRunId: null };
   let workflowChanges: any = { base: "none", baseRef: null, added: [], removed: [], changed: [] };
   let workflowSnapshot: Record<string, string> = {};
@@ -316,8 +318,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
     if (wfId) {
       const prev = await q(
         "prevRuns",
-        `SELECT id, startedAt FROM workflow_runs WHERE workflowId = ? AND triggerType = 'schedule' AND id != ?
-           AND julianday(startedAt) < julianday(?) ORDER BY startedAt DESC`,
+        `SELECT id, startedAt FROM workflow_runs WHERE workflowId = ? AND id != ?
+           AND julianday(startedAt) < julianday(?)
+           AND COALESCE(CASE WHEN json_valid(triggerData) THEN json_type(triggerData, '$.dryRun') = 'true'
+             OR json_extract(triggerData, '$.dryRun') = 'true' END, 0) = 0
+         ORDER BY startedAt DESC`,
         [wfId, a.runId ?? "", me?.[0]?.startedAt],
       );
       night = { number: (prev?.length ?? 0) + 1, previousRunId: prev?.[0]?.id ?? null, previousStartedAt: prev?.[0]?.startedAt ?? null };
