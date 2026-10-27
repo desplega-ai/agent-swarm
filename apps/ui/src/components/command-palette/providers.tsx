@@ -121,8 +121,13 @@ function apiSearch<T>(
       refetchOnWindowFocus: false,
       retry: false,
     });
+    // A placeholder answered the previous query: its server match says
+    // nothing about this one, so only the client matcher may keep its rows.
+    const results = result.isPlaceholderData
+      ? (result.data ?? []).map((row) => ({ ...row, serverMatched: false }))
+      : (result.data ?? []);
     return {
-      results: result.data ?? [],
+      results,
       loading: result.isFetching,
       error: result.isError,
     };

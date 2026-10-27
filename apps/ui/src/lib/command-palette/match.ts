@@ -111,7 +111,8 @@ export interface Rankable {
   keywords?: readonly string[];
   /**
    * The server matched this row on text the row does not carry (a prompt past
-   * its preview): keep it when the client matcher misses, ranked last.
+   * its preview): keep it when the client matcher misses, ranked last. Only
+   * an answer to the current query may set it, never a placeholder.
    */
   serverMatched?: boolean;
 }
