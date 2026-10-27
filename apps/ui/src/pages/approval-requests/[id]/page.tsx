@@ -47,6 +47,7 @@ import {
   respondErrorMessage,
 } from "@/lib/approval-format";
 import { type DetailShortcut, matchDetailShortcut } from "@/lib/approval-shortcuts";
+import { useCan } from "@/lib/use-can";
 import { formatSmartTime } from "@/lib/utils";
 import { ApprovalVotes } from "../components/approval-votes";
 import { RequestHeader } from "../components/request-header";
@@ -137,8 +138,10 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         ? OPERATOR_RESPONDER
         : null;
   const answeredByMe = answeredHere || hasAnswered(request, myResponder);
+  // A Viewer cannot answer: no approve or reject, only the request itself.
+  const canRespond = useCan("approval.respond");
   // Pending and not yet answered from this credential: the form is live.
-  const editing = isPending && !answeredByMe;
+  const editing = isPending && !answeredByMe && canRespond;
   const myVote = answeredByMe
     ? (request.approvals?.find((vote) => vote.responder === myResponder) ??
       request.approvals?.at(-1))
@@ -433,7 +436,12 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         </FadeIn>
         {/* Room for the fixed phone bar under the last card. */}
         {editing ? <div aria-hidden className="h-28 md:hidden" /> : null}
-        {isPending && !editing ? (
+        {isPending && !answeredByMe && !canRespond ? (
+          <output className="mt-3 block rounded-xl border border-border-subtle bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+            Your role cannot answer approval requests. An admin or an approver can.
+          </output>
+        ) : null}
+        {isPending && answeredByMe ? (
           <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-subtle bg-muted/40 px-4 py-3">
             <output className="block min-w-0 flex-1 text-xs text-muted-foreground">
               Your approval is recorded{quorum ? ` (${quorum})` : ""}. The request stays pending

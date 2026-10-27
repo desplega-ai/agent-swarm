@@ -43,6 +43,10 @@ const ENV_KEYS = [
   "SLACK_SIGNING_SECRET",
   "STEERING_ENABLED",
   "AGENT_FS_API_URL",
+  "AGENT_FS_LINK_TARGET",
+  "AGENT_FS_LIVE_URL",
+  "APP_URL",
+  "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
 ] as const;
 
@@ -504,6 +508,47 @@ describe("getBasePrompt: outputs section", () => {
     expect(result).not.toContain(NO_AGENT_FS_LINE);
   });
 
+  test("AGENT_FS_LINK_TARGET=dashboard with APP_URL links people to <APP_URL>/file/~/", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    process.env.APP_URL = "http://localhost:5274/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+    );
+    expect(result).not.toContain("AGENT_FS_LIVE_URL}/file/~/");
+  });
+
+  test("AGENT_FS_LINK_TARGET=dashboard without APP_URL falls back to the live base", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `https://live.example.test/file/~/<org>/<drive>/<path>`.",
+    );
+  });
+
+  test("AGENT_FS_LINK_TARGET=live uses the default live host", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "live";
+    process.env.APP_URL = "http://localhost:5274";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      "Give people the live app link `https://live.agent-fs.dev/file/~/<org>/<drive>/<path>`.",
+    );
+  });
+
+  test("an invalid AGENT_FS_LINK_TARGET keeps the exact old sentence", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_LINK_TARGET = "Dashboard2";
+    process.env.APP_URL = "http://localhost:5274";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(
+      `Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`,
+    );
+  });
+
   test("uses the no_agent_fs variant when AGENT_FS_API_URL is unset", async () => {
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toContain("## Outputs");
@@ -796,9 +841,75 @@ describe("getBasePrompt: tools and skills section", () => {
     );
   });
 
+  test("pi with deferral points installed MCP servers at tool search", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: true },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain(
+      "Connected MCP servers: linear. Load their tools with your harness tool search.",
+    );
+    expect(result).not.toContain("Their tools are in your tool list.");
+  });
+
+  test("pi without deferral keeps installed MCP servers in the tool list", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: false },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain("Connected MCP servers: linear. Their tools are in your tool list.");
+  });
+
   test("omits the MCP server line for an empty list", async () => {
     const result = await getBasePrompt({ ...minimalArgs, mcpServers: [] });
     expect(result).not.toContain("Connected MCP servers");
+  });
+});
+
+describe("getBasePrompt: lead docs pointer", () => {
+  const DOCS_LINE =
+    "Load the `swarm-docs` skill only when a person asks for something no skill, workflow, schedule or memory of yours covers, or asks where something is documented. Then follow its offer rules.";
+  const withDocs = [
+    { name: "commit", description: "Create a commit" },
+    { name: "swarm-docs", description: "docs index" },
+  ];
+
+  test("renders for a lead that has the swarm-docs skill", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: withDocs,
+    });
+    expect(result).toContain(DOCS_LINE);
+  });
+
+  test("drops the line when swarm-docs is disabled for the lead", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: [{ name: "commit", description: "Create a commit" }],
+    });
+    expect(result).not.toContain(DOCS_LINE);
+  });
+
+  test("renders when the skill list is unknown (claude-managed)", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: managedTraits });
+    expect(result).toContain(DOCS_LINE);
+  });
+
+  test("never renders for a worker", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: localTraits,
+      skillsSummary: withDocs,
+    });
+    expect(result).not.toContain(DOCS_LINE);
   });
 });
 
@@ -1024,14 +1135,16 @@ describe("getBasePrompt: size budget", () => {
     expect(result.length).toBeLessThan(5_750);
   });
 
-  test("a fresh claude lead stays under 5,900 characters", async () => {
+  // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
+  // while the skill list is still unknown.
+  test("a fresh claude lead stays under 6,100 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(5_900);
+    expect(result.length).toBeLessThan(6_100);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {
@@ -1134,9 +1247,7 @@ describe("getBasePrompt: harness tool discovery", () => {
 
   test.each([
     "pi",
-    "codex",
     "claude-managed",
-    "opencode",
     "acp",
   ])("%s without tool search gets direct-tool guidance", async (provider) => {
     const result = await getBasePrompt({
@@ -1159,6 +1270,30 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain("`tool_search` and `code_exec`");
     expect(result).toContain("`store-progress` is `store_progress`");
     expect(result).toContain('import { store_progress } from "agent-swarm"');
+  });
+
+  test("codex gets exec guidance with the normalized tool name", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "codex",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain("await tools.mcp__agent_swarm__store_progress({ ... })");
+    expect(result).toContain("`ALL_TOOLS`");
+  });
+
+  test("opencode gets execute guidance with the bracketed tool path", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "opencode",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain('await tools.swarm["store-progress"]({ ... })');
+    expect(result).toContain("`search({ query })`");
   });
 
   test("omitted tool-search capability defaults to direct tools", async () => {
@@ -1198,6 +1333,18 @@ describe("getBasePromptWithParts", () => {
       Object.keys(matrix).map((name) => baselineKey(deployment, name)),
     );
     expect(Object.keys(MAIN_BASELINE).sort()).toEqual(keys.sort());
+  });
+
+  test("the lead docs pointer gets its own part", async () => {
+    const { prompt, parts } = await getBasePromptWithParts({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: [{ name: "swarm-docs", description: "docs index" }],
+    });
+    const docs = parts.find((part) => part.id === "system.agent.lead.docs");
+    expect(docs?.chars).toBeGreaterThan(0);
+    expect(promptChars(parts)).toBe(prompt.length);
   });
 
   describe("template overrides", () => {

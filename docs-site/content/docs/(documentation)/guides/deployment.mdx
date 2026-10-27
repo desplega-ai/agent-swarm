@@ -1,6 +1,9 @@
 ---
 title: Deployment Guide
 description: Deploy Agent Swarm to production with Docker Compose — volumes, networking, secrets, and persistent storage
+agent:
+  offer: true
+  when: "Someone wants to run Agent Swarm on their own server with Docker Compose"
 ---
 
 For Kubernetes, see [Kubernetes and Helm](/docs/guides/kubernetes) for installation, API ingress, dashboard access, and CORS diagnostics.
@@ -16,6 +19,7 @@ Before you start, make sure you have:
 - **Docker & Docker Compose** installed ([install guide](https://docs.docker.com/get-docker/)). Rootless Podman with a Compose provider also works; see [Rootless Podman](/docs/guides/podman-rootless).
 - **A Claude Code OAuth token** — run `claude setup-token` in your terminal to get one
 - **An API key** — any secret string you choose (all services share this key for authentication)
+- **A host with at least 4 vCPU, 8 GB RAM and 40 GB of free disk.** Upgrades leave old images behind, so schedule a prune; see [Host requirements & disk cleanup](/docs/guides/host-requirements)
 
 ### Step 1: Download the Compose File
 
@@ -559,13 +563,13 @@ docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```bash
 docker build -f Dockerfile.worker -t agent-swarm-worker .
 
-# Override the pinned Claude Code version (default: 2.1.310)
+# Override the pinned Claude Code version (default: 2.1.311)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.310`
+- `CLAUDE_CODE_VERSION=2.1.311`
 - `PI_CODING_AGENT_VERSION=1.4.0`
 - `CODEX_VERSION=0.164.0`
 - `OPENCODE_VERSION=2.1.4` (installs `@opencode/cli` and `@opencode/sdk`)

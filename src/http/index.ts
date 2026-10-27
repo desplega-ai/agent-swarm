@@ -70,6 +70,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
+import { handleAgentFsProxy } from "./agentfs-proxy";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
@@ -148,6 +149,7 @@ import {
   getPathSegments,
   httpServerSemconvAttributes,
   parseQueryParams,
+  redactShareTokenInPath,
   safeRequestUrlForLog,
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
@@ -320,7 +322,7 @@ const httpServer = createHttpServer(async (req, res) => {
           spanName,
           {
             "http.request.method": req.method ?? "",
-            "url.path": reqPath,
+            "url.path": redactShareTokenInPath(reqPath),
             "url.scheme": semconv["url.scheme"],
             "http.route": httpRoute,
             "server.address": semconv["server.address"],
@@ -375,6 +377,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePoolKeys(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
+        () => handleAgentFsProxy(req, res),
         () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),
@@ -519,7 +522,7 @@ async function shutdown() {
   await stopChatSdk();
 
   // Stop OAuth keepalive
-  if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+  if (!isEnvFlagEnabled("OAUTH_KEEPALIVE_DISABLE", false)) {
     const { stopOAuthKeepalive } = await import("../oauth/keepalive");
     await stopOAuthKeepalive();
   }
@@ -849,7 +852,7 @@ httpServer
     startRuntimeSupervisor();
 
     // Start OAuth token keepalive (proactive refresh to prevent expiry)
-    if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+    if (!isEnvFlagEnabled("OAUTH_KEEPALIVE_DISABLE", false)) {
       const { startOAuthKeepalive } = await import("../oauth/keepalive");
       startOAuthKeepalive();
     }
@@ -857,7 +860,7 @@ httpServer
     // Start generic OAuth token refresh sweep (all oauth_apps providers,
     // 15-min tick, first run ~1 min after boot). Complements the tracker-only
     // keepalive above — see src/be/oauth-refresh-sweep.ts.
-    if (process.env.OAUTH_REFRESH_SWEEP_DISABLE !== "true") {
+    if (!isEnvFlagEnabled("OAUTH_REFRESH_SWEEP_DISABLE", false)) {
       const { startOAuthRefreshSweep } = await import("../be/oauth-refresh-sweep");
       startOAuthRefreshSweep();
     }

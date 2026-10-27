@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-26T01:10:17.985Z",
+  "deployType": "local",
+  "preset": "solo",
+  "provider": "claude",
+  "providerLabel": "Claude Code",
+  "harness": "claude",
+  "containerEngine": "docker",
+  "services": [
+    {
+      "name": "worker-coder",
+      "templateId": "official/coder",
+      "agentId": "87dfb7ee-6a8a-4081-be61-003cfbc85c5c",
+      "role": "worker",
+      "displayName": "Coder"
+    }
+  ],
+  "integrations": {
+    "github": false,
+    "slack": false,
+    "gitlab": false,
+    "sentry": false
+  },
+  "slackMode": "socket",
+  "composePath": "./docker-compose.yml",
+  "envPath": "./.env",
+  "apiUrl": "http://localhost:3013",
+  "dashboardUrl": "https://app.agent-swarm.dev"
+}

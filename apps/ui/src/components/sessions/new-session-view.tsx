@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import type { AgentTask } from "@/api/types";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
+import { useCan } from "@/lib/use-can";
 import { RecordAudioButton, useAudioRecorder } from "./audio-recorder";
 import { ComposerDock } from "./composer-dock";
 import { useStartSession } from "./use-start-session";
@@ -39,6 +40,8 @@ export function NewSessionView({
   draftState?: [string, (value: string) => void];
 } = {}) {
   const navigate = useNavigate();
+  // A Viewer reads sessions but cannot start one.
+  const mayCreate = useCan("task.create.own");
   const { userId, setDraft, isPending, addAttachment, composerProps } = useStartSession({
     key: startKey,
     onStarted: onStarted ?? ((created) => void navigate(`/sessions/${created.id}`)),
@@ -85,27 +88,37 @@ export function NewSessionView({
             Describe a goal. The lead agent picks it up, spawns the right crew, and chains the
             follow-ups under one session.
           </p>
-          <SuggestionChips
-            suggestions={SUGGESTIONS}
-            onPick={setDraft}
-            disabled={!userId || isPending}
-          />
+          {mayCreate ? (
+            <SuggestionChips
+              suggestions={SUGGESTIONS}
+              onPick={setDraft}
+              disabled={!userId || isPending}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Your role can read sessions but not start them. Ask an admin for the Requester role.
+            </p>
+          )}
         </div>
       </div>
 
-      <ComposerDock
-        {...composerProps}
-        modeControl={startIn}
-        placeholder={
-          userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
-        }
-        sendLabel="Start session"
-        extraActions={
-          <RecordAudioButton recorder={recorder} disabled={!userId || isPending} bar={touch} />
-        }
-        touch={touch}
-        autoFocus
-      />
+      {mayCreate ? (
+        <ComposerDock
+          {...composerProps}
+          modeControl={startIn}
+          placeholder={
+            userId
+              ? "What's the goal?"
+              : "Pick an identity in the sidebar before starting a session."
+          }
+          sendLabel="Start session"
+          extraActions={
+            <RecordAudioButton recorder={recorder} disabled={!userId || isPending} bar={touch} />
+          }
+          touch={touch}
+          autoFocus
+        />
+      ) : null}
     </>
   );
 }

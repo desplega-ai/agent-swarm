@@ -872,6 +872,9 @@
     },
     "used_at": {
       "exempt": "timestamp"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "context_versions": {
@@ -2488,6 +2491,9 @@
       "exempt": "hash or digest"
     },
     "fsMode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "executor": {
       "exempt": "enum or fixed-format value"
     },
     "createdByAgentId": {

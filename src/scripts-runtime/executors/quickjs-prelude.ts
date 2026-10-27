@@ -308,14 +308,116 @@ define("__swarm_ctx", ctx);
  * zod `argsSchema` check, the same contract as `eval-harness.ts`.
  */
 export const SANDBOX_EPILOGUE = String.raw`(async () => {
+  const isStructuralSchemaNode = (schema) => {
+    if (!schema || typeof schema !== "object") return false;
+    const def = schema._zod && schema._zod.def;
+    if (!def || typeof def !== "object") return false;
+    if (def.coerce) return false;
+    if (Array.isArray(def.checks) && def.checks.length > 0) return false;
+    switch (def.type) {
+      case "string":
+      case "number":
+        return !def.format;
+      case "boolean":
+      case "literal":
+      case "enum":
+        return true;
+      case "optional":
+      case "nullable":
+        return isStructuralSchemaNode(def.innerType);
+      case "array":
+        return isStructuralSchemaNode(def.element);
+      case "object": {
+        const rawShape = typeof def.shape === "function" ? def.shape() : def.shape;
+        if (!rawShape || typeof rawShape !== "object") return false;
+        return Object.values(rawShape).every(isStructuralSchemaNode);
+      }
+      default:
+        return false;
+    }
+  };
+  const isHostValidationEquivalent = (schema, value) => {
+    if (!schema || typeof schema !== "object") return false;
+    const def = schema._zod && schema._zod.def;
+    if (!def || typeof def !== "object") return false;
+    if (def.coerce) return false;
+    if (Array.isArray(def.checks) && def.checks.length > 0) return false;
+    switch (def.type) {
+      case "string":
+        return typeof value === "string" && !def.format;
+      case "number":
+        return typeof value === "number" && Number.isFinite(value) && !def.format;
+      case "boolean":
+        return typeof value === "boolean";
+      case "literal": {
+        const rawValues = def.values;
+        const values = Array.isArray(rawValues)
+          ? rawValues
+          : rawValues instanceof Set
+            ? Array.from(rawValues)
+            : [];
+        return (
+          values.length > 0 &&
+          values.some((v) => v === value && typeof v !== "bigint" && typeof v !== "symbol")
+        );
+      }
+      case "enum": {
+        if (schema._zod && schema._zod.values instanceof Set) {
+          return schema._zod.values.has(value);
+        }
+        const entriesObj = def.entries && typeof def.entries === "object" ? def.entries : null;
+        if (!entriesObj) return false;
+        const entries = Object.values(entriesObj).filter(
+          (v) => !(typeof v === "string" && typeof entriesObj[v] === "number"),
+        );
+        return entries.length > 0 && entries.includes(value);
+      }
+      case "optional":
+        return value === undefined
+          ? isStructuralSchemaNode(def.innerType)
+          : isHostValidationEquivalent(def.innerType, value);
+      case "nullable":
+        return value === null
+          ? isStructuralSchemaNode(def.innerType)
+          : isHostValidationEquivalent(def.innerType, value);
+      case "array":
+        return (
+          Array.isArray(value) &&
+          isStructuralSchemaNode(def.element) &&
+          value.every((item) => isHostValidationEquivalent(def.element, item))
+        );
+      case "object": {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+        const shape = typeof def.shape === "function" ? def.shape() : def.shape;
+        if (!shape || typeof shape !== "object") return false;
+        for (const key of Object.keys(value)) {
+          if (!Object.hasOwn(shape, key)) return false;
+        }
+        for (const [key, propSchema] of Object.entries(shape)) {
+          if (!Object.hasOwn(value, key) && key in value) return false;
+          const propValue = value[key];
+          if (!isHostValidationEquivalent(propSchema, propValue)) return false;
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
+  };
   const mod = globalThis.__swarm_module;
   if (!mod || typeof mod.default !== "function") {
     throw new Error(
       "Swarm script must export a default function. Script must export default async function (args, ctx): args FIRST, ctx second.",
     );
   }
+  const hostValidatedArgs = globalThis.__swarm_host_validated_args === true;
   let args = globalThis.__swarm_args;
-  if (mod.argsSchema && typeof mod.argsSchema === "object" && "parse" in mod.argsSchema) {
+  if (
+    mod.argsSchema &&
+    typeof mod.argsSchema === "object" &&
+    "parse" in mod.argsSchema &&
+    !(hostValidatedArgs && isHostValidationEquivalent(mod.argsSchema, args))
+  ) {
     try {
       args = mod.argsSchema.parse(args);
     } catch (error) {

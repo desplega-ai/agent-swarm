@@ -176,6 +176,7 @@ export {
   useCancelTask,
   useCreateTask,
   usePauseTask,
+  useRequestComposition,
   useResumeTask,
   useSteerTask,
   useTask,

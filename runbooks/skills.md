@@ -15,6 +15,8 @@ They are **not** interchangeable. Pick deliberately.
 
 **For worker skills, prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
 
+> The `swarm-docs` skill body carries a generated docs index between the `docs-index` markers in its `content.md`. Edited a docs page's frontmatter, or added, moved or removed a page? Run `bun run build:docs-index` and commit the result. CI (`bun run check:docs-index`) rejects drift and enforces the `agent` frontmatter rules in `docs-site/CLAUDE.md`.
+
 > Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI (`bun run check:skill-md`) rejects drift.
 
 ## Public operator skills
@@ -103,6 +105,7 @@ seeded skills are named by the prompt, five of them with a MUST pointer:
 | `slack-interaction` | MUST, before any Slack post | engine-owned posts, the one-message rule, tools, unknown users, standing orders |
 | `code-quality` | MUST, before push/PR/review (repository block) | gh/glab, PR checks, CI loop, merge policy, review rules, review-reply provenance |
 | `heartbeat-runbook` | MUST, lead heartbeat checklist | cap policy, lift triggers, checklist and boot-triage steps |
+| `swarm-docs` | lead, on demand: a request nothing the lead already has covers, or a where-is-it-documented question (`system.agent.lead.docs`, rendered only when the lead has the skill) | offer rules, page fetch and offline fallback, generated docs index |
 | `scheduling` | plain pointer | `create-schedule` target types, timing, verify and repair |
 | `pages`, `apps`, `agent-fs` | plain pointers (outputs block) | publishing, apps, the shared drive |
 | `workflow-iterate` | plain pointer (lead) | building workflows |

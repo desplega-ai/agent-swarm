@@ -1,0 +1,19 @@
+swarm-api 188.1MiB / 7.564GiB 0.69%
+swarm-lead 122.9MiB / 7.564GiB 0.18%
+swarm-worker-coder 123MiB / 7.564GiB 0.21%
+swarm-worker-content-reviewer 123.8MiB / 7.564GiB 0.20%
+swarm-worker-content-strategist 121.2MiB / 7.564GiB 0.35%
+swarm-worker-content-writer 124.1MiB / 7.564GiB 0.21%
+swarm-worker-discoverability-optimizer 123MiB / 7.564GiB 0.19%
+swarm-worker-forward-deployed-engineer 124.6MiB / 7.564GiB 0.20%
+swarm-worker-researcher 122.1MiB / 7.564GiB 0.21%
+swarm-worker-reviewer 122.4MiB / 7.564GiB 0.20%
+swarm-worker-tester 122.5MiB / 7.564GiB 0.18%
+swarm-worker-ux-principles 122.5MiB / 7.564GiB 0.21%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        2307         444           5        5309        5438
+Status: Downloaded newer image for ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+pull_s 5.551939761
+cpu-1.9.4 685MB
+685479641

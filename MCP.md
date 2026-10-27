@@ -359,6 +359,7 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 | `failureReason` | `string` | No | - | The reason for failure (used when failing). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `citations` | `array` | No | - | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity. |
+| `learning` | `unknown` | No | - | A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. The first line of text is the title. At most ~500 tokens and 5 kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update. |
 | `persistMemory` | `boolean` | No | - | Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true. |
 | `force` | `boolean` | No | - | On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure. |
 
@@ -690,6 +691,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `intent` | `string` | No | "" | Why this script is being run. |
 | `scope` | `unknown` | No | - | Optional scope for named script resolution. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
+| `executor` | `unknown` | No | - | Optional executor override ("native" or "quickjs"). When omitted, named scripts use their saved executor or SCRIPT_EXECUTOR. |
 | `idempotencyKey` | `string` | No | - | When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get. |
 
 ### script-upsert
@@ -704,6 +706,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
+| `executor` | `unknown` | No | - | Optional per-script executor override ("native" or "quickjs"). Null or omitted inherits SCRIPT_EXECUTOR. |
 
 ### extension-delete
 
@@ -1499,6 +1502,8 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Workflow ID to trigger |
 | `triggerData` | `object` | No | - | Optional data to pass as trigger context to the workflow |
+| `wait` | `boolean` | No | - | Default true: return after the run's instant steps ran, when it finishes or parks at its first async step. false: return as soon as the run is created and walk it in the background. Use false from a script or step that only needs the runId. |
+| `idempotencyKey` | `string` | No | - | Optional, 1-255 visible ASCII characters, scoped to the calling agent and this workflow. The first trigger accepted under a key starts one run; the key is recorded in the run's own transaction and never expires. A retry with the same key and triggerData starts nothing and returns that run (replayed: true), even if the earlier call was killed before it saw the answer. The same key with other triggerData is an error with idempotencyConflict: true. |
 
 ### list-workflow-runs
 

@@ -28,6 +28,7 @@ type ScriptEmbeddingCandidateRow = ScriptEmbeddingRow & {
   isScratch: number;
   typeChecked: number;
   fsMode: "none" | "workspace-rw";
+  executor: "native" | "quickjs" | null;
   createdByAgentId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -70,6 +71,7 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
     isScratch: row.isScratch === 1,
     typeChecked: row.typeChecked === 1,
     fsMode: row.fsMode,
+    executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -79,7 +81,7 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
 export async function embedScript(script: ScriptRecord): Promise<void> {
   const text = scriptEmbeddingText(script);
   const provider = embeddingProvider();
-  const embedding = await provider.embed(text);
+  const embedding = await provider.embed(text, { kind: "document" });
   if (!embedding) return;
 
   if (embedding.length !== provider.dimensions) {
@@ -205,7 +207,7 @@ export async function searchScripts(args: {
   limit?: number;
 }): Promise<ScriptSearchResult[]> {
   const provider = embeddingProvider();
-  const queryEmbedding = await provider.embed(args.query);
+  const queryEmbedding = await provider.embed(args.query, { kind: "query" });
   if (!queryEmbedding) return lexicalFallback(args);
 
   const candidates = await candidateRows(args.scope, args.scopeId);

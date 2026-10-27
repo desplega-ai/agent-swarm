@@ -83,6 +83,7 @@ import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/open
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
+import { probeScriptRunner } from "./script-runner-probe";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
 import "./templates";
 
@@ -1703,8 +1704,20 @@ export async function defaultChecklistGateRunner(
   scriptName: string,
   leadAgentId: string,
   signal: AbortSignal,
-  deps: Parameters<typeof runSavedScriptAsAgent>[1] = {},
+  deps: Parameters<typeof runSavedScriptAsAgent>[1] & {
+    probe?: typeof probeScriptRunner;
+  } = {},
 ): Promise<unknown> {
+  try {
+    const unhealthy = await (deps.probe ?? probeScriptRunner)(leadAgentId);
+    if (unhealthy) return unhealthy;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      quiet: false,
+      reason: `script-runner-unhealthy: ${scrubSecrets(message)}`.slice(0, 300),
+    };
+  }
   const script = await getScript({ name: scriptName, scope: "global" });
   if (!script) throw new Error(`global script "${scriptName}" not found`);
   const output = await runSavedScriptAsAgent(

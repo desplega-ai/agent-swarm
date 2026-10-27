@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { buildCitationUrl } from "../be/task-citations";
 import type { TaskAttachment } from "../types";
-import { buildAgentFsLiveUrl, buildCombFileUrl } from "../utils/constants";
+import {
+  buildAgentFsLiveUrl,
+  buildCombFileUrl,
+  readAgentFsLinkTarget,
+  resolveAgentFsLinkBase,
+} from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 
 const ENV_KEYS = [
@@ -10,6 +15,7 @@ const ENV_KEYS = [
   "DASHBOARD_URL",
   "AGENT_FS_API_URL",
   "AGENT_FS_LIVE_URL",
+  "AGENT_FS_LINK_TARGET",
   "AGENT_FS_DEFAULT_ORG_ID",
   "AGENT_FS_DEFAULT_DRIVE_ID",
 ] as const;
@@ -158,5 +164,77 @@ describe("agent-fs citations", () => {
     expect(
       taskAttachmentDisplayUrl(agentFsAttachment({ orgId: undefined, driveId: undefined })),
     ).toBe(COMB);
+  });
+});
+
+describe("AGENT_FS_LINK_TARGET", () => {
+  test("unset: no target, and attachments keep the automatic choice", () => {
+    expect(readAgentFsLinkTarget()).toBeNull();
+    expect(resolveAgentFsLinkBase("attachment")).toBeNull();
+    expect(resolveAgentFsLinkBase("prompt")).toBeNull();
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+  });
+
+  test("live on a Comb + APP_URL install: the live URL", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = " Live ";
+    expect(readAgentFsLinkTarget()).toBe("live");
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+  });
+
+  test("dashboard with Comb on and APP_URL: the dashboard URL", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274/";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
+  });
+
+  test("dashboard with Comb off: attachments use the live URL, the prompt still uses APP_URL", () => {
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
+  });
+
+  test("dashboard without APP_URL: the live URL on both surfaces", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+  });
+
+  test("an invalid or blank value counts as unset", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    for (const value of ["Dashboard2", "comb", "", "   "]) {
+      process.env.AGENT_FS_LINK_TARGET = value;
+      expect(readAgentFsLinkTarget()).toBeNull();
+      expect(resolveAgentFsLinkBase("prompt")).toBeNull();
+      expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+    }
+  });
+
+  test("comb: false still links to the live URL", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment(), { comb: false })).toBe(LIVE);
+  });
+
+  test("a bad path still falls back to agent-fs:<path>", () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment({ path: "../x" }))).toBe("agent-fs:../x");
+    expect(
+      taskAttachmentDisplayUrl(agentFsAttachment({ orgId: undefined, driveId: undefined })),
+    ).toBe("agent-fs:comb-qa/notes.md");
   });
 });

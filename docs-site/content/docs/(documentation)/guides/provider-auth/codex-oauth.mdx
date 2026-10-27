@@ -308,6 +308,8 @@ The value must be a **positive integer of milliseconds** (e.g. `"7200000"` — n
 
 A pool login that fails auth on every task (for example `workspace routing discovery unauthorized (401)`) is benched automatically, so it stops eating tasks.
 
+Terminal `[auth-error]` messages identify the selected pool slot and show `agent-swarm codex-login --slot N` to replace that slot's credentials. Sessions without a pool slot keep the generic API-key or ChatGPT-login hint.
+
 **Which failures count.** The runner checks the failed task's `failureReason`. A reason counts when it contains `[auth-error]` and none of these transient texts:
 
 - `waiting for the refresh lock` (lock-wait timeout)

@@ -46,6 +46,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 import { taskListTitle } from "@/lib/task-title";
+import { useCan } from "@/lib/use-can";
 import { formatRelativeTime } from "@/lib/utils";
 import { TaskEffortField } from "./task-effort-field";
 import { useStalePageCorrection } from "./use-stale-page-correction";
@@ -312,6 +313,8 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 const DEFAULT_PAGE_SIZE = 100;
 
 export default function TasksPage() {
+  // A Viewer lists tasks but cannot create one.
+  const mayCreate = useCan("task.create.own");
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -690,10 +693,12 @@ export default function TasksPage() {
             </fieldset>
           )}
           {isMobile || view === "board" ? null : <TasksColumnsMenu state={tasksColumns} />}
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
-            <Plus className="h-4 w-4" />
-            New task
-          </Button>
+          {mayCreate ? (
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New task
+            </Button>
+          ) : null}
         </div>
       </div>
 

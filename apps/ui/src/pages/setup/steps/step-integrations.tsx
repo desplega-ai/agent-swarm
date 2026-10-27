@@ -19,7 +19,7 @@ import { AutosaveScopeContext, useAutosaveScope, useContinueAction } from "@/hoo
 import { optionValue, SWARM_ORG_USE_CASE, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
-import { activeAuthorization, ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
+import { activeAuthorization, OAuthToolPane, OtherToolsPane } from "./integrations/business-panes";
 import {
   ALL_SETUP_KEYS,
   CORE_INTEGRATIONS,
@@ -314,7 +314,7 @@ function IntegrationPane({
   oauthError: string | null;
 }) {
   if (item.group === "business") {
-    return item.oauthPresetId ? <OAuthToolPane tool={item} /> : <ComingSoonPane />;
+    return item.oauthPresetId ? <OAuthToolPane tool={item} /> : <OtherToolsPane />;
   }
   switch (item.id) {
     case "slack":

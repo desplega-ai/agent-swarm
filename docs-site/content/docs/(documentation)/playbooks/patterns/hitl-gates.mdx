@@ -1,6 +1,8 @@
 ---
 title: 'Pattern: HITL Gates (Human-in-the-Loop Approval)'
 description: Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision (sending, merging, deleting, posting publicly).
+agent:
+  when: "Someone wants a workflow to wait for a person's approval before it sends, merges, deletes or posts"
 ---
 
 Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision.

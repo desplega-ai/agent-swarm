@@ -80,7 +80,10 @@ async function composeRoles(userId: string) {
 }
 
 /** Operator or user only; agents never change human roles, even with the shared key. */
-async function ensureRoleManager(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+export async function ensureRoleManager(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
   if (rejectGuest(req, res)) return false;
   const auth = getRequestAuth(req);
   if (auth?.kind !== "operator" && auth?.kind !== "user") {

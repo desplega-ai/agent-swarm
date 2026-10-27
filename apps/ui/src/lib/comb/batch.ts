@@ -118,7 +118,7 @@ export function sendFailure(
         description: "Sending creates a task. Ask a swarm admin for permission to create tasks.",
       };
     case 404:
-      return { title: "Comb is off on this swarm", description: "Nothing was sent." };
+      return { title: "Files is off on this swarm", description: "Nothing was sent." };
     case 409:
       return { title: "Nothing new to send" };
     case 422:

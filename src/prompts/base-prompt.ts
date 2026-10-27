@@ -22,6 +22,7 @@
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName, RequestCompositionPartInput } from "../types";
+import { resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -73,6 +74,26 @@ function claudeMdSourcePath(provider: string): string {
 
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
+
+/**
+ * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
+ * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
+ * with its own call shape, so the generic lines are wrong for them.
+ */
+function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
+  switch (provider) {
+    case "amp":
+      return "system.agent.tool_discovery.amp";
+    case "codex":
+      return "system.agent.tool_discovery.codex";
+    case "opencode":
+      return "system.agent.tool_discovery.opencode";
+    default:
+      return hasToolSearch
+        ? "system.agent.tool_discovery.search"
+        : "system.agent.tool_discovery.direct";
+  }
+}
 
 export function areSlackPromptToolsEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -265,7 +286,11 @@ export const getBasePromptWithParts = async (
     const outputsEvent = agentFsConfigured
       ? "system.agent.outputs"
       : "system.agent.outputs.no_agent_fs";
-    const outputsResult = await resolveTemplateAsync(outputsEvent, {});
+    const outputsResult = await resolveTemplateAsync(
+      outputsEvent,
+      // Unset AGENT_FS_LINK_TARGET keeps the literal the agent expands in its shell.
+      { fileLinkBase: resolveAgentFsLinkBase("prompt") ?? `\${AGENT_FS_LIVE_URL}` },
+    );
     prompt += outputsResult.text;
     section(outputsEvent, grown());
   }
@@ -295,20 +320,15 @@ export const getBasePromptWithParts = async (
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
-    // Amp's MCP tools sit behind its own `tool_search` + `code_exec` with
-    // underscored names, so the generic "load with your tool search" line is not enough.
-    const discoveryEvent =
-      provider === "amp"
-        ? "system.agent.tool_discovery.amp"
-        : hasToolSearch
-          ? "system.agent.tool_discovery.search"
-          : "system.agent.tool_discovery.direct";
+    const discoveryEvent = toolDiscoveryEvent(provider, hasToolSearch);
     const discoveryResult = await resolveTemplateAsync(discoveryEvent, {});
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",
       renderToolsAndSkillsVars({
         skillsSummary: args.skillsSummary,
         mcpServers: args.mcpServers,
+        // pi defers installed MCP servers together with swarm tools.
+        mcpToolsDeferred: provider === "pi" && hasToolSearch,
         nativeSkillDiscovery,
         toolDiscovery: discoveryResult.text,
         hasLocalEnv,
@@ -322,6 +342,15 @@ export const getBasePromptWithParts = async (
       : 0;
     if (discoveryChars > 0) section(discoveryEvent, discoveryChars);
     section("system.agent.tools_skills", toolsChars - discoveryChars);
+
+    // Lead docs pointer: only when the lead has the `swarm-docs` skill. The
+    // skill list is unknown on claude-managed (the cloud sandbox owns skill
+    // delivery) and before the first skill load, so render it then.
+    if (role === "lead" && hasSwarmDocsSkill(args.skillsSummary)) {
+      const docsResult = await resolveTemplateAsync("system.agent.lead.docs", {});
+      prompt += docsResult.text;
+      section("system.agent.lead.docs", grown());
+    }
   }
 
   // J. Agent notes (CLAUDE.md), only when it differs from the generated
@@ -459,6 +488,11 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
   return prompt.replace(/\n{3,}/g, "\n\n").trim();
 };
 
+/** True when the skill list includes `swarm-docs`, or when the list is unknown. */
+function hasSwarmDocsSkill(skills: { name: string }[] | undefined): boolean {
+  return skills === undefined || skills.some((skill) => skill.name === "swarm-docs");
+}
+
 /**
  * Dynamic lines for `system.agent.tools_skills`. The static text lives in the
  * template so operators can override or skip the section; only the lists that
@@ -467,6 +501,7 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
 function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
   mcpServers?: string[];
+  mcpToolsDeferred?: boolean;
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
   toolDiscovery: string;
@@ -502,7 +537,11 @@ function renderToolsAndSkillsVars(input: {
   const servers = (input.mcpServers ?? []).filter((name) => name.trim().length > 0);
   const mcpLine =
     servers.length > 0
-      ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
+      ? `Connected MCP servers: ${servers.join(", ")}. ${
+          input.mcpToolsDeferred
+            ? "Load their tools with your harness tool search."
+            : "Their tools are in your tool list."
+        }\n`
       : "";
 
   return {

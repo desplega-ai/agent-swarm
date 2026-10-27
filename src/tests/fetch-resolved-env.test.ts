@@ -41,8 +41,12 @@ const defaultMockResponse: MockResponse = {
 const mockResponsesByAgentId = new Map<string, MockResponse>();
 const requestedRepoIds = new Map<string, string | null>();
 const requestedTaskIds = new Map<string, string | null>();
-/** Every `GET /api/keys/available` query string observed by the mock server, most recent last. */
+/**
+ * Every `GET /api/keys/available` query string observed by the mock server,
+ * most recent last, without `keySuffixes` (recorded in `keysAvailableSuffixes`).
+ */
 const keysAvailableRequests: string[] = [];
+const keysAvailableSuffixes: Array<string | null> = [];
 
 beforeAll(() => {
   server = Bun.serve({
@@ -63,7 +67,10 @@ beforeAll(() => {
       }
 
       if (url.pathname === "/api/keys/available") {
-        keysAvailableRequests.push(url.search);
+        const params = new URLSearchParams(url.search);
+        keysAvailableSuffixes.push(params.get("keySuffixes"));
+        params.delete("keySuffixes");
+        keysAvailableRequests.push(`?${params}`);
         const totalKeys = Number(url.searchParams.get("totalKeys") ?? "1");
         const availableIndices = Array.from({ length: totalKeys }, (_, i) => i);
         return Response.json({ success: true, availableIndices, totalKeys });
@@ -455,6 +462,13 @@ describe("fetchResolvedEnv", () => {
       expect(keysAvailableRequests).toEqual([
         "?keyType=CLAUDE_CODE_OAUTH_TOKEN&totalKeys=32&model=fable",
       ]);
+      // The pool's own suffixes, in order, so status is matched by key (issue #2425).
+      expect(keysAvailableSuffixes.at(-1)).toBe(
+        Object.values(envWithOauthPool(32))[0]!
+          .split(",")
+          .map((key) => key.slice(-5))
+          .join(","),
+      );
     });
 
     test("model: 'claude-fable-5-1' issues the same model=fable", async () => {

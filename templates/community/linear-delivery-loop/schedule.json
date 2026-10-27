@@ -1,0 +1,10 @@
+{
+  "name": "linear-delivery-tick",
+  "description": "Linear Delivery Loop: one action per enrolled issue every 5 minutes",
+  "targetType": "script",
+  "scriptName": "linear-delivery-tick",
+  "scriptArgs": { "dryRun": true },
+  "cronExpression": "2-57/5 * * * *",
+  "timezone": "UTC",
+  "enabled": true
+}

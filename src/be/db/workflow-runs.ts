@@ -465,7 +465,8 @@ export async function disarmWorkflowTreeRetries(
 /**
  * Mark the given runs that are still running or waiting `cancelled`, without
  * the per-run `workflow.child.finished` wake-up: it is for runs whose parent
- * step the same cancel closes. A terminal run keeps its status and reason.
+ * step the same cancel closes. Each run it cancels still emits
+ * `workflow.run.finished`. A terminal run keeps its status and reason.
  */
 export async function cancelLiveWorkflowTreeRuns(
   runIds: string[],
@@ -473,12 +474,14 @@ export async function cancelLiveWorkflowTreeRuns(
   finishedAt: string,
 ): Promise<void> {
   await forEachChunk(runIds, async (chunk, placeholders) => {
-    await getDbClient().run(
+    const cancelled = await getDbClient().query<{ id: string; workflowId: string }>(
       `UPDATE workflow_runs
           SET status = 'cancelled', error = ?, finishedAt = ?, lastUpdatedAt = ?
-        WHERE id IN (${placeholders}) AND status IN ('running', 'waiting')`,
+        WHERE id IN (${placeholders}) AND status IN ('running', 'waiting')
+        RETURNING id, workflowId`,
       [scrubSecrets(reason), finishedAt, finishedAt, ...chunk],
     );
+    for (const run of cancelled) emitRunFinished(run.id, run.workflowId, "cancelled");
   });
 }
 
@@ -643,14 +646,42 @@ export function emitChildRunFinished(
 }
 
 function emitAfterCommit(childRunId: string, parentStepId: string): void {
+  emitBusEventAfterCommit("workflow.child.finished", { childRunId, parentStepId });
+}
+
+/** Bus event every run emits once when it turns terminal. */
+export const WORKFLOW_RUN_FINISHED_EVENT = "workflow.run.finished";
+
+export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * Announce after commit that a run turned terminal, top-level and child runs
+ * alike, so an event-mode `wait` can resume when any run ends. Callers emit
+ * only when a live run (running or waiting) turns terminal, never on a later
+ * update of a run that is already terminal. The id is `runId`, never `workflowRunId` or
+ * `_runId`: those would put the finished run in the waiting run's own `run`
+ * scope, so waiters use scope `global` and filter on `runId`.
+ */
+export function emitRunFinished(
+  runId: string,
+  workflowId: string,
+  status: WorkflowRunStatus,
+): void {
+  if (!TERMINAL_STATUSES.has(status)) return;
+  emitBusEventAfterCommit(WORKFLOW_RUN_FINISHED_EVENT, { runId, workflowId, status });
+}
+
+function emitBusEventAfterCommit(event: string, payload: Record<string, unknown>): void {
   getDbClient().afterCommit(() => {
     import("../../workflows/event-bus")
       .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("workflow.child.finished", { childRunId, parentStepId });
+        workflowEventBus.emit(event, payload);
       })
       .catch((err) =>
         console.error(
-          "[db] workflow.child.finished event not emitted:",
+          `[db] ${event} event not emitted:`,
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       );

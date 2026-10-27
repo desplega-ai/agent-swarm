@@ -1,9 +1,9 @@
-import { Suspense } from "react";
+import { type ReactNode, Suspense } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
 import { lazyRoute } from "@/components/shared/app-update-prompt";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
-import { SettingsLayout } from "@/pages/settings/settings-layout";
+import { AdminRoute, SettingsLayout } from "@/pages/settings/settings-layout";
 import { UsageLayout } from "@/pages/usage/usage-layout";
 import { RouteRedirect } from "./route-redirect";
 
@@ -66,8 +66,12 @@ const AppsListingPage = lazyRoute(() => import("@/pages/apps/page"));
 const AppDetailPage = lazyRoute(() => import("@/pages/apps/[id]/page"));
 const CombPage = lazyRoute(() => import("@/pages/comb/page"));
 const NotFoundPage = lazyRoute(() => import("@/pages/not-found/page"));
+/** An admin-only Settings route (`AdminRoute`). */
+const admin = (element: ReactNode) => <AdminRoute>{element}</AdminRoute>;
+
 const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
 const ConnectPage = lazyRoute(() => import("@/pages/connect/page"));
+const JoinPage = lazyRoute(() => import("@/pages/join/page"));
 
 /**
  * Dev-only routes. `/dev/embed-test` mounts an `<AppSurface>` outside the
@@ -122,7 +126,7 @@ export const router = createBrowserRouter([
   {
     path: "/setup",
     element: (
-      <Suspense fallback={<HiveLoadingScreen />}>
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
         <SetupPage />
       </Suspense>
     ),
@@ -132,8 +136,18 @@ export const router = createBrowserRouter([
   {
     path: "/connect",
     element: (
-      <Suspense fallback={<HiveLoadingScreen />}>
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
         <ConnectPage />
+      </Suspense>
+    ),
+  },
+  // A teammate's invite link. Outside the app shell: it saves the connection
+  // the shell then uses, so it must work with no connection yet.
+  {
+    path: "/join",
+    element: (
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
+        <JoinPage />
       </Suspense>
     ),
   },
@@ -186,21 +200,21 @@ export const router = createBrowserRouter([
           { path: "config", element: <Navigate to="/settings/connections" replace /> },
           { path: "connections", element: <ConnectionsPage /> },
           { path: "appearance", element: <AppearancePage /> },
-          { path: "secrets", element: <SecretsPage /> },
-          { path: "api-keys", element: <ApiKeysPage /> },
-          { path: "integrations", element: <IntegrationsPage /> },
-          { path: "integrations/:id", element: <IntegrationDetailPage /> },
-          { path: "configuration", element: <ConfigurationPage /> },
-          { path: "extensions/new", element: <ExtensionCatalogPage /> },
+          { path: "secrets", element: admin(<SecretsPage />) },
+          { path: "api-keys", element: admin(<ApiKeysPage />) },
+          { path: "integrations", element: admin(<IntegrationsPage />) },
+          { path: "integrations/:id", element: admin(<IntegrationDetailPage />) },
+          { path: "configuration", element: admin(<ConfigurationPage />) },
+          { path: "extensions/new", element: admin(<ExtensionCatalogPage />) },
           // One route for the grid and its detail sheet, so opening and closing
           // the sheet keeps the page mounted.
-          { path: "extensions/:id?", element: <ExtensionsPage /> },
-          { path: "runtime-pools", element: <RuntimePoolsPage /> },
-          { path: "runtime-pools/new", element: <RuntimePoolDetailPage /> },
-          { path: "runtime-pools/controllers", element: <RuntimeControllersPage /> },
-          { path: "runtime-pools/:id", element: <RuntimePoolDetailPage /> },
-          { path: "repos", element: <ReposPage /> },
-          { path: "debug", element: <DebugPage /> },
+          { path: "extensions/:id?", element: admin(<ExtensionsPage />) },
+          { path: "runtime-pools", element: admin(<RuntimePoolsPage />) },
+          { path: "runtime-pools/new", element: admin(<RuntimePoolDetailPage />) },
+          { path: "runtime-pools/controllers", element: admin(<RuntimeControllersPage />) },
+          { path: "runtime-pools/:id", element: admin(<RuntimePoolDetailPage />) },
+          { path: "repos", element: admin(<ReposPage />) },
+          { path: "debug", element: admin(<DebugPage />) },
         ],
       },
       { path: "templates", element: <TemplatesPage /> },

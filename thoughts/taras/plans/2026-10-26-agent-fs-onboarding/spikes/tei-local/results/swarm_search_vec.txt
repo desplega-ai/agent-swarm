@@ -1,0 +1,21 @@
+agent b4bed0a1
+Q: how do I change the api key | 157ms
+   0.972 hybrid rotate-api-key
+   0.493 hybrid slim-image
+   0.478 hybrid heartbeat-sweep
+Q: what happens if a worker crashes mid task | 47ms
+   0.920 hybrid heartbeat-sweep
+   0.801 hybrid slim-image
+   0.794 hybrid rotate-api-key
+Q: how to add a schema change | 41ms
+   0.803 hybrid db-migrations
+   0.758 hybrid rotate-api-key
+   0.516 hybrid slim-image
+Q: make the container smaller for CI | 36ms
+   0.865 hybrid slim-image
+   0.638 hybrid pasta-recipe
+   0.505 hybrid rotate-api-key
+Q: what should I cook tonight | 34ms
+   0.841 hybrid pasta-recipe
+   0.406 vec rotate-api-key
+   0.400 vec db-migrations

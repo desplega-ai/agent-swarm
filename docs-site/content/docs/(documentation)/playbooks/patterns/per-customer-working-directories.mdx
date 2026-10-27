@@ -1,6 +1,8 @@
 ---
 title: 'Pattern: Per-Customer Working Directories'
 description: Give each top account a persistent folder in agent-fs where agents accumulate context across months. A 6-month-old note like "they care about EU data residency" is what makes the next report feel personal.
+agent:
+  when: "Someone wants agents to keep long-lived notes per customer or account"
 ---
 
 Give each top account a persistent folder in the shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)) where agents accumulate context across months — not just within a single session.

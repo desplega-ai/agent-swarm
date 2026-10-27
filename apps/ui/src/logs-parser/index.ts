@@ -24,10 +24,13 @@ import type {
   TranscriptParseResult,
 } from "./types";
 
+export type { CallUsageTotals } from "./call-usage";
+export { cacheHitRatio, sumCallUsage, sumItemCallUsage } from "./call-usage";
 export { pairItems, resultPayloadText, unwrapResult } from "./helpers";
 export type { SubagentRun, SubagentRunStatus } from "./subagent-lifecycle";
 export { extractSubagentRuns } from "./subagent-lifecycle";
 export type {
+  CallUsage,
   ContentBlock,
   NormalizedItem,
   PairingSummary,
@@ -135,6 +138,10 @@ function itemToBlock(item: NormalizedItem): ContentBlock | null {
     }
     case "lifecycle": {
       return lifecycleBlock(item);
+    }
+    case "call_usage": {
+      if (!item.usage) return null;
+      return metaBlock(item, "helper", { helperType: "call_usage", usage: item.usage });
     }
     case "parse_error": {
       return metaBlock(item, "parse_error", { raw: item.raw });

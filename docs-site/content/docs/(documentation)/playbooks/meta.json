@@ -2,6 +2,7 @@
   "title": "Playbooks",
   "pages": [
     "index",
+    "lead-agent-rulebook",
     "feature-development",
     "lead-prospecting",
     "content-generation",
@@ -16,6 +17,7 @@
     "email-domain-health",
     "open-oncall",
     "pr-review",
+    "linear-delivery-loop",
     "---Hot patterns---",
     "patterns"
   ]

@@ -1225,6 +1225,7 @@ export async function provisionAgentFsAfterRegistration(opts: {
  * - TEMPLATE_REGISTRY_URL — read per registry fetch.
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
  * - SWARM_ORG_NAME — read per telemetry event for org identity.
+ * - AGENT_FS_LINK_TARGET — read by the prompt builder for the file-link base.
  *
  * CLAUDE_TRANSPORT stays in the per-session environment. Caching a scoped
  * value here would prevent deletion from restoring the configured default.
@@ -1244,6 +1245,7 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+  "AGENT_FS_LINK_TARGET",
   // Gate the public-ranking `ranking.usage` emit, so clearing the website or
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",
@@ -2717,6 +2719,8 @@ export interface RunningTask {
   assistantText?: { value?: string };
   /** Last progress value, retained until the final API writes settle. */
   finalProgress?: { value?: string };
+  /** Latest cost snapshot captured from `result` events before completion settles. */
+  lastCost?: { value?: CostData };
   /** Last time `reconcileActiveTasks` read this task's server-side status. */
   lastReconcileAt?: number;
   /** When the runner asked the session to abort (cancel or reconcile). */
@@ -4648,6 +4652,7 @@ async function spawnProviderProcess(
   // session promise resolves (see `trackAssistantText`).
   const assistantTextHolder: { value?: string } = {};
   const finalProgressHolder: { value?: string } = {};
+  const lastCostHolder: { value?: CostData } = {};
 
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
@@ -4856,6 +4861,11 @@ async function spawnProviderProcess(
           break;
         }
         case "result":
+          lastCostHolder.value = {
+            ...event.cost,
+            taskId: realTaskId,
+            sessionId: opts.runnerSessionId,
+          };
           {
             // Mid-session snapshot — fires on each streamed "result" event,
             // necessarily before `ProviderResult.appliedReasoningEffort` exists
@@ -5063,6 +5073,7 @@ async function spawnProviderProcess(
         }
 
         // Retain cost data for the concurrent final API writes.
+        result.cost ??= lastCostHolder.value;
         if (result.cost) {
           result.cost = { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId };
           sessionSpan.setAttributes({
@@ -5225,6 +5236,7 @@ async function spawnProviderProcess(
     model: model || undefined,
     assistantText: assistantTextHolder,
     finalProgress: finalProgressHolder,
+    lastCost: lastCostHolder,
   };
   runningTaskForSessionInit = runningTask;
   if (pendingHarnessVariant !== undefined) {
@@ -5241,7 +5253,7 @@ async function spawnProviderProcess(
       runningTask.result ??= r;
     })
     .catch(() => {
-      runningTask.result ??= { exitCode: 1, isError: true };
+      runningTask.result ??= { exitCode: 1, isError: true, cost: lastCostHolder.value };
     });
 
   return runningTask;
@@ -5411,6 +5423,7 @@ export async function reconcileActiveTasks(
         exitCode: 1,
         isError: true,
         sessionId: task.session.sessionId,
+        cost: task.lastCost?.value,
         failureReason: "runner exited without result: provider session did not settle after abort",
       };
     }

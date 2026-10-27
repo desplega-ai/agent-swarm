@@ -11,7 +11,9 @@ import {
 } from "node:http";
 import { closeDb, createAgent, createTaskExtended, initDb, upsertKv } from "../be/db";
 import {
+  createRequestComposition,
   getTokenRatio,
+  MAX_REQUEST_COMPOSITIONS_PER_TASK,
   nextTokenRatio,
   recordTokenRatio,
   TOKEN_RATIO_KV_NAMESPACE,
@@ -102,8 +104,8 @@ function post(body: Record<string, unknown>, id = taskId, withAgent = true) {
   });
 }
 
-async function manifests(id = taskId): Promise<RequestComposition[]> {
-  const res = await fetch(`http://localhost:${port}/api/tasks/${id}/request-composition`, {
+async function manifests(id = taskId, query = ""): Promise<RequestComposition[]> {
+  const res = await fetch(`http://localhost:${port}/api/tasks/${id}/request-composition${query}`, {
     headers: headers(),
   });
   expect(res.status).toBe(200);
@@ -195,6 +197,40 @@ describe("POST/GET /api/tasks/{id}/request-composition", () => {
       (await post({ ...body, parts: [{ kind: "nope", id: "x", label: "x", chars: 1 }] })).status,
     ).toBe(400);
     expect((await post(body, crypto.randomUUID())).status).toBe(404);
+  });
+
+  test("rejects a post for a task assigned to another agent", async () => {
+    const other = await createAgent({ name: "composition-other", isLead: false, status: "idle" });
+    const foreign = await createTaskExtended("foreign", { agentId: other.id, source: "mcp" });
+    const body = { sessionId: "s-foreign", provider: "codex", toolLoading: "none", parts: [] };
+    expect((await post(body, foreign.id)).status).toBe(403);
+    expect(await manifests(foreign.id)).toEqual([]);
+  });
+
+  test("caps manifests per task and bounds the GET", async () => {
+    const capped = await createTaskExtended("capped", { agentId, source: "mcp" });
+    for (let i = 0; i < MAX_REQUEST_COMPOSITIONS_PER_TASK; i++) {
+      const stored = await createRequestComposition({
+        taskId: capped.id,
+        agentId,
+        sessionId: `s-cap-${i}`,
+        provider: "codex",
+        source: "worker",
+        parts: [],
+      });
+      expect(stored).not.toBeNull();
+    }
+    const body = { sessionId: "s-cap-over", provider: "codex", toolLoading: "none", parts: [] };
+    expect((await post(body, capped.id)).status).toBe(429);
+    expect(await manifests(capped.id)).toHaveLength(MAX_REQUEST_COMPOSITIONS_PER_TASK);
+
+    const firstTwo = await manifests(capped.id, "?limit=2");
+    expect(firstTwo.map((m) => m.sessionId)).toEqual(["s-cap-0", "s-cap-1"]);
+    const tooMany = await fetch(
+      `http://localhost:${port}/api/tasks/${capped.id}/request-composition?limit=${MAX_REQUEST_COMPOSITIONS_PER_TASK + 1}`,
+      { headers: headers() },
+    );
+    expect(tooMany.status).toBe(400);
   });
 });
 

@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { SetupCard } from "@/components/shared/setup-card";
-import { StatusIcon } from "@/components/shared/status-icon";
+import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
 import { type AiCardId, type AiCardProps, CARD_HARNESSES, harnessNames } from "./model";
@@ -9,7 +9,8 @@ import { WaitingPanel } from "./waiting";
 /**
  * Accordion card shared by the four providers: status icon, the card's form,
  * then the waiting line once a key is saved, then the R2 harness switch once
- * a key is saved and no worker runs the card's harness.
+ * a key is saved and no worker runs the card's harness. While the step
+ * switches every agent itself (first credential), a busy line replaces it.
  */
 export function ProviderCard({
   card,
@@ -22,8 +23,13 @@ export function ProviderCard({
   rollup,
   agents,
   dialContext,
+  reportSaved,
+  autoSwitching,
   children,
-}: Pick<AiCardProps, "open" | "onOpenChange" | "rollup" | "agents" | "dialContext"> & {
+}: Pick<
+  AiCardProps,
+  "open" | "onOpenChange" | "rollup" | "agents" | "dialContext" | "reportSaved" | "autoSwitching"
+> & {
   card: AiCardId;
   icon: ReactNode;
   title: string;
@@ -32,6 +38,7 @@ export function ProviderCard({
   children: ReactNode;
 }) {
   const harnesses = CARD_HARNESSES[card];
+  useEffect(() => reportSaved(card, saved), [reportSaved, card, saved]);
   const runsHarness =
     rollup.workers > 0 ||
     agents.some((a) => a.harnessProvider != null && harnesses.includes(a.harnessProvider));
@@ -84,11 +91,17 @@ export function ProviderCard({
     >
       {children}
       {saved || rollup.verified || rollup.error ? (
-        <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} />
+        <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} noWorker={noWorker} />
       ) : null}
       {/* A key only verifies on a worker that runs this harness. Before a key
           is saved, the agent list would only push the form down. */}
-      {saved && noWorker ? (
+      {saved && noWorker && autoSwitching ? (
+        <output className="block">
+          <StatusLine tone="busy">
+            Switching all agents to {HARNESS_LABEL[autoSwitching] ?? autoSwitching}…
+          </StatusLine>
+        </output>
+      ) : saved && noWorker ? (
         <HarnessSwitch
           harnessPhrase={harnessNames(card)}
           targets={harnesses}

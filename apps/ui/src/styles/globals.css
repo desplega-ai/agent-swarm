@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* A viewport under 56rem (896 px) tall, as on most laptops: `/setup` tightens its spacing. */
+@custom-variant short (@media (max-height: 56rem));
 
 @theme {
   /* shadcn/ui Zinc theme, light base with amber primary */

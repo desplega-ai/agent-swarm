@@ -447,7 +447,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1792991933-g65080c`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1793073650-g23dd39`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -661,6 +661,7 @@ All three open the file with `Bun.file(config.logFile).writer()` and append JSON
   - File handle closed at L329.
 - **Pi-mono** ([`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts)):
   - **Every** normalized `ProviderEvent` is written as `{...event, timestamp}` inside `emit()` (L167–187). Closed in `runSession`'s `finally` at L327.
+  - On each assistant `message_end` with usage, emits a `raw_log` event before that turn's text and tool lines. Its content is a JSON line shaped as `{type: "call_usage", harness: "pi", usage: {input, cacheRead, cacheWrite, output, reasoning}}`, containing token counts only, never message content. The dashboard session log reads it as that call's cache-hit chip ([PR #2450](https://github.com/desplega-ai/agent-swarm/pull/2450)).
 - **Codex** ([`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts)):
   - Every `ProviderEvent` written with timestamp in `emit()` (L347–374).
   - Raw SDK `ThreadEvent` mirrored as `raw_log` at L466.
@@ -813,19 +814,20 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
-Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. Amp sets it to true and gets its own text (`system.agent.tool_discovery.amp`): its MCP tools sit behind its own `tool_search` and `code_exec`, with dashes turned into underscores (`store-progress` is `store_progress`). pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. Amp sets it to true and gets its own text (`system.agent.tool_discovery.amp`): its MCP tools sit behind its own `tool_search` and `code_exec`, with dashes turned into underscores (`store-progress` is `store_progress`). Codex and OpenCode also get their own text whatever the trait says, because both run MCP tools inside a code sandbox: Codex inside `exec` as `tools.mcp__agent_swarm__store_progress` (found through `ALL_TOOLS`), OpenCode inside `execute` as `tools.swarm["store-progress"]` (found through `search`). These are `system.agent.tool_discovery.codex` and `system.agent.tool_discovery.opencode`. pi sets it to the value of `PI_TOOL_DEFERRAL` (below, on by default). Other providers with the trait off receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
 
 ### pi tool deferral
 
-pi SDK sessions load none of pi's built-in extensions, so by default every swarm tool is declared to the model up front. With `PI_TOOL_DEFERRAL=true` the pi adapter:
+pi SDK sessions load none of pi's built-in extensions, so the adapter wires deferral itself. With `PI_TOOL_DEFERRAL` on (the default) the pi adapter:
 
 - marks each swarm tool `exposure: "direct"` when it is in `CORE_TOOLS` (`src/tools/tool-config.ts`) or the server sent `_meta["anthropic/alwaysLoad"]` for it (task tool manifests), and `exposure: "deferred"` otherwise;
+- maps installed MCP servers with `exposure: "deferred"`, and the prompt's MCP-server line points at tool search;
 - adds `createToolSearchExtension()` to the session and `+tool_search` to its default tools;
 - reports `hasToolSearch: true`, so the prompt tells the model to load tools through its tool search.
 
 Swarm tools carry `namespace: { name: "agent-swarm" }` and, when the server declares one, their `outputSchema`; results pass `structuredContent` through to pi alongside the text. Tool names do not change.
 
-The flag defaults to `false`. Loading a deferred tool changes the tool set mid-session, and pi falls back to a transcript checkpoint for providers that cannot represent that change, which can invalidate the prompt cache. Pilot it on one pi agent with agent-scoped configuration (`PI_TOOL_DEFERRAL=true`) and compare against a pi agent on the same model: context tokens at session start, cost per task, and cache-read tokens as a share of input tokens. The worker picks the value up on its next task.
+The flag defaults to `true`. Loading a deferred tool changes the tool set mid-session, which costs one partial prompt-cache miss on that turn; the cache recovers on the next turn. Declaring every tool instead costs the full schema of the non-core tools on every request. Set `PI_TOOL_DEFERRAL=false` (globally, or agent-scoped for one agent) to declare every tool up front. The worker picks the value up on its next task.
 
 ### pi codemode
 

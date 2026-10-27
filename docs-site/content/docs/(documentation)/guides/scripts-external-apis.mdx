@@ -1,6 +1,9 @@
 ---
 title: Scripts as external APIs
 description: Expose a saved swarm script as a public, JSON-in/JSON-out HTTP endpoint — POST /api/x/script/<id> — with optional bearer auth, typed input validation, and per-endpoint usage tracking.
+agent:
+  offer: true
+  when: "Someone wants a swarm script exposed as a public HTTP endpoint or webhook receiver"
 ---
 
 Any saved script can be opted in to a public HTTP endpoint:

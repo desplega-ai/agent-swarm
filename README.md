@@ -87,6 +87,8 @@ Cloud service. The self-hosted software remains covered by the [MIT License](./L
 
 Or self-host. [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment: deploy every agent in it by default (1 lead and 11 workers on the official templates), and remove agents only when you have a reason to.
 
+Plan for at least 4 vCPU, 8 GB RAM and 40 GB of free disk, and prune old Docker images after upgrades. See [Host requirements & disk cleanup](https://docs.agent-swarm.dev/docs/guides/host-requirements).
+
 The one-shot installer checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes`, and prints the dashboard `/setup` link. It defaults to the single-agent `solo` preset, so pass `--preset full` for every official template (it runs one coder where the example runs two):
 
 ```bash

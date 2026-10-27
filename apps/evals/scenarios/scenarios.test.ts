@@ -56,6 +56,7 @@ const EXPECTED_IDS = [
   "human-in-loop",
   "human-in-loop-solo",
   "real-diff-agent-fs",
+  "docs-suggestion",
 ];
 
 describe("scenario registry", () => {
@@ -290,8 +291,8 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s.outcome.gates?.map((g) => g.name)).toContain("routing-structured-output");
   });
 
-  test("registry lists 16 active scenarios (12 + 4 solo baselines of the swarm ones)", () => {
-    expect(scenarios.map((x) => x.id)).toHaveLength(16);
+  test("registry lists 17 active scenarios (13 + 4 solo baselines of the swarm ones)", () => {
+    expect(scenarios.map((x) => x.id)).toHaveLength(17);
   });
 });
 

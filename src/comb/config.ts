@@ -2,6 +2,8 @@ import {
   getAgentFsDefaultDriveId,
   getAgentFsDefaultOrgId,
   getAgentFsLiveUrl,
+  getPublicMcpBaseUrl,
+  isAgentFsProxyEnabled,
   isCombEnabled,
 } from "../utils/constants";
 
@@ -27,9 +29,12 @@ function trimUrl(value: string | undefined): string | null {
  */
 export function getCombConfig(): CombConfig {
   const internalUrl = trimUrl(process.env.AGENT_FS_API_URL);
+  // With the proxy on, the browser reaches agent-fs through the API itself.
+  const browserDefault =
+    isAgentFsProxyEnabled() && internalUrl ? `${getPublicMcpBaseUrl()}/agentfs` : internalUrl;
   return {
     enabled: isCombEnabled(),
-    apiUrl: trimUrl(process.env.AGENT_FS_PUBLIC_URL) ?? internalUrl,
+    apiUrl: trimUrl(process.env.AGENT_FS_PUBLIC_URL) ?? browserDefault,
     liveUrl: getAgentFsLiveUrl(),
     orgId: getAgentFsDefaultOrgId() ?? null,
     driveId: getAgentFsDefaultDriveId() ?? null,

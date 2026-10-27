@@ -49,6 +49,7 @@ import {
   CREDENTIAL_POOL_VARS,
   splitCredentialPool,
 } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import {
   checkAnthropicApiKey,
   checkDeepSeekApiKey,
@@ -664,7 +665,7 @@ export async function validateProviderCredentials(
  * the dashboard surfaces "unreported".
  */
 export function isCredCheckDisabled(env: NodeJS.ProcessEnv): boolean {
-  return env.CRED_CHECK_DISABLE === "1";
+  return isEnvFlagEnabled("CRED_CHECK_DISABLE", false, env);
 }
 
 /**

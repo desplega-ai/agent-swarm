@@ -1,6 +1,6 @@
 import { Check, X } from "lucide-react";
 import type { CSSProperties } from "react";
-import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
+import type { OnboardingStepDef } from "@/api/hooks/visible-onboarding-steps";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { SetupChip, type SetupChipTone } from "@/components/shared/setup-chip";
 import { cn } from "@/lib/utils";
@@ -45,13 +45,17 @@ export function StepStatusChip({ status }: { status: OnboardingStepStatus }) {
   return <SetupChip tone={CHIP_TONE[status]}>{STEP_STATUS_WORD[status]}</SetupChip>;
 }
 
-/** 1-based position of a step, as used in `?step=N` and "Step N of 6". */
-export function stepNumber(id: OnboardingStepId): number {
-  return ONBOARDING_STEPS.findIndex((step) => step.id === id) + 1;
+/**
+ * 1-based position of a step among the visible `steps`
+ * (`useVisibleOnboardingSteps`), as used in `?step=N` and "Step N of 8".
+ */
+export function stepNumber(id: OnboardingStepId, steps: ReadonlyArray<OnboardingStepDef>): number {
+  return steps.findIndex((step) => step.id === id) + 1;
 }
 
+/** By id, not number: the number depends on which steps the API shows. `/setup` accepts both. */
 export function setupStepHref(id: OnboardingStepId): string {
-  return `/setup?step=${stepNumber(id)}`;
+  return `/setup?step=${id}`;
 }
 
 /**

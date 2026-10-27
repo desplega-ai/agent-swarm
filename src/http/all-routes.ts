@@ -42,6 +42,7 @@ import "./oauth-callback";
 import "./oauth-generic";
 import "./onboarding";
 import "./page-proxy";
+import "./agentfs-proxy";
 import "./pages";
 import "./pages-public";
 import "./prompt-templates";

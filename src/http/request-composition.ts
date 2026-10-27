@@ -7,6 +7,7 @@ import {
   getLatestWorkerComposition,
   getRequestCompositionsByTask,
   getTokenRatio,
+  MAX_REQUEST_COMPOSITIONS_PER_TASK,
   recordTokenRatio,
 } from "../be/db/request-composition";
 import { estimateTokens } from "../be/memory/key-browser";
@@ -47,7 +48,7 @@ const postRequestComposition = route({
   },
   summary: "Record the request composition manifest of a task session",
   description:
-    "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. A `harness-hook` post (pi, opencode) carries exact sizes measured from the request payload plus the call's prompt tokens: the server merges it with the session's worker manifest and folds the observed chars-to-tokens ratio into the provider's average.",
+    "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. A `harness-hook` post (pi, opencode) carries exact sizes measured from the request payload plus the call's prompt tokens: the server merges it with the session's worker manifest and folds the observed chars-to-tokens ratio into the provider's average. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
@@ -70,7 +71,9 @@ const postRequestComposition = route({
   responses: {
     200: { description: "Manifest recorded", schema: PostRequestCompositionResponseSchema },
     400: { description: "Validation error" },
+    403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
+    429: { description: "The task already holds the maximum number of manifests" },
   },
   auth: { apiKey: true, agentId: true },
 });
@@ -83,6 +86,14 @@ const getRequestComposition = route({
   summary: "Get the request composition manifests of a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
+  query: z.object({
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_REQUEST_COMPOSITIONS_PER_TASK)
+      .default(MAX_REQUEST_COMPOSITIONS_PER_TASK),
+  }),
   responses: {
     200: { description: "Manifests, oldest first", schema: GetRequestCompositionResponseSchema },
     404: { description: "Task not found" },
@@ -225,6 +236,10 @@ export async function handleRequestComposition(
       jsonError(res, "Task not found", 404);
       return true;
     }
+    if (task.agentId !== myAgentId) {
+      jsonError(res, "Task is assigned to another agent", 403);
+      return true;
+    }
 
     const { body } = parsed;
     let parts: RequestCompositionPart[] = body.parts.map((part) => ({
@@ -263,6 +278,14 @@ export async function handleRequestComposition(
       parts,
       tokenRatio,
     });
+    if (!manifest) {
+      jsonError(
+        res,
+        `Task already holds ${MAX_REQUEST_COMPOSITIONS_PER_TASK} request composition manifests`,
+        429,
+      );
+      return true;
+    }
 
     postRequestComposition.respond(res, 200, { ok: true, id: manifest.id, seq: manifest.seq });
     return true;
@@ -278,7 +301,7 @@ export async function handleRequestComposition(
       return true;
     }
 
-    const manifests = await getRequestCompositionsByTask(task.id);
+    const manifests = await getRequestCompositionsByTask(task.id, parsed.query.limit);
     getRequestComposition.respond(res, 200, { manifests });
     return true;
   }

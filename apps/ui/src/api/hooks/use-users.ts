@@ -13,6 +13,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type {
+  CreateInviteInput,
   CreateUserInput,
   ResolveUnmappedInput,
   UpdateUserInput,
@@ -161,5 +162,29 @@ export function useResolveUnmapped() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["unmapped"] });
     },
+  });
+}
+
+/**
+ * `POST /api/invites`. Gate the entry points with `useInvitesSupport()`. The
+ * result's `inviteUrl` is shown once: it is never cached in a query.
+ */
+export function useCreateInvite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateInviteInput) => api.createInvite(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}
+
+/** `GET /api/rbac/roles`: the role catalog (names, descriptions, verbs). */
+export function useRbacRoles(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["rbac-roles"],
+    queryFn: () => api.fetchRbacRoles(),
+    staleTime: 5 * 60_000,
+    enabled: opts?.enabled ?? true,
   });
 }

@@ -93,6 +93,43 @@ export function cardRollup(card: AiCardId, providers: OnboardingProviderSignal[]
   return rollup;
 }
 
+/** The R2 switch the step runs for the user: every listed agent moves to `target`. */
+export interface FirstCredentialSwitch {
+  card: AiCardId;
+  target: ProviderName;
+  agentIds: string[];
+}
+
+/** A key that only one harness of its card can use. Other methods take the card's default. */
+const METHOD_HARNESS: Partial<Record<OnboardingAiMethod, ProviderName>> = { deepseek: "dsh" };
+
+/**
+ * The switch on the first credential. A save with `method` moves every agent
+ * to the harness of its card (the card's default) when no agent can work yet:
+ * no other card holds a credential (a saved key, or a worker that verified
+ * one), and no agent runs a harness of this card (the case where the manual
+ * switch list shows). Null keeps the manual list. The step decides it once
+ * per card, on the first save of that card.
+ */
+export function firstCredentialSwitch(
+  method: OnboardingAiMethod,
+  saved: Partial<Record<AiCardId, boolean>>,
+  rollups: Record<AiCardId, Pick<CardRollup, "verified">>,
+  agents: readonly Pick<AgentWithTasks, "id" | "harnessProvider">[],
+): FirstCredentialSwitch | null {
+  const card = METHOD_CARD[method];
+  const harnesses = CARD_HARNESSES[card];
+  const otherCredential = (Object.keys(CARD_HARNESSES) as AiCardId[]).some(
+    (other) => other !== card && (saved[other] || rollups[other].verified),
+  );
+  const runsHarness = agents.some(
+    (a) => a.harnessProvider != null && harnesses.includes(a.harnessProvider),
+  );
+  if (agents.length === 0 || otherCredential || runsHarness) return null;
+  const target = METHOD_HARNESS[method] ?? harnesses[0];
+  return { card, target, agentIds: agents.map((a) => a.id) };
+}
+
 /**
  * The line for a rejected key. A bare `HTTP 401: {body}` from a provider
  * becomes one plain sentence; a worker message that already explains itself
@@ -115,6 +152,10 @@ export interface AiCardProps {
   onSaved: (method: OnboardingAiMethod) => void;
   /** How dsh routes, for the model level the R2 switch carries over. */
   dialContext: DialContext;
+  /** Each card tells the step its saved state, for the switch on the first credential. */
+  reportSaved: (card: AiCardId, saved: boolean) => void;
+  /** The harness of this card the step is switching every agent to, if any. */
+  autoSwitching: ProviderName | null;
 }
 
 /** Value of a non-secret global config row, for prefilling a field. */

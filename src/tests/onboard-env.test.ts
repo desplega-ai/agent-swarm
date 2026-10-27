@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateEnv } from "../commands/onboard/env-generator.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
+import { BASELINE_CASES, baselineState } from "./fixtures/onboard/baseline-states.ts";
 
 function makeState(overrides: Partial<OnboardState>): OnboardState {
   return { ...INITIAL_STATE, ...overrides };
@@ -230,5 +231,28 @@ describe("generateEnv", () => {
     const env = generateEnv(state);
     expect(env).toContain("SENTRY_AUTH_TOKEN=example-sntrys-tok");
     expect(env).toContain("SENTRY_ORG=sentry-org");
+  });
+});
+
+describe("generateEnv with the agent-fs bundle flag", () => {
+  for (const { name, state } of BASELINE_CASES) {
+    test(`flag off: ${name} .env equals the pre-bundle output`, async () => {
+      expect(state.bundleAgentFs).toBe(false);
+      const expected = await Bun.file(
+        new URL(`./fixtures/onboard/${name}.env.txt`, import.meta.url),
+      ).text();
+      expect(generateEnv(state)).toBe(expected);
+    });
+  }
+
+  test("flag on: adds only a comment block; every bundle value lives in the compose", () => {
+    const off = generateEnv(baselineState("solo"));
+    const on = generateEnv({ ...baselineState("solo"), bundleAgentFs: true });
+    const added = on.split("\n").filter((line) => !off.split("\n").includes(line));
+    expect(added.filter((line) => line && !line.startsWith("#"))).toEqual([]);
+    expect(on).toContain("--no-agent-fs");
+    for (const s of ["COMB_ENABLED", "EMBEDDING_", "AGENT_FS_", "EMBEDDING_DIMENSIONS"]) {
+      expect(on).not.toContain(s);
+    }
   });
 });

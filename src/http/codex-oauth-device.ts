@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import { getDbClient, upsertSwarmConfig } from "../be/db";
+import { getDbClient, recordKeyValidation, upsertSwarmConfig } from "../be/db";
 import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import { updateOnboardingAiFromCodexDevice } from "../be/onboarding";
+import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json";
 import {
   CODEX_DEVICE_VERIFICATION_URL,
   DeviceCodeNotEnabledError,
@@ -214,6 +215,12 @@ async function completeFlow(
       isSecret: true,
       description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by dashboard device login)`,
     });
+    // OpenAI just issued this token. Record the account as checked, so the
+    // account list says "Signed in" now: a worker's Codex check is a presence
+    // check and reports no per-account result.
+    const keySuffix = deriveCodexKeySuffix(credentials.access, credentials.accountId);
+    const checked = [{ keyIndex: slot, keySuffix, ok: true }];
+    await recordKeyValidation("CODEX_OAUTH", checked, "global", null, { retireAbsent: false });
     await updateOnboardingAiFromCodexDevice({ status: "complete" });
     state.status = "complete";
     state.slot = slot;

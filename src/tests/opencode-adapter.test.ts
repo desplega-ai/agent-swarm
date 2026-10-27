@@ -761,7 +761,7 @@ describe("OpencodeSession — persisted rows render in the dashboard", () => {
     const { items } = normalizeSessionLogs(rows);
 
     const visible = items
-      .filter((item) => item.kind !== "lifecycle")
+      .filter((item) => item.kind !== "lifecycle" && item.kind !== "call_usage")
       .map((item) =>
         item.kind === "text"
           ? `${item.role} text: ${item.text}`
@@ -781,6 +781,7 @@ describe("OpencodeSession — persisted rows render in the dashboard", () => {
       "system text: opencode error: provider overloaded",
     ]);
     expect(items.some((item) => item.kind === "unknown")).toBe(false);
+    expect(items.filter((item) => item.kind === "call_usage")).toHaveLength(1);
   });
 });
 

@@ -2,7 +2,8 @@
  * A task's requester drives attribution, cost reporting and admission. A non-lead agent may omit
  * `requestedByUserId` or pass the requester of its own current task. Only a lead, the operator or
  * a user may name any other registered user. Covers the send-task tool and POST /api/tasks.
- * POST /api/tasks also refuses an agent a foreign parent or a chat thread it does not own.
+ * POST /api/tasks also refuses an agent a foreign parent or a chat thread it does not own, and
+ * refuses a non-admin user a chat thread.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -16,8 +17,10 @@ import {
   createUser,
   getDbClient,
   getTaskById,
+  getUserById,
   initDb,
 } from "../be/db";
+import { attachRole, detachRole } from "../be/rbac-roles";
 import { handleTasks } from "../http/tasks";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerSendTaskTool } from "../tools/send-task";
@@ -70,7 +73,7 @@ const taskCount = async () =>
 const KEYED_REQUEST: HttpRequestAuth = { kind: "operator", fingerprint: "test-key" };
 
 async function postTask(
-  caller: { agentId?: string; sourceTaskId?: string },
+  caller: { agentId?: string; sourceTaskId?: string; userId?: string },
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: { id?: string; requestedByUserId?: string } }> {
   const response = await fetch(`${routeBaseUrl}/api/tasks`, {
@@ -79,6 +82,7 @@ async function postTask(
       "Content-Type": "application/json",
       ...(caller.agentId ? { "X-Agent-ID": caller.agentId } : {}),
       ...(caller.sourceTaskId ? { "X-Source-Task-Id": caller.sourceTaskId } : {}),
+      ...(caller.userId ? { "X-Test-User-Id": caller.userId } : {}),
     },
     body: JSON.stringify({ task: "created over HTTP", ...body }),
   });
@@ -114,7 +118,10 @@ beforeAll(async () => {
   registerSendTaskTool(mcp);
 
   routeServer = createServer(async (req, res) => {
-    setRequestAuth(req, KEYED_REQUEST);
+    // A test user id header stands in for an aswt_ user token.
+    const testUserId = req.headers["x-test-user-id"] as string | undefined;
+    const user = testUserId ? await getUserById(testUserId) : null;
+    setRequestAuth(req, user ? { kind: "user", userId: user.id, user } : KEYED_REQUEST);
     const url = req.url ?? "/";
     const handled = await handleTasks(
       req,
@@ -314,5 +321,59 @@ describe("POST /api/tasks parent and chat-thread binding for an agent caller", (
       (await postTask({ agentId: LEAD_ID }, { contextKey: chatSdkContextKey("telegram:554444") }))
         .status,
     ).toBe(201);
+  });
+});
+
+describe("POST /api/tasks chat-thread and context binding for a user caller", () => {
+  test("a Requester cannot bind a new task to a chat thread by contextKey", async () => {
+    const requester = await createUser({ name: "Chat Requester", email: "chat-req@example.com" });
+    // A new user starts as admin. Make this one a Requester only.
+    await attachRole(requester.id, "requester");
+    await detachRole(requester.id, "admin");
+    const before = await taskCount();
+    const result = await postTask(
+      { userId: requester.id },
+      { source: "chat", contextKey: chatSdkContextKey("telegram:556666") },
+    );
+    expect(result.status).toBe(403);
+    expect(await taskCount()).toBe(before);
+
+    // A page session key is not a chat thread: the Requester keeps it.
+    const page = await postTask({ userId: requester.id }, { contextKey: "home:abc123" });
+    expect(page.status).toBe(201);
+  });
+
+  test("a Requester cannot name the context of another user's open task", async () => {
+    const requester = await createUser({ name: "Context Requester", email: "ctx-req@example.com" });
+    await attachRole(requester.id, "requester");
+    await detachRole(requester.id, "admin");
+    await createTaskExtended("private case notes", {
+      agentId: LEAD_ID,
+      contextKey: "case:private-1",
+      requestedByUserId: userAId,
+    });
+    const before = await taskCount();
+    const foreign = await postTask({ userId: requester.id }, { contextKey: "case:private-1" });
+    expect(foreign.status).toBe(403);
+    expect(await taskCount()).toBe(before);
+
+    // The context of the Requester's own open task stays usable.
+    await createTaskExtended("my case notes", {
+      agentId: LEAD_ID,
+      contextKey: "case:mine-1",
+      requestedByUserId: requester.id,
+    });
+    const own = await postTask({ userId: requester.id }, { contextKey: "case:mine-1" });
+    expect(own.status).toBe(201);
+  });
+
+  test("an admin user may bind a task to a chat thread", async () => {
+    const admin = await createUser({ name: "Chat Admin", email: "chat-admin@example.com" });
+    await attachRole(admin.id, "admin");
+    const result = await postTask(
+      { userId: admin.id },
+      { source: "chat", contextKey: chatSdkContextKey("telegram:557777") },
+    );
+    expect(result.status).toBe(201);
   });
 });

@@ -16,10 +16,11 @@ import {
   upsertInboxState,
 } from "../be/db";
 import * as sessionMoves from "../be/db/session-moves";
+import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles";
 import { setSessionShares } from "../be/session-shares";
 import * as assets from "../http/assets";
 import { handleAssets } from "../http/assets";
-import { SESSION_READ_DENIED } from "../http/session-access";
+import { NOT_YOUR_TASK_DENIED, SESSION_READ_DENIED } from "../http/session-access";
 import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { chatSdkContextKey } from "../tasks/context-key";
@@ -704,4 +705,41 @@ test("old route denies read-only sharees with and without cascade and admits wri
   expect((await call(`assets/task/${root.id}/key`, { key: "shared/operator/" }, null)).status).toBe(
     200,
   );
+});
+
+// Regression: the session wall reads an ownerless root as everyone's, so with
+// RBAC on a requester could re-key Slack, schedule and operator sessions.
+test("with RBAC on, a requester cannot move an ownerless session; an admin user still can", async () => {
+  const previous = process.env.RBAC_ENABLED;
+  process.env.RBAC_ENABLED = "true";
+  try {
+    await ensureRbacSeedsSynced();
+    const requester = (await createUser({ name: "Move Requester" })).id;
+    await detachRole(requester, "admin");
+    await attachRole(requester, "requester");
+    const ownerless = await createTaskExtended("ownerless root", { key: "shared/slack/", agentId });
+    const own = await session("shared/requester-own/", requester);
+
+    const denied = await call(
+      "session-moves",
+      { rootTaskIds: [ownerless.id, own.root.id], groupKey: "shared/requester-moved/" },
+      requester,
+    );
+    expect(denied.status).toBe(200);
+    expect(denied.body.moved).toEqual([own.root.id]);
+    expect(denied.body.skipped).toEqual([
+      { rootTaskId: ownerless.id, reason: NOT_YOUR_TASK_DENIED },
+    ]);
+    expect((await getTaskById(ownerless.id))?.key).toBe("shared/slack/");
+
+    const admin = await call(
+      "session-moves",
+      { rootTaskIds: [ownerless.id], groupKey: "shared/admin-moved/" },
+      owner,
+    );
+    expect(admin.body.moved).toEqual([ownerless.id]);
+  } finally {
+    if (previous === undefined) delete process.env.RBAC_ENABLED;
+    else process.env.RBAC_ENABLED = previous;
+  }
 });
