@@ -1,7 +1,22 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDbClient, getStuckWorkflowRuns, initDb } from "../be/db";
-import { sessionCountQuery } from "../be/db/session-tree";
+import {
+  closeDb,
+  countScriptRuns,
+  countSessions,
+  createAgent,
+  createTaskExtended,
+  getDb,
+  getDbClient,
+  getRecentCompletedCount,
+  getStuckWorkflowRuns,
+  getTaskByWorkflowRunStepId,
+  initDb,
+  updateAgentProfile,
+} from "../be/db";
+import { checkHeartbeatChecklist } from "../heartbeat/heartbeat";
+import { getQueueStallSnapshot } from "../queue-stall-alarm";
 import { AgentTaskStatusSchema, OPEN_TASK_STATUSES, TERMINAL_TASK_STATUSES } from "../types";
 
 const TEST_DB_PATH = "./test-query-audit-plans.sqlite";
@@ -11,80 +26,151 @@ async function removeDbFiles(): Promise<void> {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
 }
 
-const open = OPEN_TASK_STATUSES.map(() => "?").join(", ");
+interface Captured {
+  sql: string;
+  params: unknown[];
+}
+
+// Runs the real caller and returns the one statement it issued that matches
+// `match`, so the plans below are of the SQL production sends, not a copy.
+async function capturedSql(match: RegExp, run: () => Promise<unknown>): Promise<Captured> {
+  const client = getDbClient();
+  const seen: Captured[] = [];
+  const query = client.query.bind(client);
+  const get = client.get.bind(client);
+  const record = (sql: string, params?: unknown[]) => {
+    if (match.test(sql)) seen.push({ sql, params: params ?? [] });
+  };
+  const spies = [
+    spyOn(client, "query").mockImplementation(((sql: string, params?: unknown[]) => {
+      record(sql, params);
+      return query(sql, params);
+    }) as typeof client.query),
+    spyOn(client, "get").mockImplementation(((sql: string, params?: unknown[]) => {
+      record(sql, params);
+      return get(sql, params);
+    }) as typeof client.get),
+  ];
+  try {
+    await run();
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+  expect(seen).toHaveLength(1);
+  return seen[0]!;
+}
+
+function plan({ sql, params }: Captured, db: Database = getDb()): string {
+  return db
+    .query<{ detail: string }, any[]>(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(...(params as any[]))
+    .map((row) => row.detail)
+    .join("\n");
+}
+
+// Plan of `captured` on a copy of the DB with `index` dropped, i.e. with
+// migration 251 reverted.
+function planWithoutIndex(captured: Captured, index: string): string {
+  const copy = Database.deserialize(getDb().serialize());
+  try {
+    copy.run(`DROP INDEX ${index}`);
+    return plan(captured, copy);
+  } finally {
+    copy.close();
+  }
+}
 
 // Production has no sqlite_stat1, so the planner picks indexes without
-// statistics. Each query must reach its index on plan shape alone. The SQL
-// mirrors the call site named in each case.
-const PLANS: Array<{ name: string; sql: string; params: unknown[]; uses: string[] }> = [
+// statistics. Each case runs the real caller, EXPLAINs the statement it
+// issued, and checks the plan reaches its index. The regression control
+// reverts that case's fix (the SQL shape or the migration 251 index) and
+// checks the same assertion then fails, so a green case is not vacuous.
+const CASES: Array<{
+  name: string;
+  match: RegExp;
+  run: () => Promise<unknown>;
+  uses: string[];
+  revert: { sql: (sql: string) => string } | { dropIndex: string };
+}> = [
   {
     name: "getTaskByWorkflowRunStepId",
-    sql: "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
-    params: ["step-1"],
+    match: /workflowRunStepId/,
+    run: () => getTaskByWorkflowRunStepId("step-1"),
     uses: [
       "SEARCH agent_tasks USING INDEX idx_agent_tasks_workflowRunStepId (workflowRunStepId=?)",
     ],
+    revert: { dropIndex: "idx_agent_tasks_workflowRunStepId" },
   },
   {
     name: "getStuckWorkflowRuns",
-    sql: `SELECT wr.id, wrs.id, at.output
-      FROM workflow_run_steps wrs
-      CROSS JOIN workflow_runs wr ON wr.id = wrs.runId
-      CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
-      WHERE wrs.status = 'waiting' AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')
-      ORDER BY at.createdAt ASC, at.rowid ASC`,
-    params: [],
+    match: /workflow_run_steps/,
+    run: () => getStuckWorkflowRuns(),
     uses: [
       "SEARCH wrs USING INDEX idx_wrs_status (status=?)",
       "SEARCH at USING INDEX idx_agent_tasks_workflowRunStepId (workflowRunStepId=?)",
     ],
+    revert: { dropIndex: "idx_agent_tasks_workflowRunStepId" },
   },
   {
     name: "captureRoutingDecisionSnapshot",
-    sql: `WITH open_task AS MATERIALIZED (
-        SELECT id, agentId, offeredTo, status FROM agent_tasks WHERE status IN (${open})
-      )
-      SELECT agent.id, COUNT(task.id) FROM agents agent
-      LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
-      WHERE agent.isLead = 0 GROUP BY agent.id, agent.status ORDER BY agent.id`,
-    params: [...OPEN_TASK_STATUSES],
+    match: /FROM agents agent/,
+    run: () => createTaskExtended("routing snapshot", {}),
     uses: ["MATERIALIZE open_task", "SEARCH agent_tasks USING INDEX idx_agent_tasks_status"],
+    revert: { sql: (sql) => sql.replace("AS MATERIALIZED", "AS NOT MATERIALIZED") },
   },
   {
     name: "checkHeartbeatChecklist dedup",
-    sql: `SELECT id FROM agent_tasks
-      WHERE status IN (${open}) AND +agentId = ? AND +taskType = 'heartbeat-checklist' LIMIT 1`,
-    params: [...OPEN_TASK_STATUSES, "lead"],
+    match: /heartbeat-checklist/,
+    run: () => checkHeartbeatChecklist(),
     uses: ["SEARCH agent_tasks USING INDEX idx_agent_tasks_status"],
+    revert: { sql: (sql) => sql.replace(/\+(agentId|taskType)/g, "$1") },
   },
   {
     name: "getRecentCompletedCount",
-    sql: "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'completed' AND finishedAt > ?",
-    params: ["2026-10-27T00:00:00.000Z"],
+    match: /agent_tasks/,
+    run: () => getRecentCompletedCount(),
     uses: ["COVERING INDEX idx_agent_tasks_status_finishedAt (status=? AND finishedAt>?)"],
+    revert: { dropIndex: "idx_agent_tasks_status_finishedAt" },
   },
   {
     name: "countScriptRuns by scriptName",
-    sql: "SELECT COUNT(*) AS count FROM script_runs WHERE scriptName = ?",
-    params: ["daily"],
+    match: /script_runs/,
+    run: () => countScriptRuns({ scriptName: "daily" }),
     uses: ["COVERING INDEX idx_script_runs_scriptName_startedAt (scriptName=?)"],
+    revert: { dropIndex: "idx_script_runs_scriptName_startedAt" },
   },
   {
     name: "getQueueStallSnapshot pickups",
-    sql: `SELECT COUNT(*) AS count FROM agent_log
-      WHERE +eventType IN ('task_status_change', 'task_claimed')
-        AND oldValue IN ('pending', 'unassigned') AND newValue = 'in_progress'
-        AND createdAt >= ?`,
-    params: ["2026-10-27T00:00:00.000Z"],
+    match: /COUNT\(\*\) AS count\s+FROM agent_log/,
+    run: () => getQueueStallSnapshot(),
     uses: ["SEARCH agent_log USING INDEX idx_agent_log_createdAt (createdAt>?)"],
+    revert: { sql: (sql) => sql.replace("+eventType", "eventType") },
+  },
+  {
+    name: "countSessions by source",
+    match: /COUNT/,
+    run: () => countSessions({ source: ["slack"] }),
+    uses: ["COVERING INDEX idx_agent_tasks_parentTaskId_source (parentTaskId=? AND source=?)"],
+    revert: { dropIndex: "idx_agent_tasks_parentTaskId_source" },
   },
 ];
+
+function missing(detail: string, uses: string[]): string[] {
+  return uses.filter((step) => !detail.includes(step));
+}
 
 describe("query audit plans without sqlite_stat1", () => {
   beforeAll(async () => {
     await removeDbFiles();
     initDb(TEST_DB_PATH);
+    // checkHeartbeatChecklist reaches its dedup only for a lead with a
+    // checklist, and stops there when an open checklist task exists.
+    const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+    await updateAgentProfile(lead.id, { heartbeatMd: "# Checklist\n\n- Check stuck tasks\n" });
+    await createTaskExtended("open checklist", {
+      agentId: lead.id,
+      taskType: "heartbeat-checklist",
+    });
   });
 
   afterAll(async () => {
@@ -99,28 +185,20 @@ describe("query audit plans without sqlite_stat1", () => {
     expect(stat).toBeNull();
   });
 
-  for (const { name, sql, params, uses } of PLANS) {
-    test(`${name} uses its index`, async () => {
-      const plan = await getDbClient().query<{ detail: string }>(
-        `EXPLAIN QUERY PLAN ${sql}`,
-        params,
-      );
-      const detail = plan.map((row) => row.detail).join("\n");
-      for (const step of uses) expect(detail).toContain(step);
+  for (const { name, match, run, uses, revert } of CASES) {
+    test(`${name} uses its index, and loses it when the fix is reverted`, async () => {
+      const captured = await capturedSql(match, run);
+      const detail = plan(captured);
+      expect(missing(detail, uses)).toEqual([]);
       expect(detail).not.toContain("SCAN agent_tasks");
+
+      const reverted =
+        "dropIndex" in revert
+          ? planWithoutIndex(captured, revert.dropIndex)
+          : plan({ ...captured, sql: revert.sql(captured.sql) });
+      expect(missing(reverted, uses)).not.toEqual([]);
     });
   }
-
-  test("session root count by source is covered by (parentTaskId, source)", async () => {
-    const query = sessionCountQuery({ source: ["slack"] });
-    const plan = await getDbClient().query<{ detail: string }>(
-      `EXPLAIN QUERY PLAN ${query.sql}`,
-      query.params,
-    );
-    expect(plan.map((row) => row.detail).join("\n")).toContain(
-      "COVERING INDEX idx_agent_tasks_parentTaskId_source (parentTaskId=? AND source=?)",
-    );
-  });
 
   test("getStuckWorkflowRuns returns only finished tasks of waiting steps in waiting runs", async () => {
     const client = getDbClient();

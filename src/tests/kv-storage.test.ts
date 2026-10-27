@@ -124,7 +124,12 @@ describe("kv-storage helpers", () => {
     });
 
     expect(await runMcpOverflowSweep(now)).toBeGreaterThanOrEqual(1);
-    expect(await getKv("mcp:overflow:agent-c", "expired-c")).toBeNull();
+    // Raw read: getKv deletes an expired row itself.
+    const expired = await getDbClient().get<{ key: string }>(
+      "SELECT key FROM kv_entries WHERE namespace = ? AND key = ?",
+      ["mcp:overflow:agent-c", "expired-c"],
+    );
+    expect(expired).toBeNull();
     expect((await getKv("mcp:overflow:agent-d", "live-d"))?.value).toBe("x");
   });
 
