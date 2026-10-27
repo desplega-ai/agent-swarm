@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
-    "@happy-dom/global-registrator": "^20.14.5",
+    "@happy-dom/global-registrator": "^21.0.4",
     "@resvg/resvg-js": "^2.6.2",
     "@types/dagre": "^0.7.54",
     "@types/node": "^24.10.1",

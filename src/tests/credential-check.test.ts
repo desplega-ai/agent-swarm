@@ -1323,10 +1323,12 @@ describe("NaN and Helmcode live probes", () => {
 // ─── Migration 055: report composition + opt-out ────────────────────────────
 
 describe("isCredCheckDisabled", () => {
-  test("true only when CRED_CHECK_DISABLE === '1'", () => {
+  test("true when CRED_CHECK_DISABLE is '1' or 'true' (case-insensitive)", () => {
     expect(isCredCheckDisabled({})).toBe(false);
     expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "0" })).toBe(false);
-    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "true" })).toBe(false);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "false" })).toBe(false);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "true" })).toBe(true);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "TRUE" })).toBe(true);
     expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "1" })).toBe(true);
   });
 });

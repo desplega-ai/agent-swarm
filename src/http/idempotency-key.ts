@@ -8,7 +8,7 @@ import { getRequestAuth } from "../utils/request-auth-context";
 import { jsonError } from "./utils";
 
 /** Visible ASCII, at most 255 characters: room for a UUID, a ULID or a client's own scheme. */
-const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7E]{1,255}$/;
+export const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7E]{1,255}$/;
 
 /** Set on a response answered from an earlier accepted request. */
 export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";

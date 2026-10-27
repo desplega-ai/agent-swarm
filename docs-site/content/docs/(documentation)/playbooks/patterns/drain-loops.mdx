@@ -1,6 +1,8 @@
 ---
 title: 'Pattern: Drain Loops (Stacked PRs + Merge Loop)'
 description: Turn one big parent issue into a chain of small, individually-reviewable stacked PRs, then review-and-merge them bottom-up with a merge loop that halts on the first failure.
+agent:
+  when: "Someone wants a large change split into small stacked pull requests and merged in order"
 ---
 
 Turn one big parent issue into a chain of small, individually-reviewable PRs — then review-and-merge them bottom-up, halting on the first failure.

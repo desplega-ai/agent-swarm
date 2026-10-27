@@ -23,6 +23,7 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import {
+  useRequestComposition,
   useTask,
   useTaskContext,
   useTaskSessionLogs,
@@ -36,6 +37,10 @@ import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import {
+  CallCompositionContext,
+  NO_CALL_COMPOSITIONS,
+} from "@/components/shared/request-composition-bar";
 import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -55,6 +60,8 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
+import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
@@ -66,6 +73,7 @@ import {
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { normalizeSessionLogs, sumItemCallUsage } from "@/logs-parser";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   TaskActions,
@@ -455,6 +463,46 @@ export default function TaskDetailPage() {
     () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
     [task, costs],
   );
+  // The rail's cache hit, from the session log this page already loads. Only
+  // with the log's usage details on.
+  const [usageDetails] = useUsageDetails();
+  const usageItems = useMemo(
+    () => (usageDetails ? normalizeSessionLogs(sessionLogs ?? []).items : null),
+    [sessionLogs, usageDetails],
+  );
+  const callUsage = useMemo(() => (usageItems ? sumItemCallUsage(usageItems) : null), [usageItems]);
+  // The request composition: the rail's panel and each cache chip's bar.
+  // Also only with usage details on.
+  const logSessionIds = useMemo(
+    () => [...new Set((sessionLogs ?? []).map((log) => log.sessionId))],
+    [sessionLogs],
+  );
+  const { data: manifests } = useRequestComposition(id!, {
+    enabled: usageDetails && logSessionIds.length > 0,
+    sessionIds: logSessionIds,
+    live: taskLive,
+  });
+  const compositions = useMemo(() => {
+    if (!usageItems || !manifests?.length) return null;
+    const sessionOfRecord = new Map((sessionLogs ?? []).map((log) => [log.id, log.sessionId]));
+    const compactions = (contextData?.snapshots ?? [])
+      .filter((snap) => snap.eventType === "compaction")
+      .map((snap) => ({ sessionId: snap.sessionId, t: Date.parse(snap.createdAt) }));
+    const derived = deriveCallCompositions(
+      compositionCallsOf(usageItems, (recId) => sessionOfRecord.get(recId)),
+      manifests,
+      compactions,
+    );
+    const latest = manifests.reduce((a, b) =>
+      b.createdAt > a.createdAt || (b.createdAt === a.createdAt && b.seq > a.seq) ? b : a,
+    );
+    const rail = {
+      manifest: latest,
+      anchor: derived.anchors.get(latest.id),
+      sessions: new Set(manifests.map((m) => m.sessionId)).size,
+    };
+    return { byCall: derived.byCall, rail };
+  }, [usageItems, manifests, sessionLogs, contextData]);
 
   if (isLoading) {
     return (
@@ -512,6 +560,8 @@ export default function TaskDetailPage() {
       costsLoading={costsLoading}
       context={contextData}
       contextLoading={contextLoading}
+      callUsage={callUsage}
+      composition={compositions?.rail}
     />
   );
 
@@ -610,7 +660,9 @@ export default function TaskDetailPage() {
   const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
     <>
       <h2 className="sr-only">Session log</h2>
-      {renderSessionLogBody(scrollElement, touchTargets)}
+      <CallCompositionContext.Provider value={compositions?.byCall ?? NO_CALL_COMPOSITIONS}>
+        {renderSessionLogBody(scrollElement, touchTargets)}
+      </CallCompositionContext.Provider>
     </>
   );
   const renderSessionLogBody = (scrollElement: HTMLElement | null, touchTargets: boolean) =>

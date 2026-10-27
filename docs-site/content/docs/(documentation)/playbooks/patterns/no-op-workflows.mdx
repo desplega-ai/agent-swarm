@@ -1,6 +1,8 @@
 ---
 title: 'Pattern: No-op When Nothing Changed'
 description: A scheduled workflow that first asks "did anything actually happen?" and skips silently if not — so it never produces empty reports, noise commits, or training-data-style "nothing to report" messages.
+agent:
+  when: "Someone wants a scheduled job that stays silent when nothing changed"
 ---
 
 A scheduled workflow that first asks "did anything actually happen?" and **skips silently** if not — so it never produces empty reports or noise commits.

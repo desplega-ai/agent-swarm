@@ -284,12 +284,22 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       renderToolsAndSkillsVars({
         skillsSummary: args.skillsSummary,
         mcpServers: args.mcpServers,
+        // pi defers installed MCP servers together with swarm tools.
+        mcpToolsDeferred: provider === "pi" && hasToolSearch,
         nativeSkillDiscovery,
         toolDiscovery: discoveryResult.text,
         hasLocalEnv,
       }),
     );
     prompt += toolsResult.text;
+
+    // Lead docs pointer: only when the lead has the `swarm-docs` skill. The
+    // skill list is unknown on claude-managed (the cloud sandbox owns skill
+    // delivery) and before the first skill load, so render it then.
+    if (role === "lead" && hasSwarmDocsSkill(args.skillsSummary)) {
+      const docsResult = await resolveTemplateAsync("system.agent.lead.docs", {});
+      prompt += docsResult.text;
+    }
   }
 
   // J. Agent notes (CLAUDE.md), only when it differs from the generated
@@ -352,6 +362,11 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
   return prompt.replace(/\n{3,}/g, "\n\n").trim();
 };
 
+/** True when the skill list includes `swarm-docs`, or when the list is unknown. */
+function hasSwarmDocsSkill(skills: { name: string }[] | undefined): boolean {
+  return skills === undefined || skills.some((skill) => skill.name === "swarm-docs");
+}
+
 /**
  * Dynamic lines for `system.agent.tools_skills`. The static text lives in the
  * template so operators can override or skip the section; only the lists that
@@ -360,6 +375,7 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
 function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
   mcpServers?: string[];
+  mcpToolsDeferred?: boolean;
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
   toolDiscovery: string;
@@ -395,7 +411,11 @@ function renderToolsAndSkillsVars(input: {
   const servers = (input.mcpServers ?? []).filter((name) => name.trim().length > 0);
   const mcpLine =
     servers.length > 0
-      ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
+      ? `Connected MCP servers: ${servers.join(", ")}. ${
+          input.mcpToolsDeferred
+            ? "Load their tools with your harness tool search."
+            : "Their tools are in your tool list."
+        }\n`
       : "";
 
   return {

@@ -718,11 +718,11 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "PI_TOOL_DEFERRAL",
-        label: "Defer pi swarm tools (pilot)",
+        label: "Defer pi swarm tools",
         description:
-          "pi workers only. Keep the core lifecycle tools and any task-manifest tools in the tool list, and load the rest through pi's tool_search. Cuts the tool schema sent with every pi session. Off by default: pilot it on one agent first and compare cost and cache hits. Takes effect on the worker's next task.",
+          "pi workers only. Keep the core lifecycle tools and any task-manifest tools in the tool list, and load the rest, plus installed MCP server tools, through pi's tool_search. Cuts the tool schema sent with every pi request. On by default; turn off to declare every tool up front. Takes effect on the worker's next task.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
@@ -1466,6 +1466,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "https://app.example.com,https://dashboard.example.com",
         docsUrl:
           "https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors",
+      },
+      {
+        key: "PAGES_FRAME_ANCESTORS",
+        label: "Public page embed origins",
+        description:
+          "Extra origins allowed to iframe public pages (/p/:id), for example a blog embedding a chart. Comma or space separated CSP host-sources; invalid entries are dropped with a warning. Authed and password pages ignore this list.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "https://www.example.com https://example.com",
+        docsUrl: `${DOCS}ui`,
       },
     ],
   },

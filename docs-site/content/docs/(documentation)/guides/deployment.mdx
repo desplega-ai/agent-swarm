@@ -1,6 +1,9 @@
 ---
 title: Deployment Guide
 description: Deploy Agent Swarm to production with Docker Compose — volumes, networking, secrets, and persistent storage
+agent:
+  offer: true
+  when: "Someone wants to run Agent Swarm on their own server with Docker Compose"
 ---
 
 For Kubernetes, see [Kubernetes and Helm](/docs/guides/kubernetes) for installation, API ingress, dashboard access, and CORS diagnostics.
@@ -16,6 +19,7 @@ Before you start, make sure you have:
 - **Docker & Docker Compose** installed ([install guide](https://docs.docker.com/get-docker/)). Rootless Podman with a Compose provider also works; see [Rootless Podman](/docs/guides/podman-rootless).
 - **A Claude Code OAuth token** — run `claude setup-token` in your terminal to get one
 - **An API key** — any secret string you choose (all services share this key for authentication)
+- **A host with at least 4 vCPU, 8 GB RAM and 40 GB of free disk.** Upgrades leave old images behind, so schedule a prune; see [Host requirements & disk cleanup](/docs/guides/host-requirements)
 
 ### Step 1: Download the Compose File
 

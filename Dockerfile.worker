@@ -244,7 +244,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.7
+ARG AGENT_FS_VERSION=0.18.9
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -558,8 +558,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-rc.3
-ARG DSH_SHA512=1fe13d1cb9c77fb7c9ab37a7f3867d06af2081be716eb71bca16635d324b13d35a6c7af7ced786bd346f76f1a4c4f978a2ff348ace162e0945992a3efe89498e
+ARG DSH_VERSION=0.2.1-rc.4
+ARG DSH_SHA512=f20c65eb33a2eafc75b03a251febe387db71ae96d70feb7be19d987d690406d477c4fd9812d9346db2e480b6519d84200f10a85e2b57c970ca9f9934fba897ae
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1792991933-g65080c
-ARG AMP_SHA512_AMD64=37376917ab094689e97544dbc2bb9eb159d9e6c3f7d2cabca43eaba05d27f8357824a34fc8182b5d6902ab5d3744d44822d70f2ec835d777b71761e18a195fd5
-ARG AMP_SHA512_ARM64=6dafc79c0166e1d121107117d2dbba8fe80c1473c8b33831c9da1697765f424838b004d715a9cda80797ebfba58364efa3347c46d87ee6b6dffbfd63bed51dc7
+ARG AMP_VERSION=0.0.1793025586-g9211b5
+ARG AMP_SHA512_AMD64=4dfa3253f3008d9b836144f060c2b6fd5679eda089fa30da9289cacfba6ee4ede129f86239485ab61c9536cf557aaf115ff2a309d2cfb1f24b5aec6513fcb3be
+ARG AMP_SHA512_ARM64=b22addf7db8eea051e440fc757c7929dbd3ec5f1d84af9218064fbce307d81c77d4ea19032d92212c976ca31bfa61ce3594ef9c7f5e616269bf05d26d1cd9187
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \

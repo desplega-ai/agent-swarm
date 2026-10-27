@@ -382,14 +382,15 @@ type ToolStructuredContent = NonNullable<AgentToolResult["structuredContent"]>;
 export const SWARM_TOOL_NAMESPACE = { name: "agent-swarm" } as const;
 
 /**
- * `PI_TOOL_DEFERRAL`: hide non-core swarm tools behind pi's `tool_search`.
- * Off by default until a pilot measures the prompt-cache cost of mid-session
- * tool-set changes. Read from `process.env` by both the adapter traits (which
- * pick the prompt's tool-discovery line) and `createSession`, so the prompt
- * and the session always agree.
+ * `PI_TOOL_DEFERRAL`: hide non-core swarm tools, and installed MCP server
+ * tools, behind pi's `tool_search`. On by default: the deferred schemas cost
+ * more on every request than the one partial cache miss a load causes.
+ * `false` declares every tool up front. Read from `process.env` by both the
+ * adapter traits (which pick the prompt's tool-discovery line) and
+ * `createSession`, so the prompt and the session always agree.
  */
 export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseEnvFlag(env.PI_TOOL_DEFERRAL, false);
+  return parseEnvFlag(env.PI_TOOL_DEFERRAL, true);
 }
 
 /**
@@ -919,6 +920,28 @@ function requestContextTokens(message: unknown): number | undefined {
   return usage.input + cacheRead + cacheWrite;
 }
 
+/**
+ * The session-log line for one LLM call's usage (token counts only, never
+ * content). The dashboard reads it as that call's cache-hit chip.
+ */
+function callUsageLine(message: unknown): string | undefined {
+  const usage = (message as { usage?: Record<string, unknown> } | null)?.usage;
+  if (typeof usage?.input !== "number") return undefined;
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return JSON.stringify({
+    type: "call_usage",
+    harness: "pi",
+    usage: {
+      input: count(usage.input),
+      cacheRead: count(usage.cacheRead),
+      cacheWrite: count(usage.cacheWrite),
+      output: count(usage.output),
+      reasoning: count(usage.reasoning),
+    },
+  });
+}
+
 function describeAssistantTurn(message: unknown): AssistantTurnShape {
   const msg = (message ?? {}) as {
     content?: unknown;
@@ -1116,6 +1139,10 @@ export class PiMonoSession implements ProviderSession {
         if (endMsg.role === "assistant") {
           const turn = describeAssistantTurn(event.message);
           this.lastAssistantTurn = turn;
+          // Ahead of the turn's text and tool lines: the chip rides on the
+          // call's first row.
+          const usageLine = callUsageLine(event.message);
+          if (usageLine) this.emit({ type: "raw_log", content: usageLine });
           if (endMsg.stopReason === "error") {
             // Candidate terminal failure. May still be cleared by a successful
             // retry (auto_retry_end success / a later good message_end).
@@ -1684,12 +1711,15 @@ function escapeValues(values: unknown): Record<string, string> {
 /**
  * Map installed servers (`fetchInstalledMcpServers(..., "claude")` entries)
  * to pi MCP configs. pi speaks stdio and streamable HTTP; `sse` entries map to
- * HTTP, which is how the previous pi client already reached them. Tools stay
- * `direct`, as before: the prompt lists these servers as in the tool list.
+ * HTTP, which is how the previous pi client already reached them. With
+ * `deferred`, their tools load through `tool_search` like non-core swarm
+ * tools; otherwise they are declared up front.
  */
 export function toPiMcpServers(
   installed: Record<string, Record<string, unknown>> | null,
+  options: { deferred?: boolean } = {},
 ): Record<string, McpServerConfig> {
+  const exposure = options.deferred ? "deferred" : "direct";
   const servers: Record<string, McpServerConfig> = {};
   for (const [name, entry] of Object.entries(installed ?? {})) {
     if (typeof entry.command === "string") {
@@ -1698,14 +1728,14 @@ export function toPiMcpServers(
         command: entry.command,
         args: Array.isArray(entry.args) ? entry.args.map(String) : [],
         env: escapeValues(entry.env),
-        exposure: "direct",
+        exposure,
       };
     } else if (typeof entry.url === "string") {
       servers[name] = {
         type: "http",
         url: entry.url,
         headers: escapeValues(entry.headers),
-        exposure: "direct",
+        exposure,
       };
     }
   }
@@ -1860,7 +1890,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       config.apiUrl && config.apiKey && config.agentId
         ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "claude")
         : null;
-    const piMcpServers = toPiMcpServers(installedMcpServers);
+    const piMcpServers = toPiMcpServers(installedMcpServers, { deferred: deferTools });
     if (Object.keys(piMcpServers).length > 0) {
       console.log(
         `\x1b[2m[${config.role}]\x1b[0m Registering ${Object.keys(piMcpServers).length} installed MCP server(s) with pi`,

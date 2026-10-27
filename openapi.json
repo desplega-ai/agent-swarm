@@ -19601,6 +19601,14 @@
             "required": false,
             "name": "model",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "keySuffixes",
+            "in": "query"
           }
         ],
         "responses": {
@@ -54036,6 +54044,17 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "executor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "native",
+                      "quickjs",
+                      null
+                    ]
                   }
                 },
                 "required": [
@@ -54162,6 +54181,17 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "executor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "native",
+                      "quickjs",
+                      null
+                    ]
                   },
                   "idempotencyKey": {
                     "type": "string",
@@ -54749,6 +54779,18 @@
                               "workspace-rw"
                             ]
                           },
+                          "executor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "native",
+                              "quickjs",
+                              null
+                            ],
+                            "default": null
+                          },
                           "createdByAgentId": {
                             "type": [
                               "string",
@@ -54923,6 +54965,18 @@
                             "none",
                             "workspace-rw"
                           ]
+                        },
+                        "executor": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "native",
+                            "quickjs",
+                            null
+                          ],
+                          "default": null
                         },
                         "createdByAgentId": {
                           "type": [
@@ -63520,6 +63574,20 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "Default true: respond after the run's instant steps ran, when it finishes or parks at its first async step. false: respond as soon as the run is committed and walk it in the background."
+            },
+            "required": false,
+            "description": "Default true: respond after the run's instant steps ran, when it finishes or parks at its first async step. false: respond as soon as the run is committed and walk it in the background.",
+            "name": "wait",
+            "in": "query"
           },
           {
             "schema": {

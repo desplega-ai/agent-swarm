@@ -37,4 +37,8 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "human-in-loop": [{ version: 1, hash: "61ac1c21766960da" }],
   "human-in-loop-solo": [{ version: 1, hash: "7cfc7a2d2e3303f3" }],
   "real-diff-agent-fs": [{ version: 1, hash: "66cd830c80ac1e4b" }],
+  "docs-suggestion": [
+    { version: 1, hash: "8c5077d6ea442fc6" },
+    { version: 2, hash: "32d131bdab3b2e4b" },
+  ],
 };

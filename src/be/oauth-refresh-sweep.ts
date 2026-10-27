@@ -20,6 +20,7 @@
  * same per-authorization locks in ensure-token, so overlap is safe.
  */
 import { forceRefreshAuthorizationOrThrow } from "../oauth/ensure-token";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AuthorizationSweepRow,
@@ -138,7 +139,7 @@ async function runSweepTick(trigger: "startup" | "interval"): Promise<void> {
  * already running.
  */
 export function startOAuthRefreshSweep(): void {
-  if (process.env.OAUTH_REFRESH_SWEEP_DISABLE === "true") {
+  if (isEnvFlagEnabled("OAUTH_REFRESH_SWEEP_DISABLE", false)) {
     console.log("[oauth-refresh-sweep] Disabled via OAUTH_REFRESH_SWEEP_DISABLE");
     return;
   }

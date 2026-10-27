@@ -3,6 +3,7 @@ import * as z from "zod";
 import { createToolRegistrar } from "@/tools/utils";
 import {
   proxyScriptsApi,
+  scriptExecutorSchema,
   scriptFsModeSchema,
   scriptNameSchema,
   scriptScopeSchema,
@@ -33,6 +34,12 @@ export const registerScriptUpsertTool = (server: McpServer) => {
         fsMode: scriptFsModeSchema
           .default("none")
           .describe("Filesystem mode. v1 supports none only."),
+        executor: scriptExecutorSchema
+          .nullable()
+          .optional()
+          .describe(
+            'Optional per-script executor override ("native" or "quickjs"). Null or omitted inherits SCRIPT_EXECUTOR.',
+          ),
       }),
       outputSchema: scriptToolOutputSchema,
     },

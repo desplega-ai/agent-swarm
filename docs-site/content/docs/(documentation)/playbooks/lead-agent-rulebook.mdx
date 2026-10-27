@@ -1,0 +1,170 @@
+---
+title: The rulebook our lead agent wrote for itself
+description: 24 rules learned from running a swarm of coding agents, with failures and checks you can reuse.
+agent:
+  offer: false
+---
+
+<Callout>
+Built on [agent-swarm](https://github.com/desplega-ai/agent-swarm), open source. If these help, star it on GitHub.
+</Callout>
+
+Every rule below was written by one agent, for itself, after it got something wrong. Our lead agent runs a swarm of coding agents and keeps a rulebook that loads into every session. What follows comes from its own failures across 47,311 tasks. These came out of real volume: in the last 30 days, 12 agents merged 702 PRs, 81% of our org's merged PRs.
+
+Most of these transfer to one agent on one repo. Paste the heading of any rule into CLAUDE.md or AGENTS.md. Each one carries the failure behind it and a check your agent can run itself.
+
+## Reading a failure
+
+### 1. Before you repeat any work, read the target's state, not the task row.
+
+**What happened:** A run was marked failed because its last step timed out after the publish. The work was already done. An agent trusted the row and re-ran the publish. The release note went out again.
+
+**Check:** Before any retry, have the agent print the target's own evidence: `git log -1 --format='%h %s' origin/main`, the issue's current labels, or the URL it would have written. If that evidence shows the work landed, stop.
+
+### 2. A failed run is five different things. Read which one before you tune anything.
+
+**What happened:** Most of the failures logged in one review were wins. A guard refused bad input, an agent stopped correctly when a credential was missing, a job hit a wall it could not pass. All of them counted as agent errors, so the tuning went to the wrong place.
+
+**Check:** Group last week's failures by their final message text, then print the count per distinct message. A group whose message begins with refused or blocked is not an agent error.
+
+### 3. Stop after two instant failures and check the infrastructure.
+
+**What happened:** Two attempts failed in under 30 seconds each, and a third would have too. The container had no network. The agent spent an hour re-reading its own prompt instead of testing the pipe.
+
+**Check:** Time each attempt. If two fail in under 30 seconds, run one health check the tool depends on before trying again: `git ls-remote origin` or `curl -sS -o /dev/null -w '%{http_code}' https://api.github.com`.
+
+### 4. Fixing a run does not re-run it.
+
+**What happened:** An agent patched the step that broke, said the job was fixed, and left. The failed run stayed failed. Nobody noticed until the next scheduled window, a day later.
+
+**Check:** After any fix to a pipeline or a job, list the runs that failed since the break. Re-trigger each one, or write down why it does not need re-running. A fix with no run behind it is unverified.
+
+### 5. No failures can mean it never ran.
+
+**What happened:** A weekly job reported zero errors for weeks. It had stopped being scheduled. Nothing failed because nothing started, and the quiet dashboard read as health.
+
+**Check:** Compare the job's last start time to the time it should have started. A gap larger than one interval is an invocation problem, not a reliability problem.
+
+## Verifying before you state
+
+### 6. A negative verdict needs two searches.
+
+**What happened:** An agent reported that a capability did not exist after one failed lookup. A second phrasing found it in a doc it had already read.
+
+**Check:** Before any negative verdict, require two different search phrasings, one of them over local files (`grep -rl "<topic>" .`), and the terms in the answer. An agent that cannot list its searches has not done them.
+
+### 7. "It is fixed" and "that is superseded" are claims. Test the live thing.
+
+**What happened:** A note said a permission had been lifted. It had not, and two pieces of work were sent into the same wall. The note was right about a decision and wrong about a deployment.
+
+**Check:** For a permission, make the call. For an endpoint, send one request. For a merged fix, read the diff. If the check needs more than a minute, write "unverified" beside the claim instead of deleting it.
+
+### 8. Read the state field, not the flag you believe gates it.
+
+**What happened:** An agent held a queued action because a flag said do not re-probe. The thing it waited on had finished two days earlier. The flag suppressed an action, and the agent read it as the state.
+
+**Check:** Before acting on a wait, read the terminal field of the thing you wait for: `status`, `mergedAt`, `sentAt`. Never the note that told you to wait.
+
+### 9. Compute timestamps in code, never by hand.
+
+**What happened:** A hand-converted window drifted and a period with events was reported as quiet.
+
+**Check:** Every time comparison goes through a library with a named zone: `TZ=Europe/Madrid date -d "$ts"`, `Intl.DateTimeFormat` with `timeZone`, or `zoneinfo`. An agent that prints a time without a zone has not finished.
+
+### 10. Re-read the artifact after you write it.
+
+**What happened:** A write returned success and changed nothing. The tool accepted the request and refused the edit, and the agent reported the change as done. The next session worked from a file that had not moved.
+
+**Check:** After every write to a config file or a remote record, read the value back and compare it to what you sent. Success in the response is not the check.
+
+## Numbers that lie
+
+### 11. An exact round number is a truncation until you prove otherwise.
+
+**What happened:** A query returned exactly 1,000 rows. That was a cap, not a result. The agent reported a total well below the real one.
+
+**Check:** If a row count sits exactly on a known limit (100, 1,000, 10,000), run `SELECT COUNT(*)` on the same filter. When the count exceeds the rows returned, aggregate in SQL until the number is smaller than the cap.
+
+### 12. "Zero" is a denominator claim. Count who could have reported.
+
+**What happened:** An audit found zero projects using a feature. It had looked at the projects holding a config file. The rest could not report at all.
+
+**Check:** Report zeros as "0 of N that can report", with N from its own query. State what a member needs in order to be counted, then count the members that hold it.
+
+### 13. A non-empty result is not evidence the thing exists.
+
+**What happened:** A presence check passed on output that was a 404 body, because the command printed the error to standard output. A second check matched rows it should have rejected, because a text pattern treated one character in the search term as a wildcard and ignored case.
+
+**Check:** On an HTTP call, assert the status code (`curl -fsS`) or parse for the field you expect, never the byte count: run it once against a path you know is missing. On a text match, run the same query against one row you know matches and one you know does not, and use a pattern that fails on the near miss.
+
+### 14. Every check needs a control that can fail.
+
+**What happened:** A cleanup query matched nothing for a month. The table name was wrong. The check stayed green because it was broken, and the zero it returned was read as a clean result.
+
+**Check:** Run each check once against a case you know is positive and once against one you know is negative. A wrong answer on either control means the instrument is broken, so fix it before you trust the zero. A control that answers correctly proves the check can fire, not that it read the rows you think it read: also assert a row count against the rows you processed.
+
+### 15. A number inside a file that loads every session is a fuse. Cite the instrument, not the number.
+
+**What happened:** A rule file said "there are two of these now". Two later runs read the number as current and skipped the measurement. The real count was seven.
+
+**Check:** Any count in CLAUDE.md, AGENTS.md or a standing note names the command that produces it. When a line carries a bare number, replace it with the query.
+
+## Don't do it again
+
+### 16. Search for the work before you start it.
+
+**What happened:** Two sessions started the same fix an hour apart. One opened a PR, the other opened a competing one. The duplicate was closed.
+
+**Check:** Search the tracker and the branch list for the same noun before you write a line: `gh pr list --search "<noun>" --state all`, `gh issue list --search "<noun>"`, `git log --all --oneline --grep="<noun>"`. If something is open, read it first.
+
+### 17. Verify each item before you redo a checklist.
+
+**What happened:** An agent re-ran a multi-step propagation for a defect fixed the day before, because the checklist said pending. Some of the steps were already done.
+
+**Check:** Print the live state of every item first and strike the done ones. Then re-measure the original defect. If it no longer reproduces, delete the list.
+
+### 18. A wait with no date you control is a plan that quietly dies.
+
+**What happened:** A note said waiting for a reply for days. The reply had arrived early and nobody had read it.
+
+**Check:** Every pending item carries a date and an action the agent can take alone. Write it as "no objection by Friday, ship it" or "delete this on the 14th". An item whose trigger the agent cannot cause is a dropped item.
+
+### 19. Never open a competing PR over someone else's work.
+
+**What happened:** A contributor's branch could not pass a gate. An agent copied the commits into a clean branch and opened its own PR. Their work was reviewed and then discarded. They never got the credit.
+
+**Check:** Before opening a PR, run `gh pr list --author <login> --state open`. If the same files are already in review, the work is not yours to redo. Leave review comments and let the author push.
+
+## What reaches the reader
+
+### 20. Look at the output before your human does.
+
+**What happened:** An agent shipped a page with a section that overlapped on mobile and a caption that still described the old design. It had tested the function, not the picture.
+
+**Check:** Open the artifact (screenshot, PDF, page, rendered email) and read every string that claims to reflect a change. Require three passes with at least one change each. If the output is visual and you cannot see it, say so instead of describing it.
+
+### 21. Put the result where the reader reads it.
+
+**What happened:** An agent finished a job and wrote a good answer into its run log. The human saw only the green checkmark on the job, never the answer, and asked for it again.
+
+**Check:** Name the surface the human opens before you start. At the end, confirm the content is visible there: the thread, the PR body, the issue comment. A log nobody opens is not a delivery.
+
+### 22. Never send anything outward on inferred consent.
+
+**What happened:** A message approving a fix was read as approval to tell the customer. It was not, and the customer read a status they should not have had.
+
+**Check:** Before any message to someone outside the team, quote the sentence that authorizes that exact message in that channel. If the sentence authorizes the work and not the message, ask.
+
+### 23. A rule the agent never loads is not a rule.
+
+**What happened:** An agent wrote a warning inside the artifact it protected. The warning loaded only when someone was already editing that file, which is the one moment the rule could not change a decision. The same failure came back a second time.
+
+A context file holds rules that fire on a moment: before a push, after a write, when a test fails. Work with no such moment, like a weekly audit, belongs in a task list or a scheduled job, where missing it shows up as a missed run instead of a silent gap.
+
+**Check:** Put each guard in a file read at session start, or in the tool description the agent sees at decision time. Then start a fresh session and grep the loaded context for the string. Before you conclude a rule failed, confirm it was in the context for the window you measured.
+
+### 24. Fixing the thing a rule describes does not fix the rule.
+
+**What happened:** A workaround sat in a runbook for 58 days: "this check is blind to X, so look at X by hand". The check itself took an afternoon to patch. The runbook kept telling every session to work around a bug that no longer existed.
+
+**Check:** When you patch a bug, grep the instructions for the workaround in the same change: `grep -rn "<symptom>" CLAUDE.md AGENTS.md docs/`. A workaround left behind is a bug report addressed to nobody.

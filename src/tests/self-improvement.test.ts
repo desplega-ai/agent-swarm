@@ -503,17 +503,17 @@ describe("Self-Improvement Mechanisms", () => {
     const MEMORY_SKILL_POINTER =
       "You MUST use the `memory` skill before you store, edit, or delete a memory.";
 
-    test("a worker prompt names memory-store and the memory skill", async () => {
+    test("a worker prompt points learnings at store-progress and names the memory skill", async () => {
       const prompt = await getBasePrompt({ role: "worker", agentId: workerId });
 
-      expect(prompt).toContain("`memory-store`");
+      expect(prompt).toContain("as `learning` on a `store-progress` call");
       expect(prompt).toContain(MEMORY_SKILL_POINTER);
     });
 
-    test("a lead prompt names memory-store and the memory skill", async () => {
+    test("a lead prompt points learnings at store-progress and names the memory skill", async () => {
       const prompt = await getBasePrompt({ role: "lead", agentId: leadId });
 
-      expect(prompt).toContain("`memory-store`");
+      expect(prompt).toContain("as `learning` on a `store-progress` call");
       expect(prompt).toContain(MEMORY_SKILL_POINTER);
     });
 

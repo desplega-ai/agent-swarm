@@ -27,8 +27,31 @@ export type NormalizedKind =
   | "file_change"
   | "result"
   | "lifecycle"
+  | "call_usage"
   | "parse_error"
   | "unknown";
+
+/**
+ * Token usage of one LLM call. `promptTokens` is the whole request:
+ * uncached input + cache read + cache write, whatever the harness counts.
+ */
+export interface CallUsage {
+  callId: string;
+  promptTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  /** A sub-agent made the call (claude `parent_tool_use_id`). */
+  sidechain: boolean;
+  harness: "claude" | "codex" | "opencode" | "pi";
+  /**
+   * Where the harness logs the usage: on the call's first output line
+   * (`start`: claude, pi) or after the call's output (`end`: codex, opencode).
+   */
+  reportedAt: "start" | "end";
+}
 
 export interface NormalizedToolCall {
   id: string;
@@ -58,6 +81,7 @@ export interface NormalizedItem {
   diff?: unknown;
   meta?: unknown;
   raw?: unknown;
+  usage?: CallUsage;
   /** The Agent/Task call that spawned the sub-agent which emitted this item (claude). */
   parentToolUseId?: string;
   /** Extra source-row ids aggregated into this item (e.g. opencode stream deltas). */

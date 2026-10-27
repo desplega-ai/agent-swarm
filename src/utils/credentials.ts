@@ -406,10 +406,13 @@ async function fetchAvailableIndices(
   for (const envVar of poolVars) {
     const val = env[envVar];
     if (val) {
-      const totalKeys = val.includes(",") ? val.split(",").filter((s) => s.trim()).length : 1;
+      // Status is matched by key suffix, so a key at the same index in another
+      // agent's or repo's pool never blocks one of ours (issue #2425).
+      const keySuffixes = splitCredentialPool(val).map((key) => key.slice(-5));
+      const totalKeys = keySuffixes.length;
       try {
         const resp = await fetch(
-          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}${modelParam}`,
+          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}${modelParam}&keySuffixes=${encodeURIComponent(keySuffixes.join(","))}`,
           { headers: { Authorization: `Bearer ${apiKey}` } },
         );
         if (resp.ok) {

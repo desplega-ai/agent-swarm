@@ -1,6 +1,9 @@
 ---
 title: Observability with OpenTelemetry
 description: Send Agent Swarm traces and OTLP metrics to SigNoz or any compatible backend, filter local runs, and inspect API, worker, MCP, and tool execution telemetry.
+agent:
+  offer: true
+  when: "Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend"
 ---
 
 Agent Swarm can emit OpenTelemetry traces and OTLP metrics from the API server and worker runners. Telemetry is disabled by default and turns on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.

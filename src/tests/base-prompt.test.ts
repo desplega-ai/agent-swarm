@@ -787,9 +787,75 @@ describe("getBasePrompt: tools and skills section", () => {
     );
   });
 
+  test("pi with deferral points installed MCP servers at tool search", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: true },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain(
+      "Connected MCP servers: linear. Load their tools with your harness tool search.",
+    );
+    expect(result).not.toContain("Their tools are in your tool list.");
+  });
+
+  test("pi without deferral keeps installed MCP servers in the tool list", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: false },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain("Connected MCP servers: linear. Their tools are in your tool list.");
+  });
+
   test("omits the MCP server line for an empty list", async () => {
     const result = await getBasePrompt({ ...minimalArgs, mcpServers: [] });
     expect(result).not.toContain("Connected MCP servers");
+  });
+});
+
+describe("getBasePrompt: lead docs pointer", () => {
+  const DOCS_LINE =
+    "Load the `swarm-docs` skill only when a person asks for something no skill, workflow, schedule or memory of yours covers, or asks where something is documented. Then follow its offer rules.";
+  const withDocs = [
+    { name: "commit", description: "Create a commit" },
+    { name: "swarm-docs", description: "docs index" },
+  ];
+
+  test("renders for a lead that has the swarm-docs skill", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: withDocs,
+    });
+    expect(result).toContain(DOCS_LINE);
+  });
+
+  test("drops the line when swarm-docs is disabled for the lead", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: [{ name: "commit", description: "Create a commit" }],
+    });
+    expect(result).not.toContain(DOCS_LINE);
+  });
+
+  test("renders when the skill list is unknown (claude-managed)", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: managedTraits });
+    expect(result).toContain(DOCS_LINE);
+  });
+
+  test("never renders for a worker", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: localTraits,
+      skillsSummary: withDocs,
+    });
+    expect(result).not.toContain(DOCS_LINE);
   });
 });
 
@@ -1015,14 +1081,16 @@ describe("getBasePrompt: size budget", () => {
     expect(result.length).toBeLessThan(5_750);
   });
 
-  test("a fresh claude lead stays under 5,900 characters", async () => {
+  // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
+  // while the skill list is still unknown.
+  test("a fresh claude lead stays under 6,100 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(5_900);
+    expect(result.length).toBeLessThan(6_100);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

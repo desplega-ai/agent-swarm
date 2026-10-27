@@ -1,0 +1,185 @@
+---
+title: Host Requirements & Disk Cleanup
+description: Minimum and recommended CPU, RAM and disk for a self-hosted swarm, why Docker fills the disk, and how to prune images and rotate logs safely
+agent:
+  offer: true
+  when: "Someone asks how big a host their self-hosted swarm needs, or their disk is filling up with Docker images"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Plan for the disk first. CPU and RAM grow with how many agents work at once, but disk grows with every upgrade until you prune old images.
+
+## Host size
+
+These numbers assume Docker Compose on one Linux host, as `install.sh` and `agent-swarm onboard` set it up.
+
+| | Minimum | Recommended |
+|---|---:|---:|
+| vCPU | 4 | 8 |
+| RAM | 8 GB | 16 GB |
+| Free disk for Docker | 40 GB | 80 GB or more |
+| Fits | Lead + 1 coding worker + 1-2 light workers | Lead + 3 coding workers + 2-4 light workers |
+
+The default `install.sh` preset (`full`, a lead and 10 workers) runs on the minimum box while only one or two agents run heavy tasks at the same time. Idle, those 11 agents use about 1.8 GiB of RAM together.
+
+To add one more agent:
+
+| Agent type | CPU | RAM | Disk |
+|---|---|---|---|
+| Coding worker (builds, tests, repo-wide checks) | 1-2 vCPU | 2-3 GB | Its workspace volume: the repos it clones and their dependencies |
+| Light worker (review, research, content) | 0.5 vCPU | 0.5-1 GB | Its workspace volume |
+
+Agents do not add image disk. Every agent, whatever its harness (Claude Code, Codex, pi, opencode and the rest), runs the same worker image. Disk grows with image versions, not with agent count.
+
+The CPU and RAM figures come from container metrics; see [Performance & Resource Sizing](/docs/guides/performance-resource-sizing) for per-container budgets, Kubernetes requests and limits, and larger hosts.
+
+<Callout type="info">
+If you also run agent-fs and a local embeddings server (TEI) next to the swarm, add about 2.6 GB of images, about 1.1 GB of model weights in a volume, and about 1 GB of RAM. TEI peaks near 1 GB and should be capped at 2 GB.
+</Callout>
+
+## What uses the disk
+
+Image sizes for `v2.6.0`, `linux/amd64`:
+
+| Image | Download | On disk |
+|---|---:|---:|
+| `ghcr.io/desplega-ai/agent-swarm-worker` | 3.0 GB | 8.3 GB |
+| `ghcr.io/desplega-ai/agent-swarm` (API) | 0.17 GB | 0.42 GB |
+| `ghcr.io/desplega-ai/agent-fs:0.18.8` (in `docker-compose.example.yml`) | 0.75 GB | 1.9 GB |
+| `text-embeddings-inference:cpu-1.9.4` (optional local embeddings) | 0.24 GB | 0.69 GB |
+
+A fresh install needs about 9 GB of images for the API and the worker image, or about 11 GB with agent-fs. The 40 GB minimum leaves room for a second worker image during an upgrade, plus the OS, the database, logs and your repositories.
+
+<Callout type="info">
+Docker's containerd image store (`docker info` lists `driver-type: io.containerd.snapshotter.v1`) keeps the compressed download next to the unpacked layers. On those hosts, budget the download plus the on-disk size for each image.
+</Callout>
+
+## Why the disk fills up
+
+- **Each upgrade leaves the old image behind.** Recent upgrades of the worker image added between 2.7 GB and 7.7 GB of new layers. Docker keeps the old layers until you prune them. Releases ship often, and the generated compose file tracks `latest` with `pull_policy: always`, so every `docker compose up` can pull a new image. Without cleanup, a 50 GB disk fills after a handful of upgrades.
+- **Pinned versions and variants add images.** Each tag you pull (`latest`, `2.6.0`, `slim`) is a separate image until you prune the ones no container uses.
+- **Build cache.** Building images on the host, for example with `docker-compose.local.yml --build`, leaves build cache behind. A host that only pulls images has little or none.
+- **Container logs.** Docker's default `json-file` log driver does not rotate. Every agent's stdout grows one file under `/var/lib/docker/containers/` for the life of the container.
+- **Agent workspaces.** Each agent clones repos and installs dependencies in its own volume. Files an agent writes outside a mounted volume stay in the container's writable layer. They show up under `Containers` in `docker system df`.
+- **Swarm data.** The SQLite database and session logs grow with use. To bound them, see [Database retention](/docs/guides/deployment#database-retention).
+
+## Check usage
+
+```bash
+df -h /var/lib/docker
+docker system df
+```
+
+`docker system df` lists images, containers, local volumes and build cache, with a `RECLAIMABLE` column. Add `-v` to see each image and each volume:
+
+```bash
+docker system df -v
+```
+
+## Clean up safely
+
+<Callout type="error">
+**Never prune volumes.** The swarm's named volumes hold the SQLite database (all swarm state), agent workspaces, shared memory and agent IDs. Never run `docker system prune --volumes`, `docker volume prune`, or `docker compose down -v` on a swarm host. They delete this data, and nothing restores it except a backup. The commands below never touch volumes.
+</Callout>
+
+Run these while the swarm is up:
+
+```bash
+# Delete every image that no container uses, including old swarm versions
+docker image prune -af
+
+# Delete build cache (only matters if you build images on this host)
+docker builder prune -af
+```
+
+`docker image prune -a` keeps every image that a container uses, running or stopped. If the swarm is down when it runs, it also deletes the current images, and the next `docker compose up` downloads them again.
+
+To upgrade on your own schedule instead of on every `up`, pin a release with `AGENT_SWARM_VERSION` in `.env`. See [Pin the Image Version](/docs/guides/deployment#step-4-pin-the-image-version).
+
+On Podman, use `podman system df` and `podman image prune -af`.
+
+## Rotate container logs
+
+Set a size limit for every container in `/etc/docker/daemon.json`. The `local` driver rotates and compresses logs, and `docker compose logs` still works:
+
+```json
+{
+  "log-driver": "local",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+```
+
+Restart Docker, then recreate the containers. The setting applies only to containers created after the change:
+
+```bash
+sudo systemctl restart docker
+docker compose up -d --force-recreate
+```
+
+To limit only the swarm's containers, add a `logging` block to each service in your compose file instead:
+
+```yaml
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  swarm-api:
+    logging: *default-logging
+    # ...the rest of the service
+```
+
+## Schedule the cleanup
+
+Prune daily if you track `latest`, weekly if you pin releases.
+
+With a systemd timer, create `/etc/systemd/system/docker-prune.service`:
+
+```ini
+[Unit]
+Description=Prune unused Docker images and build cache
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune -af
+ExecStart=/usr/bin/docker builder prune -af
+```
+
+And `/etc/systemd/system/docker-prune.timer`:
+
+```ini
+[Unit]
+Description=Daily Docker image and build-cache prune
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it and check the next run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now docker-prune.timer
+systemctl list-timers docker-prune.timer
+```
+
+Or with cron, create `/etc/cron.d/docker-prune`:
+
+```text
+30 4 * * * root /usr/bin/docker image prune -af >/dev/null 2>&1; /usr/bin/docker builder prune -af >/dev/null 2>&1
+```
+
+Neither job uses `--volumes`, and neither should.

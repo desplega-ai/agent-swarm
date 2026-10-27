@@ -104,7 +104,8 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/api/v1";
     delete process.env.PI_CODEMODE;
     delete process.env.PI_CODEMODE_MODELS;
-    delete process.env.PI_TOOL_DEFERRAL;
+    // Deferral off, so every swarm tool shows up as an active tool name.
+    process.env.PI_TOOL_DEFERRAL = "false";
   });
   afterEach(() => {
     for (const key of envKeys) {

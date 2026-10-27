@@ -376,7 +376,7 @@ describe("dsh harness", () => {
     await rename(join(config.cwd, "dsh"), join(config.cwd, "npx"));
     config.env = { ...config.env, DSH_BINARY: "", PATH: config.cwd };
     await expect(new DshAdapter().createSession(config)).rejects.toThrow(
-      "dsh CLI not found. Install @deepseek-ai/dsh@0.2.1-rc.3",
+      "dsh CLI not found. Install @deepseek-ai/dsh@0.2.1-rc.4",
     );
     expect(await Bun.file(join(config.cwd, "invocation.json")).exists()).toBe(false);
   });

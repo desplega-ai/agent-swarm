@@ -18,6 +18,10 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 
+## Tool-schema cost on harness bumps
+
+On a codex, opencode or pi bump, run `bun scripts/probe-tool-schema-tokens.ts --harness <name>` and paste its table into the PR. It reports provider-reported turn-1 input tokens with and without the swarm MCP server, and how many swarm tools the request declares. On codex, a swarm-MCP delta above 2k tokens blocks the bump; on opencode, any declared swarm tool does: the new version stopped deferring MCP tools. On pi, the deferral-on leg must declare only the core set (`CORE_TOOLS`, 26 today). A `FAIL` in "swarm tool reached" means the MCP leg never connected, so its numbers do not count.
+
 ## NaN and Helmcode (pi, opencode)
 
 NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
@@ -215,7 +219,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.1-rc.3` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.1-rc.4` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -442,7 +446,7 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi extension text for the model** goes through `sendNudge` (`pi.sendMessage`) in `src/providers/pi-mono-extension.ts`. pi runs extensions in-process and never feeds their stdout to the model, so a `console.log` there only reaches the worker log. `{ block, reason }` from `tool_call` also reaches the model. `context` fires before every LLM call; post-compaction text belongs on `session_compact`.
 
-**pi tool deferral** (`PI_TOOL_DEFERRAL`, default off): non-core swarm tools get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Pilot procedure: the harness-providers guide, section "pi tool deferral".
+**pi tool deferral** (`PI_TOOL_DEFERRAL`, default on): non-core swarm tools and installed MCP servers get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Rollback: `PI_TOOL_DEFERRAL=false`.
 
 **pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models })` (`models` follows `PI_CODEMODE_MODELS`, default off, only with codemode on; the usage of a script's `models.*` calls reaches `getSessionStats()` cost, proven in `src/tests/providers/pi-cost.test.ts`), wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
