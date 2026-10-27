@@ -7,6 +7,8 @@
   "description": "Nightly self-improvement loop: agents report on their day, the lead approves changes, guarded scripts apply them, and verify checks every write.",
   "version": "1.0.0",
   "category": "workflows",
+  "placeholders": [],
+  "requires": [],
   "runAllSeedersCandidate": true,
   "autoEnableCandidate": true,
   "tags": ["self-improvement", "memory", "profiles", "skills"]
