@@ -30,13 +30,16 @@
  * one lands. When the endpoint stops answering, the run stops with the cursor
  * saved; the next boot, reload or recovered embedding call resumes it. A row
  * the endpoint rejects while others embed loses its vector (it is in the old
- * space) and the NULL backfill retries it.
+ * space) and the NULL backfill, which runs after every finished re-embed,
+ * retries it.
  *
  * A full re-embed sends every stored document to the endpoint. So an endpoint
  * URL (`EMBEDDING_API_BASE_URL`, else the SDK's `OPENAI_BASE_URL` fallback)
  * stored through `/api/config` must pass the same SSRF check as the /setup
  * probe; only the deployment environment's own value may be private (the
- * bundled TEI at http://tei:80/v1). A blocked URL changes nothing.
+ * bundled TEI at http://tei:80/v1). A blocked URL changes nothing, and
+ * `runEmbeddingMaintenance` then sends no request at all: no probe, no
+ * re-embed, no backfill.
  *
  * Logs counts and a short fingerprint prefix only, never content.
  */
@@ -220,9 +223,12 @@ async function reembedScripts(
   counts: Counts,
   opts: EmbeddingSpaceOptions,
 ): Promise<boolean> {
-  const { embedScript, embeddingProvider } = await import("../scripts/embeddings");
+  const { computeScriptEmbedding, embeddingProvider, writeScriptEmbedding } = await import(
+    "../scripts/embeddings"
+  );
   const { toScriptRecord } = await import("../scripts/boot-reembed");
   type ScriptRow = import("../scripts/boot-reembed").ScriptRow;
+  type ScriptEmbedding = import("../scripts/embeddings").ScriptEmbedding;
 
   const client = getDbClient();
   const provider = embeddingProvider();
@@ -238,28 +244,38 @@ async function reembedScripts(
     if (rows.length === 0) return true;
     if (getEmbeddingProvider() !== memoryProvider) return false;
 
+    // Embed outside the write lock.
+    const embedded: { id: string; result: ScriptEmbedding | null }[] = [];
     for (const row of rows) {
-      let stored = false;
+      let result: ScriptEmbedding | null = null;
       try {
-        stored = await embedScript(toScriptRecord(row));
+        result = await computeScriptEmbedding(toScriptRecord(row));
       } catch {
-        stored = false;
+        result = null;
       }
-      if (stored) {
-        counts.done++;
-      } else {
-        if (!(await endpointWorks(provider))) {
-          await writeState(cursorKey, cursor);
-          return false;
-        }
-        // Rejected input: its old vector is in the old space. The missing-
-        // embedding backfill retries it.
-        await client.run("DELETE FROM script_embeddings WHERE scriptId = ?", [row.id]);
-        counts.failed++;
-      }
-      cursor = row.id;
+      embedded.push({ id: row.id, result });
     }
-    await writeState(cursorKey, cursor);
+    // Down endpoint: commit nothing, so the resume redoes the whole batch.
+    if (embedded.some((e) => !e.result) && !(await endpointWorks(provider))) return false;
+
+    // Vectors and cursor commit together, so a crash never leaves a new
+    // vector behind a cursor that still points before it.
+    const lastId = rows[rows.length - 1]!.id;
+    await client.transaction(async () => {
+      for (const { id, result } of embedded) {
+        if (result) {
+          await writeScriptEmbedding(id, result);
+          counts.done++;
+        } else {
+          // Rejected input: its old vector is in the old space. The missing-
+          // embedding backfill retries it.
+          await client.run("DELETE FROM script_embeddings WHERE scriptId = ?", [id]);
+          counts.failed++;
+        }
+      }
+      await writeState(cursorKey, lastId);
+    });
+    cursor = lastId;
 
     await opts.afterBatch?.({ table: "scripts", ids: rows.map((r) => r.id) });
     await yieldTick();
@@ -345,10 +361,11 @@ let queuedBackfill = false;
 let tail: Promise<void> = Promise.resolve();
 
 /**
- * Space check, then (with `backfill`) the NULL / wrong-length backfills for
- * memories and scripts. Runs one at a time, so boot, a config reload and an
- * embedding recovery never re-embed the same rows twice in parallel. A call
- * made while one waits joins it.
+ * Space check, then the NULL / wrong-length backfills for memories and
+ * scripts (with `backfill`, or after a finished re-embed). Nothing runs when
+ * the endpoint URL fails the SSRF check. Runs one at a time, so boot, a
+ * config reload and an embedding recovery never re-embed the same rows twice
+ * in parallel. A call made while one waits joins it.
  */
 export function runEmbeddingMaintenance(opts: { backfill?: boolean } = {}): Promise<void> {
   queuedBackfill ||= opts.backfill ?? true;
@@ -357,12 +374,21 @@ export function runEmbeddingMaintenance(opts: { backfill?: boolean } = {}): Prom
     const backfill = queuedBackfill;
     queued = null;
     queuedBackfill = false;
+    // Every request below (probe, re-embed, both backfills) goes to this URL.
+    if (!endpointAllowed()) {
+      console.warn(
+        `${TAG} maintenance skipped: the stored embedding base URL is not an allowed endpoint`,
+      );
+      return;
+    }
+    let result: EmbeddingSpaceResult | null = null;
     try {
-      await reconcileEmbeddingSpace();
+      result = await reconcileEmbeddingSpace();
     } catch (err) {
       console.error(`${TAG} space check failed (non-fatal):`, (err as Error).message);
     }
-    if (!backfill) return;
+    // A finished re-embed may have cleared rows the endpoint rejected: retry them now.
+    if (!backfill && result !== "reembedded") return;
     await Promise.all([
       import("./boot-reembed")
         .then(({ runBootReembed }) => runBootReembed())

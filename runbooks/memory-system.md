@@ -121,7 +121,11 @@ config reload and a recovered embedding call run `runEmbeddingMaintenance`, one
 run at a time. When the fingerprint differs, it re-embeds every memory and
 non-scratch script in id order, saves an id cursor per batch, and records the new
 fingerprint only after both tables finish. No stored fingerprint means adopt and
-re-embed nothing. Then the NULL / wrong-length backfills run as before.
+re-embed nothing. Then the NULL / wrong-length backfills run: on boot and
+recovery, on the reload that first turns embeddings on, and after every finished
+re-embed (rows the endpoint rejected lost their vector). Each batch commits its
+vectors and its cursor in one transaction. A stored endpoint URL that fails the
+SSRF check stops the whole run before any request: no probe, re-embed or backfill.
 
 ## Memory raters (v1.5)
 

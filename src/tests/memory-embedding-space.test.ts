@@ -21,6 +21,8 @@ import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 const MODEL_VALUE: Record<string, number> = { "model-a": 0.1, "model-b": 0.2 };
 const OLD_VALUE = 0.9;
 let down = false;
+// Count of document requests to model-b that answer HTTP 400 (rejected input).
+let rejectDocuments = 0;
 let requests: string[][] = [];
 let server: ReturnType<typeof Bun.serve>;
 const agentId = randomUUID();
@@ -54,6 +56,13 @@ beforeAll(async () => {
       const inputs = Array.isArray(body.input) ? body.input : [body.input];
       if (down) return new Response("model loading", { status: 503 });
       requests.push(inputs);
+      if (body.model === "model-b" && inputs.some((s) => s !== "test") && rejectDocuments > 0) {
+        rejectDocuments--;
+        return Response.json(
+          { error: { message: "rejected input", type: "invalid_request_error" } },
+          { status: 400 },
+        );
+      }
       return Response.json({
         object: "list",
         data: inputs.map((_, index) => ({
@@ -83,6 +92,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   down = false;
+  rejectDocuments = 0;
   requests = [];
   resetEmbeddingRecoveryForTests();
   setEnv({});
@@ -337,6 +347,67 @@ describe("embedding space fingerprint", () => {
       }
     });
   }
+
+  test("a blocked endpoint URL stops every maintenance request, backfills included", async () => {
+    const memoryId = await oldMemory();
+    await reconcileEmbeddingSpace();
+    await getMemoryStore().clearEmbedding(memoryId);
+    const savedNodeEnv = process.env.NODE_ENV;
+    const savedAllow = process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    process.env.NODE_ENV = "production";
+    delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    try {
+      setEnv({ EMBEDDING_MODEL: "model-b" });
+      requests = [];
+      await runEmbeddingMaintenance({ backfill: true });
+      expect(requests).toHaveLength(0);
+      expect(await memoryValue(memoryId)).toBeNull();
+    } finally {
+      if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = savedNodeEnv;
+      if (savedAllow !== undefined) process.env.ALLOW_PRIVATE_NETWORK_URLS = savedAllow;
+    }
+  });
+
+  test("a reload re-embed retries a rejected row with the NULL backfill", async () => {
+    const memoryId = await oldMemory();
+    await reconcileEmbeddingSpace();
+    setEnv({ EMBEDDING_MODEL: "model-b" });
+    // Reject the batch and its single-input fallback; the retry is accepted.
+    rejectDocuments = 2;
+    await runEmbeddingMaintenance({ backfill: false });
+    expect(rejectDocuments).toBe(0);
+    expect(await memoryValue(memoryId)).toBe(0.2);
+    expect(await state(EMBEDDING_SPACE_KEY)).toBe(fingerprint());
+  });
+
+  test("a reload re-embed retries a rejected script with the missing-embedding backfill", async () => {
+    const scriptId = await oldScript();
+    await reconcileEmbeddingSpace();
+    setEnv({ EMBEDDING_MODEL: "model-b" });
+    rejectDocuments = 1;
+    await runEmbeddingMaintenance({ backfill: false });
+    expect(rejectDocuments).toBe(0);
+    expect(await scriptValue(scriptId)).toBe(0.2);
+  });
+
+  test("a failed script cursor write rolls back the batch's vectors", async () => {
+    const scriptId = await oldScript();
+    await reconcileEmbeddingSpace();
+    setEnv({ EMBEDDING_MODEL: "model-b" });
+    await getDbClient().run(`CREATE TEMP TRIGGER fail_script_cursor BEFORE INSERT ON seed_state
+      WHEN NEW.key = 'embedding-space:scripts:cursor'
+      BEGIN SELECT RAISE(ABORT, 'cursor crash'); END`);
+    try {
+      await expect(reconcileEmbeddingSpace()).rejects.toThrow("cursor crash");
+      expect(await scriptValue(scriptId)).toBe(OLD_VALUE);
+      expect(await state(embeddingSpaceCursorKey("scripts"))).toBeNull();
+    } finally {
+      await getDbClient().run("DROP TRIGGER fail_script_cursor");
+    }
+    expect(await reconcileEmbeddingSpace()).toBe("reembedded");
+    expect(await scriptValue(scriptId)).toBe(0.2);
+  });
 
   test("maintenance calls made while one waits join it", async () => {
     const first = runEmbeddingMaintenance({ backfill: false });

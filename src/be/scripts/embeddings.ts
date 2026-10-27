@@ -78,20 +78,28 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
   };
 }
 
-/** Returns whether a vector was stored. */
-export async function embedScript(script: ScriptRecord): Promise<boolean> {
+export type ScriptEmbedding = { text: string; embedding: Float32Array; model: string };
+
+/** Embeds a script's text without writing it. Null when no usable vector came back. */
+export async function computeScriptEmbedding(
+  script: ScriptRecord,
+): Promise<ScriptEmbedding | null> {
   const text = scriptEmbeddingText(script);
   const provider = embeddingProvider();
   const embedding = await provider.embed(text, { kind: "document" });
-  if (!embedding) return false;
+  if (!embedding) return null;
 
   if (embedding.length !== provider.dimensions) {
     console.error(
       `[script-embed] dimension mismatch for "${script.name}": expected=${provider.dimensions} got=${embedding.length}, skipping`,
     );
-    return false;
+    return null;
   }
+  return { text, embedding, model: provider.name };
+}
 
+/** Upserts a computed vector. Joins the caller's transaction when there is one. */
+export async function writeScriptEmbedding(scriptId: string, e: ScriptEmbedding): Promise<void> {
   await getDbClient().run(
     `INSERT INTO script_embeddings (
       scriptId, embedding, embeddingModel, embeddedText, embeddedAt
@@ -102,8 +110,15 @@ export async function embedScript(script: ScriptRecord): Promise<boolean> {
       embeddingModel = excluded.embeddingModel,
       embeddedText = excluded.embeddedText,
       embeddedAt = excluded.embeddedAt`,
-    [script.id, serializeEmbedding(embedding), provider.name, text, new Date().toISOString()],
+    [scriptId, serializeEmbedding(e.embedding), e.model, e.text, new Date().toISOString()],
   );
+}
+
+/** Returns whether a vector was stored. */
+export async function embedScript(script: ScriptRecord): Promise<boolean> {
+  const result = await computeScriptEmbedding(script);
+  if (!result) return false;
+  await writeScriptEmbedding(script.id, result);
   return true;
 }
 
