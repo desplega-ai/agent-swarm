@@ -32,11 +32,17 @@
  * the endpoint rejects while others embed loses its vector (it is in the old
  * space) and the NULL backfill retries it.
  *
+ * A full re-embed sends every stored document to the endpoint. So an
+ * `EMBEDDING_API_BASE_URL` stored through `/api/config` must pass the same SSRF
+ * check as the /setup probe; only the deployment environment's own value may be
+ * private (the bundled TEI at http://tei:80/v1). A blocked URL changes nothing.
+ *
  * Logs counts and a short fingerprint prefix only, never content.
  */
 
 import { createHash } from "node:crypto";
 import { getDbClient } from "@/be/db";
+import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import { getEmbeddingProvider, getMemoryStore } from "./index";
 import type { EmbeddingProvider } from "./types";
 
@@ -73,13 +79,36 @@ export type EmbeddingSpaceResult =
   | "adopted"
   | "unchanged"
   | "reembedded"
-  | "interrupted";
+  | "interrupted"
+  | "blocked";
 
 export type EmbeddingSpaceOptions = {
   batchSize?: number;
   /** Test hook, called after each committed batch. A throw stops the run, cursor saved. */
   afterBatch?: (info: { table: "memory" | "scripts"; ids: string[] }) => void | Promise<void>;
 };
+
+/**
+ * The deployment environment's EMBEDDING_API_BASE_URL, without stored config.
+ * Set by the HTTP server at boot (http/core owns the env injection). Unset, no
+ * URL counts as operator config, so every one gets the SSRF check.
+ */
+let readDeploymentBaseUrl: () => string | undefined = () => undefined;
+
+export function setDeploymentEmbeddingBaseUrl(read: () => string | undefined): void {
+  readDeploymentBaseUrl = read;
+}
+
+function endpointAllowed(): boolean {
+  const baseUrl = process.env.EMBEDDING_API_BASE_URL;
+  if (!baseUrl || baseUrl === readDeploymentBaseUrl()) return true;
+  try {
+    assertUrlSafe(baseUrl, publicEndpointSsrfOptions());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function readState(key: string): Promise<string | null> {
   const row = await getDbClient().get<{ seededHash: string }>(
@@ -251,6 +280,13 @@ export async function reconcileEmbeddingSpace(
     return "adopted";
   }
   if (stored === current && target === null) return "unchanged";
+
+  if (!endpointAllowed()) {
+    console.warn(
+      `${TAG} re-embed to ${short(current)} blocked: the stored EMBEDDING_API_BASE_URL is not an allowed endpoint`,
+    );
+    return "blocked";
+  }
 
   if (target !== current) {
     await getDbClient().transaction(async () => {

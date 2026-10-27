@@ -12,6 +12,7 @@ import {
   embeddingSpaceFingerprint,
   reconcileEmbeddingSpace,
   runEmbeddingMaintenance,
+  setDeploymentEmbeddingBaseUrl,
 } from "../be/memory/embedding-space";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 
@@ -299,6 +300,33 @@ describe("embedding space fingerprint", () => {
     for (const id of memoryIds) expect(await memoryValue(id)).toBe(0.1);
     expect(await state(EMBEDDING_SPACE_KEY)).toBe(spaceA);
     expect(await state(EMBEDDING_SPACE_TARGET_KEY)).toBeNull();
+  });
+
+  test("a stored private endpoint blocks the re-embed and sends no document", async () => {
+    const memoryId = await oldMemory();
+    await reconcileEmbeddingSpace();
+    const savedNodeEnv = process.env.NODE_ENV;
+    const savedAllow = process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    process.env.NODE_ENV = "production";
+    delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    try {
+      setEnv({ EMBEDDING_MODEL: "model-b" });
+      requests = [];
+      expect(await reconcileEmbeddingSpace()).toBe("blocked");
+      expect(requests).toHaveLength(0);
+      expect(await memoryValue(memoryId)).toBe(OLD_VALUE);
+      expect(await state(EMBEDDING_SPACE_TARGET_KEY)).toBeNull();
+
+      // The deployment environment's own URL may be private (bundled TEI).
+      setDeploymentEmbeddingBaseUrl(() => process.env.EMBEDDING_API_BASE_URL);
+      expect(await reconcileEmbeddingSpace()).toBe("reembedded");
+      expect(await memoryValue(memoryId)).toBe(0.2);
+    } finally {
+      setDeploymentEmbeddingBaseUrl(() => undefined);
+      if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = savedNodeEnv;
+      if (savedAllow !== undefined) process.env.ALLOW_PRIVATE_NETWORK_URLS = savedAllow;
+    }
   });
 
   test("maintenance calls made while one waits join it", async () => {

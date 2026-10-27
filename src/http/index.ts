@@ -83,7 +83,7 @@ import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
-import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
@@ -884,7 +884,10 @@ httpServer
     // prefix) changed, then embed rows with a missing or wrong-length vector.
     // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
     import("../be/memory/embedding-space")
-      .then(({ runEmbeddingMaintenance }) => runEmbeddingMaintenance({ backfill: true }))
+      .then(({ runEmbeddingMaintenance, setDeploymentEmbeddingBaseUrl }) => {
+        setDeploymentEmbeddingBaseUrl(() => getDeploymentEnvValue("EMBEDDING_API_BASE_URL"));
+        return runEmbeddingMaintenance({ backfill: true });
+      })
       .catch((err) => {
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
