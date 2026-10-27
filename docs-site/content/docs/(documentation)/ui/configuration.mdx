@@ -336,11 +336,12 @@ required to preload task-specific tools.
 
 ## pi tool deferral
 
-`PI_TOOL_DEFERRAL` defaults to `false` and only affects `pi` workers. When it is `true`, a pi
-session keeps the core lifecycle tools, and any tool a task manifest preloads, in the model's tool
-list. Every other swarm tool is marked deferred and is loaded on demand through pi's `tool_search`.
-The system prompt switches to the tool-search guidance in the same task. See
-[Harness providers](/docs/guides/harness-providers#pi-tool-deferral) for the pilot procedure.
+`PI_TOOL_DEFERRAL` defaults to `true` and only affects `pi` workers. A pi session keeps the core
+lifecycle tools, and any tool a task manifest preloads, in the model's tool list. Every other swarm
+tool, and every installed MCP server tool, is marked deferred and is loaded on demand through pi's
+`tool_search`. Set it to `false` to declare every tool up front; the system prompt switches back to
+the direct-tool guidance in the same task. See
+[Harness providers](/docs/guides/harness-providers#pi-tool-deferral).
 
 ## pi codemode
 

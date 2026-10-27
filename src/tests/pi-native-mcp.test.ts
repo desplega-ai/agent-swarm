@@ -30,6 +30,17 @@ describe("toPiMcpServers", () => {
     });
   });
 
+  test("deferred maps every installed server to deferred exposure", () => {
+    const servers = toPiMcpServers(
+      {
+        local: { command: "context-mode" },
+        remote: { url: "https://mcp.example.com/mcp" },
+      },
+      { deferred: true },
+    );
+    expect(Object.values(servers).map((s) => s.exposure)).toEqual(["deferred", "deferred"]);
+  });
+
   test("no installed servers maps to an empty set", () => {
     expect(toPiMcpServers(null)).toEqual({});
   });
@@ -70,7 +81,8 @@ describe("PiMonoAdapter.createSession — native MCP for installed servers", () 
     process.env.OPENROUTER_API_KEY = "example-test-key";
     // The session prompts on creation; keep that request off the network.
     process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/api/v1";
-    delete process.env.PI_TOOL_DEFERRAL;
+    // Direct exposure, so installed tools show up as active tool names.
+    process.env.PI_TOOL_DEFERRAL = "false";
     mkdirSync(join(dir, "agent"), { recursive: true });
   });
   afterEach(() => {

@@ -1,0 +1,31 @@
+{
+  "linear": {
+    "connection": "linear",
+    "teamKey": "ENG",
+    "projectLabel": "delivery-loop",
+    "states": {}
+  },
+  "github": {
+    "connection": "github",
+    "repos": ["acme/app"],
+    "botLogins": ["github-actions[bot]"],
+    "ownerLogins": [],
+    "ignoredChecks": [],
+    "requiredChecks": [],
+    "mergeMethod": "SQUASH"
+  },
+  "agents": {
+    "coders": ["<coder-agent-id>"],
+    "reviewers": ["<reviewer-agent-id>"],
+    "researchers": ["<researcher-agent-id>"]
+  },
+  "slack": {
+    "ownerPing": { "default": "<channel-id>", "byProject": {} },
+    "escalation": { "default": "<slack-user-or-channel-id>", "byProjectLead": {} },
+    "teamChannels": { "default": "<channel-id>", "byTeam": {} },
+    "errors": "<channel-id>"
+  },
+  "reviewGate": true,
+  "backlogPreflight": true,
+  "caps": {}
+}

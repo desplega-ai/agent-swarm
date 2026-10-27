@@ -273,6 +273,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       renderToolsAndSkillsVars({
         skillsSummary: args.skillsSummary,
         mcpServers: args.mcpServers,
+        // pi defers installed MCP servers together with swarm tools.
+        mcpToolsDeferred: provider === "pi" && hasToolSearch,
         nativeSkillDiscovery,
         toolDiscovery: discoveryResult.text,
         hasLocalEnv,
@@ -362,6 +364,7 @@ function hasSwarmDocsSkill(skills: { name: string }[] | undefined): boolean {
 function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
   mcpServers?: string[];
+  mcpToolsDeferred?: boolean;
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
   toolDiscovery: string;
@@ -397,7 +400,11 @@ function renderToolsAndSkillsVars(input: {
   const servers = (input.mcpServers ?? []).filter((name) => name.trim().length > 0);
   const mcpLine =
     servers.length > 0
-      ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
+      ? `Connected MCP servers: ${servers.join(", ")}. ${
+          input.mcpToolsDeferred
+            ? "Load their tools with your harness tool search."
+            : "Their tools are in your tool list."
+        }\n`
       : "";
 
   return {

@@ -176,8 +176,8 @@ describe("pi resource loader trust", () => {
 });
 
 describe("PI_TOOL_DEFERRAL flag", () => {
-  test("defaults off and parses boolean literals", () => {
-    expect(isPiToolDeferralEnabled({})).toBe(false);
+  test("defaults on and parses boolean literals", () => {
+    expect(isPiToolDeferralEnabled({})).toBe(true);
     expect(isPiToolDeferralEnabled({ PI_TOOL_DEFERRAL: "true" })).toBe(true);
     expect(isPiToolDeferralEnabled({ PI_TOOL_DEFERRAL: "1" })).toBe(true);
     expect(isPiToolDeferralEnabled({ PI_TOOL_DEFERRAL: "false" })).toBe(false);
@@ -187,9 +187,9 @@ describe("PI_TOOL_DEFERRAL flag", () => {
     "traits.hasToolSearch follows the flag live",
     withEnv("PI_TOOL_DEFERRAL", undefined, () => {
       const adapter = new PiMonoAdapter();
-      expect(adapter.traits.hasToolSearch).toBe(false);
-      process.env.PI_TOOL_DEFERRAL = "true";
       expect(adapter.traits.hasToolSearch).toBe(true);
+      process.env.PI_TOOL_DEFERRAL = "false";
+      expect(adapter.traits.hasToolSearch).toBe(false);
     }),
   );
 });
@@ -259,8 +259,8 @@ describe("PiMonoAdapter.createSession — tool deferral wiring", () => {
   }
 
   test(
-    "flag on: non-core tools deferred and tool_search enabled by default",
-    withEnv("PI_TOOL_DEFERRAL", "true", async () => {
+    "flag unset: non-core tools deferred and tool_search enabled by default",
+    withEnv("PI_TOOL_DEFERRAL", undefined, async () => {
       const opts = await captureSessionOptions();
       const tools = opts.customTools as ToolDefinition[];
       expect(Object.fromEntries(tools.map((t) => [t.name, t.exposure]))).toEqual({
@@ -274,8 +274,8 @@ describe("PiMonoAdapter.createSession — tool deferral wiring", () => {
   );
 
   test(
-    "flag off: every tool declared and no tool_search",
-    withEnv("PI_TOOL_DEFERRAL", undefined, async () => {
+    "flag false: every tool declared and no tool_search",
+    withEnv("PI_TOOL_DEFERRAL", "false", async () => {
       const opts = await captureSessionOptions();
       const tools = opts.customTools as ToolDefinition[];
       expect(tools.map((t) => t.exposure)).toEqual([undefined, undefined, undefined]);

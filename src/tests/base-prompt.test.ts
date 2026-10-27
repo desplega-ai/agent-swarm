@@ -832,6 +832,29 @@ describe("getBasePrompt: tools and skills section", () => {
     );
   });
 
+  test("pi with deferral points installed MCP servers at tool search", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: true },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain(
+      "Connected MCP servers: linear. Load their tools with your harness tool search.",
+    );
+    expect(result).not.toContain("Their tools are in your tool list.");
+  });
+
+  test("pi without deferral keeps installed MCP servers in the tool list", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "pi",
+      traits: { ...localTraits, hasToolSearch: false },
+      mcpServers: ["linear"],
+    });
+    expect(result).toContain("Connected MCP servers: linear. Their tools are in your tool list.");
+  });
+
   test("omits the MCP server line for an empty list", async () => {
     const result = await getBasePrompt({ ...minimalArgs, mcpServers: [] });
     expect(result).not.toContain("Connected MCP servers");
