@@ -2,8 +2,9 @@ import { expect, test } from "../fixtures";
 
 // The teammate path: an admin invites a Requester from People and reads the
 // one-time link. A second browser context, with no saved connection, opens
-// the link: /join trades the code for the teammate's own token, saves it as a
-// connection and lands on Home. Reusing the link shows the expired copy.
+// the link: /join shows the swarm host, and after Join it trades the code for
+// the teammate's own token, saves it as a connection and lands on Home.
+// Reusing the link shows the expired copy.
 const EMAIL = "e2e-ada@example.com";
 // `browser.newContext()` inherits the fixture's storageState (the admin's
 // connection): a teammate's browser starts empty.
@@ -44,6 +45,10 @@ test.describe("invites", () => {
         if (requested.origin === new URL(page.url()).origin) dashboardRequests.push(requested);
       });
       await ada.goto(link);
+      // Nothing is saved before the teammate confirms the host.
+      await expect(ada.getByRole("button", { name: "Join swarm" })).toBeVisible();
+      expect(await ada.evaluate(() => localStorage.getItem("agent-swarm-connections"))).toBeNull();
+      await ada.getByRole("button", { name: "Join swarm" }).click();
       await ada.waitForURL((current) => current.pathname === "/");
       // The code left the address bar.
       expect(new URL(ada.url()).searchParams.get("code")).toBeNull();
@@ -75,6 +80,7 @@ test.describe("invites", () => {
     try {
       const reuse = await third.newPage();
       await reuse.goto(link);
+      await reuse.getByRole("button", { name: "Join swarm" }).click();
       await expect(
         reuse.getByText("This invite link is used or expired. Ask the admin for a new one."),
       ).toBeVisible();

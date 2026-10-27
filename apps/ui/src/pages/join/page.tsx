@@ -1,5 +1,5 @@
 import { AlertCircle, Loader2, RotateCw, UserPlus } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -46,10 +46,12 @@ function JoinShell({
 }
 
 /**
- * `/join?swarm=#code=`: the teammate's side of an invite. Trades the one-time
- * code for a personal token, saves it as a dashboard connection, then lands
- * on Home (or Comb, when Comb is on). The code leaves the URL and the history
- * entry before anything else happens.
+ * `/join?swarm=#code=`: the teammate's side of an invite. Shows the swarm host
+ * and waits for a click on Join: anyone can send a link with any `swarm`, so
+ * the dashboard never saves or switches to it without that click. Then it
+ * trades the one-time code for a personal token, saves it as a dashboard
+ * connection, and lands on Home (or Comb, when Comb is on). The code leaves
+ * the URL and the history entry before anything else happens.
  */
 export default function JoinPage() {
   const navigate = useNavigate();
@@ -59,7 +61,7 @@ export default function JoinPage() {
     parseJoinParams(window.location.search, window.location.hash),
   );
   const [outcome, setOutcome] = useState<JoinOutcome | null>(null);
-  const started = useRef(false);
+  const [confirmed, setConfirmed] = useState(false);
 
   const join = useCallback(
     async (joinParams: JoinParams) => {
@@ -92,11 +94,7 @@ export default function JoinPage() {
       url.hash = "";
       window.history.replaceState(window.history.state, "", url.toString());
     }
-    // One exchange per page load, also under StrictMode's double effect.
-    if (!params || started.current) return;
-    started.current = true;
-    void join(params);
-  }, [params, join]);
+  }, []);
 
   if (!params) {
     return (
@@ -107,6 +105,30 @@ export default function JoinPage() {
   }
 
   const host = swarmHost(params.swarm);
+
+  if (!confirmed) {
+    return (
+      <JoinShell
+        title={`Join ${host}?`}
+        description="You have an invite to the agent swarm at this address. Join only if you expect this invite."
+      >
+        <p className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm break-all">
+          {params.swarm}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => {
+              setConfirmed(true);
+              void join(params);
+            }}
+          >
+            Join swarm
+          </Button>
+          <GoHome label="Not now" />
+        </div>
+      </JoinShell>
+    );
+  }
 
   if (!outcome) {
     return (
@@ -152,10 +174,10 @@ export default function JoinPage() {
   );
 }
 
-function GoHome() {
+function GoHome({ label = "Go to dashboard" }: { label?: string }) {
   return (
     <Button asChild variant="outline" className="self-start">
-      <Link to="/">Go to dashboard</Link>
+      <Link to="/">{label}</Link>
     </Button>
   );
 }

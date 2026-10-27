@@ -1043,6 +1043,28 @@ describe("POST /agentfs/auth/register needs a swarm credential", () => {
     expect(fake.last?.headers.get("authorization")).toBeNull();
   });
 
+  test("a swarm key shaped like an agent-fs key never goes upstream", async () => {
+    const afShaped = "af_example-swarm-operator-key"; // gitleaks:allow (test fixture, not a real key)
+    process.env.AGENT_SWARM_API_KEY = afShaped;
+    try {
+      const res = await register({ email: "someone@example.test" }, `Bearer ${afShaped}`);
+      expect(res.status).toBe(200);
+      expect(fake.last?.headers.get("authorization")).toBeNull();
+
+      await fetch(`${proxyUrl}/agentfs/auth/me`, {
+        headers: { Authorization: `Bearer ${afShaped}` },
+      });
+      expect(fake.last?.url).toBe("/auth/me");
+      expect(fake.last?.headers.get("authorization")).toBeNull();
+
+      // A teammate's own agent-fs key still goes upstream.
+      await fetch(`${proxyUrl}/agentfs/auth/me`, { headers: { Authorization: "Bearer af_mate" } });
+      expect(fake.last?.headers.get("authorization")).toBe("Bearer af_mate");
+    } finally {
+      process.env.AGENT_SWARM_API_KEY = FAKE_SWARM_KEY;
+    }
+  });
+
   test("a user token registers its own email or an alias, not a teammate's", async () => {
     for (const email of ["MATE@example.test", "mate.alias@example.test"]) {
       const res = await register({ email }, `Bearer ${userToken}`);

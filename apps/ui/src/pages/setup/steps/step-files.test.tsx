@@ -293,11 +293,26 @@ describe("StepFiles", () => {
     await view.unmount();
   });
 
-  test("a done step does not register again", async () => {
+  test("a done step in a connected browser does not register again", async () => {
+    fsState = "ready";
     const view = await mount(onboarding("done"));
     expect(calls).toEqual([]);
     expect(acts).toEqual([]);
     expect(view.container.textContent).toContain("Your files account is ready.");
+    await view.unmount();
+  });
+
+  test("a done step in a fresh browser connects it, and never claims it is ready", async () => {
+    // Another browser finished the step: the account exists, this browser has no key.
+    registerResult = async () => {
+      throw new AgentFsError(409, "conflict", "User with this email already exists");
+    };
+    const view = await mount(onboarding("done"));
+    expect(calls.filter((c) => c.startsWith("register:"))).toEqual([
+      "register:qa+files@example.com",
+    ]);
+    expect(view.container.textContent).not.toContain("Your files account is ready.");
+    expect(view.container.querySelector('[data-testid="paste-form"]')).not.toBeNull();
     await view.unmount();
   });
 });

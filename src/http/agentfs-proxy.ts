@@ -257,9 +257,16 @@ export async function handleAgentFsProxy(
   if (isRegister && registerBody === null) return true;
 
   const headers = new Headers();
-  const authorization = req.headers.authorization;
-  if (typeof authorization === "string" && AGENT_FS_BEARER.test(authorization.trim())) {
-    headers.set("authorization", authorization.trim());
+  const authorization = req.headers.authorization?.trim();
+  // Only an agent-fs key goes upstream: never on register (the swarm credential
+  // authorized it), and never the swarm API key, even when it looks like one.
+  if (
+    registerBody === null &&
+    authorization &&
+    AGENT_FS_BEARER.test(authorization) &&
+    authorization.replace(/^bearer\s+/i, "") !== getApiKey()
+  ) {
+    headers.set("authorization", authorization);
   }
   for (const name of REQUEST_HEADER_ALLOWLIST) {
     const v = req.headers[name];

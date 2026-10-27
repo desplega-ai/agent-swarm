@@ -1,9 +1,9 @@
 /**
  * Pure decision logic for the `/join` route: a teammate opens the invite link
- * `/join?swarm=<API URL>#code=<one-time code>`. The page trades the code for
- * a personal token, saves it as a normal dashboard connection, and lands the
- * teammate on Home (or on Comb when Comb is on, so it connects their files
- * account). Kept free of React and `@/` imports so the rules are
+ * `/join?swarm=<API URL>#code=<one-time code>`. After the teammate confirms
+ * the host, the page trades the code for a personal token, saves it as a
+ * normal dashboard connection, and lands the teammate on Home (or on Comb when
+ * Comb is on, so it connects their files account). Kept free of React and `@/` imports so the rules are
  * unit-testable on their own.
  */
 

@@ -11,6 +11,7 @@ import {
   getAgentById,
   getAllTasks,
   getDbClient,
+  getInProgressTasksByContextKey,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
@@ -39,6 +40,7 @@ import {
 } from "../be/db";
 import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
 import {
   getTaskSteeringFields,
@@ -49,7 +51,7 @@ import {
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
-import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -884,6 +886,40 @@ async function resolveTaskWritePrincipal(
 }
 
 /**
+ * May this caller bind a new task to a chat thread? The operator may. An agent needs the
+ * lead's chat post permission. A user needs admin, or a role with `integration.chat.post`.
+ */
+async function mayBindChatThread(principal: RbacPrincipal): Promise<boolean> {
+  if (principal.kind === "operator") return true;
+  if (principal.kind === "user") {
+    if (!isRbacEnabled()) return true;
+    const grant = await getUserGrant(principal.userId);
+    return grant.grantsAll || grant.verbs.has("integration.chat.post");
+  }
+  return can({
+    principal,
+    verb: "integration.chat.post",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
+}
+
+/**
+ * Sibling awareness copies the open tasks under a contextKey into the new task, and may pick
+ * one as its parent. A non-admin user may name a context only when they may write each of
+ * its open tasks.
+ */
+async function deniesForeignContext(req: IncomingMessage, contextKey: string): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || !isRbacEnabled()) return false;
+  if ((await getUserGrant(auth.userId)).grantsAll) return false;
+  for (const task of await getInProgressTasksByContextKey(contextKey)) {
+    if (await deniesNonOwnerTaskWrite(req, task)) return true;
+  }
+  return false;
+}
+
+/**
  * Requester for a new task. Prefer trusted server-side identity: an
  * authenticated request user, or the caller's own ownership-gated task context
  * (`X-Source-Task-Id` / ambient current task), the upstream #939 anti-spoofing
@@ -1074,17 +1110,27 @@ export async function handleTasks(
       return true;
     }
     // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
-    // may then read and post to. An agent may only name a thread other than the parent's
-    // with the lead's chat post permission.
+    // may then read and post to. Only a caller with chat post permission may name a thread
+    // other than the parent's.
     if (
-      principal.kind === "agent" &&
       parsed.body.contextKey &&
       parsed.body.contextKey !== parentTask?.contextKey &&
       chatThreadOfContextKey(parsed.body.contextKey) &&
-      !can({ principal, verb: "integration.chat.post", resource: { kind: "none" }, source: "http" })
-        .allow
+      !(await mayBindChatThread(principal))
     ) {
-      jsonError(res, "Permission denied: only a lead can bind a task to a chat thread.", 403);
+      jsonError(
+        res,
+        "Permission denied: only a lead or an admin can bind a task to a chat thread.",
+        403,
+      );
+      return true;
+    }
+    if (
+      parsed.body.contextKey &&
+      parsed.body.contextKey !== parentTask?.contextKey &&
+      (await deniesForeignContext(req, parsed.body.contextKey))
+    ) {
+      jsonError(res, "You don't have access to the tasks in this context.", 403);
       return true;
     }
     let assetKey: string | undefined;

@@ -1,9 +1,10 @@
 /**
- * A memory written while the embeddings endpoint is down keeps no vector, and
- * the backfill (`runBootReembed`) runs only at boot or when a config reload
- * turns embeddings on. When an embedding call works again after a failed one
- * (for example, a local TEI restarted), run the backfill once more, so those
- * memories do not wait for the next API restart.
+ * A memory or script written while the embeddings endpoint is down keeps no
+ * vector, and the backfills (`runBootReembed`, `runBootReembedScripts`) run
+ * only at boot or when a config reload turns embeddings on. When an embedding
+ * call works again after a failed one (for example, a local TEI restarted),
+ * run both backfills once more, so those rows do not wait for the next API
+ * restart.
  */
 
 let failedSinceBackfill = false;
@@ -18,11 +19,19 @@ export function noteEmbeddingFailure(): void {
 export function noteEmbeddingSuccess(): void {
   if (!failedSinceBackfill || backfill) return;
   failedSinceBackfill = false;
-  backfill = import("./boot-reembed")
-    .then(({ runBootReembed }) => runBootReembed())
-    .catch((err) => {
-      console.error("[memory] Backfill after embeddings recovered failed:", (err as Error).message);
-    })
+  const report = (what: string) => (err: unknown) => {
+    console.error(
+      `[memory] ${what} backfill after embeddings recovered failed:`,
+      (err as Error).message,
+    );
+  };
+  backfill = Promise.all([
+    import("./boot-reembed").then(({ runBootReembed }) => runBootReembed()).catch(report("Memory")),
+    import("../scripts/boot-reembed")
+      .then(({ runBootReembedScripts }) => runBootReembedScripts())
+      .catch(report("Script")),
+  ])
+    .then(() => undefined)
     .finally(() => {
       backfill = null;
     });

@@ -77,6 +77,25 @@ async function memoryWithoutVector(): Promise<string> {
   return memory.id;
 }
 
+/** A stored script with no vector, like one seeded while the endpoint was down. */
+async function scriptWithoutVector(): Promise<string> {
+  const id = randomUUID();
+  await getDbClient().run(
+    `INSERT INTO scripts (id, name, scope, source, description, intent, signatureJson, contentHash)
+     VALUES (?, ?, 'global', 'export default async () => 1', 'umbrella counter', 'count', '{}', ?)`,
+    [id, `recovery-${id}`, id],
+  );
+  return id;
+}
+
+async function scriptVectorBytes(id: string): Promise<number | null> {
+  const row = await getDbClient().get<{ bytes: number | null }>(
+    "SELECT length(embedding) AS bytes FROM script_embeddings WHERE scriptId = ?",
+    [id],
+  );
+  return row?.bytes ?? null;
+}
+
 async function vectorBytes(id: string): Promise<number | null> {
   const row = await getDbClient().get<{ bytes: number | null }>(
     "SELECT length(embedding) AS bytes FROM agent_memory WHERE id = ?",
@@ -86,11 +105,13 @@ async function vectorBytes(id: string): Promise<number | null> {
 }
 
 describe("backfill after the embeddings endpoint recovers", () => {
-  test("a memory written while the endpoint was down gets its vector on the next working call", async () => {
+  test("a memory or script written while the endpoint was down gets its vector on the next working call", async () => {
     mode = "down";
     expect(await getEmbeddingProvider().embed("first try", { kind: "document" })).toBeNull();
     const id = await memoryWithoutVector();
+    const scriptId = await scriptWithoutVector();
     expect(await vectorBytes(id)).toBeNull();
+    expect(await scriptVectorBytes(scriptId)).toBeNull();
 
     mode = "up";
     expect(await getEmbeddingProvider().embed("a search", { kind: "query" })).not.toBeNull();
@@ -98,6 +119,7 @@ describe("backfill after the embeddings endpoint recovers", () => {
     expect(backfill).not.toBeNull();
     await backfill;
     expect(await vectorBytes(id)).toBe(EMBEDDING_DIMENSIONS * 4);
+    expect(await scriptVectorBytes(scriptId)).toBe(EMBEDDING_DIMENSIONS * 4);
   }, 30_000);
 
   test("a rejected input does not start a backfill", async () => {

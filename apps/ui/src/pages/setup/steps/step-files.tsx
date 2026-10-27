@@ -145,12 +145,14 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
       return;
     }
     if (state !== "needs-connect" || !runKey || handled.current === runKey) return;
-    if (!deps || !driveReady || stepDone) return;
+    // Also when the step is done: this browser has no key yet (another browser finished it).
+    if (!deps || !driveReady) return;
     handled.current = runKey;
     void create();
   }, [runKey, endpoint, state, deps, driveReady, stepDone, complete, create]);
 
-  const done = phase.kind === "done" || (stepDone && phase.kind === "idle");
+  // The step is done for the swarm, but this browser is connected only when agent-fs says ready.
+  const done = phase.kind === "done" || (stepDone && phase.kind === "idle" && state === "ready");
   // A saved key agent-fs rejects means the account exists: paste its key, as Comb does.
   const pasting =
     phase.kind === "email-taken" || (phase.kind === "idle" && state === "invalid-key");
