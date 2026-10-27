@@ -75,6 +75,7 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
+import { createListTotalCache } from "./list-total-cache";
 import { agentFirstPrincipal, authUserId, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import {
@@ -537,6 +538,8 @@ const SessionShowSourceSchema = z
   .describe(
     "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source.",
   );
+
+const sessionTotals = createListTotalCache();
 
 const listSessions = route({
   method: "get",
@@ -1017,8 +1020,12 @@ export async function handleSessions(
         ? await listRecentSessions(baseOpts)
         : await listRecentSessions({ ...baseOpts, slim: true });
     // Filter-aware total: same WHERE as the list query, so the UI pager
-    // reflects the filtered result set.
-    const total = await countSessions(filterOpts);
+    // reflects the filtered result set. Page 1 counts; later pages reuse it
+    // for 30 s (keyed without the request clock).
+    const { now: _now, ...totalKey } = filterOpts;
+    const total = await sessionTotals.get(totalKey, parsed.query.offset, () =>
+      countSessions(filterOpts),
+    );
     listSessions.respond(res, 200, {
       sessions,
       total,

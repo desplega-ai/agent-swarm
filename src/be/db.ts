@@ -127,6 +127,7 @@ import {
   CreateTaskOptionsSchema,
   isTerminalTaskStatus,
   type ModelTier,
+  OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
@@ -2435,17 +2436,23 @@ async function findLatestRoutingCandidate(
 async function captureRoutingDecisionSnapshot(
   options: CreateTaskOptions,
 ): Promise<RoutingDecisionSnapshot> {
+  // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
+  // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
+  // over agentId/offeredTo that reads each agent's whole task history.
   const workerStatuses = await getDbClient().query<RoutingDecisionWorkerStatus>(
-    `SELECT agent.id AS agentId, agent.status,
+    `WITH open_task AS MATERIALIZED (
+         SELECT id, agentId, offeredTo, status FROM agent_tasks
+          WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
+       )
+       SELECT agent.id AS agentId, agent.status,
          COUNT(task.id) AS openTaskCount,
          SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
        FROM agents agent
-       LEFT JOIN agent_tasks task ON
-         (task.agentId = agent.id OR task.offeredTo = agent.id)
-         AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
        WHERE agent.isLead = 0
        GROUP BY agent.id, agent.status
        ORDER BY agent.id`,
+    [...OPEN_TASK_STATUSES],
   );
 
   const samePr =
@@ -8276,6 +8283,10 @@ export interface StuckWorkflowRun {
 }
 
 export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
+  // CROSS JOIN fixes the join order: the few waiting steps drive, and each
+  // one seeks its task through idx_agent_tasks_workflowRunStepId, so `output`
+  // is read only for matched tasks. Driving from agent_tasks by status reads
+  // nearly every finished task.
   return getDbClient().query<StuckWorkflowRun>(
     `SELECT
         wr.id as runId,
@@ -8285,10 +8296,11 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
         at.status as taskStatus,
         at.output as taskOutput,
         wr.workflowId
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
-      JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
+      FROM workflow_run_steps wrs
+      CROSS JOIN workflow_runs wr ON wr.id = wrs.runId
+      CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
+      WHERE wrs.status = 'waiting'
+        AND wr.status = 'waiting'
         AND at.status IN ('completed', 'failed', 'cancelled')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );

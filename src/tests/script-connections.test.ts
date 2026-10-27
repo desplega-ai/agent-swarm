@@ -659,6 +659,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "247_workflow_run_triggered_by_agent.sql");
       // 250 indexes workflow_run_steps, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "250_workflow_run_steps_runid_status_index.sql");
+      // 251 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
+      markMigrationApplied(database, "251_query_audit_indexes.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

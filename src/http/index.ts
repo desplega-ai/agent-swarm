@@ -17,6 +17,7 @@ import {
 } from "../be/db";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -528,6 +529,9 @@ async function shutdown() {
   // Stop the unified OAuth pending-session garbage collector (all flows)
   stopOAuthPendingGc();
 
+  // Stop the expired MCP overflow sweep
+  stopMcpOverflowSweep();
+
   // Stop memory expired-row garbage collector
   stopMemoryGc();
 
@@ -865,6 +869,9 @@ httpServer
 
     // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
     startOAuthPendingGc();
+
+    // Delete expired MCP overflow values (10-min tick, off the spill path)
+    startMcpOverflowSweep();
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
     await startMemoryGc();

@@ -18,7 +18,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
+import { upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
@@ -815,9 +815,8 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
 
     // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
     // column and this direct server-side helper have no declared size limit.
-    // Sweep the whole per-agent namespace family so expired rows from inactive
-    // agents do not wait for their owner to spill again.
-    await sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
+    // Expired values are deleted by the 10-minute sweep in
+    // src/be/mcp-overflow-sweep.ts, off this request path.
     await upsertKv({
       namespace,
       key,
