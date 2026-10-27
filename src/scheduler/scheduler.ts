@@ -252,6 +252,8 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
+        // The creator, as for script schedules: `targetAgentId` is caller-chosen.
+        triggeredByAgentId: schedule.createdByAgentId,
         requestedByUserId: schedule.createdBy,
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);

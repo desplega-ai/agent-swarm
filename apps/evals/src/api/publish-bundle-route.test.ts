@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SUITE_SCENARIO_VERSIONS, SUITE_VERSION } from "../../scenarios/suite.ts";
 import { MIN_ATTEMPTS_PER_CELL } from "../benchmark.ts";
-import { getDb, resetDbForTests } from "../db/client.ts";
+import { publishBenchmark } from "../benchmark-publish.ts";
+import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import { createRun, insertAttempt, setRunStatus, updateAttempt } from "../db/queries.ts";
 import { resetActiveRunsForTests, startServer } from "./server.ts";
 
@@ -114,11 +118,14 @@ describe("GET /api/runs/:id/publish-bundle", () => {
         ok: boolean;
         refusals?: string[];
         configs: string[];
+        snapshot: string;
+        publishedAt: string;
         files: Record<string, string>;
       };
       expect(body.refusals).toBeUndefined();
       expect(body.ok).toBe(true);
       expect(body.configs).toEqual([CONFIG]);
+      expect(body.snapshot).toBe(body.publishedAt.slice(0, 10));
       expect(Object.keys(body.files)).toContain("snapshot.json");
       expect(Object.keys(body.files)).toContain(`configs/${CONFIG}.json`);
       const snapshot = JSON.parse(body.files["snapshot.json"] ?? "{}") as {
@@ -128,5 +135,52 @@ describe("GET /api/runs/:id/publish-bundle", () => {
     } finally {
       server.stop(true);
     }
+  });
+});
+
+describe("publishBenchmark writes a dated snapshot", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "evals-publish-snapshots-"));
+    process.env.EVALS_BENCHMARK_DIR = root;
+  });
+  afterEach(async () => {
+    delete process.env.EVALS_BENCHMARK_DIR;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a later publish adds a directory and leaves the earlier week alone", async () => {
+    await initDb();
+    await seed("full", MIN_ATTEMPTS_PER_CELL);
+    const db = getDb();
+    const publishOn = (iso: string) =>
+      publishBenchmark(db, {
+        suiteVersion: SUITE_VERSION,
+        runId: "full",
+        harnessCommit: COMMIT,
+        now: () => new Date(iso),
+      });
+
+    const first = await publishOn("2026-10-18T06:30:00.000Z");
+    expect(first.ok).toBe(true);
+    await Bun.write(join(root, SUITE_VERSION, "2026-10-18", "marker.txt"), "stale");
+    const second = await publishOn("2026-10-25T07:30:00.000Z");
+    expect(second.ok && second.outDir).toBe(join(root, SUITE_VERSION, "2026-10-25"));
+    expect((await readdir(join(root, SUITE_VERSION))).sort()).toEqual(["2026-10-18", "2026-10-25"]);
+    // The earlier snapshot is untouched, including a file the bundle does not write.
+    expect(await Bun.file(join(root, SUITE_VERSION, "2026-10-18", "marker.txt")).text()).toBe(
+      "stale",
+    );
+
+    // Same UTC day again: that day's directory is replaced whole, no stale file survives.
+    await Bun.write(join(root, SUITE_VERSION, "2026-10-25", "marker.txt"), "stale");
+    await publishOn("2026-10-25T23:00:00.000Z");
+    expect(await Bun.file(join(root, SUITE_VERSION, "2026-10-25", "marker.txt")).exists()).toBe(
+      false,
+    );
+    const written = JSON.parse(
+      await Bun.file(join(root, SUITE_VERSION, "2026-10-25", "snapshot.json")).text(),
+    ) as { publishedAt: string };
+    expect(written.publishedAt).toBe("2026-10-25T23:00:00.000Z");
   });
 });

@@ -655,6 +655,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "244_api_key_validation.sql");
       // 245 alters scripts, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "245_script_executor.sql");
+      // 247 alters workflow_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "247_workflow_run_triggered_by_agent.sql");
       // 250 indexes workflow_run_steps, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "250_workflow_run_steps_runid_status_index.sql");
 

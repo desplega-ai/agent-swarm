@@ -91,9 +91,9 @@ afterEach(async () => {
 });
 
 describe("schedules seeder", () => {
-  test("loads all eleven schedule templates, including the unfenced schedule block", () => {
+  test("loads all twelve schedule templates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(11);
+    expect(schedules).toHaveLength(12);
     // Zero-config, requires:[], placeholders:[], template enabled:true -> auto-enabled
     // under the default (unset -> on) SEED_AUTOMATIONS_ENABLED switch.
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
@@ -120,25 +120,29 @@ describe("schedules seeder", () => {
       schedules.filter((schedule) => schedule.enabled).map((schedule) => schedule.name),
     ).toEqual([
       "daily-blocker-digest",
-      "daily-compounding-reflection",
       "daily-status-report",
       "daily-swarm-update-check",
       "daily-workflow-health-audit",
+      "dreaming-daily",
     ]);
+    // dreaming replaces Daily Evolution, which seeds off even though it is zero-config.
+    expect(
+      schedules.find((schedule) => schedule.name === "daily-compounding-reflection"),
+    ).toMatchObject({ enabled: false });
   });
 
   test("SEED_AUTOMATIONS_ENABLED=false still seeds all schedules disabled", async () => {
     process.env.SEED_AUTOMATIONS_ENABLED = "false";
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 11, failed: [] });
+    expect(result).toMatchObject({ created: 12, failed: [] });
     const schedules = await getScheduledTasks();
-    expect(schedules).toHaveLength(11);
+    expect(schedules).toHaveLength(12);
     expect(schedules.every((schedule) => schedule.enabled === false)).toBe(true);
   });
 
   test("seeds a disabled schedule whose timezone still needs setup", async () => {
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 11, failed: [] });
+    expect(result).toMatchObject({ created: 12, failed: [] });
     expect(await getScheduledTaskByName("weekly-dependabot-triage")).toMatchObject({
       cronExpression: "40 3 * * 0",
       timezone: "{{TIMEZONE}}",
