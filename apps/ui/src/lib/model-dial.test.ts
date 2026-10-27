@@ -223,7 +223,8 @@ describe("dsh", () => {
     });
     const ctx = context({ tiers });
     expect(dialSetting("dsh", "cheap", ctx)?.model).toBe("deepseek-v4-pro");
-    expect(dialSetting("dsh", "optimal", ctx)?.model).toBe("deepseek-v4-flash");
+    // The snapshot marks direct `deepseek-v4-flash` deprecated; `deepseek-flash` is the live flash id.
+    expect(dialSetting("dsh", "optimal", ctx)?.model).toBe("deepseek-flash");
   });
 
   test("a tier that names no DeepSeek model at the lowest level has no direct setting", () => {

@@ -27,7 +27,7 @@ It also means every human message in that thread wakes Lead: "lol", an emoji, "t
   F -- yes --> P["Pass<br/>Lead task created"]
   F -- no --> D["One SystemOne choice call<br/>Jev or Clef"]
   D -- "error or timeout" --> P
-  D --> K{"Skip label on top and<br/>p(skip) >= minConfidence?"}
+  D --> K{"Skip label on top and<br/>p(skip) >= minConfidence<br/>or unscored?"}
   K -- no --> P
   K -- "yes, shadow" --> SH["Record shadow-skip<br/>Lead task created"]
   K -- "yes, enforce" --> X["Block<br/>no Lead task, :mute:"]
@@ -40,7 +40,7 @@ For each buffered follow-up:
 1. **Files pass.** A follow-up with downloaded files (task status `draft`) passes without a model call.
 2. **Mentions pass.** A new message that names Lead passes without a model call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
 3. **One decision.** Otherwise the hook makes one SystemOne `choice` call through the `system-one-decide` tool, with the new messages, the sender kind (known teammate, unknown, or a listed bot), and the last `contextMessages` thread messages. The labels are `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, and `other`.
-4. **Skip only when sure.** The verdict is "no reply" only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels (`skipP`) is at least `minConfidence`. A split between two skip labels still skips. A skip label below the threshold replies. When the model returns no probabilities, the top label's confidence stands in for `skipP`.
+4. **Skip only when sure.** The verdict is "no reply" only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels (`skipP`) is at least `minConfidence`. A split between two skip labels still skips. A skip label below the threshold replies. When the model returns no probabilities, the top label's confidence stands in for `skipP`. When it returns neither probabilities nor a confidence, `skipP` is null and the threshold is not applied: a skip label on top still skips. The decision row records `skipP: null` and `lowConfidence: false`, and in `enforce` the message is dropped however unsure the model was.
 5. **Fail open.** A missing credential, a provider error, a network error, a timeout, a malformed answer, or an unknown label lets the task through. The handler never throws, so a provider outage cannot auto-disable the extension. Each failure is recorded as `fail-open`.
 
 Several buffered messages are judged together. One mention in any of them passes the whole batch.
@@ -107,7 +107,7 @@ Every decision lands in KV namespace `ext:slack-reply-gate`:
 - `last`: the latest decision.
 - Counters: `total`, `mention`, `files`, `reply`, `shadow-skip`, `skipped`, `error`, `muted`, `unreacted`, `mute-error`, and `reason:<label>`.
 
-Keys sort by time, so the end of the `d:` list is the newest. The list endpoint returns up to 1000 entries per page; use `offset` to page.
+Keys sort by time in ascending order, so the newest `d:` rows are at the end of the list. The list endpoint returns at most 1000 entries per page, starting at `offset`, and reports the full count as `total`. To read the newest rows, read `total` first, then fetch the last page from `offset = total - 50`.
 
 ```bash
 NS=ext:slack-reply-gate
@@ -116,9 +116,11 @@ NS=ext:slack-reply-gate
 curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS/last" | jq .value
 
 # The last 50 decisions, one line each
-curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS?prefix=d:&limit=1000" \
-  | jq -r '.entries[-50:][].value
-      | [.at, .action, (.reason // ""), (.skipP // "" | tostring), (.provider // ""), (.preview // .error // "")]
+TOTAL=$(curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS?prefix=d:&limit=1" | jq .total)
+OFFSET=$(( TOTAL > 50 ? TOTAL - 50 : 0 ))
+curl -s "${H[@]}" "$SWARM_URL/api/kv/_/$NS?prefix=d:&offset=$OFFSET&limit=50" \
+  | jq -r '.entries[].value
+      | [.at, .action, (.reason // ""), (.skipP | tostring), (.provider // ""), (.preview // .error // "")]
       | @tsv'
 
 # The counters
@@ -135,6 +137,7 @@ Run shadow on real threads, then read the rows with these questions:
 
 - **Every `shadow-skip`.** Each one is a message `enforce` would drop. Read its `preview`. A real ask, answer, or instruction for Lead here is a false skip. One false skip costs more than many wasted wake-ups.
 - **`pass` rows with `lowConfidence: true`.** The top label was a skip label, but `skipP` was under `minConfidence`. These are the near misses that `enforce` lets through.
+- **`shadow-skip` rows with `skipP: null`.** The model returned neither probabilities nor a confidence, so `minConfidence` was never checked. `enforce` drops these unconditionally. If they appear, read each one closely, or switch to a provider that returns probabilities before you enforce.
 - **`fail-open` rows.** The `error` names the cause: a missing credential, a provider error, or a timeout. Fix these first; a gate that fails open on every message does nothing.
 - **`latencyMs`.** If it often approaches `timeoutMs` (default 3000, capped at 4000), the call times out and fails open. Try another provider.
 - **`provider`.** `minConfidence` was tuned on Jev. If `auto` picked Clef, read its verdicts before you enforce on it.

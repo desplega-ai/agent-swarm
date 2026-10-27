@@ -52,7 +52,7 @@ describe("lookupModelCost", () => {
 
   test("claude: bare aliases resolve to the latest family member (v7 §8)", async () => {
     const haiku = await lookupModelCost("claude", "haiku");
-    expect(haiku?.id).toBe("claude-haiku-4-5");
+    expect(haiku?.id).toBe("claude-haiku-5-5");
     const fable = await lookupModelCost("claude", "fable");
     expect(fable?.id).toBe("claude-fable-5-1");
   });

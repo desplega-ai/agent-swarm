@@ -198,7 +198,8 @@ function stepSubtitle(
     case "files":
       return context.filesEmail ? `Connected as ${context.filesEmail}` : "Not connected";
     case "first_task":
-      if (stepStatus === "done" || signals.firstTask?.status === "completed") return "Completed";
+      // The step, not the root task: the lead completes the root task when it delegates.
+      if (stepStatus === "done") return "Completed";
       if (signals.firstTask) return "Sent";
       return signals.agents.leadsOnline > 0 ? "Ready" : "Lead not ready yet";
   }

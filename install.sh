@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Agent Swarm one-shot self-host installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --tunnel
+#   curl -fsSL https://agent-swarm.dev/install.sh | bash
+#   curl -fsSL https://agent-swarm.dev/install.sh | bash -s -- --no-tunnel
+#
+# The raw GitHub URL (https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh)
+# serves the same script. The API goes public through a localtunnel by default
+# (see --tunnel / --no-tunnel); the API key still protects every route but /health.
 #
 # It checks Docker and Compose v2, installs Bun when missing, runs
 # `agent-swarm onboard --yes --preset full` (a lead and 10 workers) to write
@@ -29,7 +33,12 @@ HEALTH_TIMEOUT_SECONDS=180
 TUNNEL_WARMUP_SECONDS=240
 
 DRY_RUN=0
-TUNNEL=0
+# auto (default) | 1 | 0. AGENT_SWARM_TUNNEL=1|0 overrides auto; flags override env.
+TUNNEL=auto
+case "${AGENT_SWARM_TUNNEL:-}" in
+  1 | true | on) TUNNEL=1 ;;
+  0 | false | off) TUNNEL=0 ;;
+esac
 NO_AGENT_FS=0
 INSTALL_DIR="${AGENT_SWARM_DIR:-$DEFAULT_DIR}"
 PRESET="${AGENT_SWARM_PRESET:-$DEFAULT_PRESET}"
@@ -42,15 +51,16 @@ usage() {
 Agent Swarm installer: one command from zero to a running self-hosted swarm.
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
-  curl -fsSL .../install.sh | bash -s -- [options]
+  curl -fsSL https://agent-swarm.dev/install.sh | bash
+  curl -fsSL https://agent-swarm.dev/install.sh | bash -s -- [options]
   bash install.sh [options]
 
 Options:
   --dir <path>       Install directory (default: \$AGENT_SWARM_DIR, else ~/agent-swarm)
   --version <ver>    @desplega.ai/agent-swarm npm version to run (default: latest)
-  --tunnel           Expose the API publicly with localtunnel (lt.desplega.ai) and
-                     set PUBLIC_MCP_BASE_URL. Off by default. See "Tunnel" below.
+  --tunnel           Force the public tunnel on (localtunnel, lt.desplega.ai). It sets
+                     PUBLIC_MCP_BASE_URL. This is already the default. See "Tunnel".
+  --no-tunnel        Keep the API local only. No tunnel, no PUBLIC_MCP_BASE_URL.
   --no-agent-fs      Skip the bundled agent-fs (files, Comb) and TEI (memory
                      embeddings) services. New installs only.
   --dry-run          Print every command instead of running it
@@ -61,7 +71,10 @@ Environment:
   AGENT_SWARM_CLI_VERSION  Same as --version
   AGENT_SWARM_CLI_PACKAGE  Full package spec for the CLI instead of the npm release:
                            a tarball path or URL from \`bun pm pack\` (testing unreleased builds)
+  AGENT_SWARM_TUNNEL       1 forces the tunnel on, 0 forces it off (flags win over this)
   AGENT_SWARM_LT_VERSION   @desplega.ai/localtunnel version for --tunnel (default: ${DEFAULT_LT_VERSION})
+  ANONYMIZED_TELEMETRY, DESPLEGA_TELEMETRY_ENV
+                           Written to .env: turn telemetry off, or set the cohort tag
   CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
   HARNESS_PROVIDER, GITHUB_TOKEN, SLACK_BOT_TOKEN, ...
                            Passed through to \`agent-swarm onboard --yes\`. All optional:
@@ -81,7 +94,12 @@ What it does:
   4. Waits for http://localhost:<port>/health.
   5. Prints the dashboard link to /setup with the API URL and key filled in.
 
-Tunnel (--tunnel):
+Tunnel (on by default, --no-tunnel turns it off):
+  The tunnel is on unless you pass --no-tunnel (or AGENT_SWARM_TUNNEL=0), or the
+  install directory's .env already has a PUBLIC_MCP_BASE_URL that is not a
+  *.lt.desplega.ai URL (your own domain). A previous tunnel URL keeps it on.
+  An explicit choice is saved as AGENT_SWARM_TUNNEL=1|0 in .env, so a re-run
+  without flags keeps it.
   Runs \`lt --port <port>\` in the background (pid in .agent-swarm/tunnel.pid, log in
   .agent-swarm/tunnel.log), writes the public URL to PUBLIC_MCP_BASE_URL in .env,
   adds docker-compose.override.yml to pass it to the API, restarts the API (and
@@ -94,6 +112,7 @@ Tunnel (--tunnel):
 Examples:
   curl -fsSL .../install.sh | bash
   curl -fsSL .../install.sh | ANTHROPIC_API_KEY=sk-ant-... bash
+  bash install.sh --dry-run --no-tunnel
   bash install.sh --dry-run --tunnel
 EOF
 }
@@ -142,6 +161,7 @@ parse_args() {
       --version) [ $# -ge 2 ] || die "--version needs a value"; CLI_VERSION="$2"; shift 2 ;;
       --version=*) CLI_VERSION="${1#*=}"; shift ;;
       --tunnel) TUNNEL=1; shift ;;
+      --no-tunnel) TUNNEL=0; shift ;;
       --no-agent-fs) NO_AGENT_FS=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h | --help) usage; exit 0 ;;
@@ -241,6 +261,38 @@ env_value() {
   local file="${INSTALL_DIR}/.env"
   [ -f "$file" ] || return 0
   grep -E "^$1=" "$file" | tail -n 1 | cut -d= -f2- || true
+}
+
+# Decide whether to open the tunnel. An explicit --tunnel / --no-tunnel /
+# AGENT_SWARM_TUNNEL wins and is saved to .env as AGENT_SWARM_TUNNEL, so a later
+# re-run keeps the choice. In auto mode, a saved AGENT_SWARM_TUNNEL wins. Without
+# one, the tunnel is on unless .env holds a PUBLIC_MCP_BASE_URL that is not a
+# tunnel URL (the user's own domain).
+resolve_tunnel() {
+  local saved existing
+  if [ "$TUNNEL" = auto ]; then
+    saved="$(env_value AGENT_SWARM_TUNNEL)"
+    existing="$(env_value PUBLIC_MCP_BASE_URL)"
+    if [ "$saved" = 0 ]; then
+      TUNNEL=0
+      say "Keeping the API local (AGENT_SWARM_TUNNEL=0 in .env)."
+      return 0
+    elif [ "$saved" = 1 ]; then
+      TUNNEL=1
+    else
+      case "$existing" in
+        "" | https://*.lt.desplega.ai | https://*.lt.desplega.ai/*) TUNNEL=1 ;;
+        *)
+          TUNNEL=0
+          say "Keeping PUBLIC_MCP_BASE_URL=${existing} from .env, so no tunnel."
+          return 0
+          ;;
+      esac
+    fi
+    say "The API will be public through a tunnel (lt.desplega.ai). The API key protects it. Pass --no-tunnel to keep it local."
+  else
+    set_env_value AGENT_SWARM_TUNNEL "$TUNNEL"
+  fi
 }
 
 # Set KEY=value in .env, replacing an existing line or appending one.
@@ -365,7 +417,7 @@ start_tunnel() {
       printf '+ write docker-compose.override.yml (swarm-api.environment += PUBLIC_MCP_BASE_URL)\n'
     else
       cat >"${INSTALL_DIR}/docker-compose.override.yml" <<'YAML'
-# Written by install.sh --tunnel. Compose merges this file into
+# Written by install.sh (tunnel). Compose merges this file into
 # docker-compose.yml automatically.
 services:
   swarm-api:
@@ -438,6 +490,7 @@ main() {
   wait_for_health "$local_url"
 
   TUNNEL_URL=""
+  resolve_tunnel
   if [ "$TUNNEL" -eq 1 ]; then start_tunnel "$port"; fi
 
   api_key="$(env_value API_KEY)"
