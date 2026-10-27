@@ -40,8 +40,10 @@ DIGITALOCEAN_TOKEN=unused packer validate deploy/digitalocean
 
 ## Build (human step)
 
+The token needs write scope.
+
 ```bash
-DIGITALOCEAN_TOKEN=<token with write scope> packer build deploy/digitalocean
+DIGITALOCEAN_TOKEN=<token> packer build deploy/digitalocean
 ```
 
 The build creates a temporary Droplet, snapshots it and deletes it. `99-img-check.sh` must end with
