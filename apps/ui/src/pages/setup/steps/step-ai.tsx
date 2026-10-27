@@ -37,7 +37,7 @@ const NO_TIER_ROWS: ModelTierPreview[] = [];
 const NO_PRESENCE: EnvPresenceMap = {};
 const NO_CONFIGS: SwarmConfig[] = [];
 
-/** The stored mark that the switch on the first credential ran for `card` (one per API). */
+/** The stored mark that the first save on `card` was decided, switch or not (one per API). */
 function switchMarkKey(apiUrl: string, card: AiCardId): string {
   return deriveStorageKey(apiUrl, `setup-first-credential-switch:${card}`);
 }
@@ -140,9 +140,9 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   });
   const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
   const autoSwitchRunning = useRef(false);
-  // The cards the switch ran for. The stored mark keeps this across reloads, so
-  // agents that the user moved back stay where they are.
-  const switched = useRef<Partial<Record<AiCardId, boolean>>>({});
+  // The cards whose first save was decided. The stored mark keeps this across
+  // reloads, so agents that the user moved later stay where they are.
+  const decided = useRef<Partial<Record<AiCardId, boolean>>>({});
 
   /**
    * Runs the queued switch when its data is there. `afterWait`: the save came
@@ -159,9 +159,14 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
       // The carried model level needs the tier models: wait for them, then switch.
       if (plan && !dialContext.tiers && dialHarness(plan.target)) return;
       queued.current = null;
-      if (!plan || (afterWait && !savedCards.current[job.card])) return;
-      switched.current[job.card] = true;
-      writeSwitchMark(switchMarkKey(apiUrl, job.card));
+      if (afterWait && !savedCards.current[job.card]) return;
+      // Decided, also when no switch runs (the agents ran the card's harness
+      // already). With no agent yet, a later key can still switch them.
+      if (agents.length > 0) {
+        decided.current[job.card] = true;
+        writeSwitchMark(switchMarkKey(apiUrl, job.card));
+      }
+      if (!plan) return;
       autoSwitchRunning.current = true;
       setAutoSwitch(plan);
       try {
@@ -179,14 +184,14 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
 
   /**
    * The first credential moves every agent to its card's harness, so that a
-   * worker can check the key. It runs on a save, never on view, and once per
-   * card. A save that finds agents on the harness, or a credential on another
-   * card, keeps the manual switch list.
+   * worker can check the key. It runs on a save, never on view. The first
+   * save of each card decides it once. A save that finds agents on the
+   * harness, or a credential on another card, keeps the manual switch list.
    */
   const switchOnFirstCredential = useCallback(
     (method: OnboardingAiMethod) => {
       const card = METHOD_CARD[method];
-      if (autoSwitchRunning.current || switched.current[card]) return;
+      if (autoSwitchRunning.current || decided.current[card]) return;
       if (hasSwitchMark(switchMarkKey(apiUrl, card))) return;
       queued.current = { card, method };
       void runQueuedSwitch(false);

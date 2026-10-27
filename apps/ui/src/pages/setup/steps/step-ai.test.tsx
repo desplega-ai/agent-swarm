@@ -295,6 +295,30 @@ describe("StepAi: the switch on the first credential", () => {
     await view.unmount();
   });
 
+  test("a key on Pi agents, then a move to Claude: a second key keeps them on Claude", async () => {
+    agents = fleet.map((a) => ({ ...a, harnessProvider: "pi" }) as unknown as AgentWithTasks);
+    const view = await mount();
+    await view.saveKey();
+    expect(harnessCalls).toEqual([]);
+    agents = fleet;
+    await view.rerender();
+    await view.saveKey();
+    expect(harnessCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("a key saved before any agent registers: a later key switches the agents", async () => {
+    agents = [];
+    const view = await mount();
+    await view.saveKey();
+    expect(harnessCalls).toEqual([]);
+    agents = fleet;
+    await view.rerender();
+    await view.saveKey();
+    expect(harnessCalls).toEqual(onPi);
+    await view.unmount();
+  });
+
   test("a first key on another card still switches after the open harness switch", async () => {
     const view = await mount();
     await view.saveKey();
