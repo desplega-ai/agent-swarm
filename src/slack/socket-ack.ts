@@ -18,7 +18,7 @@ type SocketAck = (response?: Record<string, unknown>) => Promise<void>;
  * Wrap the ack Bolt receives on each `slack_event`: when it fails only because
  * the socket is not ready, log and count it, and let the listeners run. Slack
  * redelivers the unacked event with the same `event_id`, and the listeners'
- * in-memory dedup (`wasEventSeen`) drops that retry. Any other ack error
+ * in-memory dedup (`wasEventSeen`, 25h TTL, past Slack's 24h delayed-retry window) drops that retry. Any other ack error
  * still throws.
  *
  * Only `events_api` envelopes are wrapped. Interactive payloads (modal
