@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import {
   sealCodexAuth,
   usableCodexAuth,
 } from "../../scripts/e2e/codex-auth-chain";
+import { runHarnessLeg } from "../../scripts/e2e/harness";
+import type { ApiClient, ApiResponse } from "../../scripts/e2e/http";
 
 const SEED = JSON.stringify({
   access: "a",
@@ -172,6 +174,76 @@ describe("codex auth chain", () => {
   });
 });
 
+describe("codex harness leg", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  });
+
+  function fakeApi(taskStatus: "completed" | "failed"): ApiClient {
+    let marker = "";
+    const reply = (status: number, json: unknown): ApiResponse => ({
+      status,
+      json,
+      text: JSON.stringify(json),
+    });
+    return async (method, path, options) => {
+      if (method === "POST" && path === "/api/agents") return reply(201, { id: "agent-1" });
+      if (method === "POST" && path === "/api/tasks") {
+        const task = String((options?.body as { task?: unknown } | undefined)?.task ?? "");
+        marker = task.match(/PONG-[A-Za-z0-9-]+/)?.[0] ?? "";
+        return reply(201, { id: "task-1" });
+      }
+      if (method === "GET" && path.startsWith("/api/tasks/")) {
+        return reply(200, { status: taskStatus, output: marker, claudeSessionId: "session-1" });
+      }
+      if (method === "GET" && path.startsWith("/api/session-costs?")) {
+        return reply(200, { costs: [{ inputTokens: 1, outputTokens: 1, totalCostUsd: 0.01 }] });
+      }
+      throw new Error(`Unexpected fake API call: ${method} ${path}`);
+    };
+  }
+
+  function fakeWorker(): ReturnType<typeof Bun.spawn> {
+    const closed = () => new ReadableStream<Uint8Array>({ start: (c) => c.close() });
+    return {
+      stdout: closed(),
+      stderr: closed(),
+      exited: Promise.resolve(0),
+      exitCode: 0,
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+  }
+
+  // The state path is a directory, so sealing the chain the CLI left behind fails.
+  async function legWithLostChain(taskStatus: "completed" | "failed") {
+    process.env.CODEX_OAUTH = SEED;
+    process.env.E2E_CODEX_AUTH_STATE = dir;
+    process.env.E2E_COST_TIMEOUT_MS = "1000";
+    const spawn = spyOn(Bun, "spawn").mockImplementation((() => fakeWorker()) as typeof Bun.spawn);
+    try {
+      return await runHarnessLeg("codex", fakeApi(taskStatus), "http://chain.test", "key", "n", 2);
+    } finally {
+      spawn.mockRestore();
+    }
+  }
+
+  test("a passing task whose chain was not persisted fails as auth-chain", async () => {
+    const result = await legWithLostChain("completed");
+    expect(result).toMatchObject({ status: "fail", failureKind: "auth-chain" });
+    expect(result.error).toStartWith("codex auth chain not persisted: ");
+    expect(result.attempts).toHaveLength(1);
+  });
+
+  test("a lost chain starts no retry from the spent token", async () => {
+    const result = await legWithLostChain("failed");
+    expect(result).toMatchObject({ status: "fail", failureKind: "auth-chain" });
+    expect(result.error).toContain("codex task finished with status failed");
+    expect(result.attempts).toHaveLength(1);
+  });
+});
+
 describe("nightly workflow codex chain", () => {
   type Step = {
     name?: string;
@@ -180,6 +252,7 @@ describe("nightly workflow codex chain", () => {
     uses?: string;
     with?: Record<string, unknown>;
     env?: Record<string, string>;
+    run?: string;
   };
   const steps = async () => {
     const workflow = Bun.YAML.parse(
@@ -208,6 +281,23 @@ describe("nightly workflow codex chain", () => {
       "fail-on-cache-miss": true,
     });
     expect(String(save.with?.key)).toStartWith(String(restore.with?.["restore-keys"]));
+  });
+
+  test("a failed save or check rewrites the codex result before it is uploaded", async () => {
+    const all = await steps();
+    const run = byName(all, "Run harness leg");
+    const save = byName(all, "Save Codex auth chain");
+    const verify = byName(all, "Verify Codex auth chain was saved");
+    const mark = byName(all, "Fail the codex result when the chain was not saved");
+    const upload = byName(all, "Upload harness results");
+    expect(all.indexOf(mark)).toBeGreaterThan(all.indexOf(verify));
+    expect(all.indexOf(mark)).toBeLessThan(all.indexOf(upload));
+    expect(mark.if).toBe(
+      `always() && (steps.${save.id}.outcome == 'failure' || steps.${verify.id}.outcome == 'failure')`,
+    );
+    const resultsPath = run.run?.match(/--json (\S+)/)?.[1];
+    expect(resultsPath).toBeDefined();
+    expect(mark.run).toBe(`bun scripts/e2e/codex-chain-lost.ts ${resultsPath}`);
   });
 
   test("the codex leg and its secret stay on main", async () => {

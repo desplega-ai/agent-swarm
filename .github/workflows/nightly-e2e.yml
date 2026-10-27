@@ -10,7 +10,8 @@
 # The codex leg runs on main only and never sees the secret elsewhere: a dispatch on another
 # ref would spend the seed before main does, or replay a used refresh token, which can make
 # OpenAI revoke the whole token family. The report marks that leg SKIP off main. A lost chain
-# fails the leg, and a step after the save checks that the cache entry landed.
+# fails the leg: a step after the save checks that the cache entry landed, and a failed save or
+# check rewrites the codex result to an auth-chain failure before upload.
 # E2E_OPENROUTER_API_KEY is a plain OpenRouter key.
 #
 # Shape: `contract` runs the deterministic scenarios once. Each `harness` leg runs one real
@@ -166,6 +167,7 @@ jobs:
       # cache/save only warns when the upload fails, and the next night would then restore a
       # chain whose refresh token this run already spent. Fail the leg instead.
       - name: Verify Codex auth chain was saved
+        id: verify-codex-chain
         if: always() && steps.save-codex-chain.outcome == 'success'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -173,6 +175,12 @@ jobs:
           key: nightly-e2e-codex-auth-${{ github.run_id }}-${{ github.run_attempt }}
           lookup-only: true
           fail-on-cache-miss: true
+
+      # The run step wrote its result before the save, and the report reads only result files.
+      # Rewrite the codex leg to an auth-chain failure so a lost chain never reports green.
+      - name: Fail the codex result when the chain was not saved
+        if: always() && (steps.save-codex-chain.outcome == 'failure' || steps.verify-codex-chain.outcome == 'failure')
+        run: bun scripts/e2e/codex-chain-lost.ts out/e2e-results.json
 
       - name: Upload harness results
         if: always()
