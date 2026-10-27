@@ -83,7 +83,7 @@ import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
-import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
@@ -879,22 +879,17 @@ httpServer
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 
-    // Background backfill: re-embed any agent_memory rows with wrong-dimension
-    // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
-    // when the DB is clean. See src/be/memory/boot-reembed.ts.
-    import("../be/memory/boot-reembed")
-      .then(({ runBootReembed }) => runBootReembed())
+    // Background embedding maintenance: re-embed every memory and script
+    // vector when the embedding space (endpoint, model, dimensions, document
+    // prefix) changed, then embed rows with a missing or wrong-length vector.
+    // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
+    import("../be/memory/embedding-space")
+      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
+        setDeploymentEnvReader(getDeploymentEnvValue);
+        return runEmbeddingMaintenance({ backfill: true });
+      })
       .catch((err) => {
-        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
-      });
-
-    // Background backfill: embed any scripts that were seeded without embeddings
-    // (scriptEmbeddingMode: "skip" during boot). Non-blocking, idempotent, no-op
-    // when every non-scratch script already has an embedding.
-    import("../be/scripts/boot-reembed")
-      .then(({ runBootReembedScripts }) => runBootReembedScripts())
-      .catch((err) => {
-        console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
+        console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored

@@ -21,9 +21,8 @@ import {
 import { recordIdentityEvent } from "../be/users";
 import { can, isRbacEnabled } from "../rbac";
 import { RbacRoleSchema, UserRbacRolesSchema } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { getOperatorActor } from "./operator-actor";
-import { agentFirstPrincipal, rejectGuest } from "./request-principal";
+import { agentFirstPrincipal, authUserId, rejectGuest, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -85,11 +84,13 @@ export async function ensureRoleManager(
   res: ServerResponse,
 ): Promise<boolean> {
   if (rejectGuest(req, res)) return false;
-  const auth = getRequestAuth(req);
-  if (auth?.kind !== "operator" && auth?.kind !== "user") {
-    jsonError(res, "Role changes require operator or user credentials", 403);
-    return false;
-  }
+  const auth = requireAuthKind(
+    req,
+    res,
+    ["operator", "user"],
+    "Role changes require operator or user credentials",
+  );
+  if (!auth) return false;
   const header = req.headers["x-agent-id"];
   const decision = can({
     principal: await agentFirstPrincipal(req, Array.isArray(header) ? header[0] : header),
@@ -102,7 +103,8 @@ export async function ensureRoleManager(
     return false;
   }
   // A custom role holding user.role.manage must not be able to grant admin.
-  if (auth.kind === "user" && isRbacEnabled() && !(await getUserGrant(auth.userId)).grantsAll) {
+  const userId = authUserId(auth);
+  if (userId && isRbacEnabled() && !(await getUserGrant(userId)).grantsAll) {
     jsonError(res, "Role changes require a grant-all role", 403);
     return false;
   }

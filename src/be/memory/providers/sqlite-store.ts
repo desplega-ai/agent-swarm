@@ -1325,6 +1325,17 @@ export class SqliteMemoryStore implements MemoryStore {
     });
   }
 
+  async clearEmbedding(id: string): Promise<void> {
+    await getDbClient().transaction(async (tx) => {
+      await tx.run("UPDATE agent_memory SET embedding = NULL, embeddingModel = NULL WHERE id = ?", [
+        id,
+      ]);
+      if (this.vecInitialized && this.getVecTableSchema()) {
+        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+      }
+    });
+  }
+
   async rewriteForScrub(
     id: string,
     before: MemoryScrubFields,

@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   deleteSwarmConfig,
-  getAgentById,
   getResolvedConfig,
   getSwarmConfigById,
   getSwarmConfigLookupById,
@@ -30,6 +29,7 @@ import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-cont
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { syncRankingAfterConfigChange } from "./ranking";
+import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { duplicateGuardedQueryKey, jsonError } from "./utils";
 
@@ -71,30 +71,33 @@ export async function requestSecretReadScope(
   req: IncomingMessage,
   resolvedScope?: { agentId?: string; repoId?: string },
 ): Promise<"all" | "self" | "none"> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return "all";
-  if (auth?.kind === "agent") {
-    const agent = await getAgentById(auth.agentId);
+  const principal = await requestPrincipal(req, undefined);
+  // Preserve legacy reads without a user or session-token principal.
+  if (!principal || principal.kind === "operator") return "all";
+  if (principal.kind === "guest") return "none";
+  if (principal.kind === "agent") {
     if (
       can({
-        principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+        principal,
         verb: "config.read.secrets",
         resource: { kind: "none" },
         source: "http",
       }).allow
     )
       return "all";
+    const auth = getRequestAuth(req);
     // Runtime and agent tokens stand in for a worker and read their own agent's
     // scope. Task tokens are ACP harness credentials and read no secrets.
-    if (auth.tokenKind === "task" || resolvedScope?.agentId !== auth.agentId) return "none";
+    if (
+      (auth?.kind === "agent" && auth.tokenKind === "task") ||
+      resolvedScope?.agentId !== principal.agentId
+    )
+      return "none";
     return "self";
   }
-  if (auth?.kind === "guest") return "none";
-  // Preserve legacy reads without a user or session-token principal.
-  if (auth?.kind !== "user") return "all";
   if (!isRbacEnabled()) return "all";
 
-  const grant = await getUserGrant(auth.userId);
+  const grant = await getUserGrant(principal.userId);
   return grant.grantsAll || grant.verbs.has("config.read.secrets") ? "all" : "none";
 }
 
@@ -216,17 +219,18 @@ export async function ensureHttpPermission(
   res: ServerResponse,
   verb: PermissionVerb,
   forbiddenMessage: string,
+  callerAgentId?: string,
 ): Promise<boolean> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator" || auth?.kind === "user") return true;
-  if (auth?.kind === "guest") {
+  const principal = await requestPrincipal(req, callerAgentId ?? singleHeader(req, "x-agent-id"), {
+    unauthenticatedFallback: "anonymous-agent",
+  });
+  if (principal.kind === "operator" || principal.kind === "user") return true;
+  if (principal.kind === "guest") {
     jsonError(res, "Forbidden", 403);
     return false;
   }
-  const agentId = auth?.kind === "agent" ? auth.agentId : singleHeader(req, "x-agent-id");
-  const agent = agentId ? await getAgentById(agentId) : undefined;
   const decision = can({
-    principal: { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false },
+    principal,
     verb,
     resource: { kind: "none" },
     source: "http",

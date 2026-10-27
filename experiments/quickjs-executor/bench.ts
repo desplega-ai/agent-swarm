@@ -142,6 +142,115 @@ const native = new NativeScriptExecutor();
 const quickjs = new QuickJSScriptExecutor();
 
 // Run in a fresh process for each pool size; the shared pool is fixed once created.
+if (process.env.NATIVE_BREAKDOWN === "1") {
+  const { mkdir, rm, symlink } = await import("node:fs/promises");
+  const { tmpdir: osTmpdir } = await import("node:os");
+  const { pathToFileURL } = await import("node:url");
+  const { writeBareImportShims } = await import("../../src/scripts-runtime/executors/native");
+  const { buildSandboxedCommand, sandboxSpawnEnv } = await import(
+    "../../src/utils/sandboxed-process"
+  );
+  const baseTmp = process.env.TMPDIR ?? (process.platform === "win32" ? osTmpdir() : "/tmp");
+  const sharedRoot = `${baseTmp}/bench-shared-shims-${process.pid}`;
+  await writeBareImportShims(sharedRoot);
+
+  async function sampleMs(fn: () => Promise<void>, iters = N) {
+    await fn();
+    const samples: number[] = [];
+    for (let i = 0; i < iters; i++) {
+      const t0 = performance.now();
+      await fn();
+      samples.push(performance.now() - t0);
+    }
+    return { p50: percentile(samples, 0.5), p95: percentile(samples, 0.95) };
+  }
+
+  const trivial = SCRIPTS.trivial;
+  if (!trivial) throw new Error("missing trivial script");
+
+  const legacySetupTeardown = await sampleMs(async () => {
+    const dir = `${baseTmp}/bench-legacy-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${dir}`;
+    for (const name of ["stdlib", "swarm-sdk", "zod", "zod/mini"]) {
+      const mdir = `${dir}/node_modules/${name}`;
+      await Bun.$`mkdir -p ${mdir}`;
+      const url =
+        name === "stdlib" || name === "swarm-sdk"
+          ? new URL(`../../src/scripts-runtime/${name}.ts`, import.meta.url)
+          : pathToFileURL(Bun.resolveSync(name, import.meta.dir));
+      await Bun.write(`${mdir}/package.json`, JSON.stringify({ type: "module", main: "index.ts" }));
+      await Bun.write(`${mdir}/index.ts`, `export * from ${JSON.stringify(url.href)};\n`);
+    }
+    await Bun.write(`${dir}/args.json`, '{"a":1,"b":2}');
+    await Bun.write(`${dir}/source.ts`, trivial.source);
+    const copied = await Bun.file(`${dir}/source.ts`).text();
+    await Bun.write(`${dir}/user-module/user-script.ts`, copied);
+    await Bun.$`rm -rf ${dir}`;
+  });
+
+  const optimizedSetupTeardown = await sampleMs(async () => {
+    const dir = `${baseTmp}/bench-opt-${crypto.randomUUID()}`;
+    await mkdir(`${dir}/user-module`, { recursive: true });
+    await Promise.all([
+      Bun.write(`${dir}/args.json`, '{"a":1,"b":2}'),
+      Bun.write(`${dir}/user-module/user-script.ts`, trivial.source),
+      symlink(`${sharedRoot}/node_modules`, `${dir}/node_modules`, "junction"),
+    ]);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const bareSpawn = await sampleMs(async () => {
+    const proc = Bun.spawn(["bun", "--eval", ""], { stdout: "ignore", stderr: "ignore" });
+    await proc.exited;
+  });
+
+  const ulimitPreludeSpawn = await sampleMs(async () => {
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+    const cmd = buildSandboxedCommand(["bun", "--eval", ""], env, {
+      virtualMemoryMb: DEFAULT_SCRIPT_RESOURCES.memoryMb,
+      cpuTimeSec: DEFAULT_SCRIPT_RESOURCES.cpuTimeSec,
+      maxProcs: DEFAULT_SCRIPT_RESOURCES.maxProcs,
+      maxFileKb: Math.floor(DEFAULT_SCRIPT_RESOURCES.maxFileBytes / 1024),
+      maxFdCount: DEFAULT_SCRIPT_RESOURCES.maxFdCount,
+    });
+    const proc = Bun.spawn(cmd, {
+      env: sandboxSpawnEnv(env),
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await proc.exited;
+  });
+
+  const trivialFull = await latency(native, "trivial", N);
+  const zodFull = await latency(native, "zod argsSchema", N);
+  await rm(sharedRoot, { recursive: true, force: true });
+
+  console.log(
+    `bun ${Bun.version} ${process.platform}/${process.arch} | N=${N} native startup breakdown (ms)`,
+  );
+  console.log("stage                                    p50     p95");
+  console.log(
+    `  legacy setup+teardown (6x Bun.$ + copy) ${fmt(legacySetupTeardown.p50)} ${fmt(legacySetupTeardown.p95)}`,
+  );
+  console.log(
+    `  optimized setup+teardown (in-proc link) ${fmt(optimizedSetupTeardown.p50)} ${fmt(optimizedSetupTeardown.p95)}`,
+  );
+  console.log(
+    `  bare bun spawn (bun --eval "")          ${fmt(bareSpawn.p50)} ${fmt(bareSpawn.p95)}`,
+  );
+  console.log(
+    `  sandboxed spawn (sh/ulimit + bun)       ${fmt(ulimitPreludeSpawn.p50)} ${fmt(ulimitPreludeSpawn.p95)}`,
+  );
+  console.log(
+    `  NativeScriptExecutor.run (trivial)      ${fmt(trivialFull.p50)} ${fmt(trivialFull.p95)}`,
+  );
+  console.log(
+    `  NativeScriptExecutor.run (zod)          ${fmt(zodFull.p50)} ${fmt(zodFull.p95)}`,
+  );
+  server.stop(true);
+  process.exit(0);
+}
+
 if (process.env.QUICKJS_ONLY === "1") {
   console.log(
     `bun ${Bun.version} ${process.platform}/${process.arch} | pool=${process.env.SCRIPT_QUICKJS_POOL_SIZE ?? "4"}, concurrency=${CONC}, runs=${N * 10}`,
