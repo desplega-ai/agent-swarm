@@ -143,7 +143,16 @@ The cost: `/workspace/shared` lives in the container's writable layer, so it is 
 on every redeploy. Agents cannot read each other's `thoughts/`. They share files through agent-fs,
 which has its own volume. Memory entries are indexed in the API database, so they survive.
 
-## Post-deploy note (template description)
+## Template name and description
+
+- **Name:** `Agent Swarm`. Railway's Overview headings embed the template name.
+- **Description** (Railway caps it at 75 characters):
+
+  > Self-hosted AI agent swarm: a lead, two coders, memory and a shared drive
+
+## Post-deploy note (Marketplace Overview)
+
+The description is too short for this note, so put it in the template's Marketplace Overview:
 
 > When the `api` service is healthy, open
 > `https://app.agent-swarm.dev/setup?apiUrl=https://<api domain>&apiKey=<API_KEY>`.
