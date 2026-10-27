@@ -236,6 +236,84 @@ export async function admitSlackInboundReceipt(
   });
 }
 
+export interface RecordSlackInboundDeliveredInput {
+  dedupKey: string;
+  transport: SlackInboundTransport;
+  kind: SlackInboundKind;
+  payloadType: string;
+  apiAppId?: string | null;
+  eventId?: string | null;
+  outcomeCode: string;
+}
+
+/**
+ * Persist a dedup key for a delivery the caller is about to run without ever
+ * having acknowledged it (a Socket Mode ack that failed). The row is born
+ * `processed` with no payload, so no drain claims it and retention drops it with
+ * the other completed keys. Returns "duplicate" when the key is already stored,
+ * and counts that sighting.
+ */
+export async function recordSlackInboundDelivered(
+  input: RecordSlackInboundDeliveredInput,
+  now: Date = new Date(),
+): Promise<"recorded" | "duplicate"> {
+  const nowIso = now.toISOString();
+  return getDbClient().transaction(async (tx) => {
+    const inserted = await tx.get<{ id: string }>(
+      `INSERT INTO slack_inbound_receipts (
+          id, dedup_key, transport, kind, payload_type, api_app_id, event_id,
+          payload_bytes, state, attempts, outcome_code, received_at, available_at,
+          completed_at, payload_erased_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'processed', 1, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(dedup_key) DO NOTHING
+        RETURNING id`,
+      [
+        crypto.randomUUID(),
+        input.dedupKey,
+        input.transport,
+        input.kind,
+        input.payloadType,
+        input.apiAppId ?? null,
+        input.eventId ?? null,
+        input.outcomeCode,
+        nowIso,
+        nowIso,
+        nowIso,
+        nowIso,
+        nowIso,
+        nowIso,
+      ],
+    );
+    if (inserted) return "recorded";
+    await tx.run(
+      `UPDATE slack_inbound_receipts
+          SET duplicate_count = duplicate_count + 1, last_duplicate_at = ?, updated_at = ?
+        WHERE dedup_key = ?`,
+      [nowIso, nowIso, input.dedupKey],
+    );
+    return "duplicate";
+  });
+}
+
+/**
+ * Is this key stored? Counts the sighting as a duplicate delivery when it is.
+ * One atomic UPDATE, no read-then-write.
+ */
+export async function touchSlackInboundDuplicate(
+  dedupKey: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const nowIso = now.toISOString();
+  const row = await getDbClient().get<{ id: string }>(
+    `UPDATE slack_inbound_receipts
+        SET duplicate_count = duplicate_count + 1, last_duplicate_at = ?, updated_at = ?
+      WHERE dedup_key = ?
+      RETURNING id`,
+    [nowIso, nowIso, dedupKey],
+  );
+  return row !== null && row !== undefined;
+}
+
 /**
  * Atomically move one claimable pending receipt to `processing`. Without an id
  * the oldest available receipt is claimed. Returns null when nothing is

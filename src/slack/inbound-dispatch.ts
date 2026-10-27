@@ -9,6 +9,7 @@ import {
   getNextSlackInboundAvailableAt,
   getSlackInboundReceiptStats,
   markInterruptedSlackInboundReceiptsUncertain,
+  recordSlackInboundDelivered,
   releaseSlackInboundReceipt,
   SLACK_INBOUND_LIMITS,
   type SlackInboundAdmission,
@@ -16,6 +17,7 @@ import {
   type SlackInboundReceipt,
   type SlackInboundReceiptStats,
   type SlackInboundTransport,
+  touchSlackInboundDuplicate,
 } from "../be/db-queries/slack-inbound";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration, type SlackMode } from "./config";
@@ -296,6 +298,49 @@ export function computeSlackInboundKey(
     apiAppId,
     eventId: null,
   };
+}
+
+/** Dedup key for a Socket Mode `event_callback` body, or null for any other envelope. */
+function socketEventKey(body: unknown): Extract<SlackInboundKeyResult, { ok: true }> | null {
+  if ((body as { type?: unknown } | null)?.type !== "event_callback") return null;
+  const key = computeSlackInboundKey("event", "", body);
+  return key.ok ? key : null;
+}
+
+/**
+ * Persist the dedup key of a Socket Mode event whose ack failed, before its
+ * listeners run. An in-memory cache does not survive a restart; this key does
+ * (until retention), so a redelivery after the restart is still recognised.
+ * Returns "recorded" on first sight, "duplicate" when already stored, and
+ * "skipped" for a body with no event key.
+ */
+export async function recordSlackSocketUnackedEvent(
+  body: unknown,
+  now: Date = new Date(),
+): Promise<"recorded" | "duplicate" | "skipped"> {
+  const key = socketEventKey(body);
+  if (!key) return "skipped";
+  return recordSlackInboundDelivered(
+    {
+      dedupKey: key.dedupKey,
+      transport: "socket",
+      kind: "event",
+      payloadType: key.payloadType,
+      apiAppId: key.apiAppId,
+      eventId: key.eventId,
+      outcomeCode: "ack_not_ready",
+    },
+    now,
+  );
+}
+
+/** Has this Socket Mode event already run after a failed ack? Counts the sighting. */
+export async function wasSlackSocketEventUnacked(
+  body: unknown,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const key = socketEventKey(body);
+  return key ? touchSlackInboundDuplicate(key.dedupKey, now) : false;
 }
 
 export interface AdmitSlackInboundInput {
