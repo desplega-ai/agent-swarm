@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, getRequestAuth } from "../utils/request-auth-context";
 import { getAgentCurrentTask, getTaskById } from "./db";
 import { findUserByExternalId } from "./users";
 
@@ -65,8 +65,8 @@ export async function resolveHttpAuditUserId(
   req: IncomingMessage,
   callerAgentId: string | undefined,
 ): Promise<string | null> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return auth.userId;
+  const userId = authUserId(getRequestAuth(req));
+  if (userId) return userId;
   const header = req.headers["x-source-task-id"];
   const sourceTaskId = Array.isArray(header) ? header[0] : header;
   return resolveTaskAuditUserId(sourceTaskId, callerAgentId);

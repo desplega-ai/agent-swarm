@@ -7,7 +7,12 @@ import { findUserById } from "../be/users";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
-import type { HttpRequestAuth } from "../utils/request-auth-context";
+import {
+  authUser,
+  authUserId,
+  type HttpRequestAuth,
+  isOperatorAuth,
+} from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import {
@@ -101,9 +106,11 @@ function identityFromHttpAuth(
   const agentId =
     auth.kind === "agent"
       ? auth.agentId
-      : auth.kind === "operator"
+      : isOperatorAuth(auth)
         ? header(req, "x-agent-id")
         : undefined;
+  const user = authUser(auth);
+  const userId = authUserId(auth);
   const guestId = `guest-${crypto.randomUUID()}`;
   return {
     runtimeId:
@@ -114,14 +121,14 @@ function identityFromHttpAuth(
       agentId,
       sourceTaskId:
         auth.kind === "agent" ? (auth.taskId ?? undefined) : header(req, "x-source-task-id"),
-      userId: auth.kind === "user" ? auth.userId : undefined,
-      isOperator: auth.kind === "operator",
-      dashboardUserId: auth.kind === "operator" ? auth.dashboardUserId : undefined,
+      userId,
+      isOperator: isOperatorAuth(auth),
+      dashboardUserId: isOperatorAuth(auth) ? auth.dashboardUserId : undefined,
     } satisfies Identity,
     me: {
-      userId: auth.kind === "user" ? auth.userId : (agentId ?? guestId),
-      name: auth.kind === "user" ? auth.user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
-      kind: auth.kind === "user" ? "user" : agentId ? "agent" : "guest",
+      userId: userId ?? agentId ?? guestId,
+      name: user ? user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
+      kind: user ? "user" : agentId ? "agent" : "guest",
     } as Viewer,
     expiresAt: auth.kind === "agent" ? Date.parse(auth.expiresAt) : undefined,
     ...(auth.kind === "agent"

@@ -44,7 +44,7 @@ import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { rejectGuest } from "./request-principal";
+import { agentFirstPrincipal, rejectGuest } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -791,16 +791,7 @@ async function ingestPrincipal(
   req: IncomingMessage,
   agentIdHeader: string | undefined,
 ): Promise<RbacPrincipal> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  const agentId = auth?.kind === "agent" ? auth.agentId : agentIdHeader;
-  if (agentId) {
-    const agent = await getAgentById(agentId);
-    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
-  }
-  if (auth?.kind === "operator") return { kind: "operator" };
-  return { kind: "agent", agentId: "", isLead: false };
+  return agentFirstPrincipal(req, agentIdHeader, { unauthenticatedFallback: "anonymous-agent" });
 }
 
 /** Whose rows a memory list may show. `seesAll` lifts the own-or-swarm filter. */

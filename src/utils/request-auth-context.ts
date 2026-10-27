@@ -74,7 +74,20 @@ export function runWithoutRequestAuth<T>(fn: () => T): T {
   return authStorage.exit(fn);
 }
 
-export function getCurrentRequestUserId(): string | undefined {
-  const auth = getCurrentRequestAuth();
+export function authUserId(auth: HttpRequestAuth | null | undefined): string | undefined {
   return auth?.kind === "user" ? auth.userId : undefined;
+}
+
+export function authUser(auth: HttpRequestAuth | null | undefined): User | undefined {
+  return auth?.kind === "user" ? auth.user : undefined;
+}
+
+export function isOperatorAuth(
+  auth: HttpRequestAuth | null | undefined,
+): auth is Extract<HttpRequestAuth, { kind: "operator" }> {
+  return auth?.kind === "operator";
+}
+
+export function getCurrentRequestUserId(): string | undefined {
+  return authUserId(getCurrentRequestAuth());
 }

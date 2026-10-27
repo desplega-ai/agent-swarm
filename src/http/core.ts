@@ -45,6 +45,7 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
+  authUserId,
   beginRequestAuthScope,
   runWithoutRequestAuth,
   setRequestAuth,
@@ -599,8 +600,9 @@ export async function handleCore(
     }
   }
 
-  if (auth?.kind === "user" && isRbacEnabled()) {
-    const grant = await getUserGrant(auth.userId);
+  const userId = authUserId(auth);
+  if (userId && isRbacEnabled()) {
+    const grant = await getUserGrant(userId);
     if (!grant.grantsAll) {
       const def = routeDef;
       const decision = decideAdmission({
@@ -610,7 +612,7 @@ export async function handleCore(
         grant,
       });
       enqueueAdmissionRow({
-        userId: auth.userId,
+        userId,
         decision,
         method: req.method,
         route: def?.path ?? pathSegments.join("/"),

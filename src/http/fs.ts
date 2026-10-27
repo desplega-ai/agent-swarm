@@ -18,7 +18,7 @@ import { getFileStorageProvider } from "../fs/registry";
 import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
-import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getCurrentRequestUserId, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { transcribeAudioNotes } from "../utils/transcription";
 import { requestPrincipal } from "./request-principal";
@@ -264,19 +264,19 @@ async function resolveInvite(
   req: IncomingMessage,
   body: { email: string; role: InviteRole },
 ): Promise<{ email: string; role: InviteRole } | { denied: string }> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind !== "user" || !isRbacEnabled()) return body;
-  const grant = await getUserGrant(auth.userId);
+  const user = authUser(getRequestAuth(req));
+  if (!user || !isRbacEnabled()) return body;
+  const grant = await getUserGrant(user.id);
   if (grant.grantsAll) return body;
   const decision = can({
-    principal: { kind: "user", userId: auth.userId },
+    principal: { kind: "user", userId: user.id },
     verb: "fs.join.own",
     resource: { kind: "none" },
     source: "http",
   });
   // Admission already required the role to hold `fs.join.own`.
   if (!decision.allow) return { denied: decision.reason };
-  const ownEmail = auth.user.email?.trim();
+  const ownEmail = user.email?.trim();
   if (!ownEmail || ownEmail.toLowerCase() !== body.email.trim().toLowerCase()) {
     return { denied: "You can only join the shared drive with your own account email" };
   }
@@ -472,7 +472,6 @@ async function sendUpload(
     return sendProviderError(res, error);
   }
 
-  const auth = getCurrentRequestAuth();
   const attachment = await recordTaskAttachmentUpload({
     provider,
     scope,
@@ -484,7 +483,7 @@ async function sendUpload(
     intent: query.intent,
     description: query.description,
     isPrimary: query.isPrimary === "true",
-    createdBy: auth?.kind === "user" ? auth.userId : undefined,
+    createdBy: getCurrentRequestUserId(),
   });
   const mimeType = contentType.split(";")[0]!.trim().toLowerCase();
   if (isDraft && mimeType.startsWith("audio/")) {
