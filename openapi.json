@@ -54524,6 +54524,9 @@
                             "uncertain": {
                               "type": "number"
                             },
+                            "ackNotReady": {
+                              "type": "number"
+                            },
                             "lastOutcomeAt": {
                               "type": [
                                 "string",
@@ -54554,6 +54557,7 @@
                             "ignored",
                             "failed",
                             "uncertain",
+                            "ackNotReady",
                             "lastOutcomeAt",
                             "lastFailure"
                           ]
@@ -54573,6 +54577,9 @@
                             "uncertain": {
                               "type": "number"
                             },
+                            "ackNotReady": {
+                              "type": "number"
+                            },
                             "lastOutcomeAt": {
                               "type": [
                                 "string",
@@ -54603,6 +54610,7 @@
                             "ignored",
                             "failed",
                             "uncertain",
+                            "ackNotReady",
                             "lastOutcomeAt",
                             "lastFailure"
                           ]

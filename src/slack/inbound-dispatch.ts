@@ -128,6 +128,8 @@ export function resolveSlackInboundOutcome(
 // ─── Outcome counters (Socket Mode is observed, not stored) ─────────────────
 
 type OutcomeCounters = Record<SlackInboundOutcomeState, number> & {
+  /** Socket acks that failed because the client was not ready; the event still ran. */
+  ackNotReady: number;
   lastOutcomeAt: string | null;
   lastFailure: { code: string; at: string } | null;
 };
@@ -138,6 +140,7 @@ function emptyCounters(): OutcomeCounters {
     ignored: 0,
     failed: 0,
     uncertain: 0,
+    ackNotReady: 0,
     lastOutcomeAt: null,
     lastFailure: null,
   };
@@ -157,6 +160,11 @@ function recordOutcome(transport: SlackInboundTransport, outcome: SlackInboundOu
     bucket.lastFailure = { code: outcome.code, at };
     console.warn(`[Slack] inbound ${transport} delivery ${outcome.state}: ${outcome.code}`);
   }
+}
+
+/** Count a Socket Mode ack that failed because the client was not ready. */
+export function recordSlackSocketAckNotReady(): void {
+  counters.socket.ackNotReady += 1;
 }
 
 /** Test-only. */

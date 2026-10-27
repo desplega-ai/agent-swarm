@@ -6,6 +6,7 @@ import { type SlackConnectionState, setSlackConnectionState } from "./connection
 import { installSlackEgressScrub } from "./egress-scrub";
 import { installSlackExternalChannelGuard } from "./external-channel-egress";
 import { slackInboundOutcomeMiddleware } from "./inbound-dispatch";
+import { tolerateSocketNotReadyAcks } from "./socket-ack";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -97,6 +98,7 @@ export async function initSlackApp(): Promise<App | null> {
     installerOptions: clientOptions ? { clientOptions } : {},
   });
   trackConnectionState(receiver);
+  tolerateSocketNotReadyAcks(receiver.client);
   app = new App({
     token: botToken,
     receiver,
