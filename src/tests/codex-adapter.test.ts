@@ -34,6 +34,7 @@ import {
   resolveCodexModel,
 } from "../providers/codex-models";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import { isCodexAuthFailureReason } from "../utils/codex-auth-failure";
 import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 /**
@@ -1177,23 +1178,38 @@ describe("CodexSession event mapping", () => {
     expect(result.failureReason).toContain("[rate-limit]");
   });
 
-  test("turn.failed with auth error rewrites + sets errorCategory=authentication_failed", async () => {
+  test.each([
+    undefined,
+    0,
+    2,
+  ])("turn.failed auth error identifies pool slot %p", async (codexSlot) => {
+    const raw = "Request failed: HTTP 401 Unauthorized — Invalid API key provided.";
     const events: ThreadEvent[] = [
       { type: "thread.started", thread_id: "thread-auth" },
       { type: "turn.started" },
       {
         type: "turn.failed",
-        error: { message: "Request failed: HTTP 401 Unauthorized — Invalid API key provided." },
+        error: { message: raw },
       },
     ];
 
     const { emitted, result } = await runSessionWithFakeThread(
       events,
-      testConfig({ logFile: join(tmpLogDir, "auth.log"), cwd: "" }),
+      testConfig({
+        logFile: join(tmpLogDir, "auth.log"),
+        cwd: "",
+        codexSlot,
+        apiUrl: "",
+        apiKey: "",
+      }),
     );
 
+    const expected =
+      codexSlot === undefined
+        ? `[auth-error] Codex authentication failed — check OPENAI_API_KEY or ChatGPT login. Original error: ${raw}`
+        : `[auth-error] Codex pool slot ${codexSlot} authentication failed — re-run agent-swarm codex-login --slot ${codexSlot}. Original error: ${raw}`;
     const errorEvent = emitted.find((e) => e.type === "error");
-    expect(errorEvent?.type === "error" && errorEvent.message).toContain("[auth-error]");
+    expect(errorEvent?.type === "error" && errorEvent.message).toBe(expected);
 
     const resultEvent = emitted.findLast((e) => e.type === "result");
     expect(resultEvent?.type === "result" && resultEvent.errorCategory).toBe(
@@ -1201,7 +1217,8 @@ describe("CodexSession event mapping", () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(result.failureReason).toContain("[auth-error]");
+    expect(result.failureReason).toBe(expected);
+    expect(isCodexAuthFailureReason(result.failureReason)).toBe(true);
   });
 
   test("abort() resolves the session with cancelled result", async () => {
@@ -2517,7 +2534,9 @@ describe("CodexSession — rate-limit error preservation", () => {
     expect(resetMs).toBeGreaterThan(Date.now());
   });
 
-  test("revoked-while-valid OAuth pool failure ('Failed to refresh token') classifies as [auth-error]/authentication_failed", async () => {
+  test.each([
+    0, 2,
+  ])("revoked-while-valid OAuth failure identifies pool slot %i after transport exit", async (codexSlot) => {
     // A credential revoked server-side while its access token is still
     // unexpired never enters getValidCodexOAuth (the token looks fresh, it
     // fast-returns) — the spawned Codex CLI self-refreshes straight from the
@@ -2534,13 +2553,32 @@ describe("CodexSession — rate-limit error preservation", () => {
     ];
     const sdkThrow = new Error("Codex Exec exited with code 1: Reading prompt from stdin");
 
-    const { result } = await runSessionWithThrowingThread(
+    const { emitted, result } = await runSessionWithThrowingThread(
       events,
       sdkThrow,
-      testConfig({ logFile: join(tmpLogDir, "authfail-preserve.log"), cwd: "" }),
+      testConfig({
+        logFile: join(tmpLogDir, "authfail-preserve.log"),
+        cwd: "",
+        codexSlot,
+        apiUrl: "",
+        apiKey: "",
+      }),
     );
 
     expect(result.failureReason).toMatch(/\[auth-error\]/);
+    expect(result.failureReason).toContain(`pool slot ${codexSlot}`);
+    expect(result.failureReason).toContain(`agent-swarm codex-login --slot ${codexSlot}`);
+    expect(result.failureReason).toContain(refreshFailMsg);
+    expect(isCodexAuthFailureReason(result.failureReason)).toBe(true);
+    const errorEvents = emitted.filter((e) => e.type === "error");
+    expect(errorEvents.length).toBeGreaterThan(0);
+    for (const event of errorEvents) {
+      expect(event.message).toBe(result.failureReason);
+    }
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent?.type === "result" && resultEvent.errorCategory).toBe(
+      "authentication_failed",
+    );
     expect(result.isError).toBe(true);
   });
 
