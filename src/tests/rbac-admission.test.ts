@@ -787,7 +787,7 @@ describe("join the shared agent-fs drive", () => {
       body: { email: "req.user@EXAMPLE.test", role: "admin" },
     });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ orgId: "shared-org", invited: true });
+    expect(res.body).toEqual({ orgId: "shared-org", invited: true, status: "added" });
     expect(invites).toEqual([{ email: "Req.User@example.test", role: "editor" }]);
   });
 
