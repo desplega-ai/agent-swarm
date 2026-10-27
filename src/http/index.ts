@@ -884,8 +884,8 @@ httpServer
     // prefix) changed, then embed rows with a missing or wrong-length vector.
     // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
     import("../be/memory/embedding-space")
-      .then(({ runEmbeddingMaintenance, setDeploymentEmbeddingBaseUrl }) => {
-        setDeploymentEmbeddingBaseUrl(() => getDeploymentEnvValue("EMBEDDING_API_BASE_URL"));
+      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
+        setDeploymentEnvReader(getDeploymentEnvValue);
         return runEmbeddingMaintenance({ backfill: true });
       })
       .catch((err) => {

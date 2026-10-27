@@ -32,10 +32,11 @@
  * the endpoint rejects while others embed loses its vector (it is in the old
  * space) and the NULL backfill retries it.
  *
- * A full re-embed sends every stored document to the endpoint. So an
- * `EMBEDDING_API_BASE_URL` stored through `/api/config` must pass the same SSRF
- * check as the /setup probe; only the deployment environment's own value may be
- * private (the bundled TEI at http://tei:80/v1). A blocked URL changes nothing.
+ * A full re-embed sends every stored document to the endpoint. So an endpoint
+ * URL (`EMBEDDING_API_BASE_URL`, else the SDK's `OPENAI_BASE_URL` fallback)
+ * stored through `/api/config` must pass the same SSRF check as the /setup
+ * probe; only the deployment environment's own value may be private (the
+ * bundled TEI at http://tei:80/v1). A blocked URL changes nothing.
  *
  * Logs counts and a short fingerprint prefix only, never content.
  */
@@ -89,19 +90,26 @@ export type EmbeddingSpaceOptions = {
 };
 
 /**
- * The deployment environment's EMBEDDING_API_BASE_URL, without stored config.
- * Set by the HTTP server at boot (http/core owns the env injection). Unset, no
- * URL counts as operator config, so every one gets the SSRF check.
+ * Reads a key's deployment environment value, without stored config. Set by
+ * the HTTP server at boot (http/core owns the env injection). Unset, no URL
+ * counts as operator config, so every one gets the SSRF check.
  */
-let readDeploymentBaseUrl: () => string | undefined = () => undefined;
+let readDeploymentEnv: (key: string) => string | undefined = () => undefined;
 
-export function setDeploymentEmbeddingBaseUrl(read: () => string | undefined): void {
-  readDeploymentBaseUrl = read;
+export function setDeploymentEnvReader(read: (key: string) => string | undefined): void {
+  readDeploymentEnv = read;
 }
 
+/** Checks the URL the provider sends to, in the SDK's precedence order. */
 function endpointAllowed(): boolean {
-  const baseUrl = process.env.EMBEDDING_API_BASE_URL;
-  if (!baseUrl || baseUrl === readDeploymentBaseUrl()) return true;
+  const key = process.env.EMBEDDING_API_BASE_URL
+    ? "EMBEDDING_API_BASE_URL"
+    : process.env.OPENAI_BASE_URL
+      ? "OPENAI_BASE_URL"
+      : null;
+  if (!key) return true;
+  const baseUrl = process.env[key] ?? "";
+  if (baseUrl === readDeploymentEnv(key)) return true;
   try {
     assertUrlSafe(baseUrl, publicEndpointSsrfOptions());
     return true;
@@ -283,7 +291,7 @@ export async function reconcileEmbeddingSpace(
 
   if (!endpointAllowed()) {
     console.warn(
-      `${TAG} re-embed to ${short(current)} blocked: the stored EMBEDDING_API_BASE_URL is not an allowed endpoint`,
+      `${TAG} re-embed to ${short(current)} blocked: the stored embedding base URL is not an allowed endpoint`,
     );
     return "blocked";
   }

@@ -12,7 +12,7 @@ import {
   embeddingSpaceFingerprint,
   reconcileEmbeddingSpace,
   runEmbeddingMaintenance,
-  setDeploymentEmbeddingBaseUrl,
+  setDeploymentEnvReader,
 } from "../be/memory/embedding-space";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 
@@ -31,6 +31,7 @@ const ENV_KEYS = [
   "EMBEDDING_DOCUMENT_PREFIX",
   "EMBEDDING_QUERY_PREFIX",
   "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
 ] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
@@ -302,32 +303,40 @@ describe("embedding space fingerprint", () => {
     expect(await state(EMBEDDING_SPACE_TARGET_KEY)).toBeNull();
   });
 
-  test("a stored private endpoint blocks the re-embed and sends no document", async () => {
-    const memoryId = await oldMemory();
-    await reconcileEmbeddingSpace();
-    const savedNodeEnv = process.env.NODE_ENV;
-    const savedAllow = process.env.ALLOW_PRIVATE_NETWORK_URLS;
-    process.env.NODE_ENV = "production";
-    delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
-    try {
-      setEnv({ EMBEDDING_MODEL: "model-b" });
-      requests = [];
-      expect(await reconcileEmbeddingSpace()).toBe("blocked");
-      expect(requests).toHaveLength(0);
-      expect(await memoryValue(memoryId)).toBe(OLD_VALUE);
-      expect(await state(EMBEDDING_SPACE_TARGET_KEY)).toBeNull();
+  for (const urlKey of ["EMBEDDING_API_BASE_URL", "OPENAI_BASE_URL"] as const) {
+    test(`a stored private ${urlKey} blocks the re-embed and sends no document`, async () => {
+      const memoryId = await oldMemory();
+      await reconcileEmbeddingSpace();
+      const savedNodeEnv = process.env.NODE_ENV;
+      const savedAllow = process.env.ALLOW_PRIVATE_NETWORK_URLS;
+      process.env.NODE_ENV = "production";
+      delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
+      try {
+        setEnv({ EMBEDDING_MODEL: "model-b" });
+        if (urlKey === "OPENAI_BASE_URL") {
+          process.env.OPENAI_BASE_URL = process.env.EMBEDDING_API_BASE_URL;
+          delete process.env.EMBEDDING_API_BASE_URL;
+          resetEmbeddingProvider();
+        }
+        requests = [];
+        expect(await reconcileEmbeddingSpace()).toBe("blocked");
+        expect(requests).toHaveLength(0);
+        expect(await memoryValue(memoryId)).toBe(OLD_VALUE);
+        expect(await state(EMBEDDING_SPACE_TARGET_KEY)).toBeNull();
 
-      // The deployment environment's own URL may be private (bundled TEI).
-      setDeploymentEmbeddingBaseUrl(() => process.env.EMBEDDING_API_BASE_URL);
-      expect(await reconcileEmbeddingSpace()).toBe("reembedded");
-      expect(await memoryValue(memoryId)).toBe(0.2);
-    } finally {
-      setDeploymentEmbeddingBaseUrl(() => undefined);
-      if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = savedNodeEnv;
-      if (savedAllow !== undefined) process.env.ALLOW_PRIVATE_NETWORK_URLS = savedAllow;
-    }
-  });
+        // The deployment environment's own URL may be private (bundled TEI).
+        setDeploymentEnvReader((key) => process.env[key]);
+        expect(await reconcileEmbeddingSpace()).toBe("reembedded");
+        expect(await memoryValue(memoryId)).toBe(0.2);
+      } finally {
+        setDeploymentEnvReader(() => undefined);
+        delete process.env.OPENAI_BASE_URL;
+        if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = savedNodeEnv;
+        if (savedAllow !== undefined) process.env.ALLOW_PRIVATE_NETWORK_URLS = savedAllow;
+      }
+    });
+  }
 
   test("maintenance calls made while one waits join it", async () => {
     const first = runEmbeddingMaintenance({ backfill: false });
