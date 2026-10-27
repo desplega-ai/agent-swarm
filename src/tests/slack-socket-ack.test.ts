@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, test } from "bun:test";
 import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
+import { createAssistant } from "../slack/assistant";
 import { _resetForTests as resetEventDedup, wasEventSeen } from "../slack/event-dedup";
 import {
   getSlackInboundDiagnostics,
@@ -49,6 +50,11 @@ function buildApp(): { client: SocketClient; runs: string[]; errors: unknown[] }
     if (wasEventSeen(body.event_id)) return;
     runs.push(body.event_id);
   });
+  // Mirrors actions.ts: acks first, then does the work.
+  app.view("follow_up_submit", async ({ ack, body }) => {
+    await ack();
+    runs.push(`view:${body.view.id}`);
+  });
   return { client: receiver.client, runs, errors };
 }
 
@@ -71,6 +77,31 @@ async function deliver(client: SocketClient, eventId: string, retryNum?: number)
     retry_reason: retryNum ? "timeout" : undefined,
   });
   // The receiver's listener is async; let it settle.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/** Deliver an interactive modal submission the way SocketModeClient does. */
+async function deliverViewSubmission(client: SocketClient, viewId: string): Promise<void> {
+  const send = clientSend(client);
+  const envelopeId = `env-${viewId}`;
+  client.emit("slack_event", {
+    ack: (response?: Record<string, unknown>) => send(envelopeId, response),
+    envelope_id: envelopeId,
+    type: "interactive",
+    body: {
+      type: "view_submission",
+      team: { id: "T_TEST" },
+      user: { id: "U_HUMAN" },
+      api_app_id: "A_TEST",
+      view: {
+        id: viewId,
+        callback_id: "follow_up_submit",
+        private_metadata: "t",
+        state: { values: {} },
+      },
+    },
+    accepts_response_payload: true,
+  });
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
@@ -108,5 +139,61 @@ describe("Socket Mode ack failures", () => {
     expect(runs).toEqual([]);
     const { outcomes } = await getSlackInboundDiagnostics();
     expect(outcomes.socket.ackNotReady).toBe(0);
+  });
+
+  test("a failed modal submission ack is not swallowed, so the handler does no work", async () => {
+    const { client, runs, errors } = buildApp();
+    setSocket(client, { isActive: () => false });
+
+    await deliverViewSubmission(client, "V_FAILED");
+    expect(runs).toEqual([]);
+    expect(errors.length).toBe(1);
+    const { outcomes } = await getSlackInboundDiagnostics();
+    expect(outcomes.socket.ackNotReady).toBe(0);
+  });
+
+  test("a healthy modal submission still runs", async () => {
+    const { client, runs } = buildApp();
+    (client as unknown as { send: () => Promise<void> }).send = async () => {};
+
+    await deliverViewSubmission(client, "V_OK");
+    expect(runs).toEqual(["view:V_OK"]);
+  });
+});
+
+describe("assistant thread_started redelivery", () => {
+  beforeEach(() => {
+    resetEventDedup();
+  });
+
+  test("a redelivery after a tolerated ack failure does not greet twice", async () => {
+    const prev = process.env.SLACK_RENDER_V2;
+    process.env.SLACK_RENDER_V2 = "false";
+    try {
+      const threadStarted = (
+        createAssistant() as never as {
+          threadStarted: Array<(args: Record<string, unknown>) => Promise<void>>;
+        }
+      ).threadStarted[0]!;
+      let greetings = 0;
+      const deliverStart = () =>
+        threadStarted({
+          event: { assistant_thread: { channel_id: "D_TEST", thread_ts: "1.000001" } },
+          body: { event_id: "Ev_THREAD_STARTED" },
+          client: {},
+          say: async () => {
+            greetings++;
+          },
+          setSuggestedPrompts: async () => {},
+          saveThreadContext: async () => {},
+        });
+
+      await deliverStart();
+      await deliverStart();
+      expect(greetings).toBe(1);
+    } finally {
+      if (prev === undefined) delete process.env.SLACK_RENDER_V2;
+      else process.env.SLACK_RENDER_V2 = prev;
+    }
   });
 });

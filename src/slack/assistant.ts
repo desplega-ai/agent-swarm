@@ -49,6 +49,13 @@ async function isExternalAssistantThread(
 export function createAssistant(): Assistant {
   return new Assistant({
     threadStarted: async ({ event, body, client, say, setSuggestedPrompts, saveThreadContext }) => {
+      // The greeting is not idempotent: a redelivery after a tolerated socket ack
+      // failure must not post it twice.
+      const eventId = body?.event_id;
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return ignoreSlackInbound("duplicate_event");
+      }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
         return ignoreSlackInbound("external_channel");
       }

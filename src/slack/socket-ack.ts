@@ -21,14 +21,25 @@ type SocketAck = (response?: Record<string, unknown>) => Promise<void>;
  * in-memory dedup (`wasEventSeen`) drops that retry. Any other ack error
  * still throws.
  *
+ * Only `events_api` envelopes are wrapped. Interactive payloads (modal
+ * submissions, button actions) and slash commands ack from inside their
+ * handler, which does the work after acking: swallowing a failed ack there
+ * would run the handler while Slack shows the user an error, and the retry
+ * would run it again. Every non-idempotent Events API listener must dedupe on
+ * `event_id` (`wasEventSeen`), because the redelivery reaches it.
+ *
  * Wrapping `emit` (public) is the narrowest hook: the receiver builds its own
  * client and reads `args.ack` when its `slack_event` listener runs.
  */
 export function tolerateSocketNotReadyAcks(client: SocketModeReceiver["client"]): void {
   const emit = client.emit.bind(client);
   client.emit = (event: string | symbol, ...args: unknown[]): boolean => {
-    const payload = args[0] as { ack?: SocketAck; envelope_id?: string } | undefined;
-    if (event === "slack_event" && typeof payload?.ack === "function") {
+    const payload = args[0] as { ack?: SocketAck; envelope_id?: string; type?: string } | undefined;
+    if (
+      event === "slack_event" &&
+      payload?.type === "events_api" &&
+      typeof payload.ack === "function"
+    ) {
       const ack = payload.ack;
       payload.ack = async (response) => {
         try {
