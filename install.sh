@@ -96,6 +96,8 @@ Tunnel (on by default, --no-tunnel turns it off):
   The tunnel is on unless you pass --no-tunnel (or AGENT_SWARM_TUNNEL=0), or the
   install directory's .env already has a PUBLIC_MCP_BASE_URL that is not a
   *.lt.desplega.ai URL (your own domain). A previous tunnel URL keeps it on.
+  An explicit choice is saved as AGENT_SWARM_TUNNEL=1|0 in .env, so a re-run
+  without flags keeps it.
   Runs \`lt --port <port>\` in the background (pid in .agent-swarm/tunnel.pid, log in
   .agent-swarm/tunnel.log), writes the public URL to PUBLIC_MCP_BASE_URL in .env,
   adds docker-compose.override.yml to pass it to the API, restarts the API (and
@@ -259,23 +261,35 @@ env_value() {
   grep -E "^$1=" "$file" | tail -n 1 | cut -d= -f2- || true
 }
 
-# Decide whether to open the tunnel. Explicit --tunnel / --no-tunnel /
-# AGENT_SWARM_TUNNEL wins. In auto mode the tunnel is on, unless .env already
-# holds a PUBLIC_MCP_BASE_URL that is not a tunnel URL (the user's own domain).
+# Decide whether to open the tunnel. An explicit --tunnel / --no-tunnel /
+# AGENT_SWARM_TUNNEL wins and is saved to .env as AGENT_SWARM_TUNNEL, so a later
+# re-run keeps the choice. In auto mode, a saved AGENT_SWARM_TUNNEL wins. Without
+# one, the tunnel is on unless .env holds a PUBLIC_MCP_BASE_URL that is not a
+# tunnel URL (the user's own domain).
 resolve_tunnel() {
-  local existing
+  local saved existing
   if [ "$TUNNEL" = auto ]; then
+    saved="$(env_value AGENT_SWARM_TUNNEL)"
     existing="$(env_value PUBLIC_MCP_BASE_URL)"
-    case "$existing" in
-      "" | https://*.lt.desplega.ai | https://*.lt.desplega.ai/*)
-        TUNNEL=1
-        say "The API will be public through a tunnel (lt.desplega.ai). The API key protects it. Pass --no-tunnel to keep it local."
-        ;;
-      *)
-        TUNNEL=0
-        say "Keeping PUBLIC_MCP_BASE_URL=${existing} from .env, so no tunnel."
-        ;;
-    esac
+    if [ "$saved" = 0 ]; then
+      TUNNEL=0
+      say "Keeping the API local (AGENT_SWARM_TUNNEL=0 in .env)."
+      return 0
+    elif [ "$saved" = 1 ]; then
+      TUNNEL=1
+    else
+      case "$existing" in
+        "" | https://*.lt.desplega.ai | https://*.lt.desplega.ai/*) TUNNEL=1 ;;
+        *)
+          TUNNEL=0
+          say "Keeping PUBLIC_MCP_BASE_URL=${existing} from .env, so no tunnel."
+          return 0
+          ;;
+      esac
+    fi
+    say "The API will be public through a tunnel (lt.desplega.ai). The API key protects it. Pass --no-tunnel to keep it local."
+  else
+    set_env_value AGENT_SWARM_TUNNEL "$TUNNEL"
   fi
 }
 
