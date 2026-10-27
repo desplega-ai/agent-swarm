@@ -338,7 +338,7 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
     if (userId) {
       try {
         // Re-read after OAuth: the pool can change while the browser login is open.
-        const duplicateSlots = (await loadAllSlots(apiUrl, apiKey))
+        const duplicateSlots = (await loadAllSlots(apiUrl, apiKey, { throwOnError: true }))
           .filter(
             (existing) =>
               existing.slot !== slot &&

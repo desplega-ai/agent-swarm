@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 
 import { resolveCodexLoginConfig, runCodexLogin } from "../commands/codex-login.js";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
@@ -442,6 +442,12 @@ describe("runCodexLogin", () => {
 });
 
 describe("runCodexLogin duplicate accounts", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   function credentials(userId: string | null, accountId = "team-account"): CodexOAuthCredentials {
     const payload = { "https://api.openai.com/auth": { chatgpt_user_id: userId } };
     return {
@@ -582,17 +588,25 @@ describe("runCodexLogin duplicate accounts", () => {
     expect(store).toHaveBeenCalledWith("http://localhost:3013", "fixture", loginCredentials, 1);
   });
 
-  it("keeps an explicit login successful when checking existing slots fails", async () => {
-    const error = mock(() => {});
+  it.each([
+    "HTTP 503",
+    "network error",
+  ])("warns and stores credentials when the slot lookup fails with %s", async (failure) => {
+    const fetchSlots = mock(async () => {
+      if (failure === "network error") throw new Error("Network error");
+      return new Response("Service unavailable", { status: 503 });
+    });
+    globalThis.fetch = fetchSlots;
+    const calls: string[] = [];
+    const error = mock((_message: string) => calls.push("warning"));
     const exit = mock(() => {});
-    const store = mock(async () => {});
+    const store = mock(async () => {
+      calls.push("store");
+    });
 
     await runCodexLogin([], {
       resolveConfig: async () => ({ apiUrl: "http://localhost:3013", apiKey: "fixture", slot: 2 }),
       login: async () => loginCredentials,
-      loadAllSlots: async () => {
-        throw new Error("config read failed");
-      },
       store,
       readAuthFence: async () => 0,
       clearAuthBench: async () => false,
@@ -604,6 +618,11 @@ describe("runCodexLogin duplicate accounts", () => {
     expect(error).toHaveBeenCalledWith(
       "Warning: Could not check existing Codex slots for duplicate accounts.",
     );
+    expect(fetchSlots).toHaveBeenCalledWith(
+      "http://localhost:3013/api/config/resolved?includeSecrets=true",
+      { headers: { Authorization: "Bearer fixture" } },
+    );
+    expect(calls).toEqual(["warning", "store"]);
     expect(store).toHaveBeenCalledWith("http://localhost:3013", "fixture", loginCredentials, 2);
     expect(exit).not.toHaveBeenCalled();
   });
