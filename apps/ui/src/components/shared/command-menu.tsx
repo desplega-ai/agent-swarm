@@ -36,7 +36,6 @@ import type { AgentTask } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import {
   PALETTE_SCOPES,
-  type PaletteResult,
   type PaletteScopeId,
   SEARCH_PROVIDERS,
   type SearchProvider,
@@ -59,6 +58,7 @@ import {
   type Match,
   matchText,
   type Range,
+  rankResults,
 } from "@/lib/command-palette/match";
 import { pushRecent, type RecentItem, readRecents } from "@/lib/command-palette/recents";
 import {
@@ -335,21 +335,6 @@ interface OpenTarget {
 const ALL_SCOPE_LIMIT = 5;
 const SCOPED_LIMIT = 20;
 
-function ranked(
-  results: PaletteResult[],
-  query: string,
-  clientMatch: boolean,
-): Array<{ result: PaletteResult; match: Match }> {
-  const out: Array<{ result: PaletteResult; match: Match }> = [];
-  for (const result of results) {
-    const match = matchText(result.title, query, [result.detail ?? "", ...(result.keywords ?? [])]);
-    if (match) out.push({ result, match });
-    // Content hits matched on the server; keep them, with no title highlight.
-    else if (!clientMatch) out.push({ result, match: { score: 0, ranges: [] } });
-  }
-  return clientMatch ? out.sort((a, b) => b.match.score - a.match.score) : out;
-}
-
 /** One provider's group. Mounted only while it should search, so its query runs only then. */
 function ProviderGroup({
   id,
@@ -373,7 +358,7 @@ function ProviderGroup({
     onLoading(id, state.loading);
     return () => onLoading(id, false);
   }, [id, state.loading, onLoading]);
-  const rows = ranked(state.results, query, provider.clientMatch).slice(0, limit);
+  const rows = rankResults(state.results, query, provider.clientMatch).slice(0, limit);
   if (rows.length === 0 && !state.loading && !state.error) return null;
   return (
     <CommandGroup heading={<GroupHeading label={provider.label} loading={state.loading} />}>

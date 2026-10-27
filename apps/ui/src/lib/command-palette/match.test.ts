@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { highlightParts, isWordMatch, matchText } from "./match";
+import { highlightParts, isWordMatch, matchText, rankResults } from "./match";
+import { taskResult } from "./task-result";
 
 describe("matchText", () => {
   test("an empty query matches everything with no highlight", () => {
@@ -57,4 +58,31 @@ test("isWordMatch rejects a subsequence-only match", () => {
   expect(isWordMatch(matchText("Researcher", "secr"))).toBe(false);
   expect(isWordMatch(matchText("Researcher", "search"))).toBe(true);
   expect(isWordMatch(null)).toBe(false);
+});
+
+describe("task search hits", () => {
+  const task = taskResult({
+    id: "task-1",
+    title: "Deploy",
+    task: "Investigate database",
+    status: "in_progress",
+  });
+
+  test("match on the title and on the prompt", () => {
+    expect(rankResults([task], "deploy", true).map((row) => row.result.id)).toEqual(["task-1"]);
+    expect(rankResults([task], "database", true).map((row) => row.result.id)).toEqual(["task-1"]);
+  });
+
+  test("keep a server hit past the prompt preview, ranked below client matches", () => {
+    const other = taskResult({ id: "task-2", task: "Plan the migration", status: "pending" });
+    // The API matched "migration" deep in task-1's prompt; its slim row has only the preview.
+    const rows = rankResults([task, other], "migration", true);
+    expect(rows.map((row) => row.result.id)).toEqual(["task-2", "task-1"]);
+    expect(rows[1]?.match).toEqual({ score: 0, ranges: [] });
+  });
+
+  test("a client-matched provider still drops rows the server did not vouch for", () => {
+    expect(rankResults([{ title: "Workflows" }], "schedule", true)).toEqual([]);
+    expect(rankResults([{ title: "notes.md" }], "schedule", false)).toHaveLength(1);
+  });
 });

@@ -37,7 +37,7 @@ import { useAgentFs } from "@/contexts/agent-fs-context";
 import { combPath } from "@/lib/comb/paths";
 import type { SnippetPart } from "@/lib/comb/search";
 import type { PaletteNav, SearchProviderId } from "@/lib/command-palette/route-meta";
-import { taskListTitle } from "@/lib/task-title";
+import { taskResult } from "@/lib/command-palette/task-result";
 
 /** One search hit. */
 export interface PaletteResult {
@@ -51,6 +51,8 @@ export interface PaletteResult {
   href: string;
   /** A content hit with its matched words (file content search). */
   snippet?: SnippetPart[];
+  /** Kept when the client matcher misses it (see `rankResults`). */
+  serverMatched?: boolean;
 }
 
 export interface ProviderState {
@@ -160,13 +162,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProvider> = {
             signal,
           )
         ).tasks,
-      (task) => ({
-        id: task.id,
-        title: taskListTitle(task),
-        detail: task.status.replace("_", " "),
-        keywords: [task.id],
-        href: `/tasks/${task.id}`,
-      }),
+      taskResult,
     ),
   },
   agents: {

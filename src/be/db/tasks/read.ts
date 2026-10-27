@@ -906,8 +906,8 @@ export async function getAllTasks(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
+    conditions.push("(task LIKE ? OR title LIKE ? OR id LIKE ?)");
+    params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
   }
 
   // New filters
@@ -1079,8 +1079,8 @@ export async function getTasksCount(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
+    conditions.push("(task LIKE ? OR title LIKE ? OR id LIKE ?)");
+    params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
   }
 
   if (filters?.unassigned) {
