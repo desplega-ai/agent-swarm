@@ -15,6 +15,7 @@ import dreamingApply from "../be/seed-scripts/catalog/dreaming-apply";
 import dreamingHeartbeat from "../be/seed-scripts/catalog/dreaming-heartbeat";
 import dreamingMemtaxCreate from "../be/seed-scripts/catalog/dreaming-memtax-create";
 import dreamingTrim from "../be/seed-scripts/catalog/dreaming-trim";
+import ghPrSnapshot from "../be/seed-scripts/catalog/gh-pr-snapshot";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
@@ -1102,6 +1103,135 @@ describe("seed-scripts catalog", () => {
       recentlyFailedTasks: 1,
       stuckInProgressOnOfflineAgents: 1,
     });
+  });
+});
+
+describe("gh-pr-snapshot grades CI against the base branch's required checks", () => {
+  const HEAD = "a".repeat(40);
+
+  /** Fake GitHub: one PR on `main`, the given rulesets reply, check runs and statuses. */
+  function fakeGitHub(opts: {
+    rules: unknown;
+    rulesStatus?: number;
+    runs: unknown[];
+    statuses?: unknown[];
+  }) {
+    const urls: string[] = [];
+    const route = (url: string): { status: number; body: unknown } => {
+      urls.push(url);
+      if (url.includes("/rules/branches/"))
+        return { status: opts.rulesStatus ?? 200, body: opts.rules };
+      if (url.includes("/check-runs"))
+        return { status: 200, body: { total_count: opts.runs.length, check_runs: opts.runs } };
+      if (url.includes("/status")) return { status: 200, body: { statuses: opts.statuses ?? [] } };
+      if (url.includes("/reviews")) return { status: 200, body: [] };
+      if (url.endsWith("/pulls/7")) {
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "t",
+            state: "open",
+            draft: false,
+            mergeable: true,
+            mergeable_state: "clean",
+            head: { sha: HEAD },
+            base: { ref: "main", repo: { default_branch: "main" } },
+            requested_reviewers: [],
+            html_url: "https://github.com/owner/repo/pull/7",
+          },
+        };
+      }
+      return { status: 404, body: { message: "Not Found" } };
+    };
+    // Both fetch styles, so an older revision of the script runs and fails on its answers.
+    const stdlib = {
+      fetch: async (url: string) => {
+        const r = route(url);
+        return new Response(JSON.stringify(r.body), { status: r.status });
+      },
+      fetchJson: async (url: string) => route(url).body,
+    };
+    return { ctx: { stdlib }, urls };
+  }
+
+  const run = (ctx: unknown) =>
+    ghPrSnapshot({ repo: "owner/repo", number: 7, token: "t" }, ctx) as Promise<any>;
+  const ok = (name: string) => ({ name, status: "completed", conclusion: "success" });
+  const failed = (name: string) => ({ name, status: "completed", conclusion: "failure" });
+  const requires = (...names: string[]) => [
+    { type: "pull_request", parameters: {} },
+    {
+      type: "required_status_checks",
+      parameters: { required_status_checks: names.map((context) => ({ context })) },
+    },
+  ];
+
+  test("a required check with no run on the head reads as pending, not green", async () => {
+    const { ctx, urls } = fakeGitHub({ rules: requires("Merge Gate"), runs: [ok("lint")] });
+    const out = await run(ctx);
+    expect(out.error).toBeUndefined();
+    expect(urls.some((u) => u.includes("/rules/branches/main"))).toBe(true);
+    expect(out.requiredChecks).toEqual([{ name: "Merge Gate", state: "pending", url: null }]);
+    expect(out.checks).toEqual({ passed: 1, failed: 0, pending: 1 });
+    expect(out.checksSummary.requiredPending).toBe(1);
+    expect(out.ciGreen).toBe(false);
+    expect(out.controls.ok).toBe(true);
+  });
+
+  test("a failing required check named other than Merge Gate counts as required-failing", async () => {
+    const { ctx } = fakeGitHub({ rules: requires("ci", "e2e"), runs: [ok("ci"), failed("e2e")] });
+    const out = await run(ctx);
+    expect(out.checksSummary.requiredFailing).toBe(1);
+    expect(out.requiredChecks.find((r: any) => r.name === "e2e").state).toBe("failing");
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("duplicate check names collapse to the worst result", async () => {
+    const { ctx } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci"), failed("ci"), ok("lint")],
+    });
+    const out = await run(ctx);
+    expect(out.checks).toEqual({ passed: 1, failed: 1, pending: 0 });
+    expect(out.requiredChecks).toEqual([{ name: "ci", state: "failing", url: null }]);
+  });
+
+  test("an unreadable ruleset is surfaced and CI never reads green", async () => {
+    const { ctx } = fakeGitHub({
+      rules: { message: "Resource not accessible by personal access token" },
+      rulesStatus: 403,
+      runs: [ok("Merge Gate")],
+    });
+    const out = await run(ctx);
+    expect(out.error).toBeUndefined();
+    expect(out.requiredChecks).toBeNull();
+    expect(out.requiredChecksError).toContain("403");
+    expect(out.checks.pending).toBe(1);
+    expect(out.ciGreen).toBe(false);
+  });
+
+  test("control: every required check passing reads green, a required status counts", async () => {
+    const { ctx } = fakeGitHub({
+      rules: requires("ci", "deploy"),
+      runs: [ok("ci"), failed("optional-lint")],
+      statuses: [{ context: "deploy", state: "success", target_url: "https://ci.example/1" }],
+    });
+    const out = await run(ctx);
+    expect(out.requiredChecks).toEqual([
+      { name: "ci", state: "pass", url: null },
+      { name: "deploy", state: "pass", url: "https://ci.example/1" },
+    ]);
+    expect(out.checks).toEqual({ passed: 2, failed: 1, pending: 0 });
+    expect(out.ciGreen).toBe(true);
+  });
+
+  test("control: a branch with no required checks gates on every check", async () => {
+    const green = await run(fakeGitHub({ rules: [], runs: [ok("lint")] }).ctx);
+    expect(green.requiredChecks).toEqual([]);
+    expect(green.ciGreen).toBe(true);
+    const red = await run(fakeGitHub({ rules: [], runs: [ok("lint"), failed("tsc")] }).ctx);
+    expect(red.ciGreen).toBe(false);
   });
 });
 

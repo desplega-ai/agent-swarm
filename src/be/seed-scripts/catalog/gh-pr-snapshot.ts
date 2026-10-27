@@ -50,14 +50,14 @@ async function resolveSecret(ctx: any, key: string, override: unknown): Promise<
 function parseRef(input: string): { repo: string; number: number; expectHead?: string } {
   let spec = String(input || "").trim();
   const at = spec.match(/^(.*)@([0-9a-fA-F]{7,40})$/);
-  if (at) {
+  if (at?.[1] && at[2]) {
     const ref = parseRef(at[1]);
     return { ...ref, expectHead: at[2] };
   }
   let m = spec.match(/^([^/\s]+\/[^#\s]+)#(\d+)$/);
-  if (m) return { repo: m[1], number: Number(m[2]) };
+  if (m?.[1]) return { repo: m[1], number: Number(m[2]) };
   m = spec.match(/^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/);
-  if (m) return { repo: m[1], number: Number(m[2]) };
+  if (m?.[1]) return { repo: m[1], number: Number(m[2]) };
   throw new Error("PR must be 'owner/repo#N' or a GitHub pull request URL: " + spec);
 }
 
@@ -85,20 +85,115 @@ function headMatches(sha: string | null, expect: string | undefined): boolean | 
   return sha.toLowerCase().startsWith(expect.toLowerCase());
 }
 
-const REQUIRED_CHECK = "Merge Gate";
+type Bucket = "pass" | "skipped" | "failing" | "pending";
 
-/** Grouped CI counts. SKIPPED and NEUTRAL count as skipped; `Merge Gate` is the required check. */
-function summarizeChecks(list: any[]) {
-  const out = { pass: 0, skipped: 0, failing: 0, pending: 0, requiredFailing: 0 };
-  for (const run of list) {
-    const c = String(run?.conclusion ?? "").toLowerCase();
-    if (run?.status !== "completed") out.pending++;
-    else if (c === "success") out.pass++;
-    else if (c === "skipped" || c === "neutral") out.skipped++;
-    else {
-      out.failing++;
-      if (run?.name === REQUIRED_CHECK) out.requiredFailing++;
+/** Worst first. A push run and a pull_request run of one check collapse to the worse one. */
+const RANK: Record<Bucket, number> = { failing: 3, pending: 2, pass: 1, skipped: 0 };
+
+function runBucket(run: any): Bucket {
+  const c = String(run?.conclusion ?? "").toLowerCase();
+  if (run?.status !== "completed") return "pending";
+  if (c === "success") return "pass";
+  if (c === "skipped" || c === "neutral") return "skipped";
+  return "failing";
+}
+
+function statusBucket(state: unknown): Bucket {
+  const s = String(state ?? "").toLowerCase();
+  if (s === "success") return "pass";
+  if (s === "pending" || s === "expected") return "pending";
+  return "failing";
+}
+
+/**
+ * Grade CI on the head. Check runs collapse to one bucket per name (worst wins), and
+ * commit statuses fill in only required names that have no check run. `required` is the
+ * base branch's required check list: a required name with no run or status is pending.
+ * `required: null` means it could not be read, so the gate is unknown: it counts as one
+ * pending check and CI never reads green. With no required checks, every check gates.
+ */
+function gradeChecks(runs: any[], statuses: any[], required: string[] | null) {
+  const byName = new Map<string, { bucket: Bucket; url: string | null }>();
+  const put = (name: string, bucket: Bucket, url: string | null) => {
+    const cur = byName.get(name);
+    if (!cur || RANK[bucket] > RANK[cur.bucket]) byName.set(name, { bucket, url });
+  };
+  for (const run of runs) put(String(run?.name ?? ""), runBucket(run), run?.html_url ?? null);
+  const runNames = new Set(byName.keys());
+  for (const s of statuses) {
+    const name = String(s?.context ?? "");
+    if (required?.includes(name) && !runNames.has(name)) {
+      put(name, statusBucket(s?.state), s?.target_url ?? null);
     }
+  }
+
+  const summary = {
+    pass: 0,
+    skipped: 0,
+    failing: 0,
+    pending: 0,
+    requiredFailing: 0,
+    requiredPending: 0,
+  };
+  for (const { bucket } of byName.values()) summary[bucket]++;
+  const requiredChecks =
+    required === null
+      ? null
+      : required.map((name) => {
+          const hit = byName.get(name);
+          if (!hit) summary.pending++;
+          return { name, state: hit ? hit.bucket : ("pending" as Bucket), url: hit?.url ?? null };
+        });
+  if (requiredChecks === null) summary.pending++;
+  for (const r of requiredChecks ?? []) {
+    if (r.state === "failing") summary.requiredFailing++;
+    if (r.state === "pending") summary.requiredPending++;
+  }
+
+  let ciGreen: boolean;
+  if (requiredChecks === null) ciGreen = false;
+  else if (requiredChecks.length > 0)
+    ciGreen = requiredChecks.every((r) => r.state === "pass" || r.state === "skipped");
+  else ciGreen = summary.failing === 0 && summary.pending === 0;
+
+  return {
+    checks: { passed: summary.pass, failed: summary.failing, pending: summary.pending },
+    summary,
+    requiredChecks,
+    ciGreen,
+  };
+}
+
+/** Required status check names on `base`, from repository rulesets. Throws when unreadable. */
+async function requiredChecksFor(ctx: any, headers: any, api: string, base: string) {
+  const rules = await gh(
+    ctx,
+    headers,
+    `${api}/rules/branches/${encodeURIComponent(base)}?per_page=100`,
+  );
+  if (!Array.isArray(rules)) throw new Error("rules response is not a list");
+  const names = new Set<string>();
+  for (const rule of rules) {
+    if (rule?.type !== "required_status_checks") continue;
+    for (const c of rule.parameters?.required_status_checks ?? []) {
+      if (typeof c?.context === "string") names.add(c.context);
+    }
+  }
+  return [...names];
+}
+
+/** All check runs on the head, paged: a required run past the first page must not read absent. */
+async function checkRunsOn(ctx: any, headers: any, api: string, sha: string) {
+  const out: any[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const res: any = await gh(
+      ctx,
+      headers,
+      `${api}/commits/${sha}/check-runs?per_page=100&page=${page}`,
+    );
+    const list: any[] = res && Array.isArray(res.check_runs) ? res.check_runs : [];
+    out.push(...list);
+    if (list.length < 100) break;
   }
   return out;
 }
@@ -120,14 +215,31 @@ function latestReviewOf(list: any[], headSha: string | null) {
 /** Synthetic fixtures through the live helpers: no live PR state can void them. */
 function selfControls() {
   const sha = "c72be2f61d36ffdbfe0de1b5e55e770e755b4a72";
-  const cs = summarizeChecks([
-    { status: "completed", conclusion: "success", name: "lint" },
-    { status: "completed", conclusion: "skipped", name: "e2e" },
-    { status: "completed", conclusion: "neutral", name: "info" },
-    { status: "completed", conclusion: "failure", name: REQUIRED_CHECK },
-    { status: "completed", conclusion: "cancelled", name: "tsc" },
-    { status: "in_progress", conclusion: null, name: "test" },
-  ]);
+  const cs = gradeChecks(
+    [
+      { status: "completed", conclusion: "success", name: "lint" },
+      { status: "completed", conclusion: "skipped", name: "e2e" },
+      { status: "completed", conclusion: "neutral", name: "info" },
+      { status: "completed", conclusion: "failure", name: "build" },
+      { status: "completed", conclusion: "cancelled", name: "tsc" },
+      { status: "in_progress", conclusion: null, name: "test" },
+      // push and pull_request runs of one check: the failure wins
+      { status: "completed", conclusion: "success", name: "unit" },
+      { status: "completed", conclusion: "failure", name: "unit" },
+    ],
+    [{ context: "deploy", state: "success" }],
+    ["build", "absent", "deploy"],
+  );
+  const unknownGate = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "lint" }],
+    [],
+    null,
+  );
+  const noRequired = gradeChecks(
+    [{ status: "completed", conclusion: "success", name: "lint" }],
+    [],
+    [],
+  );
   const lr = latestReviewOf(
     [
       { state: "CHANGES_REQUESTED", user: { login: "a" }, commit_id: "0".repeat(40) },
@@ -141,7 +253,21 @@ function selfControls() {
     headNegative: headMatches(sha, "deadbeef") === false,
     headUnset: headMatches(sha, undefined) === null,
     checks:
-      cs.pass === 1 && cs.skipped === 2 && cs.failing === 2 && cs.pending === 1 && cs.requiredFailing === 1,
+      cs.summary.pass === 2 &&
+      cs.summary.skipped === 2 &&
+      cs.summary.failing === 3 &&
+      cs.summary.pending === 2 &&
+      cs.summary.requiredFailing === 1 &&
+      cs.summary.requiredPending === 1 &&
+      cs.checks.failed === 3 &&
+      cs.ciGreen === false,
+    absentRequiredPending: cs.requiredChecks?.find((r) => r.name === "absent")?.state === "pending",
+    requiredStatusCounts: cs.requiredChecks?.find((r) => r.name === "deploy")?.state === "pass",
+    unknownGateNotGreen:
+      unknownGate.ciGreen === false &&
+      unknownGate.requiredChecks === null &&
+      unknownGate.checks.pending === 1,
+    noRequiredAllGate: noRequired.ciGreen === true,
     latestReview: lr?.state === "APPROVED" && lr?.author === "b" && lr?.matchesHead === true,
     noReviews: latestReviewOf([], sha) === null,
   };
@@ -244,6 +370,7 @@ async function snapshot(
   repo: string,
   number: number,
   includeThreads: boolean,
+  rulesCache: Map<string, Promise<string[]>>,
   expectHead?: string,
 ) {
   const api = "https://api.github.com/repos/" + repo;
@@ -252,26 +379,41 @@ async function snapshot(
     throw new Error("PR " + repo + "#" + number + ": not found or not accessible");
   }
 
-  const checks = { passed: 0, failed: 0, pending: 0 };
-  let checkList: any[] = [];
   const sha = pr.head && pr.head.sha ? pr.head.sha : null;
+  const base = pr.base?.ref ?? null;
+  let required: string[] | null = null;
+  let requiredChecksError: string | null = null;
+  if (base) {
+    const key = repo + "@" + base;
+    if (!rulesCache.has(key)) rulesCache.set(key, requiredChecksFor(ctx, headers, api, base));
+    try {
+      required = await rulesCache.get(key)!;
+    } catch (error) {
+      requiredChecksError =
+        "could not read required checks: " + (error instanceof Error ? error.message : String(error));
+    }
+  } else {
+    requiredChecksError = "PR has no base branch";
+  }
+
+  let checkList: any[] = [];
+  let statusList: any[] = [];
   if (sha) {
-    const runs: any = await gh(ctx, headers, api + "/commits/" + sha + "/check-runs?per_page=100");
-    const list: any = runs && Array.isArray(runs.check_runs) ? runs.check_runs : [];
-    checkList = list;
-    for (const run of list) {
-      if (run.status !== "completed") checks.pending++;
-      else if (run.conclusion === "success") checks.passed++;
-      else if (
-        run.conclusion === "failure" ||
-        run.conclusion === "timed_out" ||
-        run.conclusion === "cancelled" ||
-        run.conclusion === "action_required"
-      ) {
-        checks.failed++;
+    checkList = await checkRunsOn(ctx, headers, api, sha);
+    const names = new Set(checkList.map((run) => run?.name));
+    if (required?.some((name) => !names.has(name))) {
+      try {
+        const combined = await gh(ctx, headers, api + "/commits/" + sha + "/status?per_page=100");
+        statusList = Array.isArray(combined?.statuses) ? combined.statuses : [];
+      } catch (error) {
+        // Missing required checks stay pending, so CI cannot read green; say why.
+        requiredChecksError =
+          "could not read commit statuses: " + (error instanceof Error ? error.message : String(error));
       }
     }
   }
+  const graded = gradeChecks(checkList, statusList, required);
+  const checks = graded.checks;
 
   const reviewsRaw: any = await gh(ctx, headers, api + "/pulls/" + number + "/reviews?per_page=100");
   const reviewList: any = Array.isArray(reviewsRaw) ? reviewsRaw : [];
@@ -305,7 +447,10 @@ async function snapshot(
     headMatchesExpected: headMatches(sha, expectHead),
     baseRefName: pr.base?.ref ?? null,
     baseIsDefault: pr.base?.ref && pr.base?.repo?.default_branch ? pr.base.ref === pr.base.repo.default_branch : null,
-    checksSummary: summarizeChecks(checkList),
+    checksSummary: graded.summary,
+    requiredChecks: graded.requiredChecks,
+    requiredChecksError,
+    ciGreen: graded.ciGreen,
     latestReview: latestReviewOf(reviewList, sha),
   };
   if (pr.state === "open" && pr.mergeable === false && pr.mergeable_state === "dirty") {
@@ -319,7 +464,9 @@ async function snapshot(
 
 /**
  * One-call GitHub PR snapshot: state, draft, mergeable, head SHA, merge time (UTC and
- * Europe/Madrid), CI checks, review tallies, and optionally unresolved review threads.
+ * Europe/Madrid), CI checks graded against the base branch's ruleset required checks
+ * (`requiredChecks`, `ciGreen`), review tallies, and optionally unresolved review threads.
+ * Check tallies count one result per check name, the worst of its runs.
  * Single mode ({ repo, number }) returns the snapshot or { error }. Batch mode ({ prs })
  * returns { ok, errors, prs }, where a failed PR carries { pr, error } and sets ok=false.
  */
@@ -350,14 +497,24 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
   };
   if (token) headers.Authorization = "Bearer " + token;
 
+  // One rulesets read per repo and base branch, shared across a batch.
+  const rulesCache = new Map<string, Promise<string[]>>();
   const results: any[] = new Array(refs.length);
   let next = 0;
   async function worker() {
     while (next < refs.length) {
       const i = next++;
-      const { repo, number, expectHead } = refs[i];
+      const { repo, number, expectHead } = refs[i]!;
       try {
-        results[i] = await snapshot(ctx, headers, repo, number, includeThreads, expectHead);
+        results[i] = await snapshot(
+          ctx,
+          headers,
+          repo,
+          number,
+          includeThreads,
+          rulesCache,
+          expectHead,
+        );
       } catch (error) {
         results[i] = {
           pr: repo + "#" + number,
