@@ -53,8 +53,13 @@ mock.module("@/hooks/use-dismissible-card-key", () =>
 mock.module("@/hooks/use-other-dialog-open", () => require("../../hooks/use-other-dialog-open"));
 // The dialog itself is the People page's: here only whether it opens matters.
 mock.module("@/pages/people/invite-dialog", () => ({
-  InviteDialog: ({ open, intro }: { open: boolean; intro?: { title: string } }) =>
-    open ? <p data-testid="invite">{intro?.title}</p> : null,
+  InviteDialog: ({
+    open,
+    intro,
+  }: {
+    open: boolean;
+    intro?: { title: string; description: string };
+  }) => (open ? <p data-testid="invite">{intro?.description}</p> : null),
 }));
 
 const { FirstTaskInvitePrompt, firstTaskInviteKey, resetFirstTaskInviteWatchForTests } =
@@ -73,6 +78,7 @@ async function mount() {
   return {
     rerender: render,
     opened: () => container.querySelector('[data-testid="invite"]') !== null,
+    text: () => container.querySelector('[data-testid="invite"]')?.textContent ?? "",
     unmount: () => act(() => root.unmount()),
   };
 }
@@ -156,12 +162,31 @@ describe("FirstTaskInvitePrompt", () => {
     expect(view.opened()).toBe(false);
   });
 
-  test("stays closed when the company profile says Solo", async () => {
+  test("opens for Solo too, with the Solo text", async () => {
     teamSize = "1";
     const view = await mount();
     firstTask = "done";
     await view.rerender();
-    expect(view.opened()).toBe(false);
+    expect(view.opened()).toBe(true);
+    expect(view.text()).toContain("Do you work with someone?");
+  });
+
+  test("a large team gets the team text, and no size gets the teammate text", async () => {
+    teamSize = "51+";
+    const team = await mount();
+    firstTask = "done";
+    await team.rerender();
+    expect(team.text()).toContain("Bring your team in");
+    await team.unmount();
+
+    localStorage.clear();
+    resetFirstTaskInviteWatchForTests();
+    teamSize = null;
+    firstTask = "todo";
+    const unsized = await mount();
+    firstTask = "done";
+    await unsized.rerender();
+    expect(unsized.text()).toContain("Invite a teammate");
   });
 
   test("waits until a dashboard user is picked", async () => {

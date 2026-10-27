@@ -6,15 +6,34 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { markPromptShownThisLoad, useOtherDialogOpen } from "@/hooks/use-other-dialog-open";
-import { optionValue, SWARM_ORG_TEAM_SIZE, TEAM_SIZES } from "@/lib/company-profile";
+import { optionValue, SWARM_ORG_TEAM_SIZE, TEAM_SIZES, type TeamSize } from "@/lib/company-profile";
 import { useIsAdmin } from "@/lib/use-can";
 import { InviteDialog, type InviteDialogIntro } from "@/pages/people/invite-dialog";
 
-const INTRO: InviteDialogIntro = {
-  title: "Your first task is done",
-  description:
-    "Invite a teammate to work with your swarm. They get their own access. No email is sent: you send the link.",
-  cancelLabel: "Not now",
+const LINK_NOTE = "They get their own access. No email is sent: you send the link.";
+
+/** The pop-up text for the team size in the company profile. */
+const INTROS: Record<TeamSize, InviteDialogIntro> = {
+  "1": {
+    title: "Your first task is done",
+    description: `Do you work with someone? Invite them now, or later from People. ${LINK_NOTE}`,
+    cancelLabel: "Not now",
+  },
+  "2-10": {
+    title: "Your first task is done",
+    description: `Invite a teammate to work with your swarm. ${LINK_NOTE}`,
+    cancelLabel: "Not now",
+  },
+  "11-50": {
+    title: "Your first task is done",
+    description: `Bring your team in: invite the first teammate now, and the others from People. ${LINK_NOTE}`,
+    cancelLabel: "Not now",
+  },
+  "51+": {
+    title: "Your first task is done",
+    description: `Bring your team in: invite the first teammate now, and the others from People. ${LINK_NOTE}`,
+    cancelLabel: "Not now",
+  },
 };
 
 /** The localStorage key that remembers the offer, per swarm and user. */
@@ -61,9 +80,9 @@ function rememberOffer(key: string) {
  * `/setup` and in the app shell, because sending the first task opens its
  * session: the shell's prompt knows what the setup's prompt saw. While it
  * waits for the task, it reads the onboarding state every 5 s. Only for
- * admins on an API that serves invites (the People page gate), not when the
- * company profile says "Solo" (the setup invite card hides then too), and
- * only once a dashboard user is picked. The offer is remembered per swarm
+ * admins on an API that serves invites (the People page gate), and only once
+ * a dashboard user is picked. The text follows the team size in the company
+ * profile (Solo too), so it waits until the profile loads. The offer is remembered per swarm
  * and user (localStorage) as it opens, so it never opens again. It waits
  * while another dialog is open.
  */
@@ -78,9 +97,9 @@ export function FirstTaskInvitePrompt() {
     TEAM_SIZES,
     configs?.find((entry) => entry.key === SWARM_ORG_TEAM_SIZE)?.value,
   );
-  const hasTeam = configs !== undefined && teamSize !== "1";
+  const profileLoaded = configs !== undefined;
   const [sawPending, setSawPending] = useState(() => pendingSeen.has(config.apiUrl));
-  const watching = sawPending && isAdmin && supported && hasTeam;
+  const watching = sawPending && isAdmin && supported && profileLoaded;
   // Shares the onboarding cache with `/setup` and `OnboardingRedirect`. The
   // shell polls it every 30 s only: poll faster while the first task runs.
   const { data, dataUpdatedAt, isFetchedAfterMount } = useOnboarding({
@@ -103,7 +122,7 @@ export function FirstTaskInvitePrompt() {
   }, [fresh, status, config.apiUrl]);
 
   const due =
-    sawPending && status === "done" && isAdmin && supported && hasTeam && !otherDialogOpen;
+    sawPending && status === "done" && isAdmin && supported && profileLoaded && !otherDialogOpen;
   useEffect(() => {
     if (!due || open || userId === null) return;
     const key = firstTaskInviteKey(config.apiUrl, userId);
@@ -114,5 +133,5 @@ export function FirstTaskInvitePrompt() {
     markPromptShownThisLoad(config.apiUrl);
   }, [due, open, userId, config.apiUrl]);
 
-  return <InviteDialog open={open} onOpenChange={setOpen} intro={INTRO} />;
+  return <InviteDialog open={open} onOpenChange={setOpen} intro={INTROS[teamSize ?? "2-10"]} />;
 }
