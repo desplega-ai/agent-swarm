@@ -17336,7 +17336,9 @@ export interface paths {
         /** Get the request composition manifests of a task */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    limit?: number;
+                };
                 header?: never;
                 path: {
                     id: string;
@@ -17370,7 +17372,7 @@ export interface paths {
         put?: never;
         /**
          * Record the request composition manifest of a task session
-         * @description The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq.
+         * @description The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.
          */
         post: {
             parameters: {
@@ -17429,8 +17431,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Task not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task already holds the maximum number of manifests */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };

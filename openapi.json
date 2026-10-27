@@ -39947,7 +39947,7 @@
     "/api/tasks/{id}/request-composition": {
       "post": {
         "summary": "Record the request composition manifest of a task session",
-        "description": "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq.",
+        "description": "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.",
         "tags": [
           "Tasks"
         ],
@@ -40095,8 +40095,28 @@
               }
             }
           },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The task already holds the maximum number of manifests",
             "content": {
               "application/json": {
                 "schema": {
@@ -40125,6 +40145,17 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
