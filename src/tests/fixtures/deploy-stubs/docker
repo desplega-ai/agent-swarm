@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Fake docker for the deploy tests (install.sh, deploy/one-box/bootstrap.sh).
+# It reads port mappings from ./docker-compose.yml and the override file the way
+# Compose and dockerd do, and keeps its state in $FAKE_DOCKER_STATE:
+#   calls    every invocation
+#   ports    published ports of the running stack, in `docker ps` form
+#   history  every port ever published, so a test can see a short-lived exposure
+set -euo pipefail
+state="${FAKE_DOCKER_STATE:?FAKE_DOCKER_STATE is not set}"
+printf '%s\n' "$*" >>"$state/calls"
+touch "$state/ports" "$state/history"
+
+# dockerd's default host address: "ip" in daemon.json, else every interface.
+default_ip() {
+  local file="${FAKE_DOCKER_DAEMON_JSON:-}" ip=""
+  if [ -n "$file" ] && [ -f "$file" ]; then
+    ip="$(sed -nE 's/.*"ip" *: *"([^"]+)".*/\1/p' "$file" | head -n 1)"
+  fi
+  printf '%s' "${ip:-0.0.0.0}"
+}
+
+# AGENT_SWARM_BIND_ADDRESS as Compose sees it: the shell wins over .env.
+bind_address() {
+  if [ -n "${AGENT_SWARM_BIND_ADDRESS+x}" ]; then
+    printf '%s' "$AGENT_SWARM_BIND_ADDRESS"
+  elif [ -f .env ]; then
+    grep -E '^AGENT_SWARM_BIND_ADDRESS=' .env | tail -n 1 | cut -d= -f2- || true
+  fi
+}
+
+compose_up() {
+  # shellcheck disable=SC2016 # the literal prefix the onboard generator writes
+  local prefix='${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}'
+  local addr dip entry a b c
+  addr="$(bind_address)"
+  dip="$(default_ip)"
+  awk '/^ *ports: *$/ { p = 1; next }
+    p && /^ *- / { e = $0; sub(/^ *- */, "", e); gsub(/"/, "", e); print e; next }
+    { p = 0 }' docker-compose.yml $([ ! -f docker-compose.override.yml ] || echo docker-compose.override.yml) |
+    while IFS= read -r entry; do
+      if [ "${entry#"$prefix"}" != "$entry" ]; then
+        entry="${entry#"$prefix"}"
+        [ -z "$addr" ] || entry="${addr}:${entry}"
+      fi
+      IFS=: read -r a b c <<<"$entry"
+      if [ -n "$c" ]; then
+        printf '%s:%s->%s/tcp\n' "$a" "$b" "$c"
+      else
+        printf '%s:%s->%s/tcp\n' "$dip" "$a" "$b"
+      fi
+    done >"$state/ports"
+  cat "$state/ports" >>"$state/history"
+}
+
+if [ "${1:-}" = compose ]; then
+  shift
+  verb=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env-file | -f | -p) shift 2 ;;
+      -*) shift ;;
+      *) verb="$1"; break ;;
+    esac
+  done
+  case "$verb" in
+    version) echo "Docker Compose version v2.30.0" ;;
+    up) compose_up ;;
+    ps) cat "$state/ports" ;;
+    stop | down) : >"$state/ports" ;;
+    *) ;;
+  esac
+  exit 0
+fi
+
+case "${1:-}" in
+  ps) cat "$state/ports" ;;
+  *) ;;
+esac

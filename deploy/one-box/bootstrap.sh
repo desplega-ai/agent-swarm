@@ -9,8 +9,11 @@
 #   SWARM_PRESET   Onboard preset: full (default), dev, content, research, solo.
 #   AGENT_SWARM_*  Passed through to install.sh, e.g. AGENT_SWARM_CLI_VERSION.
 #
-# Only Caddy (80/443) and SSH face the internet. The swarm publishes its ports
-# on 127.0.0.1, because Docker-published ports bypass ufw.
+# Only Caddy (80/443) and SSH face the internet. Docker-published ports bypass
+# ufw, so before the first container starts this script sets the Docker daemon's
+# default bind address to 127.0.0.1. A port mapping without a host address, as
+# every agent-swarm CLI release generates, then stays on loopback. install.sh
+# --bind 127.0.0.1 and assert_loopback_only check the same thing twice more.
 # The API key never reaches stdout, which cloud-init copies to its own log:
 # install.sh output goes to a root-only log, and the dashboard /setup link goes
 # to a root-only file that a root login prints.
@@ -20,12 +23,16 @@
 
 set -euo pipefail
 
-CONFIG=/etc/agent-swarm/deploy.env
-INSTALL_DIR=/root/agent-swarm
-LOG=/var/log/agent-swarm-deploy.log
-LINK_FILE=/root/agent-swarm-setup-link.txt
-STATUS_FILE=/var/lib/agent-swarm/deploy-status
-NOTICE_FILE=/etc/profile.d/agent-swarm.sh
+# Tests point this at a scratch directory; on a server it is empty.
+ROOT="${AGENT_SWARM_BOOTSTRAP_ROOT:-}"
+CONFIG=$ROOT/etc/agent-swarm/deploy.env
+INSTALL_DIR=$ROOT/root/agent-swarm
+LOG=$ROOT/var/log/agent-swarm-deploy.log
+LINK_FILE=$ROOT/root/agent-swarm-setup-link.txt
+STATUS_FILE=$ROOT/var/lib/agent-swarm/deploy-status
+NOTICE_FILE=$ROOT/etc/profile.d/agent-swarm.sh
+DOCKER_DAEMON_JSON=$ROOT/etc/docker/daemon.json
+CADDYFILE=$ROOT/etc/caddy/Caddyfile
 DEFAULT_INSTALL_URL=https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh
 API_PORT=3013
 HTTPS_TIMEOUT_SECONDS=300
@@ -41,10 +48,29 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 set_status() { printf '%s\n' "$1" >"$STATUS_FILE"; }
 
-# On any exit before the end, record the failure for the login notice.
+# Published ports bound to anything but loopback, one per line.
+public_ports() {
+  docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -- '->' |
+    grep -vE '^ *(127\.0\.0\.1|\[::1\]):' || true
+}
+
+stop_stack() {
+  if [ -f "${INSTALL_DIR}/docker-compose.yml" ]; then
+    (cd "$INSTALL_DIR" && docker compose stop) >>"$LOG" 2>&1 || true
+  fi
+}
+
+# On any exit before the end, record the failure for the login notice, and stop
+# the stack if it publishes a port on a public interface (fail closed).
 on_exit() {
   local code=$?
-  if [ "$code" -ne 0 ]; then set_status "failed"; fi
+  if [ "$code" -ne 0 ]; then
+    set_status "failed"
+    if have docker && [ -n "$(public_ports)" ]; then
+      stop_stack
+      printf 'error: stopped the stack because it published ports on a public interface\n' >&2
+    fi
+  fi
 }
 
 load_config() {
@@ -104,6 +130,22 @@ install_packages() {
   apt-get install -y -q ca-certificates curl gpg unzip ufw >>"$LOG" 2>&1
 }
 
+# Docker's default host address for published ports, read when dockerd starts.
+# Written before Docker is installed, so no container ever binds 0.0.0.0. An
+# existing daemon.json is the operator's, so it must already say the same.
+configure_docker_loopback() {
+  if [ -f "$DOCKER_DAEMON_JSON" ]; then
+    grep -qE '"ip" *: *"127\.0\.0\.1"' "$DOCKER_DAEMON_JSON" ||
+      die "${DOCKER_DAEMON_JSON} exists without \"ip\": \"127.0.0.1\". Add that key so published ports stay on loopback, then run $0 again."
+    say "Docker publishes ports on 127.0.0.1 by default (${DOCKER_DAEMON_JSON})"
+    return 0
+  fi
+  say "Docker: publishing ports on 127.0.0.1 by default (${DOCKER_DAEMON_JSON})"
+  mkdir -p "$(dirname "$DOCKER_DAEMON_JSON")"
+  printf '{\n  "ip": "127.0.0.1"\n}\n' >"$DOCKER_DAEMON_JSON"
+  chmod 644 "$DOCKER_DAEMON_JSON"
+}
+
 install_docker() {
   if have docker && docker compose version >/dev/null 2>&1; then
     say "Docker and Compose v2 found"
@@ -111,7 +153,9 @@ install_docker() {
     say "Installing Docker Engine and Compose v2 (get.docker.com)"
     curl -fsSL https://get.docker.com | sh >>"$LOG" 2>&1
   fi
-  systemctl enable --now docker >>"$LOG" 2>&1
+  systemctl enable docker >>"$LOG" 2>&1
+  # A Docker that was already running has not read daemon.json yet.
+  systemctl restart docker >>"$LOG" 2>&1
 }
 
 install_caddy() {
@@ -145,7 +189,7 @@ configure_firewall() {
 configure_caddy() {
   local host="$1"
   say "Caddy: https://${host} -> 127.0.0.1:${API_PORT}"
-  cat >/etc/caddy/Caddyfile <<EOF
+  cat >"$CADDYFILE" <<EOF
 # Written by Agent Swarm's bootstrap.sh. Caddy gets and renews the certificate.
 ${host} {
 	reverse_proxy 127.0.0.1:${API_PORT}
@@ -170,15 +214,11 @@ install_swarm() {
 }
 
 # Fail closed: a port published on a public interface skips Caddy and ufw.
-# An agent-swarm CLI release without AGENT_SWARM_BIND_ADDRESS support does that.
+# on_exit stops the stack.
 assert_loopback_only() {
   local exposed
-  exposed="$(docker ps --format '{{.Ports}}' | tr ',' '\n' | grep -- '->' |
-    grep -vE '^ *(127\.0\.0\.1|\[::1\]):' || true)"
-  if [ -n "$exposed" ]; then
-    (cd "$INSTALL_DIR" && docker compose stop) >>"$LOG" 2>&1 || true
-    die "the stack published ports on a public interface ($(echo "$exposed" | tr '\n' ' ')), so it was stopped. The agent-swarm CLI release predates AGENT_SWARM_BIND_ADDRESS. Set AGENT_SWARM_CLI_VERSION in ${CONFIG} to a newer release, run 'cd ${INSTALL_DIR} && docker compose down -v && cd / && rm -rf ${INSTALL_DIR}', then run $0 again."
-  fi
+  exposed="$(public_ports)"
+  [ -z "$exposed" ] || die "the stack published ports on a public interface: $(echo "$exposed" | tr '\n' ' ')"
   say "Swarm ports listen on 127.0.0.1 only"
 }
 
@@ -219,6 +259,7 @@ main() {
   install_login_notice
 
   install_packages
+  configure_docker_loopback
   install_docker
   install_caddy
 

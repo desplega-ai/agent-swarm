@@ -25,7 +25,8 @@ The default stack (a lead, 10 workers, agent-fs and TEI) needs at least **4 vCPU
 [`deploy/cloud-init.yaml`](https://github.com/desplega-ai/agent-swarm/blob/main/deploy/cloud-init.yaml)
 turns a fresh Ubuntu 24.04 or Debian 12 server into a running swarm. On first boot it:
 
-1. Installs Docker Engine with Compose v2, Caddy and ufw.
+1. Sets Docker's default address for published ports to 127.0.0.1, then installs Docker Engine
+   with Compose v2, Caddy and ufw.
 2. Opens only ports 22, 80 and 443.
 3. Points Caddy at `<public-ip>.sslip.io` (for example `203-0-113-7.sslip.io`), or at your
    domain. Caddy gets the certificate from Let's Encrypt.
@@ -64,10 +65,11 @@ variable, such as `AGENT_SWARM_CLI_VERSION`.
 
 ### Security
 
-- Docker-published ports skip ufw, so the swarm binds them to 127.0.0.1 through
-  `AGENT_SWARM_BIND_ADDRESS`. Port 3013 is reachable only through Caddy. If the agent-swarm CLI
-  release does not support that setting, the script stops the stack and fails instead of
-  exposing it.
+- Docker-published ports skip ufw. Before the first container starts, the script sets
+  `"ip": "127.0.0.1"` in `/etc/docker/daemon.json`, so every port the swarm publishes listens on
+  loopback, whatever agent-swarm CLI release npm serves. Port 3013 is reachable only through
+  Caddy. If a port still ends up on a public interface, the script stops the stack and fails
+  instead of exposing it.
 - The API key stays in root-only files: `/root/agent-swarm/.env`, the setup link file and
   `/var/log/agent-swarm-deploy.log`. The first boot never prints it to the console or to
   cloud-init's log, and the login message shows it to root only.
