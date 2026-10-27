@@ -203,17 +203,31 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   return { apiUrl, apiKey, orgId, driveId, authHeaders };
 }
 
+export type SharedOrgInviteResult = {
+  orgId: string;
+  invited: boolean;
+  status: "already_member" | "added" | "pending";
+  inviteId?: string;
+  expiresAt?: string;
+  acceptUrl?: string;
+};
+
 /**
  * Invite an external (non-agent) member into the shared org using the
  * API-owned bootstrap credentials. Powers `POST /api/fs/members/invite` so
  * callers holding the tenant API key (e.g. the cloud control plane's
  * Connect-to-Drive flow) never need the bootstrap key itself — it is
  * API-only and never served over HTTP.
+ *
+ * agent-fs (>= 0.18.9) adds an email that has an account directly
+ * (`status: "added"`) and answers an email without one with a pending invite
+ * (`status: "pending"`, plus `acceptUrl` when its app URL is configured).
+ * agent-fs sends no email, so the accept link is passed back to the caller.
  */
 export async function inviteEmailToSharedOrg(
   email: string,
   role: Role,
-): Promise<{ orgId: string; invited: boolean }> {
+): Promise<SharedOrgInviteResult> {
   const shared = await ensureAgentFsSharedProvisioning();
   const currentRoles = await getCurrentOrgMemberRoles(
     shared.apiUrl,
@@ -222,15 +236,31 @@ export async function inviteEmailToSharedOrg(
   );
   const currentRole = currentRoles.get(email.trim().toLowerCase());
   if (currentRole && roleRank(currentRole) >= roleRank(role)) {
-    return { orgId: shared.orgId, invited: false };
+    return { orgId: shared.orgId, invited: false, status: "already_member" };
   }
-  await agentFsRequest(shared.apiUrl, `/orgs/${encodeURIComponent(shared.orgId)}/members/invite`, {
+  const response = await agentFsRequest<{
+    status?: unknown;
+    inviteId?: unknown;
+    expiresAt?: unknown;
+    acceptUrl?: unknown;
+  }>(shared.apiUrl, `/orgs/${encodeURIComponent(shared.orgId)}/members/invite`, {
     method: "POST",
     headers: shared.authHeaders,
     body: { email: email.trim(), role },
     allowConflict: true,
   });
-  return { orgId: shared.orgId, invited: true };
+  // Older agent-fs answers a direct add with a bare `{ ok: true }`.
+  if (response.status !== "pending") {
+    return { orgId: shared.orgId, invited: true, status: "added" };
+  }
+  return {
+    orgId: shared.orgId,
+    invited: true,
+    status: "pending",
+    ...(typeof response.inviteId === "string" ? { inviteId: response.inviteId } : {}),
+    ...(typeof response.expiresAt === "string" ? { expiresAt: response.expiresAt } : {}),
+    ...(typeof response.acceptUrl === "string" ? { acceptUrl: response.acceptUrl } : {}),
+  };
 }
 
 export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise<{

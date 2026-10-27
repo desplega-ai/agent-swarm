@@ -68,7 +68,11 @@ async function configValue(key: string): Promise<string | undefined> {
 
 function createFetchStub(
   records: RequestRecord[],
-  options: { members?: StubMember[]; registerConflictEmail?: string } = {},
+  options: {
+    members?: StubMember[];
+    registerConflictEmail?: string;
+    inviteResponse?: Record<string, unknown>;
+  } = {},
 ): typeof fetch {
   return (async (input, init) => {
     const url = new URL(String(input));
@@ -135,7 +139,7 @@ function createFetchStub(
       return Response.json({ members: options.members ?? [] });
     }
     if (url.pathname === "/orgs/shared-org/members/invite" && method === "POST") {
-      return Response.json({ ok: true });
+      return Response.json(options.inviteResponse ?? { ok: true });
     }
 
     return Response.json(
@@ -645,7 +649,8 @@ describe("agent-fs provisioning seeder", () => {
 
     const result = await inviteEmailToSharedOrg("Customer@Example.test ", "admin");
 
-    expect(result).toEqual({ orgId: "shared-org", invited: true });
+    // Default stub answers like pre-0.18.9 agent-fs: a bare `{ ok: true }`.
+    expect(result).toEqual({ orgId: "shared-org", invited: true, status: "added" });
     const invite = records.find((r) => r.path === "/orgs/shared-org/members/invite");
     expect(invite?.method).toBe("POST");
     expect(invite?.body).toEqual({ email: "Customer@Example.test", role: "admin" });
@@ -665,7 +670,92 @@ describe("agent-fs provisioning seeder", () => {
 
     const result = await inviteEmailToSharedOrg("customer@example.test", "editor");
 
-    expect(result).toEqual({ orgId: "shared-org", invited: false });
+    expect(result).toEqual({ orgId: "shared-org", invited: false, status: "already_member" });
     expect(records.filter((r) => r.path === "/orgs/shared-org/members/invite")).toEqual([]);
+  });
+
+  test("reports an email with an agent-fs account as added, with no accept link", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, {
+        inviteResponse: {
+          ok: true,
+          status: "added",
+          userId: "customer-user",
+          email: "customer@example.test",
+          drives: [{ driveId: "shared-drive", role: "editor" }],
+        },
+      }),
+    );
+
+    const result = await inviteEmailToSharedOrg("customer@example.test", "editor");
+
+    expect(result).toEqual({ orgId: "shared-org", invited: true, status: "added" });
+  });
+
+  test("returns the pending invite and accept link for an email with no agent-fs account", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+
+    const token = "a".repeat(43);
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, {
+        inviteResponse: {
+          ok: true,
+          status: "pending",
+          inviteId: "invite-1",
+          email: "new@example.test",
+          token,
+          expiresAt: "2026-11-03T00:00:00.000Z",
+          drives: [{ driveId: "shared-drive", role: "editor" }],
+          acceptUrl: `https://live.agent-fs.example.test/invite/${token}`,
+        },
+      }),
+    );
+
+    const result = await inviteEmailToSharedOrg("new@example.test", "editor");
+
+    expect(result).toEqual({
+      orgId: "shared-org",
+      invited: true,
+      status: "pending",
+      inviteId: "invite-1",
+      expiresAt: "2026-11-03T00:00:00.000Z",
+      acceptUrl: `https://live.agent-fs.example.test/invite/${token}`,
+    });
+  });
+
+  test("omits acceptUrl on a pending invite when agent-fs has no app URL", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, {
+        inviteResponse: {
+          ok: true,
+          status: "pending",
+          inviteId: "invite-2",
+          email: "new@example.test",
+          token: "b".repeat(43),
+          expiresAt: "2026-11-03T00:00:00.000Z",
+          drives: [],
+        },
+      }),
+    );
+
+    const result = await inviteEmailToSharedOrg("new@example.test", "viewer");
+
+    expect(result).toEqual({
+      orgId: "shared-org",
+      invited: true,
+      status: "pending",
+      inviteId: "invite-2",
+      expiresAt: "2026-11-03T00:00:00.000Z",
+    });
   });
 });

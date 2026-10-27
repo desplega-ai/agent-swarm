@@ -74,7 +74,9 @@ curl -s -X POST "$MCP_BASE_URL/api/fs/members/invite" \
   -d '{"email":"customer@example.com","role":"editor"}'
 ```
 
-`role` accepts `viewer`, `editor`, or `admin` and defaults to `editor`. The API performs the invite with its bootstrap identity, never returns a key, and handles repeat calls by skipping the invite when the member's existing role already satisfies the request. See the [`POST /api/fs/members/invite` API reference](/docs/api-reference/fs#post-api-fs-members-invite) for the response schema.
+`role` accepts `viewer`, `editor`, or `admin` and defaults to `editor`. The API performs the invite with its bootstrap identity, never returns a key, and handles repeat calls by skipping the invite when the member's existing role already satisfies the request (`status: "already_member"`, `invited: false`).
+
+An email that already has an agent-fs account joins the org at once (`status: "added"`). From agent-fs 0.18.9, an email with no account gets a pending invite instead (`status: "pending"`), with an `acceptUrl` when agent-fs has an app URL configured. agent-fs sends no email, so pass the `acceptUrl` to the person yourself. See the [`POST /api/fs/members/invite` API reference](/docs/api-reference/fs#post-api-fs-members-invite) for the response schema.
 
 ## Helm
 

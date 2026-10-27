@@ -66,7 +66,20 @@ const agentFsCredentialStateSchema = z.object({
 
 const agentFsInviteStateSchema = z.object({
   orgId: z.string(),
-  invited: z.boolean(),
+  invited: z.boolean().describe("False only when the email already holds the requested role."),
+  status: z
+    .enum(["already_member", "added", "pending"])
+    .describe(
+      "already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.",
+    ),
+  inviteId: z.string().optional().describe("Pending invite id (status pending)."),
+  expiresAt: z.string().optional().describe("ISO time the accept link expires (status pending)."),
+  acceptUrl: z
+    .string()
+    .optional()
+    .describe(
+      "Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured.",
+    ),
 });
 
 const signedUrlResponseSchema = z.object({
@@ -112,14 +125,17 @@ const inviteMemberRoute = route({
   pattern: ["api", "fs", "members", "invite"],
   summary: "Invite an external member into the agent-fs shared org",
   description:
-    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.",
   tags: ["FS"],
   body: z.object({
     email: z.email(),
     role: z.enum(["viewer", "editor", "admin"]).default("editor"),
   }),
   responses: {
-    200: { description: "Invite state ({ orgId, invited })", schema: agentFsInviteStateSchema },
+    200: {
+      description: "Invite state ({ orgId, invited, status, acceptUrl? })",
+      schema: agentFsInviteStateSchema,
+    },
     400: { description: "Invalid body" },
     500: { description: "Provisioning or invite failed" },
   },

@@ -7868,7 +7868,7 @@ export interface paths {
         put?: never;
         /**
          * Invite an external member into the agent-fs shared org
-         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. No keys are returned; the invitee obtains their own key via agent-fs registration.
+         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.
          */
         post: {
             parameters: {
@@ -7891,7 +7891,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Invite state ({ orgId, invited }) */
+                /** @description Invite state ({ orgId, invited, status, acceptUrl? }) */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -7899,7 +7899,19 @@ export interface paths {
                     content: {
                         "application/json": {
                             orgId: string;
+                            /** @description False only when the email already holds the requested role. */
                             invited: boolean;
+                            /**
+                             * @description already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.
+                             * @enum {string}
+                             */
+                            status: "already_member" | "added" | "pending";
+                            /** @description Pending invite id (status pending). */
+                            inviteId?: string;
+                            /** @description ISO time the accept link expires (status pending). */
+                            expiresAt?: string;
+                            /** @description Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured. */
+                            acceptUrl?: string;
                         };
                     };
                 };
