@@ -10,6 +10,8 @@ This guide documents the harness-provider contract used by agent-swarm workers, 
 
 A *harness provider* is the runtime that actually drives an LLM: it owns the subprocess (or in-process SDK) that reads the user prompt, talks to the model, invokes tools, and streams events back. The swarm treats providers as plug-ins behind a single TypeScript interface (`ProviderAdapter`). Workers select one at boot via `HARNESS_PROVIDER`.
 
+For workers with a local environment, repository context in the prompt lists only the five newest `swarm-autostash` entries. When older entries exist, it adds their count and directs the agent to `git stash list` to see all entries. Restore guidance remains in the prompt; this display limit does not change stored stashes.
+
 <Callout type="info">
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>

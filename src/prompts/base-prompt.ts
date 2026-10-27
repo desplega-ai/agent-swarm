@@ -463,8 +463,14 @@ function renderRepositoryVars(
   }
 
   if (ctx.hasLocalEnv && repo.autoStashes && repo.autoStashes.length > 0) {
-    const stashes = repo.autoStashes.map((stash) => `- ${stash.ref}: ${stash.message}`).join("\n");
-    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+    const stashes = repo.autoStashes.slice(0, 5).map((stash) => `- ${stash.ref}: ${stash.message}`);
+    const olderCount = repo.autoStashes.length - stashes.length;
+    if (olderCount > 0) {
+      stashes.push(
+        `- ...and ${olderCount} older swarm-autostash entries (run git stash list to see all)`,
+      );
+    }
+    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes.join("\n")}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
   }
 
   let section = "";
