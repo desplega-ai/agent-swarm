@@ -175,6 +175,7 @@ Store task progress, or mark a task as completed or failed.
 | `failureReason` | string | No | Reason (for failure) |
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. Agent-fs pointers are verified before task state changes using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
 | `citations` | array | No | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each in `output` with `[citation:N]`, or set `general: true` for a source that backs the whole answer. Kinds: `task`, `memory`, `github`, `slack`, `agent-fs`, `page`, `script-run`, `url`. The first completing call is refused (the task stays in progress) if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; after one refusal, completion proceeds and those markers are dropped. At most 50 per call/task. |
+| `learning` | string \| object | No | A lesson worth keeping: a gotcha, a dead end, a pattern that worked. Stored as a swarm memory at `/learnings/<workstream>/<slug>`, tagged `learning` and tied to the task. Pass a string, or `{text, tags?, workstream?}` with at most 5 kebab-case tags; `workstream` defaults to the task's repo name, else `general`. The first line is the title. Send it on or before the completing call. A failed write is reported in the result and never blocks the progress update. |
 | `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
 | `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
 
@@ -691,6 +692,7 @@ Manually trigger a workflow execution.
 |-----------|------|----------|-------------|
 | `id` | uuid | Yes | Workflow ID |
 | `triggerData` | object | No | Data to pass as trigger context |
+| `wait` | boolean | No | Default `true`: return after the run's instant steps ran (it finishes or parks at its first async step). `false`: return once the run is created and walk it in the background. Use `false` from a script or step that only needs the `runId` |
 
 ### get-workflow-run
 
@@ -1145,6 +1147,7 @@ with `script-upsert`.
 | `intent` | string | No | Why this script is being run |
 | `scope` | string | No | Optional scope for named script resolution |
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
+| `executor` | `native` \| `quickjs` | No | Executor override for this run. When omitted, named scripts use their saved executor, else `SCRIPT_EXECUTOR` |
 
 ### script-upsert
 
@@ -1158,6 +1161,7 @@ the generated `.d.ts` and rejects on diagnostics.
 | `source` | string | Yes | TypeScript source with a default export function |
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
+| `executor` | `native` \| `quickjs` | No | Per-script executor override. Null or omitted inherits `SCRIPT_EXECUTOR` |
 
 A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`. The schema can be written with either `zod` or `zod/mini` (`import * as z from "zod/mini"`); Mini uses functional forms such as `z.optional(z.string())`.
 
