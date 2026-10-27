@@ -35,13 +35,13 @@ const rows = (r: any): any[] => {
   return d.rows.map((x: any[]) => Object.fromEntries(c.map((k, i) => [k, x[i]])));
 };
 // Every ctx.swarm response (db_query and kv reads) passes the secret scrubber, which rewrites secret-looking
-// `key=value` text to `[REDACTED:<key>]`. Apply's memory pre-image rows carry `contentHex` (stored bytes), so the
-// restore body is decoded from it and the re-read uses hex(...) too; plain reads would corrupt or false-fail.
+// `key=value` text to `[REDACTED:<key>]`. Apply's memory pre-image rows hold stored bytes in `content`, so the
+// pre-image is read as hex(...) of its kv row and the re-read uses hex(...) too; plain reads would corrupt or false-fail.
 const MARK = "[REDACTED:";
 const markers = (s: string) => String(s ?? "").split(MARK).length - 1;
 const decodeHex = (hx: unknown) =>
   new TextDecoder().decode(new Uint8Array((String(hx ?? "").match(/../g) ?? []).map((h) => parseInt(h, 16))));
-// Stored bytes of a pre-image row: contentHex when present (apply v8+), else the legacy `content`.
+// Stored bytes of a pre-image row: `content` of the hex kv read; contentHex when present (rows apply wrote before the sweep covered pre-images).
 const preBody = (m: any) => (typeof m?.contentHex === "string" && m.contentHex ? decodeHex(m.contentHex) : String(m?.content ?? ""));
 const once = (text: string, s: string) => {
   const i = s ? text.indexOf(s) : -1;
@@ -65,15 +65,25 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const r = await q(`SELECT content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = ?`, [memoryId]);
     return r.length ? (legacy ? String(r[0].content ?? "") : decodeHex(r[0].hx)) : null;
   };
-  // Read control, every run. Positive: a secret-looking pre-image row (content scrubbed as a kv read would be,
-  // contentHex intact) restores the stored bytes, and the hex re-read of those bytes matches. Negative
+  // A pre-image value as stored: hex(...) of its kv row, so the scrubber never rewrites the memory bodies in it.
+  const readPreimage = async (key: string) => {
+    const r = await q(
+      `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)`,
+      [NS, key, Date.now()],
+    );
+    if (!r.length) return null;
+    try { return JSON.parse(decodeHex(r[0].hx)); } catch { return null; }
+  };
+  // Read control, every run. Positive: a secret-looking pre-image row read as hex of its kv value (as readPreimage
+  // does) restores the stored bytes, and the hex re-read of those bytes matches. Negative
   // (legacyRead): the plain re-read of the same bytes differs, the false "re-read differs" failure.
   const controls: any = { ok: false, legacyRead };
   try {
     const fx = "api" + "_key=sk-" + "fixture-9f8e7d6c5b4a39281706f5e4d3c2b1a0\nsecond line of the memory body";
-    const p = (await q(`SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx`, [fx, fx]))[0] ?? {};
+    const kvValue = JSON.stringify({ rows: [{ content: fx }] });
+    const p = (await q(`SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx, hex(CAST(? AS BLOB)) AS vhx`, [fx, fx, kvValue]))[0] ?? {};
     const plain = String(p.plain ?? "");
-    const row = { content: plain, contentHex: String(p.hx ?? "") };
+    const row = JSON.parse(decodeHex(p.vhx)).rows[0];
     const body = preBody(row);
     const reread = (legacy: boolean) => (legacy ? plain : decodeHex(p.hx));
     const scrubberActive = plain !== fx && markers(plain) > 0;
@@ -102,7 +112,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   for (const it of items) {
     const id = String(it.actionId);
     try {
-      const pre: any = it.preimageKey ? ((await ctx.swarm.kv_getOrNull({ namespace: NS, key: it.preimageKey }))?.value ?? null) : null;
+      const pre: any = it.preimageKey ? await readPreimage(String(it.preimageKey)) : null;
 
       if (it.kind === "identity") {
         const field = FIELD[it.target?.file] ?? "";

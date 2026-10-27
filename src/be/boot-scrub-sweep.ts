@@ -53,9 +53,13 @@ type SweepTarget = {
    * replay column is NULL, it seals the original there first.
    */
   replay?: Record<string, string>;
+  /** Unique TEXT row key within `where`. Default `id`. */
+  idColumn?: string;
+  /** Static SQL filter limiting the sweep to some rows of the table. */
+  where?: string;
 };
 
-/** Swept in this order. Every table has a TEXT `id` primary key. */
+/** Swept in this order. Each row has a unique TEXT key (`idColumn`, default `id`). */
 export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
   { table: "session_logs", columns: ["content"] },
   { table: "agent_tasks", columns: ["task", "output", "failureReason", "progress"] },
@@ -75,6 +79,14 @@ export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
     table: "workflow_runs",
     columns: ["triggerData", "context", "error"],
     replay: { context: "context_replay" },
+  },
+  // Dreaming memory pre-images copy memory bodies for rollback, so they follow the memory's redaction.
+  {
+    table: "kv_entries",
+    columns: ["value"],
+    idColumn: "key",
+    where:
+      "namespace = 'dreaming-v2' AND (key GLOB 'preimage:*' OR key GLOB 'memtax-create:pre:*')",
   },
 ];
 
@@ -182,8 +194,10 @@ async function sweepTarget(
       )
     )?.seededHash ?? "";
 
+  const idCol = target.idColumn ?? "id";
+  const filter = target.where ? `${target.where} AND ` : "";
   const selectCols = [
-    "id",
+    idCol === "id" ? "id" : `${idCol} AS id`,
     ...target.columns,
     ...(target.hash && !target.columns.includes(target.hash.column) ? [target.hash.column] : []),
     ...Object.values(target.replay ?? {}),
@@ -192,7 +206,7 @@ async function sweepTarget(
   for (;;) {
     const rows = await client.query<Record<string, string | null>>(
       `SELECT ${selectCols.join(", ")} FROM ${target.table}
-       WHERE id > ? ORDER BY id ASC LIMIT ?`,
+       WHERE ${filter}${idCol} > ? ORDER BY ${idCol} ASC LIMIT ?`,
       [cursor, batchSize],
     );
     if (rows.length === 0) break;
@@ -281,8 +295,9 @@ async function rewriteRow(
   // Compare-and-set on every changed column.
   const guards = [...changedCols.map((c) => `${c} IS ?`), ...sealedCols.map((c) => `${c} IS NULL`)];
   params.push(id, ...changedCols.map((c) => before[c] ?? null));
+  const filter = target.where ? `${target.where} AND ` : "";
   const result = await tx.run(
-    `UPDATE ${target.table} SET ${sets.join(", ")} WHERE id = ? AND ${guards.join(" AND ")}`,
+    `UPDATE ${target.table} SET ${sets.join(", ")} WHERE ${filter}${target.idColumn ?? "id"} = ? AND ${guards.join(" AND ")}`,
     params,
   );
   return result.changes > 0;

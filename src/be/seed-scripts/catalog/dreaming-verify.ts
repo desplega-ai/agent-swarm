@@ -112,8 +112,8 @@ const MARK = "[REDACTED:";
 const markers = (s: string) => String(s ?? "").split(MARK).length - 1;
 const decodeHex = (hx: unknown) =>
   new TextDecoder().decode(new Uint8Array((String(hx ?? "").match(/../g) ?? []).map((h) => parseInt(h, 16))));
-// Stored bytes of a pre-image row: contentHex when present (apply v8+), else the legacy `content`. The kv read
-// of `content` is scrubbed too, so only contentHex matches the hex read of the current memory.
+// Stored bytes of a pre-image row: contentHex when present (rows apply wrote before the sweep covered pre-images),
+// else `content`. Memory pre-images are read as hex(...) of the kv row (readPreimage), so `content` is stored bytes.
 const preBody = (m: any) => (typeof m?.contentHex === "string" && m.contentHex ? decodeHex(m.contentHex) : String(m?.content ?? ""));
 // One memory-edit claim against its pre-image: memEditDefects plus apply's afterSha.
 async function editClaimDefects(preBody: string, next: string, mode: string, shrink: string, afterSha: unknown) {
@@ -340,6 +340,16 @@ export default async function (args: unknown, ctx: ScriptContext) {
     (await q(label, `SELECT ${cols}, content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = ?`, [memoryId])).map(
       ({ hx, ...r }: any) => ({ ...r, content: legacyRead ? String(r.content ?? "") : decodeHex(hx) }),
     );
+  // Memory pre-image value as stored: hex(...) of its kv row, so the bodies in it come back unscrubbed (legacyRead: the
+  // plain kv read, scrubbed like readMemory's plain side).
+  const readPreimage = async (label: string, key: string) => {
+    if (legacyRead) {
+      const p: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key });
+      return parseObj(p?.value) ?? p?.value ?? null;
+    }
+    const r = await q(label, `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)`, [NS, key, Date.now()]);
+    return r.length ? parseObj(decodeHex(r[0].hx)) : null;
+  };
   // v11 (2026-10-18): skills.content is hashed from stored bytes too. The plain read is scrubbed, so a skill holding a
   // key=value shape never matched the lane's sha (run 2026-10-18: patch-global-script-safely v3 plain 265b8e05fe52,
   // stored 59e0099389e1, claimed 59e0099389e1).
@@ -350,7 +360,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // Pre-image body on the same side as readMemory (legacyRead: plain `content` on both sides).
   const preOf = (m: any) => (legacyRead ? String(m?.content ?? "") : preBody(m));
   // Read control, every run. A secret-looking memory gets an append edit, then is reverted to its pre-image. The
-  // pre-image row is kv-shaped as apply v8 writes it ({content: scrubbed, contentHex: stored}).
+  // pre-image row is read as readPreimage reads it: hex of the kv value apply writes ({rows: [{content: stored}]}).
   // Positive: preBody(row) against the hex read: the edit claim is clean and the revert classifies as reverted.
   // Negatives, each must alarm: legacyRead (plain content on both sides: the scrubbed body fails apply's afterSha);
   // preImagePlain (scrubbed pre-image vs hex read: append prefix false alarm and the revert missed as drifted).
@@ -359,9 +369,12 @@ export default async function (args: unknown, ctx: ScriptContext) {
     try {
       const fx = "api" + "_key=sk-" + "fixture-9f8e7d6c5b4a39281706f5e4d3c2b1a0\nsecond line of the memory body";
       const nx = `${fx}\nthird line appended by the edit`;
-      const p = (await q("readControl", `SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx, ? AS nplain, hex(CAST(? AS BLOB)) AS nhx`, [fx, fx, nx, nx]))[0] ?? {};
+      const kvValue = JSON.stringify({ rows: [{ content: fx }] });
+      const p = (await q("readControl", `SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx, ? AS nplain, hex(CAST(? AS BLOB)) AS nhx, hex(CAST(? AS BLOB)) AS vhx`, [fx, fx, nx, nx, kvValue]))[0] ?? {};
       const hexRead = decodeHex(p.hx), plain = String(p.plain ?? "");
-      const row = { content: plain, contentHex: String(p.hx ?? "") };
+      // `row`: the hex kv read; `plainRow`: the same row through the scrubbed kv_get read.
+      const row = parseObj(decodeHex(p.vhx))?.rows?.[0] ?? {};
+      const plainRow = { content: plain };
       const roundTrip = hexRead === fx && decodeHex(p.nhx) === nx;
       const scrubberActive = plain !== fx && markers(plain) > 0;
       const nxSha = await sha(nx);
@@ -372,9 +385,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
       });
       const pb = preBody(row);
       const hv = await verdict(pb, decodeHex(p.nhx), hexRead);
-      const lv = await verdict(String(row.content), String(p.nplain ?? ""), plain);
-      const mv = await verdict(String(row.content), decodeHex(p.nhx), hexRead);
-      c.positive = { fixture: "secret-looking key=value", preimage: "kv-shaped {content, contentHex}", roundTrip, scrubberActive, preIsStored: pb === fx, ...hv, ok: roundTrip && scrubberActive && pb === fx && hv.editDefects === 0 && hv.revert === "reverted" };
+      const lv = await verdict(String(plainRow.content), String(p.nplain ?? ""), plain);
+      const mv = await verdict(String(plainRow.content), decodeHex(p.nhx), hexRead);
+      c.positive = { fixture: "secret-looking key=value", preimage: "hex kv read of {rows: [{content}]}", roundTrip, scrubberActive, preIsStored: pb === fx, ...hv, ok: roundTrip && scrubberActive && pb === fx && hv.editDefects === 0 && hv.revert === "reverted" };
       c.legacyRead = { ...lv, ok: lv.editDefects > 0 };
       c.preImagePlain = { ...mv, ok: mv.editDefects > 0 && mv.revert !== "reverted" };
       // v11 skills lane: the fixture as a skill body claimed at its stored sha confirms on the hex read, mismatches on
@@ -500,8 +513,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
         const preKey = String(it.preimageKey ?? `preimage:${runId}:${it.actionId}`);
         let pre: any = null;
         try {
-          const p: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key: preKey });
-          pre = parseObj(p?.value) ?? p?.value ?? null;
+          pre = await readPreimage("editPreimage", preKey);
         } catch (e: any) {
           errors.push(`editPreimage ${preKey}: ${String(e?.message ?? e).slice(0, 200)}`);
         }
@@ -516,8 +528,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
           const rKey = String(ren.preimageKey ?? `preimage:${runId}:${ren.actionId}`);
           let rp: any = null;
           try {
-            const p: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key: rKey });
-            rp = parseObj(p?.value) ?? p?.value ?? null;
+            rp = await readPreimage("renamePreimage", rKey);
           } catch (e: any) {
             errors.push(`renamePreimage ${rKey}: ${String(e?.message ?? e).slice(0, 200)}`);
           }
@@ -742,7 +753,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
           const present = r.length > 0 && (!it.contentHash || r[0].contentHash === it.contentHash);
           env = { ...env, exists: r.length > 0, present, currentSha: r.length ? await sha(String(r[0].content ?? "")) : null };
           if (!present && r.length) {
-            const preRow = (await preimage(it))?.rows?.[0];
+            const pre = replay && it.syntheticPreimage ? it.syntheticPreimage : it.preimageKey ? await readPreimage("survivalEditPreimage", String(it.preimageKey)) : null;
+            const preRow = pre?.rows?.[0];
             env.preimageSha = typeof preRow?.content === "string" ? await sha(preOf(preRow)) : null;
           }
         } else if (it.kind === "skill") {

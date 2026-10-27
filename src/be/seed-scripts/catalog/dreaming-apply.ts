@@ -92,10 +92,12 @@ const scrubberGuard = (stored: string, next: string, content: string) => {
   const s = markers(stored), n = markers(next), c = markers(content);
   return n > s + c ? { ok: false as const, reason: "scrubber-corruption", stored: s, next: n, content: c } : { ok: true as const, stored: s, next: n, content: c };
 };
-// Memory pre-image row: stored bytes in `content`, plus the hex itself so a restore decodes it even when its own read is scrubbed.
+// Memory pre-image row: stored bytes in `content`. No hex copy: the boot scrub sweep redacts `content` in the
+// kv row together with the memory, while a hex copy would keep a later-registered secret readable. Restores read
+// the kv row via hex(...) to get these bytes unscrubbed.
 const storedRow = (r: any) => {
   const { hx, ...rest } = r ?? {};
-  return { ...rest, content: decodeHex(hx), contentHex: String(hx ?? "") };
+  return { ...rest, content: decodeHex(hx) };
 };
 // Rename: compose the new body from stored bytes (hex). legacy: from the plain (scrubbed) read, dryRun negative control only.
 const renameCompose = (rws: { content?: unknown; hx?: unknown }[], legacy: boolean) => {
@@ -691,7 +693,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         }
         const net = op === "memory-edit" ? body.length - preBody.length : -found.reduce((s: number, m: any) => s + String(m.content ?? "").length, 0);
         if (dry) { out.wouldApply.push({ actionId: id, kind: op, target, netChars: net, ...(op === "memory-edit" ? { mode } : {}) }); continue; }
-        // Pre-image holds stored bytes (hex read), never the scrubbed plain content.
+        // Pre-image holds stored bytes (hex read), never the scrubbed plain content, and no hex copy (storedRow).
         const preRows = found.map(storedRow);
         await kvSet(preKey, op === "memory-edit" ? { kind: op, rows: preRows, mode, ...(shrink ? { allowShrink: shrink } : {}) } : { kind: op, rows: preRows });
         if (op === "memory-delete") {
