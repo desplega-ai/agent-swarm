@@ -71,6 +71,9 @@ Options:
   --bind <addr>      Publish the API and agent ports on this host address only, e.g.
                      127.0.0.1 behind a reverse proxy (saved as AGENT_SWARM_BIND_ADDRESS
                      in .env). Docker-published ports bypass host firewalls such as ufw.
+                     An older docker-compose.yml gets its port mappings rewritten (backup
+                     in docker-compose.yml.bak). Fails, stopping the stack, if a running
+                     port still listens elsewhere.
   --no-agent-fs      Skip the bundled agent-fs (files, Comb) and TEI (memory
                      embeddings) services. New installs only.
   --dry-run          Print every command instead of running it
@@ -264,6 +267,7 @@ compose_up() {
 onboard() {
   if [ -f "${INSTALL_DIR}/docker-compose.yml" ]; then
     say "docker-compose.yml already exists in ${INSTALL_DIR}; skipping onboard and starting the stack"
+    if [ -n "$BIND_ADDRESS" ]; then bind_compose_ports || true; fi
     compose_up
     return 0
   fi
@@ -273,6 +277,78 @@ onboard() {
   say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
   run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
     --container-engine docker ${extra[@]+"${extra[@]}"} </dev/null
+}
+
+# What the onboard compose generator puts before each published port
+# (src/commands/onboard/compose-generator.ts): "<address>:" when
+# AGENT_SWARM_BIND_ADDRESS is set, nothing otherwise.
+# shellcheck disable=SC2016 # Compose expands this, not the shell
+BIND_PREFIX='${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}'
+
+# A docker-compose.yml from a CLI release before AGENT_SWARM_BIND_ADDRESS
+# publishes "3013:3013" on every interface. Give each such mapping the bind
+# prefix, keeping a backup. A mapping with its own host address, or one this
+# cannot read, is a hard error. Returns 0 when it rewrote the file.
+bind_compose_ports() {
+  local file="${INSTALL_DIR}/docker-compose.yml" tmp result
+  if [ ! -f "$file" ]; then
+    [ "$DRY_RUN" -eq 1 ] && printf '+ rewrite port mappings in docker-compose.yml to honour --bind\n'
+    return 1
+  fi
+  tmp="$(mktemp)"
+  result="$(awk -v prefix="$BIND_PREFIX" -v addr="$BIND_ADDRESS" -v out="$tmp" '
+    function emit(line) { print line > out }
+    /^ *ports: *$/ { inports = 1; emit($0); next }
+    inports && /^ *- / {
+      entry = $0
+      sub(/^ *- */, "", entry)
+      gsub(/["\047]/, "", entry)
+      if (entry ~ /^[0-9]+(-[0-9]+)?:[0-9]+(-[0-9]+)?(\/(tcp|udp))?$/) {
+        indent = $0
+        sub(/-.*$/, "", indent)
+        emit(indent "- \"" prefix entry "\"")
+        changed++
+        next
+      }
+      if (index(entry, prefix) != 1 && index(entry, addr ":") != 1 && index(entry, "[" addr "]:") != 1) bad = bad " " entry
+      emit($0)
+      next
+    }
+    { inports = 0; emit($0) }
+    END { printf "%d%s", changed, bad }
+  ' "$file")"
+  case "$result" in
+    0) rm -f "$tmp"; return 1 ;;
+    *" "*)
+      rm -f "$tmp"
+      die "docker-compose.yml publishes ports that ignore --bind: ${result#* }. Change them to ${BIND_PREFIX}<host>:<container>, or run without --bind."
+      ;;
+  esac
+  say "Rewriting ${result} port mapping(s) in docker-compose.yml to publish on ${BIND_ADDRESS} (backup: docker-compose.yml.bak)"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    rm -f "$tmp"
+  else
+    { cp "$file" "${file}.bak" && cat "$tmp" >"$file"; } || die "could not rewrite ${file}"
+    rm -f "$tmp"
+  fi
+}
+
+# Check the running stack, not the files: every published port must listen on
+# --bind. Otherwise stop the stack and fail, so no port stays public by mistake.
+assert_ports_bound() {
+  local exposed
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '+ check that every published port listens on %s\n' "$BIND_ADDRESS"
+    return 0
+  fi
+  exposed="$(docker compose ps --format '{{.Ports}}' </dev/null | tr ',' '\n' | grep -- '->' |
+    sed -E 's/^ +//' | awk -v a="${BIND_ADDRESS}:" -v b="[${BIND_ADDRESS}]:" \
+      'index($0, a) != 1 && index($0, b) != 1' || true)"
+  if [ -n "$exposed" ]; then
+    docker compose stop </dev/null || true
+    die "ports are still published outside ${BIND_ADDRESS} ($(echo "$exposed" | tr '\n' ' ')), so the stack was stopped. Check the ports: sections of docker-compose.yml and any override file."
+  fi
+  say "Publishing ports on ${BIND_ADDRESS} only"
 }
 
 # Whether the stack runs the bundled agent-fs service. A dry run writes no
@@ -520,14 +596,16 @@ main() {
   if [ -d "$INSTALL_DIR" ]; then cd "$INSTALL_DIR"; fi
   say "Install directory: ${INSTALL_DIR}"
 
-  # Exported so the first `docker compose up` (inside onboard) already binds there.
-  if [ -n "$BIND_ADDRESS" ]; then
-    export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
-    say "Publishing ports on ${BIND_ADDRESS} only"
-  fi
-
+  # Exported so the first `docker compose up` (inside onboard) already binds
+  # there, when the CLI release supports it. A compose file without the bind
+  # prefix gets it and the stack is recreated; then the running ports are checked.
+  [ -z "$BIND_ADDRESS" ] || export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
   onboard
-  [ -z "$BIND_ADDRESS" ] || set_env_value AGENT_SWARM_BIND_ADDRESS "$BIND_ADDRESS"
+  if [ -n "$BIND_ADDRESS" ]; then
+    set_env_value AGENT_SWARM_BIND_ADDRESS "$BIND_ADDRESS"
+    if bind_compose_ports; then compose_up; fi
+    assert_ports_bound
+  fi
 
   local port api_key local_url dash_url
   port="$(api_port)"

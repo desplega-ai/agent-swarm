@@ -176,10 +176,11 @@ describe("install.sh public URL and bind address", () => {
   );
 
   test(
-    "--bind exports the address for onboard and saves it",
+    "--bind saves the address and plans the port check without claiming it",
     async () => {
       const out = await dryRun(["--no-tunnel", "--bind", "127.0.0.1"]);
-      expect(out).toContain("Publishing ports on 127.0.0.1 only");
+      expect(out).not.toContain("Publishing ports on 127.0.0.1 only");
+      expect(out).toContain("+ check that every published port listens on 127.0.0.1");
       expect(out).toContain("set AGENT_SWARM_BIND_ADDRESS=127.0.0.1 in");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
