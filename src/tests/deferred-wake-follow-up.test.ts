@@ -1,13 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  cancelTask,
   closeDb,
   completeTask,
   createAgent,
   createTaskExtended,
   failTask,
+  getChildTasks,
   getDbClient,
   getLogsByTaskIdAndEventType,
+  getTaskById,
   initDb,
   startTask,
 } from "../be/db";
@@ -65,8 +68,13 @@ async function activeTask(agentId: string, options: Parameters<typeof createTask
 }
 
 /** `waiterAgentId` defers a fresh task until `producers` settle. */
-async function deferOn(producers: AgentTask[], mode: "all" | "any", waiterAgentId = leadId) {
-  const waiter = await activeTask(waiterAgentId);
+async function deferOn(
+  producers: AgentTask[],
+  mode: "all" | "any",
+  waiterAgentId = leadId,
+  options: Parameters<typeof createTaskExtended>[1] = {},
+) {
+  const waiter = await activeTask(waiterAgentId, options);
   const result = await tool.handler(
     {
       taskId: waiter.id,
@@ -108,6 +116,77 @@ async function suppressions(taskId: string) {
 }
 
 describe("worker follow-up vs. deferred wake", () => {
+  for (const cause of ["event", "ceiling"] as const) {
+    test(`a worker's ${cause} wake-up cancellation notifies the Lead once`, async () => {
+      const producer = await activeTask(workerId);
+      const instructions = "Tell the requester that the continuation stopped.";
+      const { waiter, scheduleId } = await deferOn([producer], "all", workerId, {
+        followUpConfig: { onFailed: instructions },
+      });
+      expect(await getChildTasks(waiter.id)).toHaveLength(0);
+      if (cause === "event") {
+        await completeTask(producer.id, "Ready");
+        await reconcileDeferredTaskWaits(producer.id);
+      } else {
+        await dispatchDeferredTaskWait(scheduleId, "ceiling");
+      }
+      const [wake] = await wakeChildren(scheduleId);
+      expect(wake?.agentId).toBe(workerId);
+      const reason = "No longer needed";
+      expect((await cancelTask(wake!.id, reason))?.status).toBe("cancelled");
+      const deadline = Date.now() + 1000;
+      let followUps = await getChildTasks(wake!.id);
+      while (followUps.length === 0 && Date.now() < deadline) {
+        await Bun.sleep(5);
+        followUps = await getChildTasks(wake!.id);
+      }
+      expect(followUps).toHaveLength(1);
+      expect(followUps[0]?.agentId).toBe(leadId);
+      expect(followUps[0]?.task).toContain(`Deferred continuation cancelled: ${reason}`);
+      expect(followUps[0]?.task).toContain(instructions);
+      expect(await cancelTask(wake!.id, reason)).toBeNull();
+      await Bun.sleep(25);
+      expect(await getChildTasks(wake!.id)).toHaveLength(1);
+    });
+  }
+
+  test("wake-up cancellation respects disabled follow-ups and Lead ownership", async () => {
+    for (const agentId of [workerId, leadId]) {
+      const producer = await activeTask(workerId);
+      const { scheduleId } = await deferOn([producer], "all", agentId, {
+        followUpConfig: agentId === workerId ? { disabled: true } : undefined,
+      });
+      await dispatchDeferredTaskWait(scheduleId, "ceiling");
+      const [wake] = await wakeChildren(scheduleId);
+      expect((await cancelTask(wake!.id))?.status).toBe("cancelled");
+      await Bun.sleep(25);
+      expect(await getChildTasks(wake!.id)).toHaveLength(0);
+    }
+  });
+
+  test("ordinary worker cancellation creates no Lead follow-up", async () => {
+    const task = await activeTask(workerId);
+    expect((await cancelTask(task.id))?.status).toBe("cancelled");
+    await Bun.sleep(25);
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+  });
+
+  test("a rolled-back wake-up cancellation creates no Lead follow-up", async () => {
+    const producer = await activeTask(workerId);
+    const { scheduleId } = await deferOn([producer], "all", workerId);
+    await dispatchDeferredTaskWait(scheduleId, "ceiling");
+    const [wake] = await wakeChildren(scheduleId);
+    await expect(
+      getDbClient().transaction(async () => {
+        expect((await cancelTask(wake!.id))?.status).toBe("cancelled");
+        throw new Error("Roll back cancellation");
+      }),
+    ).rejects.toThrow("Roll back cancellation");
+    await Bun.sleep(25);
+    expect((await getTaskById(wake!.id))?.status).toBe("pending");
+    expect(await getChildTasks(wake!.id)).toHaveLength(0);
+  });
+
   test("a deferred worker suppresses onCompleted until its real completion", async () => {
     const options = {
       followUpConfig: { onCompleted: "Route the finished result to Reviewer." },
