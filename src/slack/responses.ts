@@ -443,7 +443,6 @@ export async function sendWithPersona(
 
 export type SlackPersonaIcon = { icon_emoji: string } | { icon_url: string };
 
-/** The agent's configured Slack icon, else the default emoji. */
 export function getAgentSlackIcon(agent: Agent): SlackPersonaIcon {
   if (agent.slackIcon?.type === "url") return { icon_url: agent.slackIcon.url };
   if (agent.slackIcon?.type === "emoji") return { icon_emoji: agent.slackIcon.emoji };

@@ -531,7 +531,7 @@ const updateAgentProfileRoute = route({
     heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
-    /** `null` resets to the default Slack emoji; omit the key to leave untouched. */
+    // z.lazy keeps `| null` in the OpenAPI body: a named schema's $ref drops it.
     slackIcon: z
       .lazy(() => AgentSlackIconSchema)
       .nullable()

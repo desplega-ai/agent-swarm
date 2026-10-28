@@ -64,7 +64,7 @@ export type AgentRow = {
   cred_status: string | null;
   /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
   avatar: string | null;
-  /** Migration 254: Slack persona icon (JSON of AgentSlackIcon). NULL = default emoji. */
+  /** Migration 254: JSON of AgentSlackIcon. */
   slack_icon: string | null;
   runtime_pool_id: string | null;
   runtime_provision_attempts: number;
@@ -84,7 +84,7 @@ function parseAgentAvatar(raw: string | null): AgentAvatar | null {
   }
 }
 
-/** Safe-parse the `slack_icon` JSON column; malformed content falls back to `null`. */
+/** Malformed content falls back to `null`, like `parseAgentAvatar`. */
 function parseAgentSlackIcon(raw: string | null): AgentSlackIcon | null {
   if (!raw) return null;
   try {

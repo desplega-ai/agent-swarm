@@ -3745,7 +3745,6 @@ export async function updateAgentProfile(
     heartbeatMd?: string;
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar?: AgentAvatar | null;
-    /** Same null-vs-absent semantics as `avatar`. */
     slackIcon?: AgentSlackIcon | null;
   },
   meta?: VersionMeta,

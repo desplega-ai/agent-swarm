@@ -21,11 +21,6 @@ const PHASE_LABEL: Partial<Record<AutosavePhase, string>> = {
   saved: "Saved",
 };
 
-/**
- * The agent's Slack icon: an emoji code or an https image URL. Saves itself
- * through `PUT /api/agents/{id}/profile`; blank or "Reset to default" stores
- * `null`, which brings back the default emoji.
- */
 export function AgentSlackIconField({ agent }: { agent: Agent }) {
   const updateProfile = useUpdateAgentProfile();
   const stored = formatSlackIcon(agent.slackIcon);

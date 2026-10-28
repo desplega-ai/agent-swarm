@@ -1,7 +1,6 @@
 import type { AgentSlackIcon } from "@/api/types";
 
-// Mirrors AgentSlackIconSchema in the server's src/types.ts (the UI cannot
-// import it). src/tests/agent-slack-icon.test.ts runs both on the same cases.
+// Mirrors AgentSlackIconSchema (src/types.ts); src/tests/agent-slack-icon.test.ts checks parity.
 const EMOJI_PATTERN = /^:[a-z0-9_+'-]+:$/;
 const MAX_EMOJI_LENGTH = 102;
 const MAX_URL_LENGTH = 2048;
@@ -10,7 +9,7 @@ export type SlackIconInput =
   | { ok: true; icon: AgentSlackIcon | null }
   | { ok: false; error: string };
 
-/** Parse what the operator typed: blank resets, `owl` becomes `:owl:`, URLs must be https. */
+/** Blank resets; `owl` becomes `:owl:`. */
 export function parseSlackIconInput(text: string): SlackIconInput {
   const value = text.trim();
   if (!value) return { ok: true, icon: null };
@@ -35,7 +34,6 @@ export function parseSlackIconInput(text: string): SlackIconInput {
   return { ok: true, icon: { type: "emoji", emoji } };
 }
 
-/** The text that shows `icon` in the input. */
 export function formatSlackIcon(icon: AgentSlackIcon | null | undefined): string {
   if (!icon) return "";
   return icon.type === "url" ? icon.url : icon.emoji;
