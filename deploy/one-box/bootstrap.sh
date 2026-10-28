@@ -10,10 +10,11 @@
 #   AGENT_SWARM_*  Passed through to install.sh, e.g. AGENT_SWARM_CLI_VERSION.
 #
 # Only Caddy (80/443) and SSH face the internet. Docker-published ports bypass
-# ufw, so before the first container starts this script sets the Docker daemon's
-# default bind address to 127.0.0.1. A port mapping without a host address, as
-# every agent-swarm CLI release generates, then stays on loopback. install.sh
-# --bind 127.0.0.1 and assert_loopback_only check the same thing twice more.
+# ufw, so install.sh --bind 127.0.0.1 sets 127.0.0.1 as the default host address
+# of the stack's Compose network before the first container starts. A port
+# mapping without a host address, as every agent-swarm CLI release generates,
+# then stays on loopback. daemon.json does the same for Docker's default bridge,
+# and install.sh and assert_loopback_only check the running ports twice more.
 # The API key never reaches stdout, which cloud-init copies to its own log:
 # install.sh output goes to a root-only log, and the dashboard /setup link goes
 # to a root-only file that a root login prints.
@@ -130,9 +131,11 @@ install_packages() {
   apt-get install -y -q ca-certificates curl gpg unzip ufw >>"$LOG" 2>&1
 }
 
-# Docker's default host address for published ports, read when dockerd starts.
-# Written before Docker is installed, so no container ever binds 0.0.0.0. An
-# existing daemon.json is the operator's, so it must already say the same.
+# Docker's default host address for ports published on its default bridge
+# (`docker run -p`), read when dockerd starts. It does not cover the swarm:
+# Compose puts the stack on its own network, whose default install.sh --bind
+# sets before the first `up`. An existing daemon.json is the operator's, so it
+# must already say the same.
 configure_docker_loopback() {
   if [ -f "$DOCKER_DAEMON_JSON" ]; then
     grep -qE '"ip" *: *"127\.0\.0\.1"' "$DOCKER_DAEMON_JSON" ||

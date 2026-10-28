@@ -19,6 +19,10 @@ export interface DeployStubs {
   history(): Promise<string[]>;
   /** Every docker invocation. */
   calls(): Promise<string[]>;
+  /** One "<network> <default host address>" line per `docker compose up`. */
+  ups(): Promise<string[]>;
+  /** Create a project network as an earlier `up` would, with this default address ("" for none). */
+  network(name: string, hostBinding: string): Promise<void>;
 }
 
 async function lines(path: string): Promise<string[]> {
@@ -56,5 +60,9 @@ export async function makeDeployStubs(
     ports: () => lines(join(state, "ports")),
     history: () => lines(join(state, "history")),
     calls: () => lines(join(state, "calls")),
+    ups: () => lines(join(state, "ups")),
+    network: async (name, hostBinding) => {
+      await Bun.write(join(state, "networks", name), `${hostBinding}\n`);
+    },
   };
 }

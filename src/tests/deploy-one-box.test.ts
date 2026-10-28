@@ -39,7 +39,6 @@ async function bootstrap(installUrl = `file://${ROOT}/install.sh`) {
   );
   const stubs = await makeDeployStubs(dir, {
     AGENT_SWARM_BOOTSTRAP_ROOT: root,
-    FAKE_DOCKER_DAEMON_JSON: join(root, "etc/docker/daemon.json"),
     FAKE_API_KEY: API_KEY,
   });
   const result = await runChild(["bash", BOOTSTRAP], { env: stubs.env });
@@ -56,6 +55,9 @@ describe("one-box bootstrap.sh", () => {
       expect(r.exitCode).toBe(0);
       expect(r.status).toBe("done");
 
+      // Compose puts the stack on its own network, which daemon.json's "ip" does
+      // not cover: the first `up`, inside onboard, must find its default set.
+      expect((await r.stubs.ups())[0]).toBe("agent-swarm_default 127.0.0.1");
       const history = await r.stubs.history();
       expect(history.length).toBeGreaterThan(0);
       expect(history.filter((p) => !p.startsWith("127.0.0.1:"))).toEqual([]);

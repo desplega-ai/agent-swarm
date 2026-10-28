@@ -74,6 +74,8 @@ Options:
   --bind <addr>      Publish the API and agent ports on this host address only, e.g.
                      127.0.0.1 behind a reverse proxy (saved as AGENT_SWARM_BIND_ADDRESS
                      in .env). Docker-published ports bypass host firewalls such as ufw.
+                     Before the first start, docker-compose.override.yml sets it as the
+                     default host address of the stack's Docker network.
                      An older docker-compose.yml gets its port mappings rewritten (backup
                      in docker-compose.yml.bak). Fails, stopping the stack, if a running
                      port still listens elsewhere, or if the install fails before that check.
@@ -336,6 +338,69 @@ bind_compose_ports() {
   fi
 }
 
+OVERRIDE_FILE=docker-compose.override.yml
+BINDING_OPTION=com.docker.network.bridge.host_binding_ipv4
+
+# Start docker-compose.override.yml with its header, unless it exists.
+start_override() {
+  local file="${INSTALL_DIR}/${OVERRIDE_FILE}"
+  [ ! -f "$file" ] || return 0
+  printf '%s\n' "# Written by install.sh. Compose merges this file into docker-compose.yml automatically." >"$file"
+}
+
+# Compose publishes a port without a host address on its project network's
+# default address: 0.0.0.0 unless the network sets $BINDING_OPTION (it takes
+# IPv6 too). dockerd's "ip" setting covers only its own default bridge. This
+# runs before onboard, so even the first `up` of a CLI that ignores
+# AGENT_SWARM_BIND_ADDRESS binds there. Compose loads only the first override
+# file it finds, so a compose.override.* would hide this one.
+bind_network_default() {
+  local file="${INSTALL_DIR}/${OVERRIDE_FILE}" f tmp
+  for f in compose.override.yml compose.override.yaml; do
+    [ ! -e "${INSTALL_DIR}/${f}" ] ||
+      die "${f} hides ${OVERRIDE_FILE} from Compose, so --bind cannot set the network's default address. Merge it into ${OVERRIDE_FILE}, then run again."
+  done
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '+ set the default network'"'"'s %s=%s in %s\n' "$BINDING_OPTION" "$BIND_ADDRESS" "$OVERRIDE_FILE"
+    return 0
+  fi
+  if [ -f "$file" ] && grep -qF "$BINDING_OPTION" "$file"; then
+    tmp="$(mktemp)"
+    sed -E "s/(${BINDING_OPTION//./\\.}:).*/\\1 \"${BIND_ADDRESS}\"/" "$file" >"$tmp"
+    cat "$tmp" >"$file"
+    rm -f "$tmp"
+    return 0
+  fi
+  if [ -f "$file" ] && grep -qE '^networks:' "$file"; then
+    die "${OVERRIDE_FILE} already has a networks: section. Add driver_opts: { ${BINDING_OPTION}: \"${BIND_ADDRESS}\" } to its default network, then run again."
+  fi
+  start_override
+  cat >>"$file" <<YAML
+networks:
+  default:
+    driver_opts:
+      ${BINDING_OPTION}: "${BIND_ADDRESS}"
+YAML
+}
+
+# Compose reuses an existing network without applying new driver options (it
+# only recreates one it labelled with a config hash, from Compose 2.31). A
+# network left by an earlier install in a directory with this name would keep
+# publishing on every interface, so a fresh install refuses it.
+check_project_network() {
+  local project net current
+  [ "$DRY_RUN" -eq 0 ] || return 0
+  # Compose's default project name: the directory name, lowercased, keeping
+  # [a-z0-9_-], without leading "_" or "-".
+  project="$(printf '%s' "${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+  project="${project#"${project%%[a-z0-9]*}"}"
+  net="${project}_default"
+  docker network inspect "$net" >/dev/null 2>&1 </dev/null || return 0
+  current="$(docker network inspect --format "{{index .Options \"${BINDING_OPTION}\"}}" "$net" </dev/null || true)"
+  [ "$current" = "$BIND_ADDRESS" ] ||
+    die "Docker network ${net} from an earlier install exists and publishes ports on ${current:-every interface}. Remove it (stop its containers, then: docker network rm ${net}) and run again."
+}
+
 # Check the running stack, not the files: every published port must listen on
 # --bind. Otherwise stop the stack and fail, so no port stays public by mistake.
 assert_ports_bound() {
@@ -509,14 +574,15 @@ stop_tunnel() {
 apply_public_url() {
   local url="$1" port="$2"
   set_env_value PUBLIC_MCP_BASE_URL "$url"
-  if [ ! -f "${INSTALL_DIR}/docker-compose.override.yml" ]; then
+  # An override without services: holds only install.sh's --bind network.
+  local file="${INSTALL_DIR}/${OVERRIDE_FILE}"
+  if [ ! -f "$file" ] || ! grep -qE '^services:' "$file"; then
     say "Writing docker-compose.override.yml to pass PUBLIC_MCP_BASE_URL to the API"
     if [ "$DRY_RUN" -eq 1 ]; then
       printf '+ write docker-compose.override.yml (swarm-api.environment += PUBLIC_MCP_BASE_URL)\n'
     else
-      cat >"${INSTALL_DIR}/docker-compose.override.yml" <<'YAML'
-# Written by install.sh (public URL). Compose merges this file into
-# docker-compose.yml automatically.
+      start_override
+      cat >>"$file" <<'YAML'
 services:
   swarm-api:
     environment:
@@ -612,16 +678,19 @@ main() {
   if [ -d "$INSTALL_DIR" ]; then cd "$INSTALL_DIR"; fi
   say "Install directory: ${INSTALL_DIR}"
 
-  # Exported so the first `docker compose up` (inside onboard) already binds
-  # there, when the CLI release supports it. A compose file without the bind
-  # prefix gets it and the stack is recreated; then the running ports are checked.
-  # Until that check passes, on_exit stops the stack on any exit.
+  # The network default and the exported address make the first `docker
+  # compose up` (inside onboard) bind there, whatever the CLI release. A compose
+  # file without the bind prefix gets it and the stack is recreated; then the
+  # running ports are checked. Until that check passes, on_exit stops the stack
+  # on any exit.
   if [ -n "$BIND_ADDRESS" ]; then
     export AGENT_SWARM_BIND_ADDRESS="$BIND_ADDRESS"
     if [ "$DRY_RUN" -eq 0 ]; then
       PORTS_UNCHECKED=1
       trap on_exit EXIT
     fi
+    [ -f "${INSTALL_DIR}/docker-compose.yml" ] || check_project_network
+    bind_network_default
   fi
   onboard
   if [ -n "$BIND_ADDRESS" ]; then

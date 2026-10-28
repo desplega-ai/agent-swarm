@@ -65,11 +65,11 @@ variable, such as `AGENT_SWARM_CLI_VERSION`.
 
 ### Security
 
-- Docker-published ports skip ufw. Before the first container starts, the script sets
-  `"ip": "127.0.0.1"` in `/etc/docker/daemon.json`, so every port the swarm publishes listens on
-  loopback, whatever agent-swarm CLI release npm serves. Port 3013 is reachable only through
-  Caddy. If a port still ends up on a public interface, the script stops the stack and fails
-  instead of exposing it.
+- Docker-published ports skip ufw. Before the first container starts, the installer sets
+  `127.0.0.1` as the default host address of the stack's Docker network (in
+  `docker-compose.override.yml`), so every port the swarm publishes listens on loopback, whatever
+  agent-swarm CLI release npm serves. Port 3013 is reachable only through Caddy. If a port still
+  ends up on a public interface, the script stops the stack and fails instead of exposing it.
 - The API key stays in root-only files: `/root/agent-swarm/.env`, the setup link file and
   `/var/log/agent-swarm-deploy.log`. The first boot never prints it to the console or to
   cloud-init's log, and the login message shows it to root only.
