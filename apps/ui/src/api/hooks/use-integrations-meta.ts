@@ -158,6 +158,7 @@ export function useSlackAppIcon(enabled: boolean) {
     queryKey: ["integrations", "slack", "app-icon"],
     queryFn: () => api.fetchSlackAppIcon(),
     enabled,
-    staleTime: 60 * 60 * 1000,
+    // A null avatar can be a passing Slack failure: ask again on the next mount.
+    staleTime: (query) => (query.state.data?.imageUrl ? 60 * 60 * 1000 : 0),
   });
 }

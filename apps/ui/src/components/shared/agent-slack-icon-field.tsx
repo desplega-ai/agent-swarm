@@ -40,6 +40,8 @@ function SlackIconPreview({
   appIconUrl: string | null | undefined;
   onBrokenImage: () => void;
 }) {
+  // An app avatar that fails to load falls back to the badge.
+  const [failedAppSrc, setFailedAppSrc] = useState<string | null>(null);
   if (icon.type === "emoji") {
     const glyph = slackEmojiGlyph(icon.emoji);
     if (glyph) {
@@ -61,7 +63,7 @@ function SlackIconPreview({
     );
   }
   const src = icon.type === "url" ? icon.url : appIconUrl;
-  if (!src) {
+  if (!src || (icon.type === "app" && src === failedAppSrc)) {
     return (
       <Badge variant="outline" size="tag">
         Slack app
@@ -73,7 +75,7 @@ function SlackIconPreview({
       src={src}
       alt={icon.type === "app" ? "Slack app icon" : ""}
       referrerPolicy="no-referrer"
-      onError={icon.type === "url" ? onBrokenImage : undefined}
+      onError={icon.type === "url" ? onBrokenImage : () => setFailedAppSrc(src)}
       className="size-5 rounded-sm object-cover"
     />
   );

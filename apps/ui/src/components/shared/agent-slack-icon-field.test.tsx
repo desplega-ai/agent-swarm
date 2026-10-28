@@ -213,11 +213,16 @@ describe("AgentSlackIconField preview", () => {
     await field.unmount();
   });
 
-  test("the app icon shows the app's avatar, or a Slack app badge without one", async () => {
+  test("the app icon shows the app's avatar, or a Slack app badge when it is missing or fails", async () => {
     appIconUrl = "https://slack.example/app-72.png";
     const withAvatar = await mount(withIcon({ type: "app" }));
     expect(withAvatar.preview()?.getAttribute("src")).toBe(appIconUrl);
     await withAvatar.unmount();
+    appIconUrl = "https://slack.example/gone.png";
+    const broken = await mount(withIcon({ type: "app" }));
+    await act(async () => broken.preview()?.dispatchEvent(new Event("error")));
+    expect(broken.preview()?.textContent).toBe("Slack app");
+    await broken.unmount();
     appIconUrl = null;
     const badge = await mount(withIcon({ type: "app" }));
     expect(badge.preview()?.textContent).toBe("Slack app");

@@ -1,12 +1,31 @@
-import type { WebClient } from "@slack/web-api";
+import { WebClient } from "@slack/web-api";
 import { getSlackApp } from "./app";
 
-const TTL_MS = 60 * 60 * 1000;
-// The WebClient retries auth.test for a long time; the dashboard preview must not wait for that.
-const TIMEOUT_MS = 5_000;
+export const SLACK_APP_ICON_TTL_MS = 60 * 60 * 1000;
+// Per request, with no retries: the lookup ends within two of these, and an
+// aborted auth.test never goes on to bots.info.
+const REQUEST_TIMEOUT_MS = 2_500;
 
 let cached: { url: string | null; at: number } | null = null;
 let inFlight: Promise<string | null> | null = null;
+
+/** A client for this lookup only: the app's token and API URL, no retries, a hard request timeout. */
+export function createLookupClient(
+  base: Pick<WebClient, "token" | "slackApiUrl">,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): WebClient {
+  return new WebClient(base.token, {
+    slackApiUrl: base.slackApiUrl,
+    retryConfig: { retries: 0 },
+    rejectRateLimitedCalls: true,
+    timeout: timeoutMs,
+  });
+}
+
+function defaultClient(): WebClient | undefined {
+  const client = getSlackApp()?.client;
+  return client?.token ? createLookupClient(client) : undefined;
+}
 
 async function lookUp(client: WebClient): Promise<string | null> {
   const auth = await client.auth.test();
@@ -21,28 +40,26 @@ async function lookUp(client: WebClient): Promise<string | null> {
  * (`bots.info` for the bot behind the token). Null when Slack is off or the
  * lookup fails. Cached for an hour; failures are not cached.
  */
-export async function getSlackAppIconUrl(
-  getClient: () => WebClient | undefined = () => getSlackApp()?.client,
-): Promise<string | null> {
-  if (cached && Date.now() - cached.at < TTL_MS) return cached.url;
+export async function getSlackAppIconUrl({
+  getClient = defaultClient,
+  now = Date.now,
+}: {
+  getClient?: () => WebClient | undefined;
+  now?: () => number;
+} = {}): Promise<string | null> {
+  // Slack can be turned off at runtime, so check it before the cache.
   const client = getClient();
   if (!client) return null;
-  if (!inFlight) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS);
+  if (cached && now() - cached.at < SLACK_APP_ICON_TTL_MS) return cached.url;
+  inFlight ??= lookUp(client)
+    .then((url) => {
+      cached = { url, at: now() };
+      return url;
+    })
+    .catch(() => null)
+    .finally(() => {
+      inFlight = null;
     });
-    inFlight = Promise.race([lookUp(client), timeout])
-      .then((url) => {
-        cached = { url, at: Date.now() };
-        return url;
-      })
-      .catch(() => null)
-      .finally(() => {
-        clearTimeout(timer);
-        inFlight = null;
-      });
-  }
   return await inFlight;
 }
 
