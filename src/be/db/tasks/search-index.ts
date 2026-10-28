@@ -13,6 +13,27 @@ const ROWID_SET_MAX = 500;
 // batch holds the write lock and the event loop for tens of milliseconds.
 const BACKFILL_BATCH_SIZE = 100;
 
+// Pause between batches. Back to back, the batches wrote hundreds of MB of
+// index pages to the WAL in about a minute. Past ~500 MB, litestream forces a
+// TRUNCATE checkpoint that holds the write lock for minutes, and every writer
+// in the process failed with "database is locked". The pause leaves the lock
+// to other writers and lets passive checkpoints keep up.
+const BACKFILL_YIELD_MS = 250;
+
+// Waits before retrying a failed batch, usually SQLITE_BUSY that outlasted the
+// db-client's own ~11s retry budget. The last delay repeats. After
+// BACKFILL_MAX_RETRIES failures in a row (about 3 minutes) the run gives up,
+// and the backfill starts again from the watermark BACKFILL_RESUME_MS later.
+const BACKFILL_RETRY_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
+const BACKFILL_MAX_RETRIES = 10;
+const BACKFILL_RESUME_MS = 5 * 60_000;
+
+export type TaskSearchBackfillOptions = {
+  yieldMs?: number;
+  retryBackoffMs?: number[];
+  maxRetries?: number;
+};
+
 /**
  * The agent_tasks_fts MATCH expression for free text: the whole input as one
  * FTS5 phrase, so user text cannot inject operators (NEAR, AND, -, ^, column
@@ -98,53 +119,114 @@ export async function taskSearchCondition(
  * `indexedThrough` mark that admits it to the triggers commit together, so a
  * concurrent write is indexed exactly once: by its trigger when its row is
  * already covered, else by a later batch. The last batch sets the mark to
- * TASK_FTS_COMPLETE, which switches search to the index. Resumable after a
- * restart; a no-op once complete.
+ * TASK_FTS_COMPLETE, which switches search to the index. Each batch reads the
+ * mark inside its own BEGIN IMMEDIATE, so a rerun, a resume, or a second
+ * process running it at the same time continues from the mark and never
+ * indexes a row twice. A failed batch rolls back whole and is retried with
+ * backoff; a no-op once complete.
  */
 export async function backfillTaskSearchIndex(
   batchSize = BACKFILL_BATCH_SIZE,
+  {
+    yieldMs = BACKFILL_YIELD_MS,
+    retryBackoffMs = BACKFILL_RETRY_BACKOFF_MS,
+    maxRetries = BACKFILL_MAX_RETRIES,
+  }: TaskSearchBackfillOptions = {},
 ): Promise<{ indexed: number; ms: number }> {
   const client = getDbClient();
   const startedAt = performance.now();
   let indexed = 0;
+  let retries = 0;
   while (!stopRequested) {
-    const done = await client.transaction(async (tx) => {
-      const state = await tx.get<{ indexedThrough: number }>(
-        "SELECT indexedThrough FROM agent_tasks_fts_state WHERE id = 1",
+    let batch: { changes: number; done: boolean };
+    try {
+      batch = await client.transaction(async (tx) => {
+        const state = await tx.get<{ indexedThrough: number }>(
+          "SELECT indexedThrough FROM agent_tasks_fts_state WHERE id = 1",
+        );
+        if (!state || state.indexedThrough >= TASK_FTS_COMPLETE) return { changes: 0, done: true };
+        const last = await tx.get<{ rid: number }>(
+          "SELECT rowid AS rid FROM agent_tasks WHERE rowid > ? ORDER BY rowid LIMIT 1 OFFSET ?",
+          [state.indexedThrough, batchSize - 1],
+        );
+        const through = last?.rid ?? TASK_FTS_COMPLETE;
+        const result = await tx.run(
+          `INSERT INTO agent_tasks_fts(rowid, task, title)
+           SELECT rowid, task, title FROM agent_tasks WHERE rowid > ? AND rowid <= ?`,
+          [state.indexedThrough, through],
+        );
+        await tx.run("UPDATE agent_tasks_fts_state SET indexedThrough = ? WHERE id = 1", [through]);
+        return { changes: result.changes, done: through >= TASK_FTS_COMPLETE };
+      });
+    } catch (err) {
+      if (retries >= maxRetries) throw err;
+      const delayMs = retryBackoffMs[Math.min(retries, retryBackoffMs.length - 1)] ?? 0;
+      retries += 1;
+      console.warn(
+        `[task-fts] backfill batch failed (${(err as Error).message}), retry ${retries} in ${delayMs}ms`,
       );
-      if (!state || state.indexedThrough >= TASK_FTS_COMPLETE) return true;
-      const last = await tx.get<{ rid: number }>(
-        "SELECT rowid AS rid FROM agent_tasks WHERE rowid > ? ORDER BY rowid LIMIT 1 OFFSET ?",
-        [state.indexedThrough, batchSize - 1],
-      );
-      const through = last?.rid ?? TASK_FTS_COMPLETE;
-      const result = await tx.run(
-        `INSERT INTO agent_tasks_fts(rowid, task, title)
-         SELECT rowid, task, title FROM agent_tasks WHERE rowid > ? AND rowid <= ?`,
-        [state.indexedThrough, through],
-      );
-      indexed += result.changes;
-      await tx.run("UPDATE agent_tasks_fts_state SET indexedThrough = ? WHERE id = 1", [through]);
-      return through >= TASK_FTS_COMPLETE;
-    });
-    if (done) break;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+      await pause(delayMs);
+      continue;
+    }
+    retries = 0;
+    indexed += batch.changes;
+    if (batch.done) break;
+    await pause(yieldMs);
   }
   return { indexed, ms: Math.round(performance.now() - startedAt) };
 }
 
 let backfill: Promise<void> | null = null;
 let stopRequested = false;
+let wakeBackfill: (() => void) | null = null;
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Start the backfill once per process, off the boot path. */
-export function startTaskSearchBackfill(): Promise<void> {
+/** A sleep that stopTaskSearchBackfill cuts short. */
+function pause(ms: number): Promise<void> {
+  if (stopRequested) return Promise.resolve();
+  return new Promise((resolve) => {
+    const wake = () => {
+      clearTimeout(timer);
+      if (wakeBackfill === wake) wakeBackfill = null;
+      resolve();
+    };
+    const timer = setTimeout(wake, ms);
+    wakeBackfill = wake;
+  });
+}
+
+/**
+ * Start the backfill once per process, off the boot path. A run that gives up
+ * starts again `resumeMs` later from the watermark, so the index converges
+ * without a restart; search keeps the LIKE fallback until then.
+ */
+export function startTaskSearchBackfill(
+  opts: TaskSearchBackfillOptions & { batchSize?: number; resumeMs?: number } = {},
+): Promise<void> {
+  const { batchSize = BACKFILL_BATCH_SIZE, resumeMs = BACKFILL_RESUME_MS, ...backfillOpts } = opts;
   stopRequested = false;
-  backfill ??= backfillTaskSearchIndex()
+  if (resumeTimer) {
+    clearTimeout(resumeTimer);
+    resumeTimer = null;
+  }
+  backfill ??= backfillTaskSearchIndex(batchSize, backfillOpts)
     .then(({ indexed, ms }) => {
       if (indexed > 0) console.log(`[task-fts] backfill indexed=${indexed} ms=${ms}`);
     })
     .catch((err) => {
-      console.error("[task-fts] backfill failed:", (err as Error).message);
+      if (stopRequested) {
+        console.error("[task-fts] backfill failed:", (err as Error).message);
+        return;
+      }
+      console.error(
+        `[task-fts] backfill failed, resuming in ${resumeMs}ms:`,
+        (err as Error).message,
+      );
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        if (!stopRequested) void startTaskSearchBackfill(opts);
+      }, resumeMs);
+      resumeTimer.unref?.();
     })
     .finally(() => {
       backfill = null;
@@ -152,8 +234,16 @@ export function startTaskSearchBackfill(): Promise<void> {
   return backfill;
 }
 
-/** Stop after the current batch, before SQLite closes. The next start resumes. */
+/**
+ * Stop after the current batch, before SQLite closes, cutting any pause,
+ * retry wait or pending resume short. The next start resumes.
+ */
 export async function stopTaskSearchBackfill(): Promise<void> {
   stopRequested = true;
+  if (resumeTimer) {
+    clearTimeout(resumeTimer);
+    resumeTimer = null;
+  }
+  wakeBackfill?.();
   await backfill;
 }
