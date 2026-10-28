@@ -13,7 +13,7 @@ import {
   isContainerEnginePreference,
   resolveContainerEnginePreference,
 } from "./onboard/container-engine.ts";
-import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
+import { buildOnboardDashboardUrl, maskDashboardUrlApiKey } from "./onboard/dashboard-url.ts";
 import {
   parseMaxConcurrentTasks,
   resolveNonInteractiveProvider,
@@ -311,6 +311,10 @@ export function Onboard({
     const apiUrl = `http://localhost:${state.apiPort || 3013}`;
     // camelCase params — the SPA ignores snake_case (see dashboard-url.ts).
     const dashUrl = buildOnboardDashboardUrl({ apiUrl, apiKey: state.apiKey });
+    // install.sh prints its own (tunnel) setup link after onboard finishes,
+    // so when it runs onboard it sets AGENT_SWARM_INSTALLER=1 and onboard
+    // skips its own Dashboard line instead of printing a second link.
+    const fromInstaller = process.env.AGENT_SWARM_INSTALLER === "1";
     const agentCount = state.services.reduce((sum, s) => sum + s.count, 0);
 
     return (
@@ -331,9 +335,11 @@ export function Onboard({
             <Text>
               API: <Text color="cyan">{apiUrl}</Text>
             </Text>
-            <Text>
-              Dashboard: <Text color="cyan">{dashUrl}</Text>
-            </Text>
+            {!fromInstaller && (
+              <Text>
+                Dashboard: <Text color="cyan">{maskDashboardUrlApiKey(dashUrl)}</Text>
+              </Text>
+            )}
             {agentCount > 0 && <Text>Agents: {agentCount} configured</Text>}
             <Text dimColor>Files: docker-compose.yml, .env, .agent-swarm/config.json</Text>
           </Box>

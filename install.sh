@@ -241,7 +241,10 @@ onboard() {
   local extra=()
   [ "$NO_AGENT_FS" -eq 1 ] && extra+=(--no-agent-fs)
   say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
-  run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
+  # Tell onboard it runs under the installer: onboard then skips its own
+  # Dashboard line, so the install summary below prints the only link
+  # (the /setup link, with the tunnel URL when --tunnel is used).
+  run env AGENT_SWARM_INSTALLER=1 bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
     --container-engine docker ${extra[@]+"${extra[@]}"} </dev/null
 }
 
@@ -502,8 +505,11 @@ main() {
   printf '  API:        %s\n' "$local_url"
   [ -n "$TUNNEL_URL" ] && printf '  Public API: %s\n' "$TUNNEL_URL"
   printf '  Files:      %s\n' "$INSTALL_DIR"
+  # Never print the full API key: the printed link is display-only, so the
+  # key param is masked (apiKey is the last param of the setup link).
+  dash_url_display="${dash_url%%apiKey=*}apiKey=<redacted>"
   printf '\n  Finish setup (harness credentials, integrations) in the dashboard:\n'
-  printf '  %s\n\n' "$dash_url"
+  printf '  %s\n\n' "$dash_url_display"
   printf '  Logs: cd %s && docker compose logs -f\n' "$INSTALL_DIR"
   printf '  Stop: cd %s && docker compose down\n' "$INSTALL_DIR"
 }

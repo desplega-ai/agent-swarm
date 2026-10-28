@@ -27,3 +27,13 @@ export function buildOnboardDashboardUrl(parts: DashboardUrlParts): string {
   const base = (parts.base ?? DEFAULT_DASHBOARD_BASE).replace(/\/+$/, "");
   return `${base}?${params.toString()}`;
 }
+
+/**
+ * Mask the apiKey query param for DISPLAY ONLY (terminal output, logs).
+ * The returned URL must not be used to connect: the key is replaced with
+ * `<redacted>`, so a copied link will not authenticate. URLs without an
+ * apiKey param are returned unchanged.
+ */
+export function maskDashboardUrlApiKey(url: string): string {
+  return url.replace(/([?&]apiKey=)[^&]*/, "$1<redacted>");
+}

@@ -1,6 +1,6 @@
 import { Select } from "@inkjs/ui";
 import { Box, Text } from "ink";
-import { buildOnboardDashboardUrl } from "../dashboard-url.ts";
+import { buildOnboardDashboardUrl, maskDashboardUrlApiKey } from "../dashboard-url.ts";
 import type { StepProps } from "../types.ts";
 
 export function PostDashboardStep({ state, addLog, goToNext }: StepProps) {
@@ -11,7 +11,7 @@ export function PostDashboardStep({ state, addLog, goToNext }: StepProps) {
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold>Open the swarm dashboard?</Text>
-      <Text dimColor>{dashboardUrl}</Text>
+      <Text dimColor>{maskDashboardUrlApiKey(dashboardUrl)}</Text>
       <Box marginTop={1}>
         <Select
           options={[
@@ -24,7 +24,7 @@ export function PostDashboardStep({ state, addLog, goToNext }: StepProps) {
                 await Bun.$`open ${dashboardUrl}`.quiet();
                 addLog("Opened dashboard in browser");
               } catch {
-                addLog(`Open manually: ${dashboardUrl}`);
+                addLog(`Open manually: ${maskDashboardUrlApiKey(dashboardUrl)}`);
               }
             }
             goToNext();
