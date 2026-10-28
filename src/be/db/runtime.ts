@@ -214,17 +214,21 @@ function bootOpenedDb(
         )
         .all();
 
-      database.transaction(() => {
-        database.run("DROP TABLE IF EXISTS agent_tasks_new");
-        database.run(rebuiltSchemaSql);
-        database.run(`INSERT INTO agent_tasks_new (${columns}) SELECT ${columns} FROM agent_tasks`);
-        for (const object of schemaObjects) {
-          if (object.tbl_name !== "agent_tasks") database.run(`DROP TRIGGER "${object.name}"`);
-        }
-        database.run("DROP TABLE agent_tasks");
-        database.run("ALTER TABLE agent_tasks_new RENAME TO agent_tasks");
-        for (const object of schemaObjects) database.run(object.sql);
-      })();
+      database
+        .transaction(() => {
+          database.run("DROP TABLE IF EXISTS agent_tasks_new");
+          database.run(rebuiltSchemaSql);
+          database.run(
+            `INSERT INTO agent_tasks_new (${columns}) SELECT ${columns} FROM agent_tasks`,
+          );
+          for (const object of schemaObjects) {
+            if (object.tbl_name !== "agent_tasks") database.run(`DROP TRIGGER "${object.name}"`);
+          }
+          database.run("DROP TABLE agent_tasks");
+          database.run("ALTER TABLE agent_tasks_new RENAME TO agent_tasks");
+          for (const object of schemaObjects) database.run(object.sql);
+        })
+        .immediate();
 
       database.run("PRAGMA foreign_keys=on");
       console.log("[Migration] Successfully removed CHECK constraint on agent_tasks.status");
