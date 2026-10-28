@@ -44,6 +44,7 @@ import { UsageLayout } from "@/pages/usage/usage-layout";
 // Relative, not `@/`: `routes.test.ts` loads this file under `bun test`.
 import { nav, unlisted } from "../lib/command-palette/route-meta";
 import { RouteRedirect } from "./route-redirect";
+import { SessionsRoute as SessionsPage } from "./sessions-route";
 
 const UnifiedHome = lazyRoute(() => import("@/pages/home/unified-home"));
 const AgentsPage = lazyRoute(() => import("@/pages/agents/page"));
@@ -51,7 +52,6 @@ const AgentDetailPage = lazyRoute(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
 const TaskLineagePage = lazyRoute(() => import("@/pages/tasks/[id]/lineage/page"));
-const SessionsPage = lazyRoute(() => import("@/pages/sessions/page"));
 const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
 const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
