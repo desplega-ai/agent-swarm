@@ -269,6 +269,53 @@ describe("task search over agent_tasks_fts", () => {
     expect(await found("busy")).toHaveLength(7);
   });
 
+  test("waits while the WAL is over its cap, at most walMaxWaitMs per batch", async () => {
+    const client = getDbClient();
+    for (let i = 0; i < 4; i++) await newTask(`paced item number${i}`);
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    const GB = 1024 ** 3;
+    const transaction = client.transaction.bind(client);
+    const events: string[] = [];
+    const spy = spyOn(client, "transaction").mockImplementation((fn, opts) => {
+      events.push("batch");
+      return transaction(fn, opts);
+    });
+    // Read 1 sets the cap from a small WAL. Before batch 1 the WAL is over it
+    // twice, then drops. Before batch 2 it stays over it: the wait times out.
+    const sizes = [0, GB, GB, 0];
+    let reads = 0;
+    const walBytes = () => {
+      const size = sizes[reads] ?? GB;
+      reads += 1;
+      if (size > 0) events.push("wal-high");
+      return size;
+    };
+    try {
+      const result = await backfillTaskSearchIndex(2, {
+        yieldMs: 0,
+        walBytes,
+        walPollMs: 1,
+        walMaxWaitMs: 3,
+      });
+      expect(result.indexed).toBe(4);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(events.slice(0, 7)).toEqual([
+      "wal-high",
+      "wal-high",
+      "batch",
+      "wal-high",
+      "wal-high",
+      "wal-high",
+      "batch",
+    ]);
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
+    await expectIndexInSync();
+  });
+
   test("a run that gives up resumes from the watermark until the index is complete", async () => {
     const client = getDbClient();
     for (let i = 0; i < 5; i++) await newTask(`stuck item number${i}`);

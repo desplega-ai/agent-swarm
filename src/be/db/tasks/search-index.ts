@@ -10,15 +10,26 @@ export const TASK_FTS_COMPLETE = Number.MAX_SAFE_INTEGER;
 const ROWID_SET_MAX = 500;
 
 // Rows per backfill transaction. A task averages about 16 KB of text, so a
-// batch holds the write lock and the event loop for tens of milliseconds.
-const BACKFILL_BATCH_SIZE = 100;
+// batch holds the write lock and the event loop for a few milliseconds.
+const BACKFILL_BATCH_SIZE = 50;
 
-// Pause between batches. Back to back, the batches wrote hundreds of MB of
-// index pages to the WAL in about a minute. Past ~500 MB, litestream forces a
-// TRUNCATE checkpoint that holds the write lock for minutes, and every writer
-// in the process failed with "database is locked". The pause leaves the lock
-// to other writers and lets passive checkpoints keep up.
+// Pause between batches, so other writers get the lock between them.
 const BACKFILL_YIELD_MS = 250;
+
+// WAL guard. Back to back, the batches wrote hundreds of MB of index pages to
+// the WAL within a minute. Past ~500 MB, litestream forces a TRUNCATE
+// checkpoint that holds the write lock, and every writer in the process got
+// "database is locked". So before each batch the backfill waits while the
+// `-wal` file is over a cap. The file shrinks only on a truncate, so a size
+// left over from earlier traffic is not growth: the cap sits
+// BACKFILL_WAL_HEADROOM_BYTES above the size at start, clamped to 150-400 MB.
+// A batch waits at most BACKFILL_WAL_MAX_WAIT_MS, so a WAL that never shrinks
+// slows the backfill down instead of stalling it.
+const BACKFILL_WAL_MIN_CAP_BYTES = 150 * 1024 * 1024;
+const BACKFILL_WAL_MAX_CAP_BYTES = 400 * 1024 * 1024;
+const BACKFILL_WAL_HEADROOM_BYTES = 64 * 1024 * 1024;
+const BACKFILL_WAL_POLL_MS = 5_000;
+const BACKFILL_WAL_MAX_WAIT_MS = 60_000;
 
 // Waits before retrying a failed batch, usually SQLITE_BUSY that outlasted the
 // db-client's own ~11s retry budget. The last delay repeats. After
@@ -32,6 +43,10 @@ export type TaskSearchBackfillOptions = {
   yieldMs?: number;
   retryBackoffMs?: number[];
   maxRetries?: number;
+  /** Size of the `-wal` file in bytes. Defaults to a stat of the main DB's WAL. */
+  walBytes?: () => number;
+  walPollMs?: number;
+  walMaxWaitMs?: number;
 };
 
 /**
@@ -131,13 +146,26 @@ export async function backfillTaskSearchIndex(
     yieldMs = BACKFILL_YIELD_MS,
     retryBackoffMs = BACKFILL_RETRY_BACKOFF_MS,
     maxRetries = BACKFILL_MAX_RETRIES,
+    walBytes,
+    walPollMs = BACKFILL_WAL_POLL_MS,
+    walMaxWaitMs = BACKFILL_WAL_MAX_WAIT_MS,
   }: TaskSearchBackfillOptions = {},
 ): Promise<{ indexed: number; ms: number }> {
   const client = getDbClient();
   const startedAt = performance.now();
+  const readWalBytes = walBytes ?? (await mainWalBytesReader());
+  const walCap = Math.min(
+    BACKFILL_WAL_MAX_CAP_BYTES,
+    Math.max(BACKFILL_WAL_MIN_CAP_BYTES, readWalBytes() + BACKFILL_WAL_HEADROOM_BYTES),
+  );
   let indexed = 0;
   let retries = 0;
   while (!stopRequested) {
+    for (let waited = 0; waited < walMaxWaitMs && readWalBytes() > walCap; waited += walPollMs) {
+      await pause(walPollMs);
+      if (stopRequested) break;
+    }
+    if (stopRequested) break;
     let batch: { changes: number; done: boolean };
     try {
       batch = await client.transaction(async (tx) => {
@@ -174,6 +202,16 @@ export async function backfillTaskSearchIndex(
     await pause(yieldMs);
   }
   return { indexed, ms: Math.round(performance.now() - startedAt) };
+}
+
+/** Reads the main database's `-wal` size; always 0 for an in-memory DB. */
+async function mainWalBytesReader(): Promise<() => number> {
+  const main = await getDbClient().get<{ file: string }>(
+    "SELECT file FROM pragma_database_list WHERE name = 'main'",
+  );
+  if (!main?.file) return () => 0;
+  const wal = `${main.file}-wal`;
+  return () => Bun.file(wal).size;
 }
 
 let backfill: Promise<void> | null = null;
