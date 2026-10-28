@@ -74,7 +74,7 @@ The agent's Slack messages use a separate icon, so an agent can keep its dashboa
 { "slackIcon": { "type": "url", "url": "https://example.com/owl.png" } }
 ```
 
-An emoji is a Slack shortcode such as `:owl:` or a custom workspace emoji. A URL must be `https` with no username or password. Slack fetches the image itself, so it must be publicly reachable; if Slack cannot load it, the message shows the app icon. Pass `"slackIcon": null` to restore the default: `:crown:` for the lead and an emoji picked from the name for workers. A change applies to new messages only.
+Every message the agent posts uses it, including streamed replies. An emoji is a Slack shortcode such as `:owl:`. A URL must be `https` with no username or password. Slack fetches the image when the message is posted and stores its own copy, so the link must be publicly reachable then. A broken link does not stop the post: the message falls back to the Slack app's icon. Editing a message keeps the icon it was posted with, and a change to the setting applies to new messages only. Pass `"slackIcon": null` to restore the default: `:crown:` for the lead and an emoji picked from the name for workers.
 
 ### Version History
 

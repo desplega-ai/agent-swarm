@@ -26,7 +26,7 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`, `member_joined_channel`, `channel_shared`, `channel_unshared`
 7. Install to your workspace and copy tokens
 
-`chat:write.customize` lets each agent post under its own name and [Slack icon](/docs/architecture/agents#slack-icon).
+`chat:write.customize` lets each agent post under its own name and [Slack icon](/docs/architecture/agents#slack-icon), including streamed replies.
 
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
 
