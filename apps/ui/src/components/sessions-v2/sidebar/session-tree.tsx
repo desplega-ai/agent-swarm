@@ -46,6 +46,7 @@ import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { useSessionsFilter } from "@/lib/sessions-show";
 import { SESSIONS_TOAST_POSITION, type SessionSection, userName } from "@/lib/sessions-v2";
+import { cn } from "@/lib/utils";
 import { MobileBulkBar } from "../mobile/mobile-bulk-bar";
 import { MobileTreeBody } from "../mobile/mobile-tree-body";
 import { useListKeys } from "../use-list-keys";
@@ -167,7 +168,14 @@ export function SessionTree({
   /** The group whose name is an input. */
   const [renaming, setRenaming] = useState<string | null>(null);
   const searching = query.trim() !== "";
-  const treeRows = useTreeRows({ me, myGroups, isOpen, expanded, creating, paused: searching });
+  const { rows: treeRows, updating } = useTreeRows({
+    me,
+    myGroups,
+    isOpen,
+    expanded,
+    creating,
+    paused: searching,
+  });
   useEffect(() => {
     if (groups) prune(groups);
   }, [groups, prune]);
@@ -762,14 +770,19 @@ export function SessionTree({
           aria-label={searching ? "Search results" : "Sessions"}
           aria-multiselectable
           aria-activedescendant={cursorRow ? domId(cursorRow.key) : undefined}
-          aria-busy={rows.some((row) => row.type === "loading") || undefined}
+          aria-busy={
+            (!search.active && updating) || rows.some((row) => row.type === "loading") || undefined
+          }
           tabIndex={0}
           data-kb={keyboard ? "true" : undefined}
           onKeyDown={onTreeKeyDown}
           onFocus={cursor.onFocus}
           onBlur={cursor.onBlur}
           onPointerDown={onTreePointerDown}
-          className="group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none"
+          className={cn(
+            "group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none transition-opacity",
+            !search.active && updating && "opacity-60",
+          )}
         >
           {segmentsOf(rows).map(({ section, rows: segmentRows }) =>
             section ? (

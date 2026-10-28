@@ -4,7 +4,7 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { getSessionsShow, type SessionsShow } from "../../lib/sessions-show";
 import { sidebarListParams } from "../../lib/sessions-v2";
 import type {
@@ -16,6 +16,7 @@ import type {
 } from "../types";
 import {
   SESSION_LIST_KEY,
+  SESSION_TREE_KEY,
   type SessionListParams,
   sessionDetailKey,
   sessionListKey,
@@ -282,4 +283,50 @@ export function rollBackTriageCaches(queryClient: QueryClient, context: TriageCo
       detail && detail.readState === patch.readState ? { ...detail, readState: before } : detail,
     );
   }
+}
+
+/** What the triage writes in flight since the last refetch need refetched. */
+interface PendingRefresh {
+  /** A write other than "read" settled: refetch every list. */
+  all: boolean;
+  /** The list pages that held a row a "read" write changed, by key hash. */
+  lists: Map<string, QueryKey>;
+}
+
+const pendingRefresh = new WeakMap<QueryClient, PendingRefresh>();
+
+/**
+ * The refetch after a triage write settles, once no other write is in
+ * flight (`othersInFlight`). A refetch after an early write would bring
+ * back rows that a later write already changed, so the writes in between
+ * only add to what the last one refetches.
+ *
+ * Opening an unread session marks it read, so "read" is the common write.
+ * It changes no list's membership except lists that held the row (an
+ * Unread list drops it), and the rows already show it. So it refetches
+ * the tree (its counts) and only those lists. Every other write refetches
+ * every list: a row can arrive in a list that never held it.
+ */
+export function refreshAfterTriage(
+  queryClient: QueryClient,
+  action: TriageAction,
+  context: TriageContext | undefined,
+  othersInFlight: boolean,
+) {
+  const pending = pendingRefresh.get(queryClient) ?? { all: false, lists: new Map() };
+  pendingRefresh.set(queryClient, pending);
+  if (action.kind === "read" && context) {
+    for (const { key } of context.changes) pending.lists.set(hashKey(key), key);
+  } else pending.all = true;
+  if (othersInFlight) return;
+  pendingRefresh.delete(queryClient);
+  void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
+  if (pending.all) void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  else {
+    for (const key of pending.lists.values()) {
+      void queryClient.invalidateQueries({ queryKey: key, exact: true });
+    }
+  }
+  // The dashboard inbox (and the pane's Later wake time) read the same rows.
+  void queryClient.invalidateQueries({ queryKey: ["inbox-state"] });
 }

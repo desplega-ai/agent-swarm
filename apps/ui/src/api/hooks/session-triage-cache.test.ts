@@ -4,7 +4,11 @@ import { setSessionsShow } from "../../lib/sessions-show";
 import { sidebarListParams } from "../../lib/sessions-v2";
 import type { SessionListItem, SessionsListResponse, SessionTreeResponse } from "../types";
 import { sessionListKey, sessionListParams, sessionTreeKey } from "./session-query-keys";
-import { patchTriageCaches, rollBackTriageCaches } from "./session-triage-cache";
+import {
+  patchTriageCaches,
+  refreshAfterTriage,
+  rollBackTriageCaches,
+} from "./session-triage-cache";
 
 const USER = "user-1";
 
@@ -101,5 +105,44 @@ describe("patchTriageCaches", () => {
 
     expect(ids(client, sectionKey("done", "mine"))).toEqual(["a"]);
     expect(ids(client, sectionKey("done", "all"))).toEqual(["a"]);
+  });
+});
+
+describe("refreshAfterTriage", () => {
+  const invalidated = (client: QueryClient, key: readonly unknown[]) =>
+    client.getQueryState(key)?.isInvalidated ?? false;
+
+  function seeded() {
+    const client = new QueryClient();
+    client.setQueryData(sessionTreeKey(USER, "mine"), tree(0));
+    client.setQueryData(sectionKey("inbox", "mine"), page(row("a", "2026-10-22T10:00:00.000Z")));
+    client.setQueryData(sectionKey("done", "mine"), page(row("b", "2026-10-22T09:00:00.000Z")));
+    return client;
+  }
+
+  // Opening a session used to refetch the tree and every list after the
+  // mark-read write, each one a slow chain walk on the server.
+  test("a read refetches the tree and only the lists that held the row", () => {
+    const client = seeded();
+    const context = patchTriageCaches(client, USER, new Set(["a"]), { kind: "read" });
+    refreshAfterTriage(client, { kind: "read" }, context, false);
+
+    expect(invalidated(client, sessionTreeKey(USER, "mine"))).toBe(true);
+    expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(true);
+    expect(invalidated(client, sectionKey("done", "mine"))).toBe(false);
+  });
+
+  test("a write in flight defers the refetch, and any non-read write refetches every list", () => {
+    const client = seeded();
+    const read = patchTriageCaches(client, USER, new Set(["a"]), { kind: "read" });
+    refreshAfterTriage(client, { kind: "read" }, read, true);
+    expect(invalidated(client, sessionTreeKey(USER, "mine"))).toBe(false);
+    expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(false);
+
+    const done = patchTriageCaches(client, USER, new Set(["b"]), { kind: "inbox" });
+    refreshAfterTriage(client, { kind: "inbox" }, done, false);
+    expect(invalidated(client, sessionTreeKey(USER, "mine"))).toBe(true);
+    expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(true);
+    expect(invalidated(client, sectionKey("done", "mine"))).toBe(true);
   });
 });
