@@ -1,7 +1,9 @@
 # Railway template
 
-Everything needed to create the Agent Swarm Railway template in one pass. The template does not
-exist yet: a person with the desplega Railway workspace creates and publishes it.
+Everything needed to create the Agent Swarm Railway template in one pass. The live template is
+[`railway.com/deploy/agent-swarm`](https://railway.com/deploy/agent-swarm):
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/agent-swarm)
 
 ## Why there is no template file
 
@@ -175,6 +177,6 @@ and turn on automatic image updates in each service's settings. Railway supports
 1. In the desplega Railway workspace, create the template from this page.
 2. Deploy it once on a Hobby workspace. Check that `api` is healthy, that the `/setup` link connects,
    and that the lead and both coders appear in the dashboard.
-3. Publish it to the marketplace. Then replace the Railway placeholder in the
-   [one-click deploy guide](https://docs.agent-swarm.dev/docs/guides/one-click-deploy) with the
-   "Deploy on Railway" button for `https://railway.com/deploy/<code>`.
+3. Publish it to the marketplace. The template URL is `https://railway.com/deploy/agent-swarm`; the
+   [one-click deploy guide](https://docs.agent-swarm.dev/docs/guides/one-click-deploy), the root
+   README and the dashboard `/setup` step link to it.

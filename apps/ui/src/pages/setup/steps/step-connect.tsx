@@ -21,10 +21,9 @@ import { useConfig } from "@/hooks/use-config";
 import { connectionName } from "@/lib/config";
 import { needsLocalNetworkPermission, withAddressSpace } from "@/lib/local-network";
 import { httpUrlError } from "../components/http-url";
+import { DEPLOY_GUIDE_URL } from "../components/install-prompt-card";
 import { DEFAULT_SWARM_NAME, swarmDisplayName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
-
-const DEPLOY_GUIDE_URL = "https://docs.agent-swarm.dev/docs/guides/one-click-deploy";
 
 export interface StepConnectProps {
   /** Null until a connection exists (the shell renders step 1 before any API call works). */

@@ -13,7 +13,7 @@ Pick a server option, wait for the first boot, then open the dashboard `/setup` 
 |---|---|---|---|---|
 | [Cloud-init on any VPS](#cloud-init-on-any-vps) | Paste one file when you create the server | Caddy, on `<ip>.sslip.io` or your domain | About $10/month (Hetzner CX33), $48 (DigitalOcean) | Available |
 | [DigitalOcean 1-Click](#digitalocean-1-click) | Click "Deploy to DigitalOcean" | Same as cloud-init | $48/month | Not listed yet |
-| [Railway template](#railway-template) | Click "Deploy on Railway" | Railway | About $30-60/month, Hobby plan | Not published yet |
+| [Railway template](#railway-template) | Click "Deploy on Railway" | Railway | About $30-60/month, Hobby plan | Available |
 | [A Docker host you already have](/docs/getting-started#option-a-onboard-wizard-recommended) | `curl -fsSL https://agent-swarm.dev/install.sh \| bash` | localtunnel, or your proxy with `--public-url` | Your server | Available |
 
 The default stack (a lead, 10 workers, agent-fs and TEI) needs at least **4 vCPU, 8 GB RAM and
@@ -87,10 +87,10 @@ and runs the same first boot as cloud-init. Until the listing is live, create a 
 
 ## Railway template
 
-{/* PLACEHOLDER(one-click): replace this paragraph with the "Deploy on Railway" button once the template is published. Spec: deploy/railway/README.md. */}
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/agent-swarm)
 
-Not published yet. The template runs the API, agent-fs, TEI, a lead and 2 coders, one volume each,
-and needs the Hobby plan. Railway serves the API over HTTPS. The full service list is in
+The template runs the API, agent-fs, TEI, a lead and 2 coders, one volume each, and needs the
+Hobby plan. Railway serves the API over HTTPS. The full service list is in
 [`deploy/railway/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/deploy/railway/README.md).
 
 ## Try it for an hour on E2B
