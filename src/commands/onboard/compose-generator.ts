@@ -14,6 +14,11 @@ const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
 // which moves on every commit to main; operators pin a release in .env.
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const IMAGE_TAG_EXPRESSION = "${AGENT_SWARM_VERSION:-latest}";
+// Host address for published ports, from AGENT_SWARM_BIND_ADDRESS in .env. Blank
+// publishes on every interface, as before. 127.0.0.1 keeps the ports behind a host
+// reverse proxy: Docker-published ports bypass host firewalls such as ufw.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const BIND_ADDRESS_PREFIX = "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_API_KEY = "      - API_KEY=${API_KEY}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
@@ -275,7 +280,7 @@ export function generateCompose(state: OnboardState): string {
 
   lines.push("");
   lines.push("    ports:");
-  lines.push(`      - "${port}:3013"`);
+  lines.push(`      - "${BIND_ADDRESS_PREFIX}${port}:3013"`);
   lines.push("");
   lines.push("    volumes:");
   lines.push("      - swarm_data:/app/data");
@@ -353,7 +358,7 @@ export function generateCompose(state: OnboardState): string {
 
     lines.push("");
     lines.push("    ports:");
-    lines.push(`      - "${port}:3000"`);
+    lines.push(`      - "${BIND_ADDRESS_PREFIX}${port}:3000"`);
     lines.push("");
     lines.push("    volumes:");
     // Same targets as docker-compose.example.yml: the worker logs to /logs and

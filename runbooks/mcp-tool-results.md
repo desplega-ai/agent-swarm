@@ -66,10 +66,11 @@ Ctx-control stores the full canonical, scrubbed outcome directly through the API
   ownership for this namespace family; another authenticated agent cannot get,
   list, overwrite, increment, or delete an agent's spill rows.
 - **Key:** `v1/<sanitized-tool-name>/<sha256(canonical-payload)>`. Identical scrubbed outcomes reuse the same deterministic key and refresh its TTL.
-- **TTL:** 24 hours. Before every spill, the middleware proactively deletes
-  expired rows across the entire `mcp:overflow:*` namespace family, including
-  rows owned by inactive agents; point reads retain the KV store's normal
-  lazy-expiry behavior.
+- **TTL:** 24 hours. A 10-minute API timer (`src/be/mcp-overflow-sweep.ts`)
+  deletes expired rows across the entire `mcp:overflow:*` namespace family,
+  including rows owned by inactive agents. It runs off the spill path, so the
+  DELETE never adds latency to a tool call. Point reads retain the KV store's
+  normal lazy-expiry behavior.
 - **Value:** raw string JSON containing `{ version, toolName, outcome }`, including full `details`/`data`/`nudge`. The KV table itself has no declared `TEXT` size constraint; the public KV PUT surfaces impose a separate 2 MiB request cap, which does not apply to this direct server-side write.
 
 The wire replacement keeps `message` and `nudge` on both channels. The pointer appears once per channel: the text channel ends with one `Full value: kv://…` line and one `Retrieval:` line; `structuredContent` carries only the `truncation` object (never a copy of the pointer inside `details`). For array-shaped structured data, ctx-control preserves the array key and finds the largest leading element prefix that fits, sizing arrays against a 1,200-char prose floor and then growing the prose preview into the budget left over. In this path `details` stays out of `structuredContent` (it carries the shortened data itself), so the text preview and the structured array each fill their own channel. It also rewrites or augments the human message with the surviving count, so callers cannot confuse a shortened array with a genuine full or empty result. Tool-authored prose keeps the largest prefix that fits the per-channel budget (binary search on characters, never splitting a surrogate pair) plus a `… [truncated N chars]` marker. Oversized `data` with no array to shorten is omitted from `structuredContent` as a complete unit (a cut JSON value there would read as a real one); the text and structured `details` instead carry a labelled `JSON payload head:` prefix of its pretty-printed rendering, filled to the budget. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.

@@ -1,0 +1,109 @@
+---
+title: One-click deploy
+description: Run Agent Swarm on a cloud server with HTTPS from one cloud-init paste, plus the DigitalOcean, Railway and E2B options
+agent:
+  offer: true
+  when: "Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS"
+---
+
+Pick a server option, wait for the first boot, then open the dashboard `/setup` link it gives you.
+`/setup` adds your harness credentials and integrations, so no option asks for them up front.
+
+| Option | You do | HTTPS | Cost | Status |
+|---|---|---|---|---|
+| [Cloud-init on any VPS](#cloud-init-on-any-vps) | Paste one file when you create the server | Caddy, on `<ip>.sslip.io` or your domain | About $10/month (Hetzner CX33), $48 (DigitalOcean) | Available |
+| [DigitalOcean 1-Click](#digitalocean-1-click) | Click "Deploy to DigitalOcean" | Same as cloud-init | $48/month | Not listed yet |
+| [Railway template](#railway-template) | Click "Deploy on Railway" | Railway | About $30-60/month, Hobby plan | Available |
+| [A Docker host you already have](/docs/getting-started#option-a-onboard-wizard-recommended) | `curl -fsSL https://agent-swarm.dev/install.sh \| bash` | localtunnel, or your proxy with `--public-url` | Your server | Available |
+
+The default stack (a lead, 10 workers, agent-fs and TEI) needs at least **4 vCPU, 8 GB RAM and
+40 GB of disk**. Only the `solo` preset fits 2 vCPU / 4 GB. See
+[Host requirements](/docs/guides/host-requirements).
+
+## Cloud-init on any VPS
+
+[`deploy/cloud-init.yaml`](https://github.com/desplega-ai/agent-swarm/blob/main/deploy/cloud-init.yaml)
+turns a fresh Ubuntu 24.04 or Debian 12 server into a running swarm. On first boot it:
+
+1. Sets Docker's default address for published ports to 127.0.0.1, then installs Docker Engine
+   with Compose v2, Caddy and ufw.
+2. Opens only ports 22, 80 and 443.
+3. Points Caddy at `<public-ip>.sslip.io` (for example `203-0-113-7.sslip.io`), or at your
+   domain. Caddy gets the certificate from Let's Encrypt.
+4. Runs `install.sh --no-tunnel --public-url https://<host> --bind 127.0.0.1`. The swarm sets
+   `PUBLIC_MCP_BASE_URL` to the HTTPS address and publishes its ports on 127.0.0.1 only.
+5. Writes the dashboard `/setup` link to `/root/agent-swarm-setup-link.txt` and shows it when
+   root logs in.
+
+To use it:
+
+1. Create a server with at least 4 vCPU and 8 GB RAM on Ubuntu 24.04.
+2. Paste the whole file into the user data field: **Cloud config** on Hetzner, **User data** on
+   DigitalOcean, Vultr and Akamai, **Launch script** on Lightsail. Keep ports 80 and 443 open in
+   the provider's firewall, if it has one.
+3. Wait about 10 minutes, then `ssh root@<server-ip>`. The login message shows the `/setup` link.
+   To follow the first boot: `tail -f /var/log/agent-swarm-deploy.log`.
+
+Hetzner can fetch the file instead of a paste. Put this in **Cloud config**:
+
+```text
+#include
+https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/deploy/cloud-init.yaml
+```
+
+### Your own domain
+
+Point an A record at the server, then set `SWARM_DOMAIN` near the top of the file before you
+paste it:
+
+```yaml
+      SWARM_DOMAIN=swarm.example.com
+```
+
+The same block takes `SWARM_PRESET` (`full` by default) and any `AGENT_SWARM_*` installer
+variable, such as `AGENT_SWARM_CLI_VERSION`.
+
+### Security
+
+- Docker-published ports skip ufw. Before the first container starts, the installer sets
+  `127.0.0.1` as the default host address of the stack's Docker network (in
+  `docker-compose.override.yml`), so every port the swarm publishes listens on loopback, whatever
+  agent-swarm CLI release npm serves. Port 3013 is reachable only through Caddy. If a port still
+  ends up on a public interface, the script stops the stack and fails instead of exposing it.
+- The API key stays in root-only files: `/root/agent-swarm/.env`, the setup link file and
+  `/var/log/agent-swarm-deploy.log`. The first boot never prints it to the console or to
+  cloud-init's log, and the login message shows it to root only.
+- Data lives in Docker volumes on the server's disk. They survive reboots and upgrades. Back them
+  up with your provider's snapshots.
+
+## DigitalOcean 1-Click
+
+{/* PLACEHOLDER(one-click): replace this paragraph with the "Deploy to DigitalOcean" button once the Marketplace listing is approved. Image: deploy/digitalocean. */}
+
+Not listed yet. The image is built from
+[`deploy/digitalocean`](https://github.com/desplega-ai/agent-swarm/tree/main/deploy/digitalocean)
+and runs the same first boot as cloud-init. Until the listing is live, create a Droplet
+(4 vCPU / 8 GB, $48/month) and paste the cloud-init file as its user data.
+
+## Railway template
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/agent-swarm)
+
+The template runs the API, agent-fs, TEI, a lead and 2 coders, one volume each, and needs the
+Hobby plan. Railway serves the API over HTTPS. The full service list is in
+[`deploy/railway/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/deploy/railway/README.md).
+
+## Try it for an hour on E2B
+
+This is a trial, not a deployment. The swarm runs in E2B sandboxes, and everything in it, including
+the database, is deleted when the sandboxes stop: after one hour by default (`--timeout-sec`), and
+at most 1 hour on E2B's Hobby tier or 24 hours on Pro. You pay E2B for the sandbox time.
+
+```bash
+export E2B_API_KEY=e2b_...
+bunx @desplega.ai/agent-swarm e2b start-stack --yes --swarm demo --workers 2 --api-key "$(openssl rand -hex 16)"
+bunx @desplega.ai/agent-swarm e2b swarms info demo --reveal-key
+```
+
+`swarms info --reveal-key` prints the dashboard link with the API key filled in. See the
+[CLI reference](/docs/reference/cli#e2b).

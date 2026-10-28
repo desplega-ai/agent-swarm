@@ -181,7 +181,7 @@ export function Breadcrumbs() {
   if (segments.length === 0) {
     return (
       <span className="min-w-0 truncate text-sm font-medium text-foreground">
-        {user?.name ? `Welcome back, ${user.name}` : "Welcome to Agent Swarm"}
+        {user?.name ? `Hi, ${user.name}` : "Welcome to Agent Swarm"}
       </span>
     );
   }

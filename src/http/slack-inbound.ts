@@ -22,6 +22,7 @@ const OutcomeCountersSchema = z.object({
   ignored: z.number(),
   failed: z.number(),
   uncertain: z.number(),
+  ackNotReady: z.number(),
   lastOutcomeAt: z.string().nullable(),
   lastFailure: FailureSchema,
 });

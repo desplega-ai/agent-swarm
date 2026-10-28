@@ -71,7 +71,7 @@ const cases: {
     params: [],
     ids: ["a"],
   },
-  { name: "search", filters: { search: "b" }, params: ["%b%", "%b%"], ids: ["b"] },
+  { name: "search", filters: { search: "b" }, params: ["%b%", "%b%", "%b%"], ids: ["b"] },
   {
     name: "combined ordering",
     filters: {
@@ -85,6 +85,7 @@ const cases: {
     params: [
       "pending",
       "completed",
+      "%needle%",
       "%needle%",
       "%needle%",
       "feature",
@@ -143,6 +144,19 @@ for (const { name, filters, params, ids, total } of cases) {
     }
   });
 }
+
+test("search matches the title as well as the prompt and id", async () => {
+  await db
+    .getDbClient()
+    .run("UPDATE agent_tasks SET title = 'Deploy', task = 'Investigate database' WHERE id = 'b'");
+  for (const search of ["Deploy", "database"]) {
+    expect((await db.getAllTasks({ search })).map((task) => task.id)).toEqual(["b"]);
+    expect((await db.getAllTasks({ search }, { slim: true })).map((task) => task.id)).toEqual([
+      "b",
+    ]);
+    expect(await db.getTasksCount({ search })).toBe(1);
+  }
+});
 
 test("facade dependency callback preserves post-pagination readiness and propagates errors", async () => {
   await db.getDbClient().run("UPDATE agent_tasks SET dependsOn = '[\"a\"]' WHERE id = 'c'");

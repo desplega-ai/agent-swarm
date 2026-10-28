@@ -9,6 +9,8 @@
 export const AGENT_FS_REPO = "desplega-ai/agent-fs";
 export const AGENT_FS_IMAGE = "desplega-ai/agent-fs";
 export const AGENT_FS_NPM_PACKAGE = "@desplega.ai/agent-fs";
+/** just-bash adapter the scripts runtime mounts `/afs` with; released in lockstep with agent-fs. */
+export const AGENT_FS_ADAPTER_NPM_PACKAGE = "@desplega.ai/agent-fs-just-bash";
 /** Path inside the agent-fs repo that `npx skills add ... --skill agent-fs` resolves. */
 export const AGENT_FS_SKILL_PATH = "skills/agent-fs/SKILL.md";
 

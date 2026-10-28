@@ -104,6 +104,40 @@ export function isWordMatch(match: Match | null): match is Match {
   return match !== null && match.score > FUZZY_SCORE;
 }
 
+/** A search hit the palette ranks. */
+export interface Rankable {
+  title: string;
+  detail?: string;
+  keywords?: readonly string[];
+  /**
+   * The server matched this row on text the row does not carry (a prompt past
+   * its preview): keep it when the client matcher misses, ranked last. Only
+   * an answer to the current query may set it, never a placeholder.
+   */
+  serverMatched?: boolean;
+}
+
+/**
+ * Orders a provider's hits by `matchText`. With `clientMatch`, a hit the
+ * matcher misses is dropped unless it is `serverMatched`. Without it (content
+ * hits), every hit is kept in server order.
+ */
+export function rankResults<T extends Rankable>(
+  results: readonly T[],
+  query: string,
+  clientMatch: boolean,
+): Array<{ result: T; match: Match }> {
+  const out: Array<{ result: T; match: Match }> = [];
+  for (const result of results) {
+    const match = matchText(result.title, query, [result.detail ?? "", ...(result.keywords ?? [])]);
+    if (match) out.push({ result, match });
+    // Matched on the server; keep it, with no title highlight.
+    else if (!clientMatch || result.serverMatched)
+      out.push({ result, match: { score: 0, ranges: [] } });
+  }
+  return clientMatch ? out.sort((a, b) => b.match.score - a.match.score) : out;
+}
+
 /** Splits `text` into plain and highlighted parts. */
 export function highlightParts(text: string, ranges: readonly Range[]) {
   const parts: { text: string; hit: boolean }[] = [];

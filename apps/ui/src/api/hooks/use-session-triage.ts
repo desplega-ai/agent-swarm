@@ -6,9 +6,11 @@ import { getSessionsShow, getSessionsShownSources } from "@/lib/sessions-show";
 import { plural, SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { InboxItemStatus } from "../types";
-import { SESSION_LIST_KEY, SESSION_TREE_KEY, sessionDetailKey } from "./session-query-keys";
+import { SESSION_TREE_KEY } from "./session-query-keys";
 import {
+  cancelForTriage,
   patchTriageCaches,
+  refreshAfterTriage,
   rollBackTriageCaches,
   type TriageAction,
   type TriageContext,
@@ -97,16 +99,9 @@ export function useSessionTriage() {
     },
     onMutate: async ({ targets, action }) => {
       const ids = new Set(targets.map((target) => target.rootId));
-      // Only this user's caches: the rows carry this user's read state. A
-      // poll that started before the write would bring the old state back.
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: [...SESSION_LIST_KEY, userId ?? null] }),
-        queryClient.cancelQueries({ queryKey: [...SESSION_TREE_KEY, userId ?? null] }),
-        ...[...ids].map((id) =>
-          queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId ?? null) }),
-        ),
-      ]);
-      return patchTriageCaches(queryClient, userId ?? null, ids, action);
+      // Only this user's caches: the rows carry this user's read state.
+      const interrupted = await cancelForTriage(queryClient, userId ?? null, ids);
+      return { ...patchTriageCaches(queryClient, userId ?? null, ids, action), interrupted };
     },
     onError: (error, _variables, context) => {
       if (context) rollBackTriageCaches(queryClient, context);
@@ -115,7 +110,7 @@ export function useSessionTriage() {
         position: SESSIONS_TOAST_POSITION,
       });
     },
-    onSettled: (_data, _error, { targets }) => {
+    onSettled: (_data, _error, { targets, action }, context) => {
       // Each session's detail refetches once no other write to it is in
       // flight (this write still counts), so a fast toggle never shows the
       // first answer over the second.
@@ -129,14 +124,14 @@ export function useSessionTriage() {
         });
         if (writes <= 1) void queryClient.invalidateQueries({ queryKey: ["session", rootId] });
       }
-      // Fast triage (keys, the bulk bar) overlaps writes. A refetch after an
-      // early one would bring back rows that a later write already changed,
-      // and the rows would flicker. Refetch once, after the last one.
-      if (queryClient.isMutating({ mutationKey: TRIAGE_MUTATION_KEY }) > 1) return;
-      void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
-      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      // The dashboard inbox (and the pane's Later wake time) read the same rows.
-      void queryClient.invalidateQueries({ queryKey: ["inbox-state"] });
+      // Fast triage (keys, the bulk bar) overlaps writes. Refetch once,
+      // after the last one, so the rows never flicker.
+      refreshAfterTriage(
+        queryClient,
+        action,
+        context,
+        queryClient.isMutating({ mutationKey: TRIAGE_MUTATION_KEY }) > 1,
+      );
     },
   });
 

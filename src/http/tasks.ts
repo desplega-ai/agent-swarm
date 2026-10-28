@@ -89,6 +89,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { createListTotalCache } from "./list-total-cache";
 import {
   agentFirstPrincipal,
   authUserId,
@@ -229,6 +230,8 @@ const SupersedeTaskResponseSchema = z.object({
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+const taskTotals = createListTotalCache();
 
 const listTasks = route({
   method: "get",
@@ -1025,8 +1028,10 @@ export async function handleTasks(
           ? await getAllTasks(filters, { fields: "timeline" })
           : await getAllTasks(filters, { slim: true });
     // The COUNT(*) re-scans every matching row, so only pagers pay for it.
+    // Page 1 counts; later pages reuse that count for 30 s.
     if (parsed.query.includeTotal === "true") {
-      const total = await getTasksCount(filters);
+      const { limit: _limit, offset: _offset, orderBy: _orderBy, ...totalKey } = filters;
+      const total = await taskTotals.get(totalKey, filters.offset, () => getTasksCount(filters));
       listTasks.respond(res, 200, { tasks, total });
     } else {
       listTasks.respond(res, 200, { tasks });

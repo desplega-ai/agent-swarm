@@ -46,9 +46,24 @@ async function isExternalAssistantThread(
   return true;
 }
 
-export function createAssistant(): Assistant {
+type ThreadContextStore = NonNullable<
+  ConstructorParameters<typeof Assistant>[0]["threadContextStore"]
+>;
+
+/** `threadContextStore` replaces Bolt's metadata-backed default, which calls the Slack API. */
+export function createAssistant(
+  options: { threadContextStore?: ThreadContextStore } = {},
+): Assistant {
   return new Assistant({
+    ...(options.threadContextStore ? { threadContextStore: options.threadContextStore } : {}),
     threadStarted: async ({ event, body, client, say, setSuggestedPrompts, saveThreadContext }) => {
+      // The greeting is not idempotent: a redelivery after a tolerated socket ack
+      // failure must not post it twice.
+      const eventId = body?.event_id;
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return ignoreSlackInbound("duplicate_event");
+      }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
         return ignoreSlackInbound("external_channel");
       }
@@ -75,6 +90,12 @@ export function createAssistant(): Assistant {
     },
 
     threadContextChanged: async ({ event, body, client, saveThreadContext }) => {
+      // Saves are order-dependent: a stale redelivery would overwrite newer context.
+      const eventId = body?.event_id;
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return ignoreSlackInbound("duplicate_event");
+      }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
         return ignoreSlackInbound("external_channel");
       }

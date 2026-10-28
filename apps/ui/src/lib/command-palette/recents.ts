@@ -1,8 +1,9 @@
 /**
  * The palette's recent picks, shown when the search is empty. Browser-local
- * and keyed per connection: the dashboard can switch swarms, and a task id
- * from one swarm means nothing on another.
+ * and keyed by `paletteIdentity`: the dashboard can switch swarms and users,
+ * and a recent pick can name one person's private task.
  */
+import { type PaletteConnection, paletteIdentity } from "./identity";
 
 export interface RecentItem {
   /** `nav` or a search provider id: picks the icon. */
@@ -14,8 +15,8 @@ export interface RecentItem {
 
 const MAX_RECENTS = 6;
 
-function storageKey(apiUrl: string): string {
-  return `agent-swarm:cmdk-recents:${apiUrl}`;
+function storageKey(connection: PaletteConnection): string {
+  return `agent-swarm:cmdk-recents:${paletteIdentity(connection)}`;
 }
 
 function isRecent(value: unknown): value is RecentItem {
@@ -26,9 +27,9 @@ function isRecent(value: unknown): value is RecentItem {
   );
 }
 
-export function readRecents(apiUrl: string): RecentItem[] {
+export function readRecents(connection: PaletteConnection): RecentItem[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey(apiUrl)) ?? "[]");
+    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey(connection)) ?? "[]");
     return Array.isArray(parsed) ? parsed.filter(isRecent).slice(0, MAX_RECENTS) : [];
   } catch {
     return [];
@@ -36,13 +37,13 @@ export function readRecents(apiUrl: string): RecentItem[] {
 }
 
 /** Moves `item` to the front (one entry per href) and returns the new list. */
-export function pushRecent(apiUrl: string, item: RecentItem): RecentItem[] {
-  const next = [item, ...readRecents(apiUrl).filter((r) => r.href !== item.href)].slice(
+export function pushRecent(connection: PaletteConnection, item: RecentItem): RecentItem[] {
+  const next = [item, ...readRecents(connection).filter((r) => r.href !== item.href)].slice(
     0,
     MAX_RECENTS,
   );
   try {
-    localStorage.setItem(storageKey(apiUrl), JSON.stringify(next));
+    localStorage.setItem(storageKey(connection), JSON.stringify(next));
   } catch {
     // Storage full or blocked: recents are a convenience.
   }

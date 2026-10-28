@@ -21921,6 +21921,7 @@ export interface paths {
                                     ignored: number;
                                     failed: number;
                                     uncertain: number;
+                                    ackNotReady: number;
                                     lastOutcomeAt: string | null;
                                     lastFailure: {
                                         code: string;
@@ -21932,6 +21933,7 @@ export interface paths {
                                     ignored: number;
                                     failed: number;
                                     uncertain: number;
+                                    ackNotReady: number;
                                     lastOutcomeAt: string | null;
                                     lastFailure: {
                                         code: string;
