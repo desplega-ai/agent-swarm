@@ -5,6 +5,7 @@ import { sidebarListParams } from "../../lib/sessions-v2";
 import type { SessionListItem, SessionsListResponse, SessionTreeResponse } from "../types";
 import { sessionListKey, sessionListParams, sessionTreeKey } from "./session-query-keys";
 import {
+  cancelForTriage,
   patchTriageCaches,
   refreshAfterTriage,
   rollBackTriageCaches,
@@ -130,6 +131,23 @@ describe("refreshAfterTriage", () => {
     expect(invalidated(client, sessionTreeKey(USER, "mine"))).toBe(true);
     expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(true);
     expect(invalidated(client, sectionKey("done", "mine"))).toBe(false);
+  });
+
+  // Opening a session from a link marks it read while the Inbox's first
+  // load is in flight. The write cancels that load, which leaves the list
+  // with no rows, so the refetch after the write must cover it.
+  test("a read refetches the list fetches its cancel cut short", async () => {
+    const client = new QueryClient();
+    const inbox = sectionKey("inbox", "mine");
+    client
+      .fetchQuery({ queryKey: inbox, queryFn: () => new Promise<never>(() => {}) })
+      .catch(() => {});
+    const interrupted = await cancelForTriage(client, USER, new Set(["a"]));
+    expect(client.getQueryData(inbox)).toBeUndefined();
+
+    const context = patchTriageCaches(client, USER, new Set(["a"]), { kind: "read" });
+    refreshAfterTriage(client, { kind: "read" }, { ...context, interrupted }, false);
+    expect(invalidated(client, inbox)).toBe(true);
   });
 
   test("a write in flight defers the refetch, and any non-read write refetches every list", () => {

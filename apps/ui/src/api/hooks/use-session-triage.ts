@@ -6,8 +6,9 @@ import { getSessionsShow, getSessionsShownSources } from "@/lib/sessions-show";
 import { plural, SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { InboxItemStatus } from "../types";
-import { SESSION_LIST_KEY, SESSION_TREE_KEY, sessionDetailKey } from "./session-query-keys";
+import { SESSION_TREE_KEY } from "./session-query-keys";
 import {
+  cancelForTriage,
   patchTriageCaches,
   refreshAfterTriage,
   rollBackTriageCaches,
@@ -98,16 +99,9 @@ export function useSessionTriage() {
     },
     onMutate: async ({ targets, action }) => {
       const ids = new Set(targets.map((target) => target.rootId));
-      // Only this user's caches: the rows carry this user's read state. A
-      // poll that started before the write would bring the old state back.
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: [...SESSION_LIST_KEY, userId ?? null] }),
-        queryClient.cancelQueries({ queryKey: [...SESSION_TREE_KEY, userId ?? null] }),
-        ...[...ids].map((id) =>
-          queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId ?? null) }),
-        ),
-      ]);
-      return patchTriageCaches(queryClient, userId ?? null, ids, action);
+      // Only this user's caches: the rows carry this user's read state.
+      const interrupted = await cancelForTriage(queryClient, userId ?? null, ids);
+      return { ...patchTriageCaches(queryClient, userId ?? null, ids, action), interrupted };
     },
     onError: (error, _variables, context) => {
       if (context) rollBackTriageCaches(queryClient, context);

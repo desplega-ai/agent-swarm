@@ -100,6 +100,32 @@ export interface TriageContext {
   arrivals: Arrival[];
   /** The open session details this write patched, with their read state before it. */
   details: Array<{ key: QueryKey; before: SessionReadState }>;
+  /** The list fetches the write cancelled before it patched (`cancelForTriage`). */
+  interrupted?: QueryKey[];
+}
+
+/**
+ * Cancel this user's list, tree and detail fetches before a triage write
+ * patches them: a poll that started before the write would bring the old
+ * state back. Returns the list fetches it cut short, which the refetch
+ * after the write must cover (a first load cancelled here has no rows).
+ */
+export async function cancelForTriage(
+  queryClient: QueryClient,
+  userId: string | null,
+  ids: Set<string>,
+): Promise<QueryKey[]> {
+  const listKey = [...SESSION_LIST_KEY, userId];
+  const interrupted = queryClient
+    .getQueryCache()
+    .findAll({ queryKey: listKey, fetchStatus: "fetching" })
+    .map((query) => query.queryKey);
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: listKey }),
+    queryClient.cancelQueries({ queryKey: [...SESSION_TREE_KEY, userId] }),
+    ...[...ids].map((id) => queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId) })),
+  ]);
+  return interrupted;
 }
 
 /**
@@ -304,7 +330,8 @@ const pendingRefresh = new WeakMap<QueryClient, PendingRefresh>();
  * Opening an unread session marks it read, so "read" is the common write.
  * It changes no list's membership except lists that held the row (an
  * Unread list drops it), and the rows already show it. So it refetches
- * the tree (its counts) and only those lists. Every other write refetches
+ * the tree (its counts), those lists, and the list fetches it cancelled
+ * (opening a session from a link cancels the Inbox's first load). Every other write refetches
  * every list: a row can arrive in a list that never held it.
  */
 export function refreshAfterTriage(
@@ -317,6 +344,7 @@ export function refreshAfterTriage(
   pendingRefresh.set(queryClient, pending);
   if (action.kind === "read" && context) {
     for (const { key } of context.changes) pending.lists.set(hashKey(key), key);
+    for (const key of context.interrupted ?? []) pending.lists.set(hashKey(key), key);
   } else pending.all = true;
   if (othersInFlight) return;
   pendingRefresh.delete(queryClient);
