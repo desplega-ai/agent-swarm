@@ -140,6 +140,20 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     ],
     runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 25 },
   },
+  {
+    id: "helmcode",
+    label: "Helmcode",
+    description:
+      "The five Helmcode-served models on the pi harness, reached direct (HELMCODE_API_KEY), whole suite, 3 repeats, $20 metered cap.",
+    configIds: [
+      "pi-helmcode-deepseek-v4-flash",
+      "pi-helmcode-glm5.3",
+      "pi-helmcode-glm5.3-flash",
+      "pi-helmcode-qwen3.6",
+      "pi-helmcode-gemma4",
+    ],
+    runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 20 },
+  },
 ];
 
 /**
