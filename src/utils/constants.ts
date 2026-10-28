@@ -2,7 +2,7 @@
  * Shared constants used across worker- and server-side code.
  */
 
-import { isEnvFlagEnabled } from "./env-flag";
+import { isEnvFlagEnabled, parseEnvFlag } from "./env-flag";
 
 /** Maximum profile-file length in JavaScript characters (not UTF-8 bytes). */
 export const MAX_PROFILE_FILE_LENGTH = 256 * 1024;
@@ -188,12 +188,90 @@ export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
 }
 
 /**
- * Comb (the agent-fs review space in the dashboard) is on: `COMB_ENABLED` plus
- * an agent-fs API URL. `getCombConfig()` (`src/comb/config.ts`) reports it.
+ * Whether a browser can plausibly open this URL. False for the addresses only
+ * the swarm's own network resolves: a single-label host (a docker or compose
+ * service such as `agent-fs`), `*.internal` (Railway, Fly, GCP),
+ * `*.svc` / `*.cluster.local` (Kubernetes), and private, link-local or
+ * unique-local IPs. Loopback counts as reachable: a localhost URL means the
+ * API and agent-fs share a host, which only works for a browser on that same
+ * machine (the local dev setup), and a remote operator can set `COMB_ENABLED`.
+ * An unparseable value is not reachable.
+ */
+export function isBrowserReachableUrl(value: string): boolean {
+  let host: string;
+  try {
+    host = new URL(value).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host.startsWith("[")) {
+    // IPv6 literal: loopback is reachable; unique-local and link-local are not.
+    const addr = host.slice(1, -1);
+    return addr === "::1" || !/^(f[cd]|fe[89ab])/.test(addr);
+  }
+  const octets = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (octets) {
+    const [a, b] = [Number(octets[1]), Number(octets[2])];
+    if (a === 127) return true;
+    return !(
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  if (!host.includes(".")) return false;
+  return !(host.endsWith(".internal") || host.endsWith(".svc") || host.endsWith(".cluster.local"));
+}
+
+export interface CombState {
+  enabled: boolean;
+  /** An explicit `COMB_ENABLED` decided it; otherwise the unset default did. */
+  explicit: boolean;
+  /** What is missing, for `/status` `agent_fs.comb.reason`. Null when Comb is on. */
+  reason: string | null;
+}
+
+/**
+ * Comb (the agent-fs review space in the dashboard). An explicit
+ * `COMB_ENABLED` wins both ways, but still needs `AGENT_FS_API_URL`. Unset, it
+ * is on only when a browser can reach agent-fs: `AGENT_FS_PUBLIC_URL` is set,
+ * `AGENT_FS_PROXY` is on (the browser goes through the API), or
+ * `AGENT_FS_API_URL` is itself {@link isBrowserReachableUrl}. Otherwise a
+ * docker-internal `AGENT_FS_API_URL` would send the browser to a private host.
+ * Reads `process.env` per call, so a config reload applies without a restart.
+ */
+export function getCombState(): CombState {
+  const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
+  const raw = process.env.COMB_ENABLED;
+  // The two parses agree only when the value is a recognized flag literal.
+  const explicit = parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
+  if (explicit && !isEnvFlagEnabled("COMB_ENABLED", false)) {
+    return { enabled: false, explicit, reason: "COMB_ENABLED is false." };
+  }
+  if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
+  if (explicit) return { enabled: true, explicit, reason: null };
+  const reachable =
+    Boolean(process.env.AGENT_FS_PUBLIC_URL?.trim()) ||
+    isAgentFsProxyEnabled() ||
+    isBrowserReachableUrl(apiUrl);
+  return reachable
+    ? { enabled: true, explicit, reason: null }
+    : {
+        enabled: false,
+        explicit,
+        reason: `AGENT_FS_API_URL (${apiUrl}) is not reachable from a browser. Set AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true, or set COMB_ENABLED=true to force Files on.`,
+      };
+}
+
+/**
+ * Comb is on: see {@link getCombState}. `getCombConfig()` (`src/comb/config.ts`)
+ * reports it.
  */
 export function isCombEnabled(): boolean {
-  const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
-  return isEnvFlagEnabled("COMB_ENABLED", false) && Boolean(apiUrl);
+  return getCombState().enabled;
 }
 
 /**

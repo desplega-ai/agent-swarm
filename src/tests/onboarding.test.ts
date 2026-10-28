@@ -878,7 +878,7 @@ describe("onboarding state", () => {
     process.env.COMB_ENABLED = "true";
     process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
     await put({ action: "complete", step: "files", method: "connected" });
-    delete process.env.COMB_ENABLED;
+    process.env.COMB_ENABLED = "false";
     const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
     expect(body.state.steps.files).toMatchObject({ status: "done", method: "connected" });
   });

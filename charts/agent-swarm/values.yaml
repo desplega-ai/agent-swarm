@@ -318,6 +318,17 @@ agentFs:
   apiKey: ""
   # -- Public app URL used by agent-fs when it emits browser-facing file links.
   appUrl: ""
+  # -- Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL` on the API). Files
+  # (Comb) in the dashboard is on by default, but only when a browser can reach
+  # agent-fs, and the in-cluster service URL cannot be reached. Blank derives
+  # it from `agentFs.ingress.host` when that ingress is enabled; with neither
+  # this nor `agentFs.proxy`, Files stays off.
+  publicUrl: ""
+  # -- Serve agent-fs through the API at `/agentfs` (`AGENT_FS_PROXY=true`), so
+  # the browser reaches agent-fs with no agent-fs ingress. Needs
+  # `PUBLIC_MCP_BASE_URL` (derived from `ingress.host`). Also exposes agent-fs's
+  # public `/share/*` and `/site/*` pages on the API origin. Off by default.
+  proxy: false
   # -- Bucket name for agent-fs's object storage backend (storageProvider=s3).
   bucket: ""
   resources: {}

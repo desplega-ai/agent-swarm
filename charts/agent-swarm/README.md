@@ -120,6 +120,8 @@ agentFs:
     provider: local                         # Or openai/gemini + apiKey
 ```
 
+Files (Comb) in the dashboard is on by default, but only when a browser can reach agent-fs, and the in-cluster `AGENT_FS_API_URL` never qualifies. The chart sets `AGENT_FS_PUBLIC_URL` from `agentFs.publicUrl`, else from `agentFs.ingress.host` when that ingress is enabled. Or set `agentFs.proxy: true` to serve agent-fs through the API at `/agentfs` (this also exposes agent-fs's public `/share/*` and `/site/*` pages on the API origin). With none of the three, Files stays off.
+
 Local-disk variant (no bucket; objects live on the agent-fs PVC, so keep that PVC backed up):
 
 ```yaml
