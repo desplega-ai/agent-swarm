@@ -64,7 +64,7 @@ export type AgentRow = {
   cred_status: string | null;
   /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
   avatar: string | null;
-  /** Migration 255: JSON of AgentSlackIcon. */
+  /** Migration 256: JSON of AgentSlackIcon. */
   slack_icon: string | null;
   runtime_pool_id: string | null;
   runtime_provision_attempts: number;

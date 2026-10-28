@@ -663,8 +663,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "253_session_summaries.sql");
       // 254 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
       markMigrationApplied(database, "254_query_audit_indexes.sql");
-      // 255 alters agents, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "255_agent_slack_icon.sql");
+      // 256 alters agents, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "256_agent_slack_icon.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
