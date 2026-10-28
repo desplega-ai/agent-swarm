@@ -6449,9 +6449,36 @@ export async function updateScheduledTask(
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
   return await getDbClient().transaction(async (tx) => {
+    // An unfired deferral is the only continuation of a suppressed completion.
+    // Read under the delete's write lock so a concurrent wake cannot be missed.
+    const deferred = await tx.get<{ parentTaskId: string }>(
+      `SELECT parentTaskId FROM scheduled_tasks
+       WHERE id = ? AND taskType = 'deferred' AND parentTaskId IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM agent_tasks WHERE scheduleId = scheduled_tasks.id)`,
+      [id],
+    );
     // Favorites carry no FK to the entity; drop every user's star with it.
     await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
     const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+    if (result.changes > 0 && deferred) {
+      getDbClient().afterCommit(async () => {
+        try {
+          const parent = await getTaskById(deferred.parentTaskId);
+          if (!parent?.deferredAt) return;
+          const { createWorkerTaskFollowUp } = await import("../tasks/worker-follow-up");
+          await createWorkerTaskFollowUp({
+            task: parent,
+            status: "failed",
+            failureReason: "Deferred continuation schedule deleted before its wake-up",
+          });
+        } catch (error) {
+          console.error(
+            "[deleteScheduledTask] deferred deletion follow-up failed:",
+            scrubSecrets(error instanceof Error ? error.message : String(error)),
+          );
+        }
+      });
+    }
     return result.changes > 0;
   });
 }
