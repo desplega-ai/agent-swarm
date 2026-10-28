@@ -31,8 +31,21 @@ mock.module("@/api/hooks/use-agents", () => ({
     },
   }),
 }));
+let appIconUrl: string | null = null;
+for (const [alias, path] of [
+  ["@/api/client", "../../api/client"],
+  ["@/api/hooks/status-query", "../../api/hooks/status-query"],
+  ["@/lib/env-presence-batch", "../../lib/env-presence-batch"],
+] as const) {
+  mock.module(alias, () => require(path));
+}
+mock.module("@/api/hooks/use-integrations-meta", () => ({
+  ...require("../../api/hooks/use-integrations-meta"),
+  useSlackAppIcon: () => ({ data: { imageUrl: appIconUrl } }),
+}));
 for (const [alias, path] of [
   ["@/lib/utils", "../../lib/utils"],
+  ["@/components/ui/badge", "../ui/badge"],
   ["@/lib/slack-icon", "../../lib/slack-icon"],
   ["@/hooks/use-autosave", "../../hooks/use-autosave"],
   ["@/components/shared/status-icon", "./status-icon"],
@@ -56,14 +69,14 @@ const agent = {
 
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-async function mount() {
+async function mount(subject: Agent = agent) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () =>
     root.render(
       <TooltipProvider>
-        <AgentSlackIconField agent={agent} />
+        <AgentSlackIconField agent={subject} />
       </TooltipProvider>,
     ),
   );
@@ -71,7 +84,9 @@ async function mount() {
   const button = (text: string) =>
     [...container.querySelectorAll("button")].find((b) => b.textContent === text);
   return {
+    container,
     input,
+    preview: () => container.querySelector('[role="img"], img, [data-slot="badge"], .font-mono'),
     type: (value: string) =>
       act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
@@ -92,6 +107,7 @@ describe("AgentSlackIconField saves", () => {
   beforeEach(() => {
     writes = [];
     writeGate = null;
+    appIconUrl = null;
   });
 
   test("Reset during a pending debounce stores only null", async () => {
@@ -159,6 +175,61 @@ describe("AgentSlackIconField saves", () => {
       { type: "emoji", emoji: ":owl:" },
       { type: "emoji", emoji: ":fox:" },
     ]);
+    await field.unmount();
+  });
+});
+
+describe("AgentSlackIconField preview", () => {
+  const withIcon = (slackIcon: AgentSlackIcon | null, extra: Partial<Agent> = {}) =>
+    ({ ...agent, slackIcon, ...extra }) as Agent;
+
+  test("default shows the agent's real default: crown for the lead, the hash pick for a worker", async () => {
+    const lead = await mount(withIcon(null, { isLead: true, name: "Neo" }));
+    expect(lead.preview()?.textContent).toBe("👑");
+    expect(lead.container.textContent).toContain("Leave empty for the default: 👑 :crown:.");
+    await lead.unmount();
+    // "Owl" hashes to :zap: in getAgentEmoji.
+    const worker = await mount(withIcon(null));
+    expect(worker.preview()?.getAttribute("aria-label")).toBe(":zap:");
+    expect(worker.container.textContent).toContain("default: ⚡ :zap:.");
+    await worker.unmount();
+  });
+
+  test("a known emoji renders its glyph; an unknown one shows its code in a chip", async () => {
+    const field = await mount(withIcon({ type: "emoji", emoji: ":owl:" }));
+    expect(field.preview()?.textContent).toBe("🦉");
+    await field.type(":party-parrot:");
+    const chip = field.preview();
+    expect(chip?.className).toContain("font-mono");
+    expect(chip?.textContent).toBe(":party-parrot:");
+    await field.unmount();
+  });
+
+  test("a URL shows the image, without a referrer", async () => {
+    const field = await mount(withIcon({ type: "url", url: "https://example.com/owl.png" }));
+    const img = field.preview() as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://example.com/owl.png");
+    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
+    await field.unmount();
+  });
+
+  test("the app icon shows the app's avatar, or a Slack app badge without one", async () => {
+    appIconUrl = "https://slack.example/app-72.png";
+    const withAvatar = await mount(withIcon({ type: "app" }));
+    expect(withAvatar.preview()?.getAttribute("src")).toBe(appIconUrl);
+    await withAvatar.unmount();
+    appIconUrl = null;
+    const badge = await mount(withIcon({ type: "app" }));
+    expect(badge.preview()?.textContent).toBe("Slack app");
+    await badge.unmount();
+  });
+
+  test("the preview follows the input and shows nothing for invalid input", async () => {
+    const field = await mount(withIcon(null));
+    await field.type("rocket");
+    expect(field.preview()?.textContent).toBe("🚀");
+    await field.type("http://example.com/owl.png");
+    expect(field.preview()).toBeNull();
     await field.unmount();
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseSlackIconInput } from "../../apps/ui/src/lib/slack-icon";
+import {
+  defaultSlackEmoji,
+  parseSlackIconInput,
+  slackEmojiGlyph,
+} from "../../apps/ui/src/lib/slack-icon";
 import { getAgentEmoji, getAgentSlackIcon } from "../slack/responses";
 import { type Agent, AgentSlackIconSchema } from "../types";
 
@@ -86,5 +90,20 @@ describe("Slack icon validation parity", () => {
       ok: false,
       error: "Use an https URL.",
     });
+  });
+});
+
+describe("default emoji parity", () => {
+  test("the dashboard picks the same default as getAgentEmoji", () => {
+    const agents = [
+      agent({ isLead: true, name: "Neo" }),
+      ...["Owl Worker", "Coder", "Reviewer", "Mobile Coder", "e2e-worker-a", "Ω", ""].map((name) =>
+        agent({ name }),
+      ),
+    ];
+    for (const a of agents) {
+      expect(defaultSlackEmoji(a)).toBe(getAgentEmoji(a));
+      expect(slackEmojiGlyph(getAgentEmoji(a))).not.toBeNull();
+    }
   });
 });

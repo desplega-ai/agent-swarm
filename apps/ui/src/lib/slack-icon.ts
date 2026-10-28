@@ -38,3 +38,72 @@ export function formatSlackIcon(icon: AgentSlackIcon | null | undefined): string
   if (!icon || icon.type === "app") return "";
   return icon.type === "url" ? icon.url : icon.emoji;
 }
+
+// Mirrors getAgentEmoji (src/slack/responses.ts); src/tests/agent-slack-icon.test.ts checks parity.
+const DEFAULT_WORKER_EMOJI = [
+  ":robot_face:",
+  ":gear:",
+  ":zap:",
+  ":rocket:",
+  ":star:",
+  ":crystal_ball:",
+  ":bulb:",
+  ":wrench:",
+];
+
+/** The emoji Slack shows for an agent with no Slack icon set. */
+export function defaultSlackEmoji(agent: { isLead: boolean; name: string }): string {
+  if (agent.isLead) return ":crown:";
+  const hash = agent.name.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return DEFAULT_WORKER_EMOJI[hash % DEFAULT_WORKER_EMOJI.length] ?? ":robot_face:";
+}
+
+// The defaults plus common picks. Anything else (custom workspace emoji included) shows as its code.
+const SLACK_EMOJI: Record<string, string> = {
+  ":crown:": "👑",
+  ":robot_face:": "🤖",
+  ":gear:": "⚙️",
+  ":zap:": "⚡",
+  ":rocket:": "🚀",
+  ":star:": "⭐",
+  ":crystal_ball:": "🔮",
+  ":bulb:": "💡",
+  ":wrench:": "🔧",
+  ":owl:": "🦉",
+  ":bee:": "🐝",
+  ":fox_face:": "🦊",
+  ":cat:": "🐱",
+  ":dog:": "🐶",
+  ":penguin:": "🐧",
+  ":octopus:": "🐙",
+  ":turtle:": "🐢",
+  ":unicorn_face:": "🦄",
+  ":bird:": "🐦",
+  ":bug:": "🐛",
+  ":brain:": "🧠",
+  ":ghost:": "👻",
+  ":alien:": "👽",
+  ":wave:": "👋",
+  ":+1:": "👍",
+  ":thumbsup:": "👍",
+  ":eyes:": "👀",
+  ":tada:": "🎉",
+  ":sparkles:": "✨",
+  ":fire:": "🔥",
+  ":heart:": "❤️",
+  ":white_check_mark:": "✅",
+  ":books:": "📚",
+  ":memo:": "📝",
+  ":mag:": "🔍",
+  ":hammer_and_wrench:": "🛠️",
+  ":package:": "📦",
+  ":shield:": "🛡️",
+  ":satellite:": "🛰️",
+  ":coffee:": "☕",
+  ":chart_with_upwards_trend:": "📈",
+};
+
+/** The Unicode glyph for a shortcode, or null when we can't render it here. */
+export function slackEmojiGlyph(shortcode: string): string | null {
+  return SLACK_EMOJI[shortcode] ?? null;
+}

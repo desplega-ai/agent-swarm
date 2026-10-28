@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { useUpdateAgentProfile } from "@/api/hooks/use-agents";
-import type { Agent } from "@/api/types";
+import { useSlackAppIcon } from "@/api/hooks/use-integrations-meta";
+import type { Agent, AgentSlackIcon } from "@/api/types";
 import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type AutosavePhase, useAutosave } from "@/hooks/use-autosave";
-import { formatSlackIcon, parseSlackIconInput, type SlackIconInput } from "@/lib/slack-icon";
+import {
+  defaultSlackEmoji,
+  formatSlackIcon,
+  parseSlackIconInput,
+  type SlackIconInput,
+  slackEmojiGlyph,
+} from "@/lib/slack-icon";
 
 const PHASE_TONE: Record<AutosavePhase, StatusTone> = {
   idle: "none",
@@ -20,6 +29,55 @@ const PHASE_LABEL: Partial<Record<AutosavePhase, string>> = {
   saving: "Saving…",
   saved: "Saved",
 };
+
+/** What Slack will show for `icon`; the caller resolves null to the agent's default emoji. */
+function SlackIconPreview({
+  icon,
+  appIconUrl,
+  onBrokenImage,
+}: {
+  icon: AgentSlackIcon;
+  appIconUrl: string | null | undefined;
+  onBrokenImage: () => void;
+}) {
+  if (icon.type === "emoji") {
+    const glyph = slackEmojiGlyph(icon.emoji);
+    if (glyph) {
+      return (
+        <span role="img" aria-label={icon.emoji} className="text-lg leading-none">
+          {glyph}
+        </span>
+      );
+    }
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+            {icon.emoji}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Custom emoji, shown in Slack</TooltipContent>
+      </Tooltip>
+    );
+  }
+  const src = icon.type === "url" ? icon.url : appIconUrl;
+  if (!src) {
+    return (
+      <Badge variant="outline" size="tag">
+        Slack app
+      </Badge>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={icon.type === "app" ? "Slack app icon" : ""}
+      referrerPolicy="no-referrer"
+      onError={icon.type === "url" ? onBrokenImage : undefined}
+      className="size-5 rounded-sm object-cover"
+    />
+  );
+}
 
 export function AgentSlackIconField({ agent }: { agent: Agent }) {
   const updateProfile = useUpdateAgentProfile();
@@ -61,6 +119,12 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
   }
 
   const previewUrl = parsed.ok && parsed.icon?.type === "url" ? parsed.icon.url : null;
+  const appIcon = useSlackAppIcon(usingApp);
+  const defaultEmoji = defaultSlackEmoji(agent);
+  // Invalid input shows no preview; empty input previews the agent's default.
+  const preview: AgentSlackIcon | null = parsed.ok
+    ? (parsed.icon ?? { type: "emoji", emoji: defaultEmoji })
+    : null;
   const error = !parsed.ok ? parsed.error : autosave.phase === "error" ? autosave.error : null;
 
   return (
@@ -91,13 +155,11 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {previewUrl && brokenUrl !== previewUrl ? (
-            <img
-              src={previewUrl}
-              alt=""
-              referrerPolicy="no-referrer"
-              onError={() => setBrokenUrl(previewUrl)}
-              className="size-5 rounded-sm object-cover"
+          {preview && !(previewUrl && brokenUrl === previewUrl) ? (
+            <SlackIconPreview
+              icon={preview}
+              appIconUrl={appIcon.data?.imageUrl}
+              onBrokenImage={() => setBrokenUrl(previewUrl)}
             />
           ) : null}
           {usingApp ? null : (
@@ -120,7 +182,8 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Used for this agent's Slack messages. Leave empty for the default (:crown: for the lead).
+          Used for this agent's Slack messages. Leave empty for the default:{" "}
+          {slackEmojiGlyph(defaultEmoji)} {defaultEmoji}.
         </p>
       )}
     </div>

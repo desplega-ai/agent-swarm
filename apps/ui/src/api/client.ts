@@ -1087,6 +1087,15 @@ class ApiClient {
     return res.json();
   }
 
+  /** The Slack app's own avatar (null when Slack is off or the lookup failed). */
+  async fetchSlackAppIcon(): Promise<{ imageUrl: string | null }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/integrations/slack/app-icon`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to fetch the Slack app icon: ${res.status}`);
+    return res.json();
+  }
+
   async submitFeedback(endpoint: string, data: FeedbackInput): Promise<void> {
     let parsedEndpoint: URL;
     try {
