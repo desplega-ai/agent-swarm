@@ -23697,6 +23697,42 @@
         }
       }
     },
+    "/api/integrations/slack/app-icon": {
+      "get": {
+        "summary": "The Slack app's own avatar, shown on posts with no icon override",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`imageUrl` is null when Slack is off or the lookup fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imageUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "imageUrl"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/chat/status": {
       "get": {
         "summary": "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",

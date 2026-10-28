@@ -329,6 +329,12 @@ describe("Agents", () => {
     expect(reset.body.slackIcon).toBeNull();
   });
 
+  test("GET /api/integrations/slack/app-icon — null with Slack off", async () => {
+    const { status, body } = await get("/api/integrations/slack/app-icon");
+    expect(status).toBe(200);
+    expect(body).toEqual({ imageUrl: null });
+  });
+
   test("PUT /api/agents/:id/profile — persists structured filesystem sync rejections", async () => {
     const current = "s".repeat(SOUL_MD_MAX_CHARS);
     const accepted = await put(`/api/agents/${ids.workerAgent}/profile`, {
