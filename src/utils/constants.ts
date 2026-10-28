@@ -187,12 +187,47 @@ export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
   return route ? `${getAgentFsLiveUrl()}/file/~/${route}` : null;
 }
 
+/** RFC 1918 private and 169.254/16 link-local IPv4 space, by its first two octets. */
+function isPrivateIpv4(a: number, b: number): boolean {
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+/**
+ * The eight 16-bit groups of an IPv6 literal (no brackets), or null when it is
+ * malformed. `new URL` already normalizes a host to compressed hex, so a
+ * dotted IPv4 tail never reaches here; one is rejected rather than parsed.
+ */
+function parseIpv6(addr: string): number[] | null {
+  if (addr.includes(".")) return null;
+  const halves = addr.split("::");
+  if (halves.length > 2) return null;
+  const toGroups = (part: string): number[] | null => {
+    if (!part) return [];
+    const groups = part
+      .split(":")
+      .map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : Number.NaN));
+    return groups.some(Number.isNaN) ? null : groups;
+  };
+  const head = toGroups(halves[0] ?? "");
+  const tail = toGroups(halves[1] ?? "");
+  if (!head || !tail) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const missing = 8 - head.length - tail.length;
+  return missing < 1 ? null : [...head, ...new Array<number>(missing).fill(0), ...tail];
+}
+
 /**
  * Whether a browser can plausibly open this URL. False for the addresses only
  * the swarm's own network resolves: a single-label host (a docker or compose
  * service such as `agent-fs`), `*.internal` (Railway, Fly, GCP),
  * `*.svc` / `*.cluster.local` (Kubernetes), and private, link-local or
- * unique-local IPs. Loopback counts as reachable: a localhost URL means the
+ * unique-local IPs, including IPv4-mapped IPv6 (`::ffff:10.0.0.5`), `::` and
+ * multicast `ff00::/8`. Loopback counts as reachable: a localhost URL means the
  * API and agent-fs share a host, which only works for a browser on that same
  * machine (the local dev setup), and a remote operator can set `COMB_ENABLED`.
  * An unparseable value is not reachable.
@@ -207,20 +242,26 @@ export function isBrowserReachableUrl(value: string): boolean {
   if (!host) return false;
   if (host === "localhost" || host.endsWith(".localhost")) return true;
   if (host.startsWith("[")) {
-    // IPv6 literal: loopback is reachable; unique-local and link-local are not.
-    const addr = host.slice(1, -1);
-    return addr === "::1" || !/^(f[cd]|fe[89ab])/.test(addr);
+    const parsed = parseIpv6(host.slice(1, -1));
+    if (!parsed) return false;
+    const g = (i: number) => parsed[i] ?? 0;
+    // Loopback is reachable (the local dev setup).
+    if (parsed.slice(0, 7).every((x) => x === 0) && g(7) === 1) return true;
+    // `::` and multicast `ff00::/8` are not addresses a browser can open.
+    if (parsed.every((x) => x === 0) || (g(0) & 0xff00) === 0xff00) return false;
+    // Unique-local `fc00::/7` and link-local `fe80::/10`.
+    if ((g(0) & 0xfe00) === 0xfc00 || (g(0) & 0xffc0) === 0xfe80) return false;
+    // IPv4-mapped `::ffff:a.b.c.d`: judge the embedded IPv4 address.
+    if (parsed.slice(0, 5).every((x) => x === 0) && g(5) === 0xffff) {
+      const a = g(6) >> 8;
+      return a === 127 || !isPrivateIpv4(a, g(6) & 0xff);
+    }
+    return true;
   }
   const octets = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (octets) {
     const [a, b] = [Number(octets[1]), Number(octets[2])];
-    if (a === 127) return true;
-    return !(
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    );
+    return a === 127 || !isPrivateIpv4(a, b);
   }
   if (!host.includes(".")) return false;
   return !(host.endsWith(".internal") || host.endsWith(".svc") || host.endsWith(".cluster.local"));
@@ -238,9 +279,9 @@ export interface CombState {
  * Comb (the agent-fs review space in the dashboard). An explicit
  * `COMB_ENABLED` wins both ways, but still needs `AGENT_FS_API_URL`. Unset, it
  * is on only when a browser can reach agent-fs: `AGENT_FS_PUBLIC_URL` is set,
- * `AGENT_FS_PROXY` is on (the browser goes through the API), or
- * `AGENT_FS_API_URL` is itself {@link isBrowserReachableUrl}. Otherwise a
- * docker-internal `AGENT_FS_API_URL` would send the browser to a private host.
+ * `AGENT_FS_PROXY` is on and the public API URL is {@link isBrowserReachableUrl}
+ * (the browser goes through the API), or, with no proxy, `AGENT_FS_API_URL` is
+ * itself reachable. Otherwise the browser would land on a private host.
  * Reads `process.env` per call, so a config reload applies without a restart.
  */
 export function getCombState(): CombState {
@@ -253,16 +294,19 @@ export function getCombState(): CombState {
   }
   if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
   if (explicit) return { enabled: true, explicit, reason: null };
-  const reachable =
-    Boolean(process.env.AGENT_FS_PUBLIC_URL?.trim()) ||
-    isAgentFsProxyEnabled() ||
-    isBrowserReachableUrl(apiUrl);
-  return reachable
+  if (process.env.AGENT_FS_PUBLIC_URL?.trim()) return { enabled: true, explicit, reason: null };
+  // With the proxy on, the browser goes to `<public API URL>/agentfs`, so that
+  // is the address to check, not `AGENT_FS_API_URL`.
+  const proxy = isAgentFsProxyEnabled();
+  const browserUrl = proxy ? getPublicMcpBaseUrl() : apiUrl;
+  return isBrowserReachableUrl(browserUrl)
     ? { enabled: true, explicit, reason: null }
     : {
         enabled: false,
         explicit,
-        reason: `AGENT_FS_API_URL (${apiUrl}) is not reachable from a browser. Set AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true, or set COMB_ENABLED=true to force Files on.`,
+        reason: proxy
+          ? `AGENT_FS_PROXY is on, but the API address ${browserUrl} is not reachable from a browser. Set PUBLIC_MCP_BASE_URL to the public API URL, or set COMB_ENABLED=true to force Files on.`
+          : `AGENT_FS_API_URL (${apiUrl}) is not reachable from a browser. Set AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true, or set COMB_ENABLED=true to force Files on.`,
       };
 }
 

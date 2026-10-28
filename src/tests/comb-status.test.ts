@@ -80,6 +80,22 @@ describe("/status agent_fs.comb", () => {
     expect(result.api_url).toBe("https://swarm.example.com/agentfs");
   });
 
+  test("unset, AGENT_FS_PROXY on and an internal API address: off, and names PUBLIC_MCP_BASE_URL", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.MCP_BASE_URL = "http://api:3013";
+    process.env.AGENT_FS_PROXY = "true";
+    const result = await comb();
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toContain("PUBLIC_MCP_BASE_URL");
+  });
+
+  test("unset and an IPv4-mapped private IPv6 AGENT_FS_API_URL: off", async () => {
+    process.env.AGENT_FS_API_URL = "http://[::ffff:10.0.0.5]:7433";
+    const result = await comb();
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toContain("not reachable from a browser");
+  });
+
   test("unset and AGENT_FS_PUBLIC_URL set: on", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";

@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { getCombConfig } from "../comb/config";
 import { getCombState, isBrowserReachableUrl, isCombEnabled } from "../utils/constants";
 
-const ENV_KEYS = ["COMB_ENABLED", "AGENT_FS_API_URL", "AGENT_FS_PUBLIC_URL", "AGENT_FS_PROXY"];
+const ENV_KEYS = [
+  "COMB_ENABLED",
+  "AGENT_FS_API_URL",
+  "AGENT_FS_PUBLIC_URL",
+  "AGENT_FS_PROXY",
+  "MCP_BASE_URL",
+  "PUBLIC_MCP_BASE_URL",
+];
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
@@ -28,6 +36,9 @@ describe("isBrowserReachableUrl", () => {
       "http://172.32.0.1",
       "http://172.15.0.1",
       "http://[2001:db8::1]:7433",
+      "http://[2606:4700::1111]:7433",
+      "http://[::ffff:8.8.8.8]:7433",
+      "http://[::ffff:7f00:1]:7433",
     ]) {
       expect(isBrowserReachableUrl(url)).toBe(true);
     }
@@ -66,6 +77,13 @@ describe("isBrowserReachableUrl", () => {
       "http://169.254.169.254",
       "http://[fd00::1]:7433",
       "http://[fe80::1]:7433",
+      "http://[::ffff:10.0.0.5]:7433",
+      "http://[::ffff:192.168.1.10]:7433",
+      "http://[::ffff:172.16.0.1]:7433",
+      "http://[::ffff:169.254.169.254]",
+      "http://[::]:7433",
+      "http://[ff02::1]:7433",
+      "http://[ff00::1]:7433",
     ]) {
       expect(isBrowserReachableUrl(url)).toBe(false);
     }
@@ -110,6 +128,24 @@ describe("getCombState", () => {
     process.env.AGENT_FS_PUBLIC_URL = "  ";
     expect(isCombEnabled()).toBe(false);
     process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
+    expect(isCombEnabled()).toBe(true);
+  });
+
+  test("unset with the proxy on: the public API URL decides, not AGENT_FS_API_URL", () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PROXY = "true";
+    process.env.MCP_BASE_URL = "http://api:3013";
+    const state = getCombState();
+    expect(state).toMatchObject({ enabled: false, explicit: false });
+    expect(state.reason).toContain("PUBLIC_MCP_BASE_URL");
+    expect(getCombConfig()).toMatchObject({ enabled: false, apiUrl: "http://api:3013/agentfs" });
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
+    expect(getCombState()).toMatchObject({ enabled: true, explicit: false });
+    expect(getCombConfig().apiUrl).toBe("https://swarm.example.com/agentfs");
+    delete process.env.PUBLIC_MCP_BASE_URL;
+    process.env.MCP_BASE_URL = "http://[::ffff:10.0.0.5]:3013";
+    expect(isCombEnabled()).toBe(false);
+    process.env.COMB_ENABLED = "true";
     expect(isCombEnabled()).toBe(true);
   });
 

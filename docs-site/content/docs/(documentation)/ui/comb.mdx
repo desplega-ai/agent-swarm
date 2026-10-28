@@ -27,7 +27,7 @@ agent-fs 0.14.0 still works: Comb shows files and comments, and every other part
 Comb is on by default. With `COMB_ENABLED` unset, it turns on when `AGENT_FS_API_URL` is set and a browser can reach agent-fs. That holds when any one of these is true:
 
 - `AGENT_FS_PUBLIC_URL` is set.
-- `AGENT_FS_PROXY` is `true`.
+- `AGENT_FS_PROXY` is `true` and the public API URL (`PUBLIC_MCP_BASE_URL`, else `MCP_BASE_URL`) is one a browser can open. With the proxy on, `AGENT_FS_API_URL` is not checked.
 - `AGENT_FS_API_URL` is itself a URL a browser can open: a public hostname, or `localhost`. A single-label host such as `agent-fs`, a `*.internal`, `*.svc` or `*.cluster.local` host, and a private IP (`10/8`, `172.16/12`, `192.168/16`, link-local) do not count.
 
 Otherwise Comb stays off, and `GET /status` reports what is missing in `agent_fs.comb.reason`. An explicit `COMB_ENABLED` wins both ways: `true` forces it on (it still needs `AGENT_FS_API_URL`), `false` turns it off.
@@ -275,7 +275,7 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 ## Troubleshooting
 
-**"Comb is off".** Read `agent_fs.comb.reason` in `GET /status`. It names the missing piece: `AGENT_FS_API_URL` is not set, `COMB_ENABLED` is `false`, or `AGENT_FS_API_URL` is not reachable from a browser (set `AGENT_FS_PUBLIC_URL` or `AGENT_FS_PROXY=true`). After a change, the dashboard needs up to 30 seconds to poll.
+**"Comb is off".** Read `agent_fs.comb.reason` in `GET /status`. It names the missing piece: `AGENT_FS_API_URL` is not set, `COMB_ENABLED` is `false`, or the address a browser would use is not reachable (`AGENT_FS_API_URL`, or the API address when `AGENT_FS_PROXY=true`; set `AGENT_FS_PUBLIC_URL`, or `PUBLIC_MCP_BASE_URL` with the proxy). After a change, the dashboard needs up to 30 seconds to poll.
 
 **"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL` (or `<public API URL>/agentfs` with `AGENT_FS_PROXY=true`). Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
 
