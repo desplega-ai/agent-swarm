@@ -158,8 +158,13 @@ export async function sendReviewBatch(
   // Without an authenticated sender, map the comment authors to swarm users
   // now: it may read the drive members from agent-fs. Without the service
   // identity, a swarm-authored comment could pass for a person: no requester.
+  // The caller picks the comments, so an author requester is caller-chosen
+  // attribution: TRUST_BODY_REQUESTED_BY_USER_ID=false turns it off, like a
+  // body `requestedByUserId` on POST /api/tasks.
   const authorUsers =
-    input.requestedByUserId || !serviceUserId
+    input.requestedByUserId ||
+    !serviceUserId ||
+    process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "false"
       ? null
       : await commentAuthorUsers(agentFs, drive, candidates.map(commentOf), serviceUserId);
 

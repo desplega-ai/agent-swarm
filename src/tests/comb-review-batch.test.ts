@@ -72,6 +72,7 @@ const ENV_KEYS = [
   "AGENT_FS_REQUEST_TIMEOUT_MS",
   "APP_URL",
   "RBAC_ENABLED",
+  "TRUST_BODY_REQUESTED_BY_USER_ID",
 ];
 const savedEnv = new Map<string, string | undefined>();
 
@@ -782,6 +783,18 @@ describe("requester from the comment authors", () => {
     await linkServiceAccount();
     fake.failAuthMe = true;
     const a = fake.add({ body: "@swarm a", author: SERVICE_USER });
+
+    const result = await sendReviewBatch(batch([a.id]));
+
+    expect(result.sent).toEqual([a.id]);
+    expect((await getTaskById(result.taskId as string))?.requestedByUserId).toBeUndefined();
+    expect(fake.memberReads).toBe(0);
+  });
+
+  test("TRUST_BODY_REQUESTED_BY_USER_ID=false: no author requester, and the send still works", async () => {
+    process.env.TRUST_BODY_REQUESTED_BY_USER_ID = "false";
+    const ana = await member("Ana");
+    const a = fake.add({ body: "@swarm a", author: ana.author });
 
     const result = await sendReviewBatch(batch([a.id]));
 
