@@ -1057,6 +1057,20 @@
               "type",
               "url"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "app"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },

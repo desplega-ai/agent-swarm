@@ -1283,6 +1283,8 @@ export const AgentSlackIconSchema = z
           }
         }, "URL must be valid and contain no credentials"),
     }),
+    // No icon override: Slack shows the app's own avatar.
+    z.object({ type: z.literal("app") }),
   ])
   .openapi("AgentSlackIcon");
 export type AgentSlackIcon = z.infer<typeof AgentSlackIconSchema>;

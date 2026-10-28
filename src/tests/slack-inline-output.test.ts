@@ -2,10 +2,11 @@ import { describe, expect, mock, test } from "bun:test";
 import { MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   formatInlineCompletionOutputChunks,
+  getAgentSlackIcon,
   sendWithPersona,
   shouldPostInlineCompletionOutput,
 } from "../slack/responses";
-import type { AgentTask } from "../types";
+import type { Agent, AgentTask } from "../types";
 
 const TASK_ID = "abcdef12-3456-7890-abcd-ef1234567890";
 
@@ -35,6 +36,22 @@ describe("Slack inline completion output", () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ username: "Literal Lead", icon_emoji: ":crown:" }),
     );
+  });
+
+  test("an app-icon agent posts with neither icon key", async () => {
+    const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
+    const agent = { id: "a1", name: "Owl", isLead: true, slackIcon: { type: "app" } } as Agent;
+    await sendWithPersona({ chat: { postMessage } } as never, {
+      channel: "C123",
+      thread_ts: "1",
+      text: "done",
+      username: "Owl",
+      icon: getAgentSlackIcon(agent),
+    });
+    const payload = postMessage.mock.calls[0]?.[0];
+    expect(payload?.username).toBe("Owl");
+    expect(payload).not.toHaveProperty("icon_emoji");
+    expect(payload).not.toHaveProperty("icon_url");
   });
 
   test("posts an image icon as icon_url without icon_emoji", async () => {

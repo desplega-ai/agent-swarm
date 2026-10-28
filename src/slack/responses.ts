@@ -441,11 +441,16 @@ export async function sendWithPersona(
   return result.ts;
 }
 
-export type SlackPersonaIcon = { icon_emoji: string } | { icon_url: string };
+/** Empty = no override, so Slack shows the app's own avatar. */
+export type SlackPersonaIcon =
+  | { icon_emoji: string }
+  | { icon_url: string }
+  | Record<string, never>;
 
 export function getAgentSlackIcon(agent: Agent): SlackPersonaIcon {
   if (agent.slackIcon?.type === "url") return { icon_url: agent.slackIcon.url };
   if (agent.slackIcon?.type === "emoji") return { icon_emoji: agent.slackIcon.emoji };
+  if (agent.slackIcon?.type === "app") return {};
   return { icon_emoji: getAgentEmoji(agent) };
 }
 

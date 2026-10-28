@@ -35,6 +35,6 @@ export function parseSlackIconInput(text: string): SlackIconInput {
 }
 
 export function formatSlackIcon(icon: AgentSlackIcon | null | undefined): string {
-  if (!icon) return "";
+  if (!icon || icon.type === "app") return "";
   return icon.type === "url" ? icon.url : icon.emoji;
 }

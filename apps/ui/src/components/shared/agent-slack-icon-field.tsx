@@ -5,7 +5,7 @@ import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type AutosavePhase, useAutosave } from "@/hooks/use-autosave";
-import { formatSlackIcon, parseSlackIconInput } from "@/lib/slack-icon";
+import { formatSlackIcon, parseSlackIconInput, type SlackIconInput } from "@/lib/slack-icon";
 
 const PHASE_TONE: Record<AutosavePhase, StatusTone> = {
   idle: "none",
@@ -23,26 +23,40 @@ const PHASE_LABEL: Partial<Record<AutosavePhase, string>> = {
 
 export function AgentSlackIconField({ agent }: { agent: Agent }) {
   const updateProfile = useUpdateAgentProfile();
-  const stored = formatSlackIcon(agent.slackIcon);
+  const storedIcon = agent.slackIcon ?? null;
+  // Typed text (null shows the stored value), and a click on "Use Slack app icon".
   const [draft, setDraft] = useState<string | null>(null);
+  const [pickedApp, setPickedApp] = useState(false);
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
-  const text = draft ?? stored;
-  const parsed = parseSlackIconInput(text);
-  const shown = parsed.ok ? formatSlackIcon(parsed.icon) : null;
+  const usingApp = pickedApp || (draft === null && storedIcon?.type === "app");
+  const text = usingApp ? "" : (draft ?? formatSlackIcon(storedIcon));
+  const parsed: SlackIconInput = usingApp
+    ? { ok: true, icon: { type: "app" } }
+    : parseSlackIconInput(text);
+  // The autosave value is the icon as JSON, so every choice shares one save chain.
+  const value = parsed.ok ? JSON.stringify(parsed.icon) : null;
 
   const autosave = useAutosave({
-    value: shown ?? "",
-    dirty: draft !== null && shown !== null && shown !== stored,
+    value: value ?? "",
+    dirty: (draft !== null || pickedApp) && value !== null && value !== JSON.stringify(storedIcon),
     ready: parsed.ok,
-    save: async (value) => {
-      const result = parseSlackIconInput(value);
-      if (!result.ok) throw new Error(result.error);
-      await updateProfile.mutateAsync({ id: agent.id, profile: { slackIcon: result.icon } });
+    save: async (json) => {
+      await updateProfile.mutateAsync({ id: agent.id, profile: { slackIcon: JSON.parse(json) } });
     },
   });
 
+  function edit(next: string) {
+    setPickedApp(false);
+    setDraft(next);
+  }
+
   function reset() {
-    setDraft("");
+    edit("");
+    autosave.commit();
+  }
+
+  function pickAppIcon() {
+    setPickedApp(true);
     autosave.commit();
   }
 
@@ -55,13 +69,14 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
         <div className="relative w-full sm:w-72">
           <Input
             value={text}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => edit(event.target.value)}
             onBlur={() => {
               // Show what is stored: `owl` becomes `:owl:`.
-              if (shown !== null && shown !== text) setDraft(shown);
+              const shown = parsed.ok ? formatSlackIcon(parsed.icon) : text;
+              if (!usingApp && shown !== text) setDraft(shown);
               autosave.commit();
             }}
-            placeholder=":owl: or https://…/icon.png"
+            placeholder={usingApp ? "Slack app icon" : ":owl: or https://…/icon.png"}
             aria-label="Slack icon"
             aria-invalid={error !== null}
             autoComplete="off"
@@ -84,7 +99,12 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
             className="size-5 rounded-sm object-cover"
           />
         ) : null}
-        <Button variant="ghost" size="sm" onClick={reset} disabled={!stored && !text.trim()}>
+        {usingApp ? null : (
+          <Button variant="ghost" size="sm" onClick={pickAppIcon}>
+            Use Slack app icon
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={reset} disabled={value === "null"}>
           Reset to default
         </Button>
       </div>
@@ -92,6 +112,10 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
         <p className="text-xs text-status-error-strong">{error}</p>
       ) : previewUrl && brokenUrl === previewUrl ? (
         <p className="text-xs text-muted-foreground">Can't load image.</p>
+      ) : usingApp ? (
+        <p className="text-xs text-muted-foreground">
+          Uses the Slack app's own icon. Type an emoji or URL to replace it.
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground">
           Used for this agent's Slack messages. Leave empty for the default (:crown: for the lead).

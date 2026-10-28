@@ -164,7 +164,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         slackIcon: AgentSlackIconSchema.nullable()
           .optional()
           .describe(
-            "Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default.",
+            "Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }, or { type: 'app' } for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({

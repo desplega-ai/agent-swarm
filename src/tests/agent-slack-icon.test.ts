@@ -17,6 +17,11 @@ describe("getAgentSlackIcon", () => {
     ).toEqual({ icon_url: "https://example.com/o.png" });
   });
 
+  test("sends no icon override for the Slack app icon", () => {
+    expect(getAgentSlackIcon(agent({ slackIcon: { type: "app" } }))).toEqual({});
+    expect(AgentSlackIconSchema.safeParse({ type: "app" }).success).toBe(true);
+  });
+
   test("falls back to the crown for the lead and the hashed emoji for workers", () => {
     expect(getAgentSlackIcon(agent({ isLead: true, slackIcon: null }))).toEqual({
       icon_emoji: ":crown:",

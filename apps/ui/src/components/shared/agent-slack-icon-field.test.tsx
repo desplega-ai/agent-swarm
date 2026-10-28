@@ -68,9 +68,8 @@ async function mount() {
     ),
   );
   const input = container.querySelector("input") as HTMLInputElement;
-  const reset = [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Reset to default",
-  ) as HTMLButtonElement;
+  const button = (text: string) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === text);
   return {
     input,
     type: (value: string) =>
@@ -82,7 +81,9 @@ async function mount() {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }),
     blur: () => act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))),
-    reset: () => act(async () => reset.click()),
+    reset: () => act(async () => button("Reset to default")?.click()),
+    useApp: () => act(async () => button("Use Slack app icon")?.click()),
+    hasAppButton: () => Boolean(button("Use Slack app icon")),
     unmount: () => act(async () => root.unmount()),
   };
 }
@@ -119,6 +120,26 @@ describe("AgentSlackIconField saves", () => {
     await act(async () => release());
     await wait(50);
     expect(writes).toEqual([{ type: "emoji", emoji: ":owl:" }, null]);
+    await field.unmount();
+  });
+
+  test("Use Slack app icon stores { type: app }; typing replaces it and Reset clears it", async () => {
+    const field = await mount();
+    await field.useApp();
+    await wait(50);
+    expect(writes).toEqual([{ type: "app" }]);
+    expect(field.input.value).toBe("");
+    expect(field.input.placeholder).toBe("Slack app icon");
+    expect(field.hasAppButton()).toBe(false);
+    await field.type("owl");
+    await field.blur();
+    await wait(50);
+    expect(field.input.value).toBe(":owl:");
+    expect(writes.at(-1)).toEqual({ type: "emoji", emoji: ":owl:" });
+    await field.useApp();
+    await field.reset();
+    await wait(50);
+    expect(writes.at(-1)).toBeNull();
     await field.unmount();
   });
 

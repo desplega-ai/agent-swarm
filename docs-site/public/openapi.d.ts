@@ -28005,6 +28005,9 @@ export interface components {
             type: "url";
             /** Format: uri */
             url: string;
+        } | {
+            /** @enum {string} */
+            type: "app";
         };
         Agent: {
             id: string;

@@ -136,7 +136,10 @@ export interface AgentAvatarLucide {
 export type AgentAvatar = AgentAvatarLucide;
 
 /** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
-export type AgentSlackIcon = { type: "emoji"; emoji: string } | { type: "url"; url: string };
+export type AgentSlackIcon =
+  | { type: "emoji"; emoji: string }
+  | { type: "url"; url: string }
+  | { type: "app" };
 
 export interface Agent {
   id: string;
