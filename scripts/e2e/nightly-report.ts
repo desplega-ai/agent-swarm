@@ -16,6 +16,8 @@ import type { E2eResult, HarnessResult, ScenarioResult } from "./report";
 import { harnessFailureDetails, harnessLegName, harnessTable, markdownCell, usd } from "./report";
 
 export const DEFAULT_PROVIDERS = ["claude", "claude-sdk", "codex", "pi", "opencode", "dsh"];
+/** Legs the workflow runs on main only. The codex OAuth refresh chain lives in main's cache. */
+export const MAIN_ONLY_LEGS = ["codex"];
 const TREND_LIMIT = 14;
 
 export type ContractSummary = {
@@ -37,6 +39,8 @@ export type NightlyReport = {
   harness: HarnessResult[];
   /** Providers with no result file, such as a leg that died before writing one. */
   missingLegs: string[];
+  /** Main-only providers the workflow skipped on another ref. Absent in older reports. */
+  skippedLegs?: string[];
   /** USD over every leg and attempt in this run. */
   totalCostUsd: number;
   warnings: string[];
@@ -49,6 +53,8 @@ export type ReportInputs = {
   runId: string;
   runUrl: string;
   sha: string;
+  /** The run's git ref. Off `refs/heads/main`, main-only legs are skipped, not missing. */
+  ref?: string;
   generatedAt: string;
   credentialWarnDays: number;
 };
@@ -84,7 +90,13 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
   const harness = inputs.providers
     .filter((provider) => legs.has(provider))
     .map((provider) => legs.get(provider)!);
-  const missingLegs = inputs.providers.filter((provider) => !legs.has(provider));
+  const offMain = Boolean(inputs.ref) && inputs.ref !== "refs/heads/main";
+  const skippedLegs = inputs.providers.filter(
+    (provider) => offMain && MAIN_ONLY_LEGS.includes(provider) && !legs.has(provider),
+  );
+  const missingLegs = inputs.providers.filter(
+    (provider) => !legs.has(provider) && !skippedLegs.includes(provider),
+  );
 
   const warnings: string[] = [];
   if (!contract) warnings.push("The contract job produced no result file.");
@@ -125,6 +137,7 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
     contract,
     harness,
     missingLegs,
+    skippedLegs,
     totalCostUsd: harness.reduce((total, leg) => total + leg.totalCostUsd, 0),
     warnings,
   };
@@ -160,12 +173,14 @@ export function nightlyMarkdown(
   options: MarkdownOptions = { logTails: true },
 ): string {
   const passedLegs = report.harness.filter((leg) => leg.status === "pass").length;
+  const skippedLegs = report.skippedLegs ?? [];
   const shaLabel = report.sha ? `\`${report.sha.slice(0, 7)}\`` : "";
   const runLabel = report.runUrl ? `[run](${report.runUrl})` : "";
   const headline = [
     shaLabel,
     runLabel,
-    `${passedLegs}/${providers.length} harness legs passed`,
+    `${passedLegs}/${providers.length - skippedLegs.length} harness legs passed`,
+    skippedLegs.length > 0 ? `${skippedLegs.length} skipped` : "",
     `total cost ${usd(report.totalCostUsd)}`,
   ]
     .filter(Boolean)
@@ -179,6 +194,10 @@ export function nightlyMarkdown(
     "",
     ...harnessTable(report.harness),
     ...report.missingLegs.map((provider) => `| ${provider} | | MISSING | | | | | no result file |`),
+    ...skippedLegs.map(
+      (provider) =>
+        `| ${provider} | | SKIP | | | | | main only: its OAuth refresh chain lives in main's cache |`,
+    ),
     "",
   ];
 
@@ -260,6 +279,7 @@ async function main(): Promise<void> {
       "run-id": { type: "string", default: process.env.GITHUB_RUN_ID ?? "" },
       "run-url": { type: "string", default: "" },
       sha: { type: "string", default: process.env.GITHUB_SHA ?? "" },
+      ref: { type: "string", default: process.env.GITHUB_REF ?? "" },
       providers: { type: "string", default: DEFAULT_PROVIDERS.join(",") },
       "credential-warn-days": { type: "string", default: "3" },
     },
@@ -280,6 +300,7 @@ async function main(): Promise<void> {
     runId: values["run-id"],
     runUrl: values["run-url"],
     sha: values.sha,
+    ref: values.ref,
     generatedAt: new Date().toISOString(),
     credentialWarnDays: Number(values["credential-warn-days"]),
   });

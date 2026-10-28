@@ -24,6 +24,8 @@ describe("migration 140 approval cancellation lifecycle", () => {
       runMigrations(db);
       db.run("DELETE FROM approval_requests");
       db.run("DROP TRIGGER cancel_approval_request_after_workflow_step_cancel");
+      // Reads approval_requests from another table, so the rebuild's rename would fail.
+      db.run("DROP TRIGGER session_summary_recompute_apply");
       db.run("DROP TABLE approval_requests");
       db.run(`CREATE TABLE approval_requests (
         id TEXT PRIMARY KEY,

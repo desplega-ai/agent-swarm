@@ -108,3 +108,4 @@ __pycache__/
 
 # Bun compile scratch files
 *.bun-build
+.e2e-state

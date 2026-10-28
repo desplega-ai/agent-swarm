@@ -5,13 +5,16 @@
  *   bun run bump:agent-fs            # newest stable tag on GHCR
  *   bun run bump:agent-fs 0.13.3     # explicit version (leading "v" accepted)
  *
- * Before touching any file the target version is checked against the three
- * places the worker image and the chart pull it from: the GHCR image manifest,
- * the npm package, and the skill file at the git tag. A missing pin location
- * (layout drift) fails loudly rather than leaving a partial bump behind.
+ * Before touching any file the target version is checked against the places
+ * the worker image, the chart and the scripts runtime pull it from: the GHCR
+ * image manifest, the npm packages (CLI and just-bash adapter), and the skill
+ * file at the git tag. A missing pin location (layout drift) fails loudly
+ * rather than leaving a partial bump behind. After the rewrite `bun install`
+ * refreshes bun.lock so the adapter's lock entry matches package.json.
  */
 
 import {
+  AGENT_FS_ADAPTER_NPM_PACKAGE,
   AGENT_FS_HELM_TAG_PATTERN,
   AGENT_FS_IMAGE,
   AGENT_FS_NPM_PACKAGE,
@@ -30,6 +33,7 @@ type Pin = {
 };
 
 const COMPOSE_IMAGE_PATTERN = new RegExp(`(ghcr\\.io/${AGENT_FS_IMAGE}:)(\\S+)`, "g");
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 export const PINS: Pin[] = [
   { path: "Dockerfile.worker", pattern: /^(ARG AGENT_FS_VERSION=)(\S+)$/m },
@@ -54,6 +58,10 @@ export const PINS: Pin[] = [
   {
     path: "charts/agent-swarm/examples/values-all-workers-agent-fs.yaml",
     pattern: AGENT_FS_HELM_TAG_PATTERN,
+  },
+  {
+    path: "package.json",
+    pattern: new RegExp(`^(\\s*"${escapeRegExp(AGENT_FS_ADAPTER_NPM_PACKAGE)}": ")([^"]+)`, "m"),
   },
   {
     path: "DEPLOYMENT.md",
@@ -90,13 +98,15 @@ async function resolveTarget(requested: string | undefined): Promise<string> {
 }
 
 async function preflight(version: string): Promise<void> {
-  const npmUrl = `https://registry.npmjs.org/${encodeURIComponent(AGENT_FS_NPM_PACKAGE)}/${version}`;
-  const npmResponse = await fetchWithRetry(npmUrl);
-  await npmResponse.body?.cancel();
-  if (npmResponse.status !== 200) {
-    fail(`npm has no ${AGENT_FS_NPM_PACKAGE}@${version} (HTTP ${npmResponse.status}).`);
+  for (const pkg of [AGENT_FS_NPM_PACKAGE, AGENT_FS_ADAPTER_NPM_PACKAGE]) {
+    const npmUrl = `https://registry.npmjs.org/${encodeURIComponent(pkg)}/${version}`;
+    const npmResponse = await fetchWithRetry(npmUrl);
+    await npmResponse.body?.cancel();
+    if (npmResponse.status !== 200) {
+      fail(`npm has no ${pkg}@${version} (HTTP ${npmResponse.status}).`);
+    }
+    console.log(`npm package ${pkg}@${version} exists`);
   }
-  console.log(`npm package ${AGENT_FS_NPM_PACKAGE}@${version} exists`);
 
   const skillUrl = `https://raw.githubusercontent.com/${AGENT_FS_REPO}/v${version}/${AGENT_FS_SKILL_PATH}`;
   const skillResponse = await fetchWithRetry(skillUrl, { method: "HEAD" });
@@ -149,6 +159,34 @@ export async function applyPins(version: string, root = "."): Promise<string[]> 
   return rendered;
 }
 
+/**
+ * Throw unless bun.lock resolves the just-bash adapter to `version`. Run after
+ * `bun install` so a lockfile that did not follow package.json fails loudly.
+ */
+export function assertLockfilePinned(lockText: string, version: string): void {
+  const resolved = [
+    ...lockText.matchAll(
+      new RegExp(`"${escapeRegExp(AGENT_FS_ADAPTER_NPM_PACKAGE)}@([^"]+)"`, "g"),
+    ),
+  ].map((match) => match[1]);
+  if (resolved.length === 0) {
+    throw new Error(`bun.lock has no ${AGENT_FS_ADAPTER_NPM_PACKAGE} entry.`);
+  }
+  const stale = resolved.filter((found) => found !== version);
+  if (stale.length > 0) {
+    throw new Error(
+      `bun.lock still resolves ${AGENT_FS_ADAPTER_NPM_PACKAGE}@${stale.join(", ")}; expected ${version}.`,
+    );
+  }
+}
+
+async function refreshLockfile(version: string): Promise<void> {
+  const install = Bun.spawn(["bun", "install"], { stdout: "inherit", stderr: "inherit" });
+  if ((await install.exited) !== 0) fail("bun install failed; bun.lock was not refreshed.");
+  assertLockfilePinned(await Bun.file("bun.lock").text(), version);
+  console.log(`bun.lock resolves ${AGENT_FS_ADAPTER_NPM_PACKAGE}@${version}`);
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const requested = args.find((arg) => !arg.startsWith("--"));
@@ -157,6 +195,7 @@ if (import.meta.main) {
   await preflight(target);
   try {
     console.log((await applyPins(target)).join("\n"));
+    await refreshLockfile(target);
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   }

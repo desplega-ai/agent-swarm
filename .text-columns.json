@@ -2658,6 +2658,52 @@
       "exempt": "identifier"
     }
   },
+  "session_members": {
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "rootId": {
+      "exempt": "identifier"
+    }
+  },
+  "session_summaries": {
+    "rootId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requestedByUserId": {
+      "exempt": "identifier"
+    },
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "taskType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackChannelId": {
+      "exempt": "identifier"
+    },
+    "contextKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastActivityAt": {
+      "exempt": "timestamp"
+    },
+    "latestStatus": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastHumanAt": {
+      "exempt": "timestamp"
+    }
+  },
   "session_tokens": {
     "runtimeId": {
       "exempt": "identifier"

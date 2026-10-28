@@ -69,7 +69,7 @@ function plan({ sql, params }: Captured, db: Database = getDb()): string {
 }
 
 // Plan of `captured` on a copy of the DB with `index` dropped, i.e. with
-// migration 251 reverted.
+// migration 254 reverted.
 function planWithoutIndex(captured: Captured, index: string): string {
   const copy = Database.deserialize(getDb().serialize());
   try {
@@ -83,7 +83,7 @@ function planWithoutIndex(captured: Captured, index: string): string {
 // Production has no sqlite_stat1, so the planner picks indexes without
 // statistics. Each case runs the real caller, EXPLAINs the statement it
 // issued, and checks the plan reaches its index. The regression control
-// reverts that case's fix (the SQL shape or the migration 251 index) and
+// reverts that case's fix (the SQL shape or the migration 254 index) and
 // checks the same assertion then fails, so a green case is not vacuous.
 const CASES: Array<{
   name: string;

@@ -7,7 +7,7 @@
  * are matched again on the client, so an older API that ignores `q` still
  * shows only matching rows.
  */
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import {
   BookOpen,
@@ -36,8 +36,10 @@ import type {
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { combPath } from "@/lib/comb/paths";
 import type { SnippetPart } from "@/lib/comb/search";
+import { keepPreviousWithin, paletteSearchKey } from "@/lib/command-palette/identity";
 import type { PaletteNav, SearchProviderId } from "@/lib/command-palette/route-meta";
-import { taskListTitle } from "@/lib/task-title";
+import { taskResult } from "@/lib/command-palette/task-result";
+import { getConfig } from "@/lib/config";
 
 /** One search hit. */
 export interface PaletteResult {
@@ -51,6 +53,8 @@ export interface PaletteResult {
   href: string;
   /** A content hit with its matched words (file content search). */
   snippet?: SnippetPart[];
+  /** Kept when the client matcher misses it (see `rankResults`). */
+  serverMatched?: boolean;
 }
 
 export interface ProviderState {
@@ -96,7 +100,9 @@ const STALE_MS = 15_000;
 /**
  * A provider backed by one API list call. The query key carries the text, so
  * a new keystroke starts a new query; react-query aborts the old one through
- * `signal` once nothing observes it.
+ * `signal` once nothing observes it. It also carries the swarm and user
+ * (`paletteSearchKey`), so a cached answer never serves another user's search,
+ * and the previous answer stands in only for the same user.
  */
 function apiSearch<T>(
   id: SearchProviderId,
@@ -104,18 +110,24 @@ function apiSearch<T>(
   toResult: (row: T) => PaletteResult,
 ): SearchProvider["useSearch"] {
   return function useApiSearch(query, limit) {
+    const queryKey = paletteSearchKey(getConfig(), id, query, limit);
     const result = useQuery({
-      queryKey: ["command-palette", id, query, limit],
+      queryKey,
       queryFn: ({ signal }) => fetchRows(query, limit, signal),
       select: (rows) => rows.map(toResult),
-      placeholderData: keepPreviousData,
+      placeholderData: keepPreviousWithin(queryKey[1]),
       staleTime: STALE_MS,
       refetchInterval: false,
       refetchOnWindowFocus: false,
       retry: false,
     });
+    // A placeholder answered the previous query: its server match says
+    // nothing about this one, so only the client matcher may keep its rows.
+    const results = result.isPlaceholderData
+      ? (result.data ?? []).map((row) => ({ ...row, serverMatched: false }))
+      : (result.data ?? []);
     return {
-      results: result.data ?? [],
+      results,
       loading: result.isFetching,
       error: result.isError,
     };
@@ -160,13 +172,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProvider> = {
             signal,
           )
         ).tasks,
-      (task) => ({
-        id: task.id,
-        title: taskListTitle(task),
-        detail: task.status.replace("_", " "),
-        keywords: [task.id],
-        href: `/tasks/${task.id}`,
-      }),
+      taskResult,
     ),
   },
   agents: {

@@ -4,6 +4,9 @@
 #   telemetry.sh funnel [days]   real-user install + /setup funnel (default 30 days)
 #   telemetry.sh runs [hours]    QA installs: every org that sent an onboarding-qa event (default 24 h)
 #   telemetry.sh org <org_id>    one install's event timeline, Barcelona time
+#   telemetry.sh new [hours]     installs whose first event is within <hours> (default 2), test env excluded.
+#                                A record box (proxy blocked) must not appear. Its API mints an org id locally,
+#                                so `org <id>` on that id must print no rows either
 #
 # "Real users" = environment production, no internal event, and no onboarding-qa
 # event on the same org (QA boxes send production events until they are tagged).
@@ -101,9 +104,29 @@ ORDER BY min(occurred_at);
 SQL
 }
 
+cmd_new() {
+  local hours="${1:-2}"
+  [[ "$hours" =~ ^[0-9]+$ ]] || { echo "hours must be an integer" >&2; exit 2; }
+  ch --param_hours="$hours" <<'SQL'
+SELECT actor_org_id,
+  formatDateTime(toTimeZone(min(occurred_at), 'Europe/Madrid'), '%m-%d %H:%i') AS first_bcn,
+  formatDateTime(toTimeZone(max(occurred_at), 'Europe/Madrid'), '%m-%d %H:%i') AS last_bcn,
+  count() AS events,
+  arrayStringConcat(groupUniqArray(coalesce(environment, '')), ' ') AS environments,
+  max(swarm_version) AS version,
+  any(install_method) AS install_method
+FROM telemetry.raw_events
+WHERE product = 'agent-swarm' AND actor_org_id IS NOT NULL AND coalesce(environment, '') != 'test'
+GROUP BY actor_org_id
+HAVING min(occurred_at) > now() - INTERVAL {hours:UInt32} HOUR
+ORDER BY min(occurred_at);
+SQL
+}
+
 case "${1:-}" in
   funnel) cmd_funnel "${2:-}" ;;
   runs) cmd_runs "${2:-}" ;;
   org) cmd_org "${2:?org id}" ;;
-  *) sed -n '2,11p' "$0"; exit 2 ;;
+  new) cmd_new "${2:-}" ;;
+  *) sed -n '2,12p' "$0"; exit 2 ;;
 esac

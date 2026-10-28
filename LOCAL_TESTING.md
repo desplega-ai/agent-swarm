@@ -180,7 +180,7 @@ Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and 
 Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.1-rc.4` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.2-alpha.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
@@ -189,7 +189,8 @@ Amp defaults to its cheapest mode, `low`, and needs `AMP_API_KEY` plus an `amp` 
 thread on ampcode.com and costs about a cent. The nightly workflow has no amp leg.
 Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
 Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
-The blob goes stale after its first refresh, about ten days after issue.
+The CLI rotates the refresh token on every refresh, so the blob alone survives one refresh, about ten days after issue.
+The nightly carries the rotated auth.json between main runs in the Actions cache (`E2E_CODEX_AUTH_STATE`, sealed under the secret), so reseed only when the chain breaks.
 Set `E2E_HARNESS_TIMEOUT_MS` to change the five-minute harness timeout.
 
 The same command runs locally, in GitHub Actions, and inside a swarm worker container.
