@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
 import {
   closeDb,
@@ -8,11 +8,9 @@ import {
   initDb,
   updateAgentProfile,
 } from "../be/db";
-import { saveGeneratedProfile } from "../commands/runner";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { HeartbeatExpiryError, validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
-import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
@@ -26,31 +24,6 @@ describe("heartbeat expiry validation", () => {
     expect(() => validateHeartbeatExpiry("", section("- Check the queue"))).toThrow(
       "new tracked item requires DELETE <MM-DD> (or DELETE on <MM-DD>): Check the queue",
     );
-  });
-  test("runner keeps network failures non-fatal and scrubs their diagnostics", async () => {
-    const secret = "profile-save-test-credential-value";
-    registerVolatileSecret(secret, "profile-save-test");
-    const request = spyOn(globalThis, "fetch").mockRejectedValue(
-      new TypeError(`fetch failed: ${secret}`),
-    );
-    const log = spyOn(console, "log").mockImplementation(() => {});
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      await saveGeneratedProfile({
-        apiUrl: "http://profile-save.invalid",
-        apiKey: secret,
-        agentId: crypto.randomUUID(),
-        role: "lead",
-        profileUpdate: { soulMd: "Default soul" },
-      });
-      expect(log).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("fetch failed"));
-      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining(secret));
-    } finally {
-      request.mockRestore();
-      log.mockRestore();
-      warn.mockRestore();
-    }
   });
   test.each([
     "📌 Permanent rule",
@@ -171,10 +144,11 @@ describe("profile persistence heartbeat gate", () => {
       await getDbClient().query("SELECT * FROM context_versions WHERE agentId = ?", [agentId]),
     ).toEqual(versionsBefore);
   });
-  test(
-    "runner saves the official lead template on the first boot",
-    async () => {
+  test.each(["saved", "HTTP 400", "network failure"] as const)(
+    "first-boot runner handles profile %s and continues initializing",
+    async (outcome) => {
       const leadId = crypto.randomUUID();
+      const secret = "profile-save-test-credential-value";
       expect(await getAgentById(leadId)).toBeFalsy();
       const templateFile = (name: string) =>
         Bun.file(new URL(`../../templates/official/lead/${name}`, import.meta.url)).text();
@@ -188,9 +162,14 @@ describe("profile persistence heartbeat gate", () => {
           claudeMd: await templateFile("CLAUDE.md"),
           toolsMd: "",
           setupScript: "",
-          heartbeatMd: await templateFile("HEARTBEAT.md"),
+          heartbeatMd:
+            outcome === "HTTP 400"
+              ? section("- New undated HTTP item")
+              : await templateFile("HEARTBEAT.md"),
         },
       };
+      let profileBefore: Awaited<ReturnType<typeof getAgentById>>;
+      const profileStatuses: number[] = [];
       const server = createServer(async (req, res) => {
         try {
           const path = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -202,7 +181,13 @@ describe("profile persistence heartbeat gate", () => {
           if (path === "/api/config/resolved") return json({ configs: [] });
           if (path === "/api/fs/agent-credentials") return json({ enabled: false });
           if (path.startsWith("/api/active-sessions/")) return json({ recovered: 0 });
-          if (path === "/me") return json(await getAgentById(leadId));
+          if (path === "/me") {
+            profileBefore = await getAgentById(leadId);
+            return json(profileBefore);
+          }
+          if (path === `/api/agents/${leadId}/profile` && req.method === "PUT") {
+            res.once("finish", () => profileStatuses.push(res.statusCode));
+          }
           if (path === `/api/agents/${leadId}/mcp-servers`) return json({ servers: [] });
           if (await handleAgentRegister(req, res, getPathSegments(req.url ?? "/"), leadId)) return;
           if (
@@ -239,6 +224,10 @@ describe("profile persistence heartbeat gate", () => {
         }));
         const request = globalThis.fetch;
         globalThis.fetch = Object.assign(async (...args) => {
+          const path = new URL(args[0] instanceof Request ? args[0].url : args[0]).pathname;
+          if (${JSON.stringify(outcome)} === "network failure" && path === "/api/agents/${leadId}/profile") {
+            throw new TypeError("fetch failed: " + process.env.AGENT_SWARM_API_KEY);
+          }
           const response = await request(...args);
           // This request follows profile initialization and precedes workspace writes.
           if (new URL(response.url).pathname === "/api/agents/${leadId}/mcp-servers") {
@@ -259,7 +248,7 @@ describe("profile persistence heartbeat gate", () => {
               ...process.env,
               AGENT_ID: leadId,
               AGENT_NAME: "Fresh lead",
-              AGENT_SWARM_API_KEY: "test-profile-key",
+              AGENT_SWARM_API_KEY: secret,
               MCP_BASE_URL: `http://localhost:${port}`,
               TEMPLATE_ID: "official/lead",
               TEMPLATE_REGISTRY_URL: `http://localhost:${port}`,
@@ -277,12 +266,29 @@ describe("profile persistence heartbeat gate", () => {
         );
         expect(child.stdout).toContain("Boot identity phase completed");
         const saved = await getAgentById(leadId);
-        expect(saved?.soulMd).toContain("# SOUL.md — Fresh lead");
-        expect(saved?.identityMd).toContain("# IDENTITY.md — Fresh lead");
-        expect(saved?.claudeMd).toBeTruthy();
-        expect(saved?.toolsMd).toBeTruthy();
-        expect(saved?.heartbeatMd).toBe(template.files.heartbeatMd);
-        expect(child.stdout).toContain("[lead] Generated and saved default identity templates");
+        expect(saved).toBeTruthy();
+        expect(child.stdout + child.stderr).not.toContain(secret);
+        if (outcome === "saved") {
+          expect(profileStatuses).toEqual([200]);
+          expect(saved?.soulMd).toContain("# SOUL.md — Fresh lead");
+          expect(saved?.identityMd).toContain("# IDENTITY.md — Fresh lead");
+          expect(saved?.claudeMd).toBeTruthy();
+          expect(saved?.toolsMd).toBeTruthy();
+          expect(saved?.heartbeatMd).toBe(template.files.heartbeatMd);
+          expect(child.stdout).toContain("[lead] Generated and saved default identity templates");
+        } else {
+          expect(saved).toEqual(profileBefore);
+          expect(child.stdout).not.toContain("Generated and saved default identity templates");
+          expect(child.stderr).toContain("Could not save generated templates to server");
+          if (outcome === "HTTP 400") {
+            expect(profileStatuses).toEqual([400]);
+            expect(child.stderr).toContain("HTTP 400");
+            expect(child.stderr).toContain("New undated HTTP item");
+          } else {
+            expect(profileStatuses).toEqual([]);
+            expect(child.stderr).toContain("fetch failed");
+          }
+        }
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         await Bun.$`rm -rf ${dir}`.quiet();
@@ -290,47 +296,6 @@ describe("profile persistence heartbeat gate", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
-  test("HTTP returns 400 and the runner reports the rejected profile", async () => {
-    const server = createServer(async (req, res) => {
-      try {
-        await handleAgentsRest(
-          req,
-          res,
-          getPathSegments(req.url ?? "/"),
-          parseQueryParams(req.url ?? "/"),
-          agentId,
-        );
-      } catch {
-        res.writeHead(500).end();
-      }
-    });
-    const port = await listenOnFreePort(server);
-    const log = spyOn(console, "log").mockImplementation(() => {});
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const response = await fetch(`http://localhost:${port}/api/agents/${agentId}/profile`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ heartbeatMd: section("- New undated HTTP item") }),
-      });
-      expect(response.status).toBe(400);
-      expect((await response.json()).error).toContain("New undated HTTP item");
-      await saveGeneratedProfile({
-        apiUrl: `http://localhost:${port}`,
-        apiKey: "test-profile-key",
-        agentId,
-        role: "lead",
-        profileUpdate: { heartbeatMd: section("- New undated HTTP item") },
-      });
-      expect(log).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 400"));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("New undated HTTP item"));
-    } finally {
-      log.mockRestore();
-      warn.mockRestore();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
   test("persists edits, dated additions, pin durables, and deletions", async () => {
     const next = section("- **Legacy:** Revised", "- Dated DELETE on 09-30", "📌 Durable");
     expect((await updateAgentProfile(agentId, { heartbeatMd: next }))?.heartbeatMd).toBe(next);

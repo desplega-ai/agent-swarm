@@ -5682,7 +5682,7 @@ export async function checkCompletedProcesses(
 
 const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export async function saveGeneratedProfile({
+async function saveGeneratedProfile({
   apiUrl,
   apiKey,
   agentId,
