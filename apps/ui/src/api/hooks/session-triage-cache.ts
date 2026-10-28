@@ -102,6 +102,8 @@ export interface TriageContext {
   details: Array<{ key: QueryKey; before: SessionReadState }>;
   /** The list fetches the write cancelled before it patched (`cancelForTriage`). */
   interrupted?: QueryKey[];
+  /** A row this write changed was in Later or Done, so it moves to a list that never held it. */
+  leftLaterOrDone: boolean;
 }
 
 /**
@@ -202,10 +204,13 @@ export function patchTriageCaches(
   });
   const patch = optimisticRow(action);
   const details: TriageContext["details"] = [];
+  const parked = (state: SessionReadState | undefined) => state === "later" || state === "done";
+  let leftLaterOrDone = false;
   for (const id of ids) {
     const key = sessionDetailKey(id, userId);
     const detail = queryClient.getQueryData<SessionDetailResponse>(key);
     if (!detail?.readState) continue;
+    if (parked(detail.readState) && detail.readState !== patch.readState) leftLaterOrDone = true;
     details.push({ key, before: detail.readState });
     queryClient.setQueryData<SessionDetailResponse>(key, { ...detail, readState: patch.readState });
   }
@@ -219,8 +224,12 @@ export function patchTriageCaches(
     const change: PageChange = { key, patched: new Map(), removed: [] };
     const sessions: SessionListItem[] = [];
     page.sessions.forEach((row, index) => {
-      if (!ids.has(row.root.id)) sessions.push(row);
-      else if (holds) {
+      if (!ids.has(row.root.id)) {
+        sessions.push(row);
+        return;
+      }
+      if (parked(row.readState) && row.readState !== patch.readState) leftLaterOrDone = true;
+      if (holds) {
         change.patched.set(row.root.id, row);
         sessions.push({ ...row, ...patch });
       } else change.removed.push({ row, index });
@@ -269,7 +278,7 @@ export function patchTriageCaches(
       arrivals.push({ section, listKey, treeKey, ids: [...moved.keys()] });
     }
   }
-  return { patch, changes, details, arrivals };
+  return { patch, changes, details, arrivals, leftLaterOrDone };
 }
 
 /** Undo `patchTriageCaches` after a failed write. A newer write to the same row keeps its state. */
@@ -331,7 +340,8 @@ const pendingRefresh = new WeakMap<QueryClient, PendingRefresh>();
  * It changes no list's membership except lists that held the row (an
  * Unread list drops it), and the rows already show it. So it refetches
  * the tree (its counts), those lists, and the list fetches it cancelled
- * (opening a session from a link cancels the Inbox's first load). Every other write refetches
+ * (opening a session from a link cancels the Inbox's first load). A read
+ * that takes a row out of Later or Done, and every other write, refetches
  * every list: a row can arrive in a list that never held it.
  */
 export function refreshAfterTriage(
@@ -342,7 +352,7 @@ export function refreshAfterTriage(
 ) {
   const pending = pendingRefresh.get(queryClient) ?? { all: false, lists: new Map() };
   pendingRefresh.set(queryClient, pending);
-  if (action.kind === "read" && context) {
+  if (action.kind === "read" && context && !context.leftLaterOrDone) {
     for (const { key } of context.changes) pending.lists.set(hashKey(key), key);
     for (const key of context.interrupted ?? []) pending.lists.set(hashKey(key), key);
   } else pending.all = true;

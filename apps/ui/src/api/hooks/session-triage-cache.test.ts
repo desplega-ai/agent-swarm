@@ -3,7 +3,12 @@ import { QueryClient } from "@tanstack/react-query";
 import { setSessionsShow } from "../../lib/sessions-show";
 import { sidebarListParams } from "../../lib/sessions-v2";
 import type { SessionListItem, SessionsListResponse, SessionTreeResponse } from "../types";
-import { sessionListKey, sessionListParams, sessionTreeKey } from "./session-query-keys";
+import {
+  sessionDetailKey,
+  sessionListKey,
+  sessionListParams,
+  sessionTreeKey,
+} from "./session-query-keys";
 import {
   cancelForTriage,
   patchTriageCaches,
@@ -37,7 +42,7 @@ function tree(done: number): SessionTreeResponse {
 }
 
 /** The key of a sidebar section list in one Mine / All view. */
-function sectionKey(section: "inbox" | "done", show: "mine" | "all") {
+function sectionKey(section: string, show: "mine" | "all") {
   return sessionListKey(USER, sessionListParams(sidebarListParams(section), show));
 }
 
@@ -131,6 +136,42 @@ describe("refreshAfterTriage", () => {
     expect(invalidated(client, sessionTreeKey(USER, "mine"))).toBe(true);
     expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(true);
     expect(invalidated(client, sectionKey("done", "mine"))).toBe(false);
+  });
+
+  // A mixed selection marked read took its Done row back to the Inbox, but
+  // only the lists that held a row refetched, so the row's group never
+  // showed it until the next poll.
+  for (const parked of ["done", "later"] as const) {
+    test(`a read that takes a ${parked} row back to the Inbox refetches every list`, () => {
+      const client = seeded();
+      const group = sectionKey("grp", "mine");
+      client.setQueryData(group, page(row("c", "2026-10-22T08:00:00.000Z")));
+      const from = sectionKey(parked, "mine");
+      client.setQueryData(
+        from,
+        page({ ...row("b", "2026-10-22T09:00:00.000Z"), readState: parked }),
+      );
+
+      const context = patchTriageCaches(client, USER, new Set(["a", "b"]), { kind: "read" });
+      expect(context.leftLaterOrDone).toBe(true);
+      refreshAfterTriage(client, { kind: "read" }, context, false);
+
+      expect(invalidated(client, group)).toBe(true);
+      expect(invalidated(client, sectionKey("inbox", "mine"))).toBe(true);
+      expect(invalidated(client, from)).toBe(true);
+    });
+  }
+
+  test("a read of a Done session known only from its open pane refetches every list", () => {
+    const client = seeded();
+    const group = sectionKey("grp", "mine");
+    client.setQueryData(group, page(row("c", "2026-10-22T08:00:00.000Z")));
+    client.setQueryData(sessionDetailKey("z", USER), { readState: "done" });
+
+    const context = patchTriageCaches(client, USER, new Set(["z"]), { kind: "read" });
+    refreshAfterTriage(client, { kind: "read" }, context, false);
+
+    expect(invalidated(client, group)).toBe(true);
   });
 
   // Opening a session from a link marks it read while the Inbox's first
