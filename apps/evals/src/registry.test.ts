@@ -258,7 +258,7 @@ describe("serializeScenario — workerSpecs + lead (v7 §9/§12)", () => {
 });
 
 describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
-  test("display order is frozen: frontier, challengers, oss, claude-family, budget, then the scheduled tiers", () => {
+  test("display order is frozen: frontier, challengers, oss, claude-family, budget, then the scheduled tiers, then helmcode", () => {
     expect(CONFIG_PRESETS.map((p) => p.id)).toEqual([
       "frontier",
       "challengers",
@@ -267,6 +267,7 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
       "budget",
       "nightly-canary",
       "weekly-matrix",
+      "helmcode",
     ]);
   });
 
@@ -284,6 +285,9 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
     ]);
     expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 4.5 });
     expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 25 });
+    const helmcode = CONFIG_PRESETS.find((p) => p.id === "helmcode");
+    expect(helmcode?.configIds.length).toBe(5);
+    expect(helmcode?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 20 });
     for (const preset of CONFIG_PRESETS) {
       const plan = preset.runDefaults;
       if (!plan) continue;
@@ -461,7 +465,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
 
   test("unknown preset throws the frozen error before anything else", () => {
     expect(() => expandPresetSelection(["nope"], [])).toThrow(
-      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget, nightly-canary, weekly-matrix)',
+      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget, nightly-canary, weekly-matrix, helmcode)',
     );
   });
 });

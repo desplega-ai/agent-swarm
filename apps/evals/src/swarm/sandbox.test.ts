@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { WORKER_SPEC_RESERVED_ENV } from "../registry.ts";
 import type { HarnessConfig } from "../types.ts";
-import { apiRuntimeEnv, memberBilling, workerRuntimeEnv } from "./sandbox.ts";
+import { apiRuntimeEnv, credentialsForConfig, memberBilling, workerRuntimeEnv } from "./sandbox.ts";
 
 const ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
+  "HELMCODE_API_KEY",
   "EMBEDDING_API_KEY",
   "EMBEDDING_MODEL",
   "EMBEDDING_API_BASE_URL",
@@ -301,5 +302,39 @@ describe("apiRuntimeEnv", () => {
     const env = apiRuntimeEnv("k");
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.EMBEDDING_API_KEY).toBe("example-emb-test-key");
+  });
+});
+
+describe("credentialsForConfig registry providers", () => {
+  const helmcode: HarnessConfig = {
+    id: "pi-helmcode-glm5.3",
+    provider: "pi",
+    model: "helmcode/glm5.3",
+  };
+
+  test("a helmcode/ model gets HELMCODE_API_KEY and no OpenRouter key", () => {
+    process.env.HELMCODE_API_KEY = "example-helmcode-test";
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
+    expect(credentialsForConfig(helmcode)).toEqual({ HELMCODE_API_KEY: "example-helmcode-test" });
+  });
+
+  test("a helmcode/ model without the key fails loudly and does not fall back to OpenRouter", () => {
+    delete process.env.HELMCODE_API_KEY;
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
+    expect(() => credentialsForConfig(helmcode)).toThrow(
+      'config "pi-helmcode-glm5.3" (pi) requires HELMCODE_API_KEY in the environment',
+    );
+  });
+
+  test("an openrouter/ model still gets OPENROUTER_API_KEY only", () => {
+    process.env.HELMCODE_API_KEY = "example-helmcode-test";
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
+    expect(
+      credentialsForConfig({
+        id: "pi-deepseek-flash",
+        provider: "pi",
+        model: "openrouter/deepseek/deepseek-v4-flash",
+      }),
+    ).toEqual({ OPENROUTER_API_KEY: "example-or-test-key" });
   });
 });
