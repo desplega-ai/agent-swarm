@@ -917,6 +917,8 @@ describe("Mine view hides machine-started roots", () => {
     const slack = await task("shared/", { source: "slack" });
     const ui = await task("shared/", { source: "ui" });
     const whatsapp = await task("shared/", { source: "system", taskType: "kapso-inbound" });
+    // Comments the viewer sent from the Files page.
+    const comb = await task("shared/", { source: "comb", taskType: "comb-review" });
     // A workflow root someone else shared with the viewer stays too.
     const sharedRun = await task("shared/", { source: "workflow", requestedByUserId: other.id });
     await share(sharedRun);
@@ -935,13 +937,15 @@ describe("Mine view hides machine-started roots", () => {
       return ((await res.json()) as Awaited<ReturnType<typeof getSessionTree>>).noGroup.total;
     };
 
-    const mine = [slack.id, ui.id, whatsapp.id, sharedRun.id].sort();
+    const mine = [slack.id, ui.id, whatsapp.id, comb.id, sharedRun.id].sort();
     const all = [...mine, demo.id, scheduled.id, heartbeat.id].sort();
     expect(await list("")).toEqual(mine);
     expect(await list("show=mine")).toEqual(mine);
     expect(await list("show=all")).toEqual(all);
     expect(await tree("")).toBe(mine.length);
     expect(await tree("show=all")).toBe(all.length);
+    // The sessions v2 default source filter (`comb,ui`) keeps the Files session.
+    expect(await list("showSource=comb,ui")).toEqual([comb.id, ui.id].sort());
 
     // No picked user: the bypass actor still sees every root, ownerless included.
     const bypass = await fetch(`${baseUrl}/api/sessions?scope=tree&limit=50`);

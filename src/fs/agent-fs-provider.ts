@@ -66,6 +66,9 @@ export type AgentFsComment = {
 /** One entry of a file's `log`. */
 export type AgentFsFileVersion = { version: number; createdAt: string };
 
+/** One member of a drive (`drive-members`). */
+export type AgentFsDriveMember = { userId: string; email: string; displayName?: string | null };
+
 /** An agent-fs org and drive. */
 export type AgentFsDrive = { orgId: string; driveId: string };
 
@@ -298,6 +301,12 @@ export class AgentFsProvider implements FileStorageProvider {
   async getFileVersions(drive: AgentFsDrive, path: string): Promise<AgentFsFileVersion[]> {
     const result = asRecord(await this.ops({ op: "log", path, limit: 200 }, drive));
     return Array.isArray(result?.versions) ? (result.versions as AgentFsFileVersion[]) : [];
+  }
+
+  /** `drive-members`: the drive's members with their emails. Needs the agent-fs `drive-members` feature. */
+  async getDriveMembers(drive: AgentFsDrive): Promise<AgentFsDriveMember[]> {
+    const result = asRecord(await this.ops({ op: "drive-members" }, drive));
+    return Array.isArray(result?.members) ? (result.members as AgentFsDriveMember[]) : [];
   }
 
   /** Reply to a root comment. The swarm service account is the author. */
