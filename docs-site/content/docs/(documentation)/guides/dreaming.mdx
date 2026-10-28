@@ -19,9 +19,9 @@ It ships as three pieces:
 1. **Gather.** `dreaming-gather` reads the last day: tasks, cost, skill use, manually written memories, profiles, and workflow changes. It is read-only. It also decides who runs each step (see [Inputs](#inputs)) and which agents report. An agent reports when its status is `idle` or `busy`, its name does not start with `ext:`, and it has at least one task in the last day, not counting dreaming's own tasks. With no such agent, the run takes the quiet path and only writes the report.
 2. **Self-reports.** Each of those agents, the lead included, gets one task. The prompt forbids write tools: the agent returns proposals only (repeated procedures, skill friction, script candidates, edits to its own profile files, memory edits), each with an evidence id. `dreaming-reports-check` rejects a malformed report, retries that agent once, then records it as missing.
 3. **Synthesis.** The lead reviews the reports and the gathered data, and returns an approved action list across five lanes: new skill, skill fix, script, identity (profile files), and memory. Every rejection carries a reason. This step writes nothing.
-4. **Apply.** Guarded lanes act on the approved actions, in this order: profile and memory edits (`dreaming-apply`), profile trims (`dreaming-trim`), the lead's HEARTBEAT (`dreaming-heartbeat`), then skills and scripts. Each write stores its pre-image in the `dreaming-v2` KV namespace first.
-5. **Verify.** `dreaming-verify` re-reads every claimed write and records what it confirms. It also flags lanes that should have run but returned nothing, writes no lane claimed, and changes from earlier nights that were later reverted. It only reads and records; it never undoes anything. Confirmed writes go into the run's ledger, which rollback uses.
-6. **Learn.** `dreaming-learn` scores the cuts of the last 14 days. A cut whose text came back, or showed up in a failed task, becomes a pin: text no lane may cut again.
+4. **Apply.** Guarded lanes act on the approved actions, in this order: profile and memory edits (`dreaming-apply`), profile trims (`dreaming-trim`), the lead's HEARTBEAT (`dreaming-heartbeat`), then skills and scripts. `dreaming-apply` stores a pre-image in the `dreaming-v2` KV namespace before each write: a pointer to the field's recorded profile version, the memory's stored text, or, for a new memory, only its name. A skill update stores the skill's old content. A new skill or a new script has no pre-image.
+5. **Verify.** `dreaming-verify` re-reads the claimed writes of the lanes that ran before it: profile and memory edits, trims, the HEARTBEAT, and skills. Claims it cannot confirm go into `claimMismatch`. It also flags lanes that should have run but returned nothing, writes no lane claimed, and changes from earlier nights that were later reverted. It only reads and records; it never undoes anything. On a live run it writes the run's ledger, which rollback uses: every write `dreaming-apply` and the skills lane reported as applied, including writes listed in `claimMismatch`. The long-term memory lane writes after verify, re-reads its own writes, and appends them to the same ledger.
+6. **Learn.** `dreaming-learn` scores the cuts of the last 14 days. A cut whose text came back becomes a pin: text no lane may cut again. A cut whose text shows up in a failed task's failure reason is listed as a restore candidate. It is not pinned.
 7. **Long-term memory.** The memory lanes classify swarm memories and propose `/longterm` documents. With the default inputs they only report.
 8. **Owners.** `dreaming-owners` sends one task to each owner of an item no lane closed, for example a script that only the lead can promote to `global`.
 9. **Publish.** The writer writes the report and appends one entry to a changelog. An optional Slack receipt follows.
@@ -39,7 +39,7 @@ It ships as three pieces:
 | Long-term memory (`dreaming-memtax-create`) | Documents under `/longterm/`, never `/longterm/facts` | 40 creates, 20 edits, 5 deletes | Report only |
 | Restores (`dreaming-apply`) | Text an earlier cut removed that turned out to be needed | 5 | Report only |
 
-The guards are strict on purpose. A profile edit must target an exact, unique `##` heading, and may not add a heading or shrink SOUL or IDENTITY below 200 characters. An edit that would grow a file is handed to the trim lane, which only writes it inside a rewrite that leaves the file smaller. A memory edit that drops more than half the body is refused unless the action gives a reason. A write that would add a `[REDACTED:` marker is refused. A trim needs an agent-fs backup path, so without agent-fs the trim and heartbeat lanes refuse their writes.
+The guards are strict on purpose. A profile edit either targets an exact, unique `##` heading, or replaces an exact, unique passage of at least 40 characters (`replace-exact`). Neither may add a `##` heading or shrink SOUL or IDENTITY below 200 characters. An edit that would grow a file is handed to the trim lane, which only writes it inside a rewrite that leaves the file smaller. One exception: an append of up to 400 characters under a CLAUDE.md heading grows the file directly. A memory edit that drops more than half the body is refused unless the action gives a reason. A write that would add a `[REDACTED:` marker is refused. A trim needs an agent-fs backup path, so without agent-fs the trim and heartbeat lanes refuse their writes.
 
 Skill disables stay proposals. Scripts are never promoted to `global` by the loop; the owners step asks the lead.
 
@@ -90,13 +90,15 @@ update-workflow(
 
 An edited workflow or schedule counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed.
 
-**Run it once by hand.** Start with a dry run. It does every read and every draft, writes nothing, and skips Slack:
+**Run it once by hand.** Start with a dry run. It does every read and every draft, and skips Slack. It changes no profile, memory, skill, or script, writes no ledger, and writes no report or changelog to agent-fs. It still creates the run and its agent tasks, and the lead steps store their results in `dreaming-v2` KV:
 
 ```
 trigger-workflow(id: "<dreaming workflow id>", triggerData: { "dryRun": true })
 ```
 
 Add `"agentIds": ["<agent id>", ...]` to limit the self-reports to some agents. Drop `dryRun` for a live run. The 20-hour guard lives in the scheduled task, not in the workflow. A manual run makes the next scheduled trigger skip, but a manual run after the scheduled one is a second run on shared KV state. Avoid that.
+
+**Turn it on.** If it was seeded disabled or you turned it off, `update-schedule(name: "dreaming-daily", enabled: true)` starts the nightly trigger, and `update-workflow(id: "<dreaming workflow id>", enabled: true)` lets runs start.
 
 **Turn it off.** `update-schedule(name: "dreaming-daily", enabled: false)` stops the nightly trigger. `update-workflow(id: "<dreaming workflow id>", enabled: false)` also blocks manual runs; the trigger task then completes without starting anything.
 
@@ -121,7 +123,7 @@ script-run name="dreaming-rollback" scope="global" args={"runId":"<run id>","dry
 script-run name="dreaming-rollback" scope="global" args={"runId":"<run id>","actionIds":["A3"]}
 ```
 
-It restores a profile field from its recorded version, deletes a memory the run stored, re-stores a deleted memory under a new id, puts back an edited memory body, and restores a skill or disables one the run created. It refuses to restore a memory unless its pre-image still holds the stored bytes, so it never writes back text the secret scrubber has redacted. It cannot undo a memory rename. Only verify-confirmed writes are in the ledger.
+It restores a profile field from its recorded version, deletes a memory the run stored, re-stores a deleted memory under a new id, puts back an edited memory body, and restores a skill or disables one the run created. It refuses to restore a memory unless its pre-image still holds the stored bytes, so it never writes back text the secret scrubber has redacted. It cannot undo a memory rename. The ledger also holds writes verify could not confirm, so read the `verify` step's `claimMismatch` list first and pass `actionIds` to limit rollback to the writes you want undone.
 
 **Trims.** Each trim has its own revert line in the report:
 
