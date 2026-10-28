@@ -33807,9 +33807,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards."
             },
             "required": false,
+            "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
             "name": "search",
             "in": "query"
           },

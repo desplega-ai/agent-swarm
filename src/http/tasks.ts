@@ -243,7 +243,12 @@ const listTasks = route({
     workflowRunId: z.string().uuid().optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
-    search: z.string().optional(),
+    search: z
+      .string()
+      .optional()
+      .describe(
+        "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
+      ),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
     /** ISO 8601 — return only tasks created on/after this timestamp. */
     createdAfter: z.string().datetime().optional(),

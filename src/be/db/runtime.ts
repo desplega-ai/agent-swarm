@@ -218,8 +218,9 @@ function bootOpenedDb(
         .transaction(() => {
           database.run("DROP TABLE IF EXISTS agent_tasks_new");
           database.run(rebuiltSchemaSql);
+          // Copy rowids too: agent_tasks_fts (migration 256) is keyed by them.
           database.run(
-            `INSERT INTO agent_tasks_new (${columns}) SELECT ${columns} FROM agent_tasks`,
+            `INSERT INTO agent_tasks_new (rowid, ${columns}) SELECT rowid, ${columns} FROM agent_tasks`,
           );
           for (const object of schemaObjects) {
             if (object.tbl_name !== "agent_tasks") database.run(`DROP TRIGGER "${object.name}"`);

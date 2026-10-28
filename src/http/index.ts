@@ -15,6 +15,7 @@ import {
   getSwarmConfigs,
   upsertSwarmConfig,
 } from "../be/db";
+import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
@@ -541,6 +542,9 @@ async function shutdown() {
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
 
+  // Stop the task search index backfill after its current batch.
+  await stopTaskSearchBackfill();
+
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
 
@@ -883,6 +887,10 @@ httpServer
     // Finish the human-free reclassification a request left queued (a very large
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
+
+    // Index the task rows migration 256 left out, in batches. Task search
+    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    void startTaskSearchBackfill();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

@@ -13751,6 +13751,7 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    /** @description Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. */
                     search?: string;
                     includeHeartbeat?: "true" | "false";
                     createdAfter?: string;

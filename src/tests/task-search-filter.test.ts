@@ -23,7 +23,7 @@ describe("getAllTasks search filter", () => {
     }
   });
 
-  test("matches by id prefix and substring, plus description", async () => {
+  test("matches by id prefix, not id substring, plus description", async () => {
     const agent = await createAgent({
       id: "search-filter-agent",
       name: "Search Filter Agent",
@@ -45,11 +45,11 @@ describe("getAllTasks search filter", () => {
     expect(byPrefix.map((t) => t.id)).toContain(taskA.id);
     expect(byPrefix.map((t) => t.id)).not.toContain(taskB.id);
 
-    // Arbitrary substring of UUID also matches
+    // Id search is prefix-only: a substring from the middle of a UUID does
+    // not match (search runs on agent_tasks_fts plus an id range).
     const idMid = taskB.id.slice(9, 17);
     const byMid = await getAllTasks({ search: idMid });
-    expect(byMid.map((t) => t.id)).toContain(taskB.id);
-    expect(byMid.map((t) => t.id)).not.toContain(taskA.id);
+    expect(byMid.map((t) => t.id)).not.toContain(taskB.id);
 
     // Count query honors the same filter
     expect(await getTasksCount({ search: idPrefix })).toBe(1);

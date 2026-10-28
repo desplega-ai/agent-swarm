@@ -7,11 +7,13 @@ import {
   countSessions,
   createAgent,
   createTaskExtended,
+  getAllTasks,
   getDb,
   getDbClient,
   getRecentCompletedCount,
   getStuckWorkflowRuns,
   getTaskByWorkflowRunStepId,
+  getTasksCount,
   initDb,
   updateAgentProfile,
 } from "../be/db";
@@ -153,6 +155,24 @@ const CASES: Array<{
     uses: ["COVERING INDEX idx_agent_tasks_parentTaskId_source (parentTaskId=? AND source=?)"],
     revert: { dropIndex: "idx_agent_tasks_parentTaskId_source" },
   },
+  {
+    // Few hits: the page reads the agent_tasks_fts candidates by rowid. The
+    // control is the old `task LIKE '%q%'`, which scans every task body.
+    name: "getAllTasks search",
+    match: /WITH page AS/,
+    run: async () => {
+      await createTaskExtended("update the rulebook", {});
+      return getAllTasks({ search: "rulebook" });
+    },
+    uses: ["CO-ROUTINE page\nSEARCH agent_tasks USING INTEGER PRIMARY KEY (rowid=?)"],
+    revert: {
+      sql: (sql) =>
+        sql.replace(
+          /agent_tasks\.rowid IN \([\d, ]+\)/,
+          "(task LIKE '%rulebook%' OR title LIKE '%rulebook%' OR id LIKE '%rulebook%')",
+        ),
+    },
+  },
 ];
 
 function missing(detail: string, uses: string[]): string[] {
@@ -199,6 +219,44 @@ describe("query audit plans without sqlite_stat1", () => {
       expect(missing(reverted, uses)).not.toEqual([]);
     });
   }
+
+  test("task search with many hits pages by lastUpdatedAt and counts from the index", async () => {
+    await getDbClient().transaction(async (tx) => {
+      for (let i = 0; i < 501; i++) {
+        await tx.run(
+          `INSERT INTO agent_tasks (id, task, status, source, createdAt, lastUpdatedAt)
+           VALUES (?, ?, 'completed', 'api', ?, ?)`,
+          [`landing-${i}`, `landing page ${i}`, "2026-10-01T00:00:00.000Z", `2026-10-01T${i}`],
+        );
+      }
+    });
+
+    // The page walks its ORDER BY index and stops at LIMIT, testing each row
+    // against the FTS hits. Without the `+`, the planner drives from the
+    // hits and sorts them all, reading every matching task body.
+    const page = await capturedSql(/WITH page AS/, () => getAllTasks({ search: "landing" }));
+    const pageUses = [
+      "CO-ROUTINE page\nSCAN agent_tasks USING INDEX idx_agent_tasks_last_updated",
+      "SCAN agent_tasks_fts VIRTUAL TABLE",
+    ];
+    expect(page.sql).not.toContain("task LIKE");
+    expect(missing(plan(page), pageUses)).toEqual([]);
+    const pageReverted = plan({
+      ...page,
+      sql: page.sql.replace("+agent_tasks.rowid", "agent_tasks.rowid"),
+    });
+    expect(missing(pageReverted, pageUses)).not.toEqual([]);
+
+    // A count has no LIMIT to stop at, so it drives from the hits.
+    const count = await capturedSql(/COUNT/, () => getTasksCount({ search: "landing" }));
+    const countUses = [
+      "SCAN agent_tasks_fts VIRTUAL TABLE",
+      "SEARCH agent_tasks USING INTEGER PRIMARY KEY (rowid=?)",
+    ];
+    expect(count.sql).not.toContain("task LIKE");
+    expect(missing(plan(count), countUses)).toEqual([]);
+    expect(plan(count)).not.toContain("SCAN agent_tasks USING");
+  });
 
   test("getStuckWorkflowRuns returns only finished tasks of waiting steps in waiting runs", async () => {
     const client = getDbClient();

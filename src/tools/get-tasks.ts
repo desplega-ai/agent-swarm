@@ -44,7 +44,12 @@ export const getTasksInputSchema = z.object({
   readyOnly: z.boolean().optional().describe("Only return tasks whose dependencies are met."),
   taskType: z.string().optional().describe("Filter by task type (e.g., 'bug', 'feature')."),
   tags: z.array(z.string()).optional().describe("Filter by any matching tag."),
-  search: z.string().optional().describe("Search in task description."),
+  search: z
+    .string()
+    .optional()
+    .describe(
+      "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
+    ),
   scheduleId: z
     .string()
     .uuid()
