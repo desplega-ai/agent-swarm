@@ -42,6 +42,12 @@ Browse all available templates at [templates.agent-swarm.dev](https://templates.
 
 [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment for every option below. Deploy every agent in it by default (1 lead and 11 workers on the official templates), and trim the roster only when you have a reason to.
 
+## No server yet? Deploy one
+
+[One-click deploy](/docs/guides/one-click-deploy) sets up a cloud server with HTTPS from one cloud-init paste: Docker, Caddy on `<ip>.sslip.io` or your domain, and the swarm. It also tracks the DigitalOcean 1-Click and Railway template options.
+
+To look around before you pick a server, [try it for an hour on E2B](/docs/guides/one-click-deploy#try-it-for-an-hour-on-e2b). That is a trial: the database is deleted with the sandboxes.
+
 ## Option A: Onboard Wizard (Recommended)
 
 The fastest way to get a full swarm running. The interactive wizard collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health.
@@ -54,11 +60,11 @@ Or use the one-shot installer. It checks Docker and Compose v2, installs Bun whe
 
 ```bash
 curl -fsSL https://agent-swarm.dev/install.sh | bash
-# Options: --dir <path>, --version <ver>, --tunnel, --no-tunnel, --no-agent-fs, --dry-run
+# Options: --dir <path>, --version <ver>, --tunnel, --no-tunnel, --public-url <url>, --bind <addr>, --no-agent-fs, --dry-run
 curl -fsSL https://agent-swarm.dev/install.sh | bash -s -- --no-tunnel
 ```
 
-The raw GitHub URL (`https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh`) serves the same script. The installer exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`, so the dashboard works from anywhere. The API key still protects every route except `/health`. Pass `--no-tunnel` (or set `AGENT_SWARM_TUNNEL=0`) to keep the API local. The tunnel stays off when `.env` already holds your own `PUBLIC_MCP_BASE_URL`. `--tunnel` forces it on. The installer saves an explicit choice as `AGENT_SWARM_TUNNEL` in `.env`, so a re-run keeps it.
+The raw GitHub URL (`https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh`) serves the same script. Behind your own reverse proxy, pass `--public-url https://<host>` (sets `PUBLIC_MCP_BASE_URL`, no tunnel, and the `/setup` link uses it) and `--bind 127.0.0.1` (publishes the ports on loopback only, because Docker-published ports bypass host firewalls). The installer exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`, so the dashboard works from anywhere. The API key still protects every route except `/health`. Pass `--no-tunnel` (or set `AGENT_SWARM_TUNNEL=0`) to keep the API local. The tunnel stays off when `.env` already holds your own `PUBLIC_MCP_BASE_URL`. `--tunnel` forces it on. The installer saves an explicit choice as `AGENT_SWARM_TUNNEL` in `.env`, so a re-run keeps it.
 
 A new install also runs two more services: `agent-fs` (shared files on local disk, read in the dashboard's [Comb](/docs/ui/comb)) and `tei` (a local embeddings server for memory search, so memory needs no second API key). Comb is on, and file links open in the dashboard. Neither service has a host port: the browser reaches agent-fs through the API at `/agentfs`. The bundle adds about 1 GB of RAM at idle, 2.5 GB of images and 1.5 GB of volumes, and the first boot downloads about 1.5 GB. Memory search uses keywords only until TEI is ready. Pass `--no-agent-fs` to the installer (or to `onboard --yes`) to skip both. Running the installer again on an existing install changes nothing: when `docker-compose.yml` exists, it skips onboarding and only starts the stack. See [agent-fs Co-deployment](/docs/guides/agent-fs-co-deployment#new-installs-onboard-bundle).
 

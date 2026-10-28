@@ -33,6 +33,8 @@ script_embeddings
 seed_state
 session_costs
 session_logs
+session_members        # derived chain index, written only by triggers; attribution lives on agent_tasks (253)
+session_summaries      # derived chain aggregates, written only by triggers; attribution lives on agent_tasks (253)
 session_tokens         # internal auth store: programmatically minted/revoked per ACP session, no user attribution (146)
 skill_invocations      # append-only telemetry written from ingested skill.invoke events; no user attribution (196)
 skills_fts             # FTS5 index over skills, written only by triggers; attribution lives on skills (239)

@@ -659,8 +659,12 @@ describe("script connections", () => {
       markMigrationApplied(database, "247_workflow_run_triggered_by_agent.sql");
       // 250 indexes workflow_run_steps, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "250_workflow_run_steps_runid_status_index.sql");
-      // 254 alters agents, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "254_agent_slack_icon.sql");
+      // 253 adds triggers on agent_tasks columns and approval_requests, which this fixture lacks.
+      markMigrationApplied(database, "253_session_summaries.sql");
+      // 254 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
+      markMigrationApplied(database, "254_query_audit_indexes.sql");
+      // 255 alters agents, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "255_agent_slack_icon.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

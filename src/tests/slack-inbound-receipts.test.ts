@@ -23,6 +23,7 @@ import {
   getSlackInboundReceiptById,
   getSlackInboundReceiptByKey,
   purgeSlackInboundReceipts,
+  recordSlackInboundInline,
   SLACK_INBOUND_LIMITS,
 } from "../be/db-queries/slack-inbound";
 import { registerActionHandlers } from "../slack/actions";
@@ -616,6 +617,39 @@ describe("retention", () => {
       { dedup_key: "pending", payload_ciphertext: "ciphertext" },
       { dedup_key: "uncertain", payload_ciphertext: "ciphertext" },
     ]);
+  });
+});
+
+describe("inline tombstones", () => {
+  const input = {
+    dedupKey: "event:A_TEST:Ev_INLINE",
+    transport: "socket",
+    kind: "event",
+    payloadType: "event_callback",
+    eventId: "Ev_INLINE",
+  } as const;
+
+  test("a recorded key is terminal, holds no payload, is never claimable and expires", async () => {
+    await getDbClient().run("DELETE FROM slack_inbound_receipts");
+    const at = new Date("2026-09-01T00:00:00.000Z");
+    expect(await recordSlackInboundInline(input, at)).toBe("recorded");
+    expect(await recordSlackInboundInline(input, at)).toBe("duplicate");
+
+    const receipt = await getSlackInboundReceiptByKey(input.dedupKey);
+    expect(receipt).toMatchObject({
+      state: "processed",
+      outcomeCode: "ran_inline",
+      payloadCiphertext: null,
+      payloadBytes: 0,
+      duplicateCount: 1,
+    });
+    expect(await claimSlackInboundReceipt(new Date("2026-09-01T00:01:00.000Z"))).toBeNull();
+
+    // Retention drops it with the other completed keys.
+    await purgeSlackInboundReceipts(new Date("2026-09-02T00:00:00.000Z"));
+    expect(await getSlackInboundReceiptByKey(input.dedupKey)).not.toBeNull();
+    await purgeSlackInboundReceipts(new Date(at.getTime() + 49 * 60 * 60 * 1000));
+    expect(await getSlackInboundReceiptByKey(input.dedupKey)).toBeNull();
   });
 });
 

@@ -1,0 +1,319 @@
+#cloud-config
+# Agent Swarm on one server, with HTTPS and no domain needed.
+#
+# Paste this whole file as the server's user data when you create it:
+# "Cloud config" on Hetzner, "User data" on DigitalOcean, Vultr and Akamai,
+# "Launch script" on Lightsail. Use Ubuntu 24.04 or Debian 12 with at least
+# 4 vCPU, 8 GB RAM and 40 GB of disk. The full preset needs that much.
+#
+# First boot takes about 10 minutes. Then SSH in as root: the login message
+# shows your dashboard /setup link. Progress: tail -f /var/log/agent-swarm-deploy.log
+# Guide: https://docs.agent-swarm.dev/docs/guides/one-click-deploy
+#
+# The script under /usr/local/sbin is a copy of deploy/one-box/bootstrap.sh.
+# Edit that file, then copy it here; src/tests/deploy-one-box.test.ts checks
+# that the two match.
+
+write_files:
+  - path: /etc/agent-swarm/deploy.env
+    permissions: "0600"
+    content: |
+      # Optional: your own domain, with an A record pointing at this server.
+      # Blank uses <public-ip>.sslip.io, which needs no DNS setup.
+      SWARM_DOMAIN=
+      # Optional: full (default, a lead and 10 workers), dev, content, research
+      # or solo. Only solo fits 2 vCPU / 4 GB.
+      SWARM_PRESET=full
+
+  - path: /usr/local/sbin/agent-swarm-bootstrap
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # Agent Swarm on one server: Docker, Caddy for HTTPS, and the swarm behind it.
+      #
+      # Runs once as root on first boot, from deploy/cloud-init.yaml (any VPS) or the
+      # DigitalOcean 1-Click image (deploy/digitalocean). Debian or Ubuntu only.
+      # Settings come from /etc/agent-swarm/deploy.env, all optional:
+      #   SWARM_DOMAIN   Your own domain, with an A record pointing at this server.
+      #                  Blank uses <public-ip>.sslip.io, which needs no DNS setup.
+      #   SWARM_PRESET   Onboard preset: full (default), dev, content, research, solo.
+      #   AGENT_SWARM_*  Passed through to install.sh, e.g. AGENT_SWARM_CLI_VERSION.
+      #
+      # Only Caddy (80/443) and SSH face the internet. Docker-published ports bypass
+      # ufw, so install.sh --bind 127.0.0.1 sets 127.0.0.1 as the default host address
+      # of the stack's Compose network before the first container starts. A port
+      # mapping without a host address, as every agent-swarm CLI release generates,
+      # then stays on loopback. daemon.json does the same for Docker's default bridge,
+      # and install.sh and assert_loopback_only check the running ports twice more.
+      # The API key never reaches stdout, which cloud-init copies to its own log:
+      # install.sh output goes to a root-only log, and the dashboard /setup link goes
+      # to a root-only file that a root login prints.
+      #
+      # deploy/cloud-init.yaml embeds a byte-identical copy of this file;
+      # src/tests/deploy-one-box.test.ts fails when they differ.
+
+      set -euo pipefail
+
+      # Tests point this at a scratch directory; on a server it is empty.
+      ROOT="${AGENT_SWARM_BOOTSTRAP_ROOT:-}"
+      CONFIG=$ROOT/etc/agent-swarm/deploy.env
+      INSTALL_DIR=$ROOT/root/agent-swarm
+      LOG=$ROOT/var/log/agent-swarm-deploy.log
+      LINK_FILE=$ROOT/root/agent-swarm-setup-link.txt
+      STATUS_FILE=$ROOT/var/lib/agent-swarm/deploy-status
+      NOTICE_FILE=$ROOT/etc/profile.d/agent-swarm.sh
+      DOCKER_DAEMON_JSON=$ROOT/etc/docker/daemon.json
+      CADDYFILE=$ROOT/etc/caddy/Caddyfile
+      DEFAULT_INSTALL_URL=https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh
+      API_PORT=3013
+      HTTPS_TIMEOUT_SECONDS=300
+
+      # Progress goes to stdout and the root-only log; neither ever carries the API key.
+      say() { printf '==> %s\n' "$*" | tee -a "$LOG"; }
+      warn() { printf 'warning: %s\n' "$*" | tee -a "$LOG" >&2; }
+      die() {
+        printf 'error: %s\n' "$*" >&2
+        exit 1
+      }
+      have() { command -v "$1" >/dev/null 2>&1; }
+
+      set_status() { printf '%s\n' "$1" >"$STATUS_FILE"; }
+
+      # Published ports bound to anything but loopback, one per line.
+      public_ports() {
+        docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -- '->' |
+          grep -vE '^ *(127\.0\.0\.1|\[::1\]):' || true
+      }
+
+      stop_stack() {
+        if [ -f "${INSTALL_DIR}/docker-compose.yml" ]; then
+          (cd "$INSTALL_DIR" && docker compose stop) >>"$LOG" 2>&1 || true
+        fi
+      }
+
+      # On any exit before the end, record the failure for the login notice, and stop
+      # the stack if it publishes a port on a public interface (fail closed).
+      on_exit() {
+        local code=$?
+        if [ "$code" -ne 0 ]; then
+          set_status "failed"
+          if have docker && [ -n "$(public_ports)" ]; then
+            stop_stack
+            printf 'error: stopped the stack because it published ports on a public interface\n' >&2
+          fi
+        fi
+      }
+
+      load_config() {
+        if [ -f "$CONFIG" ]; then
+          set -a
+          # shellcheck disable=SC1090 # operator-provided settings file
+          . "$CONFIG"
+          set +a
+        fi
+        SWARM_DOMAIN="${SWARM_DOMAIN:-}"
+        SWARM_PRESET="${SWARM_PRESET:-full}"
+        INSTALL_URL="${AGENT_SWARM_INSTALL_URL:-$DEFAULT_INSTALL_URL}"
+        case "$SWARM_DOMAIN" in
+          *[!A-Za-z0-9.-]*) die "SWARM_DOMAIN must be a bare host name like swarm.example.com (got '$SWARM_DOMAIN')" ;;
+        esac
+      }
+
+      prepare_log() {
+        mkdir -p "$(dirname "$STATUS_FILE")"
+        (umask 077 && touch "$LOG")
+        chmod 600 "$LOG"
+      }
+
+      # Root sees the /setup link (it holds the API key) at login; nobody else does.
+      install_login_notice() {
+        cat >"$NOTICE_FILE" <<EOF
+      # Written by Agent Swarm's bootstrap.sh: the deploy status at root login.
+      if [ "\$(id -u)" = 0 ]; then
+        if [ -r $LINK_FILE ]; then
+          printf '\nAgent Swarm is running. Finish setup in the dashboard (the link holds your API key):\n  %s\n\n' "\$(cat $LINK_FILE)"
+        elif [ "\$(cat $STATUS_FILE 2>/dev/null)" = failed ]; then
+          printf '\nAgent Swarm failed to install. Log: $LOG\n\n'
+        elif [ -f $STATUS_FILE ]; then
+          printf '\nAgent Swarm is still installing. Follow it: tail -f $LOG\n\n'
+        fi
+      fi
+      EOF
+        chmod 644 "$NOTICE_FILE"
+      }
+
+      public_ipv4() {
+        local url ip
+        for url in https://checkip.amazonaws.com https://api.ipify.org https://ipv4.icanhazip.com; do
+          ip="$(curl -4fsS --max-time 10 "$url" 2>/dev/null | tr -d '[:space:]')" || continue
+          if [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+            echo "$ip"
+            return 0
+          fi
+        done
+        return 1
+      }
+
+      install_packages() {
+        have apt-get || die "this script supports Debian and Ubuntu (apt-get not found)"
+        say "Installing base packages"
+        apt-get update -q >>"$LOG" 2>&1
+        apt-get install -y -q ca-certificates curl gpg unzip ufw >>"$LOG" 2>&1
+      }
+
+      # Docker's default host address for ports published on its default bridge
+      # (`docker run -p`), read when dockerd starts. It does not cover the swarm:
+      # Compose puts the stack on its own network, whose default install.sh --bind
+      # sets before the first `up`. An existing daemon.json is the operator's, so it
+      # must already say the same.
+      configure_docker_loopback() {
+        if [ -f "$DOCKER_DAEMON_JSON" ]; then
+          grep -qE '"ip" *: *"127\.0\.0\.1"' "$DOCKER_DAEMON_JSON" ||
+            die "${DOCKER_DAEMON_JSON} exists without \"ip\": \"127.0.0.1\". Add that key so published ports stay on loopback, then run $0 again."
+          say "Docker publishes ports on 127.0.0.1 by default (${DOCKER_DAEMON_JSON})"
+          return 0
+        fi
+        say "Docker: publishing ports on 127.0.0.1 by default (${DOCKER_DAEMON_JSON})"
+        mkdir -p "$(dirname "$DOCKER_DAEMON_JSON")"
+        printf '{\n  "ip": "127.0.0.1"\n}\n' >"$DOCKER_DAEMON_JSON"
+        chmod 644 "$DOCKER_DAEMON_JSON"
+      }
+
+      install_docker() {
+        if have docker && docker compose version >/dev/null 2>&1; then
+          say "Docker and Compose v2 found"
+        else
+          say "Installing Docker Engine and Compose v2 (get.docker.com)"
+          curl -fsSL https://get.docker.com | sh >>"$LOG" 2>&1
+        fi
+        systemctl enable docker >>"$LOG" 2>&1
+        # A Docker that was already running has not read daemon.json yet.
+        systemctl restart docker >>"$LOG" 2>&1
+      }
+
+      install_caddy() {
+        if have caddy; then
+          say "Caddy found"
+          return 0
+        fi
+        say "Installing Caddy (official apt repository)"
+        curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key |
+          gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+          >/etc/apt/sources.list.d/caddy-stable.list
+        chmod 644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update -q >>"$LOG" 2>&1
+        apt-get install -y -q caddy >>"$LOG" 2>&1
+      }
+
+      configure_firewall() {
+        say "Firewall: allowing SSH, HTTP and HTTPS only"
+        {
+          ufw default deny incoming
+          ufw default allow outgoing
+          ufw limit 22/tcp
+          ufw allow 80/tcp
+          ufw allow 443/tcp
+          ufw allow 443/udp
+          ufw --force enable
+        } >>"$LOG" 2>&1
+      }
+
+      configure_caddy() {
+        local host="$1"
+        say "Caddy: https://${host} -> 127.0.0.1:${API_PORT}"
+        cat >"$CADDYFILE" <<EOF
+      # Written by Agent Swarm's bootstrap.sh. Caddy gets and renews the certificate.
+      ${host} {
+      	reverse_proxy 127.0.0.1:${API_PORT}
+      }
+      EOF
+        systemctl enable caddy >>"$LOG" 2>&1
+        systemctl reload caddy >>"$LOG" 2>&1 || systemctl restart caddy >>"$LOG" 2>&1
+      }
+
+      install_swarm() {
+        local host="$1" script
+        script="$(mktemp)"
+        curl -fsSL "$INSTALL_URL" -o "$script"
+        say "Running install.sh (preset ${SWARM_PRESET}). Output: ${LOG}"
+        if ! bash "$script" --dir "$INSTALL_DIR" --preset "$SWARM_PRESET" --no-tunnel \
+          --public-url "https://${host}" --bind 127.0.0.1 >>"$LOG" 2>&1; then
+          rm -f "$script"
+          die "install.sh failed. See ${LOG}"
+        fi
+        rm -f "$script"
+        chmod 600 "${INSTALL_DIR}/.env"
+      }
+
+      # Fail closed: a port published on a public interface skips Caddy and ufw.
+      # on_exit stops the stack.
+      assert_loopback_only() {
+        local exposed
+        exposed="$(public_ports)"
+        [ -z "$exposed" ] || die "the stack published ports on a public interface: $(echo "$exposed" | tr '\n' ' ')"
+        say "Swarm ports listen on 127.0.0.1 only"
+      }
+
+      write_setup_link() {
+        local link
+        link="$(grep -aoE 'https://app\.agent-swarm\.dev/setup\?apiUrl=[^[:space:]]+' "$LOG" | tail -n 1 || true)"
+        case "$link" in
+          *"apiUrl=https%3A%2F%2F"*) ;;
+          *) die "install.sh did not print an https /setup link. See ${LOG}" ;;
+        esac
+        (
+          umask 077
+          printf '%s\n' "$link" >"$LINK_FILE"
+        )
+      }
+
+      wait_for_https() {
+        local host="$1" deadline
+        say "Waiting for https://${host}/health (Caddy gets a certificate first; up to ${HTTPS_TIMEOUT_SECONDS}s)"
+        deadline=$(($(date +%s) + HTTPS_TIMEOUT_SECONDS))
+        until curl -fsS --max-time 10 -o /dev/null "https://${host}/health" 2>/dev/null; do
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            warn "https://${host}/health did not answer yet. Check ports 80 and 443 in your provider's firewall, then: journalctl -u caddy"
+            return 0
+          fi
+          sleep 5
+        done
+        say "https://${host} is serving the API"
+      }
+
+      main() {
+        [ "$(id -u)" -eq 0 ] || die "run as root"
+        export HOME=/root DEBIAN_FRONTEND=noninteractive
+        load_config
+        prepare_log
+        trap on_exit EXIT
+        set_status "running"
+        install_login_notice
+
+        install_packages
+        configure_docker_loopback
+        install_docker
+        install_caddy
+
+        local ip host
+        ip="$(public_ipv4)" || die "could not detect this server's public IPv4 address"
+        host="${SWARM_DOMAIN:-${ip//./-}.sslip.io}"
+        if [ -n "$SWARM_DOMAIN" ] && ! getent ahostsv4 "$SWARM_DOMAIN" | awk '{print $1}' | grep -x "$ip" >/dev/null; then
+          warn "${SWARM_DOMAIN} does not resolve to ${ip} yet. Caddy keeps retrying the certificate until it does."
+        fi
+
+        configure_firewall
+        configure_caddy "$host"
+        install_swarm "$host"
+        assert_loopback_only
+        write_setup_link
+        wait_for_https "$host"
+        set_status "done"
+        say "Agent Swarm is running at https://${host}. Log in as root to see the dashboard link."
+      }
+
+      main "$@"
+
+runcmd:
+  - [/usr/local/sbin/agent-swarm-bootstrap]

@@ -5682,6 +5682,38 @@ export async function checkCompletedProcesses(
 
 const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+async function saveGeneratedProfile({
+  apiUrl,
+  apiKey,
+  agentId,
+  role,
+  profileUpdate,
+}: {
+  apiUrl: string;
+  apiKey: string;
+  agentId: string;
+  role: string;
+  profileUpdate: Record<string, string>;
+}): Promise<void> {
+  try {
+    const response = await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(profileUpdate),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    console.log(`[${role}] Generated and saved default identity templates`);
+  } catch (err) {
+    console.warn(scrubSecrets(`[${role}] Could not save generated templates to server: ${err}`));
+  }
+}
+
 async function fetchTemplate(
   templateId: string,
   registryUrl: string,
@@ -6534,30 +6566,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (!agentClaudeMd) agentClaudeMd = generateDefaultClaudeMd(agentInfo);
 
         // Push generated templates to server
-        try {
-          const profileUpdate: Record<string, string> = {};
-          if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
-          if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
-          if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
-          if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
-          if (!profile.setupScript && agentSetupScript)
-            profileUpdate.setupScript = agentSetupScript;
-          if (!profile.heartbeatMd && agentHeartbeatMd)
-            profileUpdate.heartbeatMd = agentHeartbeatMd;
+        const profileUpdate: Record<string, string> = {};
+        if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
+        if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
+        if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
+        if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
+        if (!profile.setupScript && agentSetupScript) profileUpdate.setupScript = agentSetupScript;
+        if (!profile.heartbeatMd && agentHeartbeatMd) profileUpdate.heartbeatMd = agentHeartbeatMd;
 
-          await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "X-Agent-ID": agentId,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(profileUpdate),
-          });
-          console.log(`[${role}] Generated and saved default identity templates`);
-        } catch {
-          console.warn(`[${role}] Could not save generated templates to server`);
-        }
+        await saveGeneratedProfile({ apiUrl, apiKey, agentId, role, profileUpdate });
       }
 
       // Fetch installed MCP servers for system prompt

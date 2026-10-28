@@ -4,7 +4,7 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { getSessionsShow, type SessionsShow } from "../../lib/sessions-show";
 import { sidebarListParams } from "../../lib/sessions-v2";
 import type {
@@ -16,6 +16,7 @@ import type {
 } from "../types";
 import {
   SESSION_LIST_KEY,
+  SESSION_TREE_KEY,
   type SessionListParams,
   sessionDetailKey,
   sessionListKey,
@@ -99,6 +100,34 @@ export interface TriageContext {
   arrivals: Arrival[];
   /** The open session details this write patched, with their read state before it. */
   details: Array<{ key: QueryKey; before: SessionReadState }>;
+  /** The list fetches the write cancelled before it patched (`cancelForTriage`). */
+  interrupted?: QueryKey[];
+  /** A row this write changed was in Later or Done, so it moves to a list that never held it. */
+  leftLaterOrDone: boolean;
+}
+
+/**
+ * Cancel this user's list, tree and detail fetches before a triage write
+ * patches them: a poll that started before the write would bring the old
+ * state back. Returns the list fetches it cut short, which the refetch
+ * after the write must cover (a first load cancelled here has no rows).
+ */
+export async function cancelForTriage(
+  queryClient: QueryClient,
+  userId: string | null,
+  ids: Set<string>,
+): Promise<QueryKey[]> {
+  const listKey = [...SESSION_LIST_KEY, userId];
+  const interrupted = queryClient
+    .getQueryCache()
+    .findAll({ queryKey: listKey, fetchStatus: "fetching" })
+    .map((query) => query.queryKey);
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: listKey }),
+    queryClient.cancelQueries({ queryKey: [...SESSION_TREE_KEY, userId] }),
+    ...[...ids].map((id) => queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId) })),
+  ]);
+  return interrupted;
 }
 
 /**
@@ -175,10 +204,13 @@ export function patchTriageCaches(
   });
   const patch = optimisticRow(action);
   const details: TriageContext["details"] = [];
+  const parked = (state: SessionReadState | undefined) => state === "later" || state === "done";
+  let leftLaterOrDone = false;
   for (const id of ids) {
     const key = sessionDetailKey(id, userId);
     const detail = queryClient.getQueryData<SessionDetailResponse>(key);
     if (!detail?.readState) continue;
+    if (parked(detail.readState) && detail.readState !== patch.readState) leftLaterOrDone = true;
     details.push({ key, before: detail.readState });
     queryClient.setQueryData<SessionDetailResponse>(key, { ...detail, readState: patch.readState });
   }
@@ -192,8 +224,12 @@ export function patchTriageCaches(
     const change: PageChange = { key, patched: new Map(), removed: [] };
     const sessions: SessionListItem[] = [];
     page.sessions.forEach((row, index) => {
-      if (!ids.has(row.root.id)) sessions.push(row);
-      else if (holds) {
+      if (!ids.has(row.root.id)) {
+        sessions.push(row);
+        return;
+      }
+      if (parked(row.readState) && row.readState !== patch.readState) leftLaterOrDone = true;
+      if (holds) {
         change.patched.set(row.root.id, row);
         sessions.push({ ...row, ...patch });
       } else change.removed.push({ row, index });
@@ -242,7 +278,7 @@ export function patchTriageCaches(
       arrivals.push({ section, listKey, treeKey, ids: [...moved.keys()] });
     }
   }
-  return { patch, changes, details, arrivals };
+  return { patch, changes, details, arrivals, leftLaterOrDone };
 }
 
 /** Undo `patchTriageCaches` after a failed write. A newer write to the same row keeps its state. */
@@ -282,4 +318,53 @@ export function rollBackTriageCaches(queryClient: QueryClient, context: TriageCo
       detail && detail.readState === patch.readState ? { ...detail, readState: before } : detail,
     );
   }
+}
+
+/** What the triage writes in flight since the last refetch need refetched. */
+interface PendingRefresh {
+  /** A write other than "read" settled: refetch every list. */
+  all: boolean;
+  /** The list pages that held a row a "read" write changed, by key hash. */
+  lists: Map<string, QueryKey>;
+}
+
+const pendingRefresh = new WeakMap<QueryClient, PendingRefresh>();
+
+/**
+ * The refetch after a triage write settles, once no other write is in
+ * flight (`othersInFlight`). A refetch after an early write would bring
+ * back rows that a later write already changed, so the writes in between
+ * only add to what the last one refetches.
+ *
+ * Opening an unread session marks it read, so "read" is the common write.
+ * It changes no list's membership except lists that held the row (an
+ * Unread list drops it), and the rows already show it. So it refetches
+ * the tree (its counts), those lists, and the list fetches it cancelled
+ * (opening a session from a link cancels the Inbox's first load). A read
+ * that takes a row out of Later or Done, and every other write, refetches
+ * every list: a row can arrive in a list that never held it.
+ */
+export function refreshAfterTriage(
+  queryClient: QueryClient,
+  action: TriageAction,
+  context: TriageContext | undefined,
+  othersInFlight: boolean,
+) {
+  const pending = pendingRefresh.get(queryClient) ?? { all: false, lists: new Map() };
+  pendingRefresh.set(queryClient, pending);
+  if (action.kind === "read" && context && !context.leftLaterOrDone) {
+    for (const { key } of context.changes) pending.lists.set(hashKey(key), key);
+    for (const key of context.interrupted ?? []) pending.lists.set(hashKey(key), key);
+  } else pending.all = true;
+  if (othersInFlight) return;
+  pendingRefresh.delete(queryClient);
+  void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
+  if (pending.all) void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  else {
+    for (const key of pending.lists.values()) {
+      void queryClient.invalidateQueries({ queryKey: key, exact: true });
+    }
+  }
+  // The dashboard inbox (and the pane's Later wake time) read the same rows.
+  void queryClient.invalidateQueries({ queryKey: ["inbox-state"] });
 }

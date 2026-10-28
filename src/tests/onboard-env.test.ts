@@ -257,6 +257,19 @@ describe("generateEnv with the agent-fs bundle flag", () => {
   });
 });
 
+describe("generateEnv bind address forwarding", () => {
+  test("writes AGENT_SWARM_BIND_ADDRESS when set", () => {
+    const env = generateEnv(makeState({}), { AGENT_SWARM_BIND_ADDRESS: "127.0.0.1" });
+    expect(env).toContain("\nAGENT_SWARM_BIND_ADDRESS=127.0.0.1\n");
+  });
+
+  test("omits it when unset or blank", () => {
+    for (const source of [{}, { AGENT_SWARM_BIND_ADDRESS: " " }]) {
+      expect(generateEnv(makeState({}), source)).not.toContain("AGENT_SWARM_BIND_ADDRESS");
+    }
+  });
+});
+
 describe("generateEnv telemetry forwarding", () => {
   test("writes ANONYMIZED_TELEMETRY and DESPLEGA_TELEMETRY_ENV when set", () => {
     const env = generateEnv(makeState({}), {

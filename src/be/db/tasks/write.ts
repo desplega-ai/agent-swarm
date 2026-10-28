@@ -19,6 +19,7 @@ import { emitTaskStarted } from "../../task-lifecycle-events";
 import { publishWorkerNudge } from "../../worker-nudges";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
+import { dropSessionDescendants } from "../session-summaries";
 import {
   classifyTaskHumanFree,
   reclassifyTaskHumanFree,
@@ -1138,6 +1139,8 @@ export async function deleteTask(id: string): Promise<boolean> {
     const childIds = (
       await tx.query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [id])
     ).map((row) => row.id);
+    // Its descendants leave the session too; the delete trigger handles the rest.
+    await dropSessionDescendants(id);
     const result = await tx.run("DELETE FROM agent_tasks WHERE id = ?", [id]);
     await reclassifyTaskHumanFree(childIds);
     return result.changes > 0;

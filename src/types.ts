@@ -335,6 +335,16 @@ export function isTerminalTaskStatus(status: string): status is TerminalTaskStat
   return (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Every status that is not terminal, derived so a new status lands here unless
+ * it is added to `TERMINAL_TASK_STATUSES`. Open tasks are a handful of rows,
+ * so hot queries filter `status IN (open)` (an index seek) rather than
+ * `status NOT IN (terminal)` (a scan of every finished task).
+ */
+export const OPEN_TASK_STATUSES = AgentTaskStatusSchema.options.filter(
+  (status) => !isTerminalTaskStatus(status),
+) as Exclude<AgentTaskStatus, TerminalTaskStatus>[];
+
 // ============================================================================
 // Lead Inbox Types
 // ============================================================================

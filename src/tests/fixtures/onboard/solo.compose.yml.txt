@@ -32,7 +32,7 @@ services:
       - APP_URL=https://app.agent-swarm.dev
 
     ports:
-      - "3013:3013"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3013:3013"
 
     volumes:
       - swarm_data:/app/data
@@ -73,7 +73,7 @@ services:
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3201:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3201:3000"
 
     volumes:
       - swarm_logs:/logs

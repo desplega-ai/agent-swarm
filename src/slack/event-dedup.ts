@@ -13,15 +13,19 @@
  * This module exposes a single in-memory check-and-insert that returns `false`
  * the first time we see an event_id (caller should proceed) and `true` on
  * subsequent retries within the TTL window — i.e. it answers "was this event
- * already seen?" (default TTL 5 min). Slack's max retry window is 1h with 3
- * retries, but the second retry typically lands within 60s, so 5 min is a
- * safe-but-tight bound.
+ * already seen?" (default TTL 25h). The TTL must outlive the last possible
+ * redelivery: Slack's standard schedule ends after ~5 min, but the optional
+ * Delayed Events feature retries hourly for 24h. The socket-ack wrapper
+ * (`socket-ack.ts`) runs listeners for an event whose ack failed, so this cache
+ * is what drops the later redelivery. Entries are an id and a number, so the
+ * long TTL costs little memory.
  *
  * Single-pod-only. The API server (which owns the Slack socket) runs as a
  * single API process; if that ever changes, swap this for a DB-backed table.
  */
 
-const DEFAULT_TTL_MS = 300_000; // 5 minutes
+export const EVENT_DEDUP_TTL_MS = 25 * 60 * 60 * 1000; // 24h delayed-retry window + 1h margin
+const DEFAULT_TTL_MS = EVENT_DEDUP_TTL_MS;
 const CLEANUP_INTERVAL_MS = 60_000; // 1 minute
 
 interface DedupCache {

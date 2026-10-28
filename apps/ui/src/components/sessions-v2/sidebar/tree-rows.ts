@@ -243,6 +243,8 @@ export function foldIds(groups: SessionGroupTree): Set<string> {
 export interface ListState {
   data?: SessionsListResponse;
   failed: boolean;
+  /** `data` is the previous Mine / All view's page while this one loads. */
+  stale?: boolean;
 }
 
 interface BuildTreeRowsInput {
