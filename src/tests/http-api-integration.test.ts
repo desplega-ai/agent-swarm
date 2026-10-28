@@ -324,6 +324,10 @@ describe("Agents", () => {
       expect((await put(path, { body: { slackIcon } })).status).toBe(400);
     }
 
+    const app = await put(path, { body: { slackIcon: { type: "app" } } });
+    expect(app.status).toBe(200);
+    expect(app.body.slackIcon).toEqual({ type: "app" });
+
     const reset = await put(path, { body: { slackIcon: null } });
     expect(reset.status).toBe(200);
     expect(reset.body.slackIcon).toBeNull();

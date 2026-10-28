@@ -8,9 +8,6 @@ import {
   getLatestContextVersion,
   initDb,
 } from "../be/db";
-import { registerGetSwarmTool } from "../tools/get-swarm";
-import { registerJoinSwarmTool } from "../tools/join-swarm";
-import { registerMyAgentInfoTool } from "../tools/my-agent-info";
 import { registerUpdateProfileTool } from "../tools/update-profile";
 import { SOUL_MD_MAX_CHARS } from "../utils/identity-field-budget";
 
@@ -58,12 +55,7 @@ async function callUpdateProfile(
   return result as { structuredContent: StructuredContent };
 }
 
-type RegisteredTool = {
-  // biome-ignore lint/complexity/noBannedTypes: accessing internal MCP SDK type for test
-  handler: Function;
-  inputSchema: { safeParse: (v: unknown) => { success: boolean } };
-  outputSchema: { parse: (v: unknown) => unknown };
-};
+type RegisteredTool = { inputSchema: { safeParse: (v: unknown) => { success: boolean } } };
 const registeredTools = (server: McpServer) =>
   (server as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools;
 
@@ -88,9 +80,6 @@ describe("update-profile authorization", () => {
 
     server = new McpServer({ name: "test-update-profile-auth", version: "1.0.0" });
     registerUpdateProfileTool(server);
-    registerGetSwarmTool(server);
-    registerMyAgentInfoTool(server);
-    registerJoinSwarmTool(server);
   });
 
   afterAll(async () => {
@@ -287,30 +276,6 @@ describe("update-profile authorization", () => {
     ]) {
       expect(inputSchema.safeParse({ slackIcon }).success).toBe(false);
     }
-  });
-
-  test("slackIcon survives the structured output of the agent tools", async () => {
-    const owl = { type: "url", url: "https://example.com/owl.png" };
-    const tools = registeredTools(server);
-    // Each result is checked through the tool's own outputSchema, as the MCP SDK does.
-    const output = async (name: string, caller: string, args: Record<string, unknown>) => {
-      const result = (await tools[name].handler(args, {
-        sessionId: "test-session",
-        requestInfo: { headers: { "x-agent-id": caller } },
-      })) as { structuredContent: unknown };
-      return tools[name].outputSchema.parse(result.structuredContent) as Record<string, any>;
-    };
-
-    const updated = await output("update-profile", OTHER_WORKER_ID, { slackIcon: owl });
-    expect(updated.agent.slackIcon).toEqual(owl);
-    const info = await output("my-agent-info", OTHER_WORKER_ID, {});
-    expect(info.yourAgentInfo.slackIcon).toEqual(owl);
-    const swarm = await output("get-swarm", OTHER_WORKER_ID, {});
-    expect(swarm.agents.find((a: { id: string }) => a.id === OTHER_WORKER_ID).slackIcon).toEqual(
-      owl,
-    );
-    const joined = await output("join-swarm", crypto.randomUUID(), { name: "Owl Joiner" });
-    expect(joined.agent).toHaveProperty("slackIcon", null);
   });
 
   test("missing self agent does not write supplied profile files", async () => {

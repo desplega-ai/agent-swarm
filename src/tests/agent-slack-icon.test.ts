@@ -4,36 +4,12 @@ import {
   parseSlackIconInput,
   slackEmojiGlyph,
 } from "../../apps/ui/src/lib/slack-icon";
-import { getAgentEmoji, getAgentSlackIcon } from "../slack/responses";
+import { getAgentEmoji } from "../slack/responses";
 import { type Agent, AgentSlackIconSchema } from "../types";
 
 function agent(overrides: Partial<Agent> = {}): Agent {
   return { id: "a1", name: "Owl Worker", isLead: false, status: "idle", ...overrides } as Agent;
 }
-
-describe("getAgentSlackIcon", () => {
-  test("uses the configured emoji or URL", () => {
-    expect(getAgentSlackIcon(agent({ slackIcon: { type: "emoji", emoji: ":owl:" } }))).toEqual({
-      icon_emoji: ":owl:",
-    });
-    expect(
-      getAgentSlackIcon(agent({ slackIcon: { type: "url", url: "https://example.com/o.png" } })),
-    ).toEqual({ icon_url: "https://example.com/o.png" });
-  });
-
-  test("sends no icon override for the Slack app icon", () => {
-    expect(getAgentSlackIcon(agent({ slackIcon: { type: "app" } }))).toEqual({});
-    expect(AgentSlackIconSchema.safeParse({ type: "app" }).success).toBe(true);
-  });
-
-  test("falls back to the crown for the lead and the hashed emoji for workers", () => {
-    expect(getAgentSlackIcon(agent({ isLead: true, slackIcon: null }))).toEqual({
-      icon_emoji: ":crown:",
-    });
-    const worker = agent();
-    expect(getAgentSlackIcon(worker)).toEqual({ icon_emoji: getAgentEmoji(worker) });
-  });
-});
 
 // Each raw input, the icon the server receives for it, and whether both the
 // zod schema and the dashboard parser accept it.

@@ -38,34 +38,30 @@ describe("Slack inline completion output", () => {
     );
   });
 
-  test("an app-icon agent posts with neither icon key", async () => {
-    const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
-    const agent = { id: "a1", name: "Owl", isLead: true, slackIcon: { type: "app" } } as Agent;
-    await sendWithPersona({ chat: { postMessage } } as never, {
-      channel: "C123",
-      thread_ts: "1",
-      text: "done",
-      username: "Owl",
-      icon: getAgentSlackIcon(agent),
-    });
-    const payload = postMessage.mock.calls[0]?.[0];
-    expect(payload?.username).toBe("Owl");
-    expect(payload).not.toHaveProperty("icon_emoji");
-    expect(payload).not.toHaveProperty("icon_url");
-  });
-
-  test("posts an image icon as icon_url without icon_emoji", async () => {
-    const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
-    await sendWithPersona({ chat: { postMessage } } as never, {
-      channel: "C123",
-      thread_ts: "1",
-      text: "done",
-      username: "Owl",
-      icon: { icon_url: "https://example.com/owl.png" },
-    });
-    const payload = postMessage.mock.calls[0]?.[0];
-    expect(payload?.icon_url).toBe("https://example.com/owl.png");
-    expect(payload).not.toHaveProperty("icon_emoji");
+  test("posts each agent's Slack icon choice and nothing else", async () => {
+    const cases: [Partial<Agent>, Record<string, string>][] = [
+      [{ slackIcon: { type: "emoji", emoji: ":owl:" } }, { icon_emoji: ":owl:" }],
+      [{ slackIcon: { type: "url", url: "https://a/o.png" } }, { icon_url: "https://a/o.png" }],
+      [{ slackIcon: { type: "app" } }, {}],
+      [{ isLead: true, slackIcon: null }, { icon_emoji: ":crown:" }],
+      [{ slackIcon: null }, { icon_emoji: ":star:" }],
+    ];
+    for (const [overrides, icon] of cases) {
+      const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
+      const agent = { id: "a1", name: "Owl Worker", isLead: false, ...overrides } as Agent;
+      await sendWithPersona({ chat: { postMessage } } as never, {
+        channel: "C123",
+        thread_ts: "1",
+        text: "done",
+        username: "Owl Worker",
+        icon: getAgentSlackIcon(agent),
+      });
+      const payload = postMessage.mock.calls[0]?.[0] ?? {};
+      const sent = Object.fromEntries(
+        Object.entries(payload).filter(([key]) => key.startsWith("icon_")),
+      );
+      expect(sent).toEqual(icon);
+    }
   });
 
   test("posts only truncated completed Slack output that has not already been replied", () => {

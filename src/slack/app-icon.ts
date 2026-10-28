@@ -1,31 +1,14 @@
 import { WebClient } from "@slack/web-api";
 import { getSlackApp } from "./app";
 
-export const SLACK_APP_ICON_TTL_MS = 60 * 60 * 1000;
+const TTL_MS = 60 * 60 * 1000;
 // Per request, with no retries: the lookup ends within two of these, and an
 // aborted auth.test never goes on to bots.info.
 const REQUEST_TIMEOUT_MS = 2_500;
 
-let cached: { url: string | null; at: number } | null = null;
-let inFlight: Promise<string | null> | null = null;
-
-/** A client for this lookup only: the app's token and API URL, no retries, a hard request timeout. */
-export function createLookupClient(
-  base: Pick<WebClient, "token" | "slackApiUrl">,
-  timeoutMs = REQUEST_TIMEOUT_MS,
-): WebClient {
-  return new WebClient(base.token, {
-    slackApiUrl: base.slackApiUrl,
-    retryConfig: { retries: 0 },
-    rejectRateLimitedCalls: true,
-    timeout: timeoutMs,
-  });
-}
-
-function defaultClient(): WebClient | undefined {
-  const client = getSlackApp()?.client;
-  return client?.token ? createLookupClient(client) : undefined;
-}
+// Keyed by token and API URL, so a reconfigured Slack app is looked up again.
+let cached: { key: string; url: string | null; at: number } | null = null;
+let inFlight: { key: string; promise: Promise<string | null> } | null = null;
 
 async function lookUp(client: WebClient): Promise<string | null> {
   const auth = await client.auth.test();
@@ -40,30 +23,28 @@ async function lookUp(client: WebClient): Promise<string | null> {
  * (`bots.info` for the bot behind the token). Null when Slack is off or the
  * lookup fails. Cached for an hour; failures are not cached.
  */
-export async function getSlackAppIconUrl({
-  getClient = defaultClient,
-  now = Date.now,
-}: {
-  getClient?: () => WebClient | undefined;
-  now?: () => number;
-} = {}): Promise<string | null> {
+export async function getSlackAppIconUrl(): Promise<string | null> {
   // Slack can be turned off at runtime, so check it before the cache.
-  const client = getClient();
-  if (!client) return null;
-  if (cached && now() - cached.at < SLACK_APP_ICON_TTL_MS) return cached.url;
-  inFlight ??= lookUp(client)
+  const app = getSlackApp()?.client;
+  if (!app?.token) return null;
+  const key = `${app.slackApiUrl} ${app.token}`;
+  if (cached?.key === key && Date.now() - cached.at < TTL_MS) return cached.url;
+  if (inFlight?.key === key) return await inFlight.promise;
+  const client = new WebClient(app.token, {
+    slackApiUrl: app.slackApiUrl,
+    retryConfig: { retries: 0 },
+    rejectRateLimitedCalls: true,
+    timeout: REQUEST_TIMEOUT_MS,
+  });
+  const promise: Promise<string | null> = lookUp(client)
     .then((url) => {
-      cached = { url, at: now() };
+      cached = { key, url, at: Date.now() };
       return url;
     })
     .catch(() => null)
     .finally(() => {
-      inFlight = null;
+      if (inFlight?.promise === promise) inFlight = null;
     });
-  return await inFlight;
-}
-
-export function resetSlackAppIconCache(): void {
-  cached = null;
-  inFlight = null;
+  inFlight = { key, promise };
+  return await promise;
 }
