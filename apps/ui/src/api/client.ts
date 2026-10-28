@@ -13,6 +13,7 @@ import type {
   AgentRuntimeInstancesResponse,
   AgentRuntimeResponse,
   AgentSkillsResponse,
+  AgentSlackIcon,
   AgentsResponse,
   AgentTask,
   AgentWithTasks,
@@ -602,6 +603,7 @@ class ApiClient {
       heartbeatMd?: string;
       /** `null` resets to the deterministic fallback; omit to leave untouched. */
       avatar?: AgentAvatar | null;
+      slackIcon?: AgentSlackIcon | null;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
