@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-28
+
+### Added
+- Install: `curl -fsSL https://agent-swarm.dev/install.sh | bash` is the short install URL, and the installer opens a tunnel by default (`--no-tunnel` or `AGENT_SWARM_TUNNEL=0` turns it off) (#2498).
+- Memory: a change of embedding endpoint, model, dimensions or document prefix re-embeds stored memory and script vectors in the background (#2487).
+- UI: Cmd+K is built from the route table and searches through per-entity providers (#2514); task titles match and results are keyed by swarm and user (#2519).
+- Seed: the dreaming loop ships as seeded scripts, a workflow and a daily schedule (#2443).
+- Skills: new `modernize-pr` skill and tighter code-quality review rules (#2500, #2512).
+- Evals: the benchmark publishes as dated snapshots (#2491); onboarding QA gains a record mode for demo takes (#2530).
+
+### Changed
+- HTTP request auth resolves through one principal-resolution path (#2503).
+- Scripts: the native script executor starts faster per run (#2484).
+- Worker and UI images: agent-fs pins 0.18.11 (#2529, #2532), opencode, amp and qwen bumps (#2504), nginx-unprivileged and docker/login-action bumps (#2526, #2527).
+- Docs: Slack Reply Gate playbook (#2492, #2495) and the onboarding demo as the README hero video (#2515); `.env.example` describes how embedding prefix changes apply.
+
+### Fixed
+- Telemetry: test, demo and scripts-only compose swarms stay out of production telemetry (#2499, #2501).
+- Onboarding: the first-task step finishes when its task tree settles (#2497); a fresh tab refetches env presence for the org-name gate (#2511).
+- Codex: app-server threads persist so sub-agent spawns can fork context (#2506); a login that duplicates an existing account warns (#2508); the nightly E2E carries the OAuth refresh chain (#2516).
+- Sessions: every user can read schedule-run sessions (#2493).
+- Dreaming: a manually triggered run finds the previous night (#2505); the dreaming workflow declares its gallery metadata (#2510).
+- Database: `workflow_run_steps` is indexed on `(runId, status)` (#2489).
+- Prompts: worker prompts cap auto-stash entries (#2520).
+- Seed scripts: `gh-pr-snapshot` grades CI against the ruleset's required checks (#2507).
+- Slack: visuals publish skips an empty staging dir (#2488) and CI bounds the optional ffmpeg install (#2502).
+
 ## [2.7.1] - 2026-10-27
 
 ### Added
