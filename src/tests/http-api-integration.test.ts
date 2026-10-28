@@ -319,6 +319,7 @@ describe("Agents", () => {
       { type: "emoji", emoji: "owl" },
       { type: "url", url: "http://example.com/owl.png" },
       { type: "url", url: "https://user:pass@example.com/owl.png" },
+      { type: "url", url: "https://" },
     ]) {
       expect((await put(path, { body: { slackIcon } })).status).toBe(400);
     }
