@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLoadTextToCopy } from "@/api/hooks/use-agent-fs";
 import { DownloadButton } from "@/components/comb/file-actions";
@@ -42,6 +42,7 @@ export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResu
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!copied) return;
@@ -71,9 +72,10 @@ export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResu
     : `${check.reason} (${formatBytes(stat.size)})`;
 
   return (
-    <HoverCard open={open} onOpenChange={setOpen} openDelay={300} closeDelay={150}>
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={300} closeDelay={300}>
       <HoverCardTrigger asChild>
         <Button
+          ref={trigger}
           size="icon-sm"
           variant="ghost"
           aria-label={label}
@@ -82,7 +84,15 @@ export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResu
           {pending ? <Spinner /> : copied ? <Check /> : <Copy />}
         </Button>
       </HoverCardTrigger>
-      <HoverCardContent side="bottom" align="end" className="flex w-72 flex-col gap-1 p-1.5">
+      <HoverCardContent
+        side="bottom"
+        align="end"
+        className="flex w-72 flex-col gap-1 p-1.5"
+        // A press on the button is outside the card: keep it open to show "Contents copied".
+        onPointerDownOutside={(event) => {
+          if (trigger.current?.contains(event.target as Node)) event.preventDefault();
+        }}
+      >
         <p className="px-2 py-1 text-xs text-muted-foreground">{note}</p>
         {check.copyable ? null : (
           <div className="px-1 pb-1">

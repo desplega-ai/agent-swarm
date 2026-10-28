@@ -117,6 +117,25 @@ describe("CopyFileButton", () => {
     expect(view.button().getAttribute("aria-label")).toBe("Contents copied");
   });
 
+  test("a press on the button keeps the open card, which then says Contents copied", async () => {
+    const view = await mount({ size: 6, contentType: "text/markdown" });
+    // Keyboard focus opens the card, like hover.
+    await act(async () => {
+      view.button().focus();
+      // Past the 300 ms open delay.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(document.body.textContent).toContain("Click to copy the contents");
+    await act(async () => {
+      view.button().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await view.click();
+    expect(clipboard).toEqual(["write:# Plan"]);
+    expect(document.body.textContent).toContain("Contents copied");
+    expect(document.body.textContent).toContain("Copy path");
+  });
+
   test("without ClipboardItem it falls back to writeText", async () => {
     installClipboard(false);
     const view = await mount({ size: 6, contentType: "text/markdown" });
