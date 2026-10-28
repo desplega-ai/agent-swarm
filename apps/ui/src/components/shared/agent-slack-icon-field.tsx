@@ -90,23 +90,25 @@ export function AgentSlackIconField({ agent }: { agent: Agent }) {
             />
           </span>
         </div>
-        {previewUrl && brokenUrl !== previewUrl ? (
-          <img
-            src={previewUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={() => setBrokenUrl(previewUrl)}
-            className="size-5 rounded-sm object-cover"
-          />
-        ) : null}
-        {usingApp ? null : (
-          <Button variant="ghost" size="sm" onClick={pickAppIcon}>
-            Use Slack app icon
+        <div className="flex items-center gap-2">
+          {previewUrl && brokenUrl !== previewUrl ? (
+            <img
+              src={previewUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+              onError={() => setBrokenUrl(previewUrl)}
+              className="size-5 rounded-sm object-cover"
+            />
+          ) : null}
+          {usingApp ? null : (
+            <Button variant="ghost" size="sm" onClick={pickAppIcon}>
+              Use Slack app icon
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={reset} disabled={value === "null"}>
+            Reset to default
           </Button>
-        )}
-        <Button variant="ghost" size="sm" onClick={reset} disabled={value === "null"}>
-          Reset to default
-        </Button>
+        </div>
       </div>
       {error ? (
         <p className="text-xs text-status-error-strong">{error}</p>
