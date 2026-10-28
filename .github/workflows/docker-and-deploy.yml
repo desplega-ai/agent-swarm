@@ -1135,20 +1135,7 @@ jobs:
         run: |
           TAG="v${VERSION}"
           VERSION_SLUG="${VERSION//./-}"
-          agent_fs_version() {
-            git show "$1:charts/agent-swarm/values.yaml" |
-              bun -e 'const values = Bun.YAML.parse(await Bun.stdin.text()); console.log(values.agentFs?.image?.tag ?? "");'
-          }
-          AGENT_FS_VERSION=$(agent_fs_version "$TAG")
-          test -n "$AGENT_FS_VERSION"
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${TAG}^" 2>/dev/null || true)
-          AGENT_FS_BUMP=""
-          if [ -n "$PREVIOUS_TAG" ]; then
-            PREVIOUS_AGENT_FS_VERSION=$(agent_fs_version "$PREVIOUS_TAG")
-            if [ -n "$PREVIOUS_AGENT_FS_VERSION" ] && [ "$AGENT_FS_VERSION" != "$PREVIOUS_AGENT_FS_VERSION" ]; then
-              AGENT_FS_BUMP=" (bumped from ${PREVIOUS_AGENT_FS_VERSION})"
-            fi
-          fi
+          AGENT_FS_NOTES=$(bun scripts/agent-fs-release-notes.ts "$TAG")
           cat > /tmp/release-notes.md <<EOF
           ## Install & Run
 
@@ -1187,11 +1174,7 @@ jobs:
           agent-swarm-worker-latest
           \`\`\`
 
-          ## agent-fs
-
-          Ships [agent-fs ${AGENT_FS_VERSION}](https://github.com/desplega-ai/agent-fs/releases/tag/v${AGENT_FS_VERSION})${AGENT_FS_BUMP}.
-
-          agent-swarm pins agent-fs via the chart image tag and npm packages \`@desplega.ai/agent-fs\` and \`@desplega.ai/agent-fs-just-bash\`; each agent-fs release needs a \`chore(deps): bump agent-fs pins\` PR here.
+          ${AGENT_FS_NOTES}
 
           ---
           EOF
