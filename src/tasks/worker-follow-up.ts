@@ -252,6 +252,9 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
 /**
  * Create the lead follow-up for a finished worker task.
  *
+ * Deferred worker completions are skipped, including explicit onCompleted
+ * instructions; their wake-up carries those instructions to the real completion.
+ *
  * Skipped when this settlement woke a deferred waiter (`defer-task` with
  * `wakeOn`) assigned to the same agent the follow-up targets: that wake-up
  * task already reviews the result, so a follow-up would duplicate it. An
@@ -275,6 +278,18 @@ export async function createWorkerTaskFollowUp(args: {
 
   const leadAgent = await getLeadAgent();
   if (!leadAgent) return null;
+
+  if (status === "completed" && task.deferredAt) {
+    try {
+      await createLogEntry({
+        eventType: "task_follow_up_suppressed",
+        taskId: task.id,
+        agentId: leadAgent.id,
+        metadata: { reason: "worker_deferred", status },
+      });
+    } catch {}
+    return null;
+  }
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
   const taskDesc = task.task.slice(0, 200);

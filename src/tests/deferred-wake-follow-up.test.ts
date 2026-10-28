@@ -108,6 +108,33 @@ async function suppressions(taskId: string) {
 }
 
 describe("worker follow-up vs. deferred wake", () => {
+  test("a deferred worker suppresses onCompleted until its real completion", async () => {
+    const options = {
+      followUpConfig: { onCompleted: "Route the finished result to Reviewer." },
+    };
+    const deferred = await activeTask(workerId, options);
+    const completed = await completeTask(deferred.id, "Checking back later.", {
+      deferredAt: new Date().toISOString(),
+    });
+
+    expect(
+      await createWorkerTaskFollowUp({
+        task: completed!,
+        status: "completed",
+        output: completed!.output,
+      }),
+    ).toBeNull();
+    expect(await suppressions(deferred.id)).toEqual([
+      { reason: "worker_deferred", status: "completed" },
+    ]);
+
+    const finished = await activeTask(workerId, options);
+    const followUp = await settle(finished);
+    expect(followUp?.taskType).toBe("follow-up");
+    expect(followUp?.task).toContain(options.followUpConfig.onCompleted);
+    expect(await suppressions(finished.id)).toHaveLength(0);
+  });
+
   test("any-mode wake suppresses the follow-up and records the waiter", async () => {
     await initDeferredTaskWaits();
     const first = await activeTask(workerId);
