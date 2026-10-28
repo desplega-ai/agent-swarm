@@ -9,11 +9,12 @@ import {
   updateAgentProfile,
 } from "../be/db";
 import { saveGeneratedProfile } from "../commands/runner";
-import { handleAgentsRest } from "../http/agents";
+import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { HeartbeatExpiryError, validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const section = (...lines: string[]) => `## Tracked Items\n${lines.join("\n")}\n`;
 
@@ -170,45 +171,125 @@ describe("profile persistence heartbeat gate", () => {
       await getDbClient().query("SELECT * FROM context_versions WHERE agentId = ?", [agentId]),
     ).toEqual(versionsBefore);
   });
-  test("runner saves the official lead template on the first boot", async () => {
-    const leadId = crypto.randomUUID();
-    await createAgent({ id: leadId, name: "Fresh lead", isLead: true, status: "idle" });
-    const templateFile = (name: string) =>
-      Bun.file(new URL(`../../templates/official/lead/${name}`, import.meta.url)).text();
-    const profileUpdate = {
-      soulMd: await templateFile("SOUL.md"),
-      identityMd: await templateFile("IDENTITY.md"),
-      claudeMd: await templateFile("CLAUDE.md"),
-      toolsMd: "# Tools\nUse the swarm tools.",
-      setupScript: "#!/bin/sh\nset -eu\n",
-      heartbeatMd: await templateFile("HEARTBEAT.md"),
-    };
-    const server = createServer(async (req, res) => {
-      await handleAgentsRest(
-        req,
-        res,
-        getPathSegments(req.url ?? "/"),
-        parseQueryParams(req.url ?? "/"),
-        leadId,
-      );
-    });
-    const port = await listenOnFreePort(server);
-    const log = spyOn(console, "log").mockImplementation(() => {});
-    try {
-      await saveGeneratedProfile({
-        apiUrl: `http://localhost:${port}`,
-        apiKey: "test-profile-key",
-        agentId: leadId,
-        role: "lead",
-        profileUpdate,
+  test(
+    "runner saves the official lead template on the first boot",
+    async () => {
+      const leadId = crypto.randomUUID();
+      expect(await getAgentById(leadId)).toBeFalsy();
+      const templateFile = (name: string) =>
+        Bun.file(new URL(`../../templates/official/lead/${name}`, import.meta.url)).text();
+      const template = {
+        config: await Bun.file(
+          new URL("../../templates/official/lead/config.json", import.meta.url),
+        ).json(),
+        files: {
+          soulMd: await templateFile("SOUL.md"),
+          identityMd: await templateFile("IDENTITY.md"),
+          claudeMd: await templateFile("CLAUDE.md"),
+          toolsMd: "",
+          setupScript: "",
+          heartbeatMd: await templateFile("HEARTBEAT.md"),
+        },
+      };
+      const server = createServer(async (req, res) => {
+        try {
+          const path = new URL(req.url ?? "/", "http://localhost").pathname;
+          const json = (data: unknown) => {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(data));
+          };
+          if (path === "/api/templates/official/lead") return json(template);
+          if (path === "/api/config/resolved") return json({ configs: [] });
+          if (path === "/api/fs/agent-credentials") return json({ enabled: false });
+          if (path.startsWith("/api/active-sessions/")) return json({ recovered: 0 });
+          if (path === "/me") return json(await getAgentById(leadId));
+          if (path === `/api/agents/${leadId}/mcp-servers`) return json({ servers: [] });
+          if (await handleAgentRegister(req, res, getPathSegments(req.url ?? "/"), leadId)) return;
+          if (
+            await handleAgentsRest(
+              req,
+              res,
+              getPathSegments(req.url ?? "/"),
+              parseQueryParams(req.url ?? "/"),
+              leadId,
+            )
+          )
+            return;
+          res.writeHead(404).end();
+        } catch {
+          res.writeHead(500).end();
+        }
       });
-      expect(await getAgentById(leadId)).toMatchObject(profileUpdate);
-      expect(log).toHaveBeenCalledWith("[lead] Generated and saved default identity templates");
-    } finally {
-      log.mockRestore();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
+      const port = await listenOnFreePort(server);
+      const dir = `${process.env.TMPDIR ?? "/tmp"}/runner-profile-boot-${leadId}`;
+      await Bun.$`mkdir -p ${dir}`.quiet();
+      try {
+        await Bun.write(
+          `${dir}/boot.ts`,
+          `
+        import { mock } from "bun:test";
+        const fs = { ...await import("node:fs/promises") };
+        // A fresh template cache, without touching the host's /workspace.
+        const isolated = (fn) => (...args) => {
+          if (String(args[0]).startsWith("/workspace")) throw new Error("No fixture workspace");
+          return fn(...args);
+        };
+        mock.module("node:fs/promises", () => ({
+          ...fs, stat: isolated(fs.stat), mkdir: isolated(fs.mkdir),
+        }));
+        const request = globalThis.fetch;
+        globalThis.fetch = Object.assign(async (...args) => {
+          const response = await request(...args);
+          // This request follows profile initialization and precedes workspace writes.
+          if (new URL(response.url).pathname === "/api/agents/${leadId}/mcp-servers") {
+            console.log("Boot identity phase completed");
+            process.exit(0);
+          }
+          return response;
+        }, { preconnect: request.preconnect });
+        const { runAgent } = await import(${JSON.stringify(new URL("../commands/runner.ts", import.meta.url).pathname)});
+        await runAgent({ role: "lead", defaultPrompt: "/start-leader", metadataType: "lead_metadata" },
+          { logsDir: ${JSON.stringify(`${dir}/logs`)} });
+      `,
+        );
+        const child = expectChildOk(
+          await runChild([process.execPath, `${dir}/boot.ts`], {
+            cwd: dir,
+            env: {
+              ...process.env,
+              AGENT_ID: leadId,
+              AGENT_NAME: "Fresh lead",
+              AGENT_SWARM_API_KEY: "test-profile-key",
+              MCP_BASE_URL: `http://localhost:${port}`,
+              TEMPLATE_ID: "official/lead",
+              TEMPLATE_REGISTRY_URL: `http://localhost:${port}`,
+              HARNESS_PROVIDER: "claude",
+              CRED_CHECK_DISABLE: "1",
+              ANONYMIZED_TELEMETRY: "false",
+              BUSINESS_USE_API_KEY: "",
+              OTEL_SDK_DISABLED: "true",
+              DESPLEGA_TELEMETRY_ENV: "test",
+              HOME: dir,
+              PATH: dir,
+            },
+          }),
+          "first-boot lead runner",
+        );
+        expect(child.stdout).toContain("Boot identity phase completed");
+        const saved = await getAgentById(leadId);
+        expect(saved?.soulMd).toContain("# SOUL.md — Fresh lead");
+        expect(saved?.identityMd).toContain("# IDENTITY.md — Fresh lead");
+        expect(saved?.claudeMd).toBeTruthy();
+        expect(saved?.toolsMd).toBeTruthy();
+        expect(saved?.heartbeatMd).toBe(template.files.heartbeatMd);
+        expect(child.stdout).toContain("[lead] Generated and saved default identity templates");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await Bun.$`rm -rf ${dir}`.quiet();
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
   test("HTTP returns 400 and the runner reports the rejected profile", async () => {
     const server = createServer(async (req, res) => {
       try {
