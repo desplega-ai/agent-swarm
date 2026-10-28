@@ -157,7 +157,7 @@ const TEXT_CONTENT_TYPES = new Set([
 ]);
 
 /** The media type without parameters ("text/plain; charset=utf-8" → "text/plain"). */
-function mediaType(contentType: string | undefined): string {
+export function mediaType(contentType: string | undefined): string {
   return (contentType?.split(";")[0] ?? "").trim().toLowerCase();
 }
 
