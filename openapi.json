@@ -1016,6 +1016,50 @@
           "reportedAt"
         ]
       },
+      "AgentSlackIcon": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "emoji"
+                ]
+              },
+              "emoji": {
+                "type": "string",
+                "maxLength": 102,
+                "pattern": "^:[a-z0-9_+'-]+:$"
+              }
+            },
+            "required": [
+              "type",
+              "emoji"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          }
+        ]
+      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -1186,6 +1230,16 @@
                   "type",
                   "icon"
                 ]
+              }
+            ]
+          },
+          "slackIcon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentSlackIcon"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -11798,6 +11852,16 @@
                           "type",
                           "icon"
                         ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "slackIcon": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentSlackIcon"
                       },
                       {
                         "type": "null"

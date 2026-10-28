@@ -2870,6 +2870,7 @@ export interface paths {
                             icon: string;
                             color?: string;
                         } | null;
+                        slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
                         changedByAgentId?: string;
                         changeReason?: string;
@@ -27993,6 +27994,16 @@ export interface components {
             })[];
             reportedAt: number;
         } | null;
+        AgentSlackIcon: {
+            /** @enum {string} */
+            type: "emoji";
+            emoji: string;
+        } | {
+            /** @enum {string} */
+            type: "url";
+            /** Format: uri */
+            url: string;
+        };
         Agent: {
             id: string;
             name: string;
@@ -28029,6 +28040,7 @@ export interface components {
                 icon: string;
                 color?: string;
             };
+            slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
