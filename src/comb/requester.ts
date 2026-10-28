@@ -26,7 +26,7 @@ export async function commentAuthorUsers(
   agentFs: AgentFsProvider,
   drive: AgentFsDrive,
   comments: AgentFsComment[],
-  serviceUserId: string | null,
+  serviceUserId: string,
 ): Promise<Map<string, string>> {
   const authors = [...new Set(comments.map((comment) => comment.author))].filter(
     (author) => author && author !== serviceUserId,

@@ -29,7 +29,7 @@ import {
   upsertPromptTemplate,
 } from "../be/db";
 import { installExtension } from "../be/extensions/db";
-import { linkIdentity, mintToken } from "../be/users";
+import { findUserByExternalId, linkIdentity, mintToken } from "../be/users";
 import { AGENT_FS_IDENTITY_KIND } from "../comb/requester";
 import {
   REVIEW_BATCH_MAX,
@@ -89,6 +89,7 @@ class FakeAgentFs {
   failReplies = false;
   failGets = false;
   failMembers = false;
+  failAuthMe = false;
   /** `drive-members` calls. */
   memberReads = 0;
   /** `comment-get` calls: total, in flight now, the most in flight at once, and a delay per call. */
@@ -121,7 +122,10 @@ class FakeAgentFs {
       return Response.json({ error: "UNAUTHORIZED" }, { status: 401 });
     }
     const url = new URL(request.url);
-    if (url.pathname === "/auth/me") return Response.json({ userId: SERVICE_USER });
+    if (url.pathname === "/auth/me") {
+      if (this.failAuthMe) return Response.json({ error: "DOWN" }, { status: 500 });
+      return Response.json({ userId: SERVICE_USER });
+    }
     if (url.pathname !== `/orgs/${ORG}/ops` || request.method !== "POST") {
       return new Response("not found", { status: 404 });
     }
@@ -258,6 +262,7 @@ beforeEach(async () => {
   fake.failReplies = false;
   fake.failGets = false;
   fake.failMembers = false;
+  fake.failAuthMe = false;
   fake.gets = 0;
   fake.maxGetsInFlight = 0;
   fake.getDelayMs = 0;
@@ -678,6 +683,19 @@ describe("requester from the comment authors", () => {
     return { userId: user.id, author, email };
   }
 
+  /** A swarm user linked to the swarm service account's agent-fs id, once per file. */
+  async function linkServiceAccount(): Promise<void> {
+    if (await findUserByExternalId(AGENT_FS_IDENTITY_KIND, SERVICE_USER)) return;
+    const service = await createUser({
+      name: "Service",
+      email: `svc-${crypto.randomUUID()}@x.test`,
+    });
+    await linkIdentity(service.id, AGENT_FS_IDENTITY_KIND, SERVICE_USER, {
+      kind: "system",
+      id: "test",
+    });
+  }
+
   test("one author: the swarm user with the agent-fs member's email", async () => {
     const ana = await member("Ana");
     const a = fake.add({ body: "@swarm a", author: ana.author });
@@ -752,19 +770,24 @@ describe("requester from the comment authors", () => {
   });
 
   test("the swarm service account is never the requester", async () => {
-    const service = await createUser({
-      name: "Service",
-      email: `svc-${crypto.randomUUID()}@x.test`,
-    });
-    await linkIdentity(service.id, AGENT_FS_IDENTITY_KIND, SERVICE_USER, {
-      kind: "system",
-      id: "test",
-    });
+    await linkServiceAccount();
     const a = fake.add({ body: "@swarm a", author: SERVICE_USER });
 
     const result = await sendReviewBatch(batch([a.id]));
 
     expect((await getTaskById(result.taskId as string))?.requestedByUserId).toBeUndefined();
+  });
+
+  test("an unknown service identity leaves the requester empty and still sends", async () => {
+    await linkServiceAccount();
+    fake.failAuthMe = true;
+    const a = fake.add({ body: "@swarm a", author: SERVICE_USER });
+
+    const result = await sendReviewBatch(batch([a.id]));
+
+    expect(result.sent).toEqual([a.id]);
+    expect((await getTaskById(result.taskId as string))?.requestedByUserId).toBeUndefined();
+    expect(fake.memberReads).toBe(0);
   });
 
   test("an authenticated sender wins, and the body cannot name a requester", async () => {

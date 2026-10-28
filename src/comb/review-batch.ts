@@ -156,10 +156,12 @@ export async function sendReviewBatch(
     else candidates.push(read);
   }
   // Without an authenticated sender, map the comment authors to swarm users
-  // now: it may read the drive members from agent-fs.
-  const authorUsers = input.requestedByUserId
-    ? null
-    : await commentAuthorUsers(agentFs, drive, candidates.map(commentOf), serviceUserId);
+  // now: it may read the drive members from agent-fs. Without the service
+  // identity, a swarm-authored comment could pass for a person: no requester.
+  const authorUsers =
+    input.requestedByUserId || !serviceUserId
+      ? null
+      : await commentAuthorUsers(agentFs, drive, candidates.map(commentOf), serviceUserId);
 
   // 2. Claim in one transaction, so two sends never split one set of comments.
   const claim = crypto.randomUUID();
