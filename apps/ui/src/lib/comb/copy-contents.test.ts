@@ -3,7 +3,9 @@ import {
   CANT_COPY_TYPE,
   type ClipboardEnv,
   COPY_CONTENTS_MAX_BYTES,
+  CopyRejected,
   copyCheck,
+  loadTextToCopy,
   TOO_LARGE_TO_COPY,
   textToCopy,
   writeTextWhenReady,
@@ -156,5 +158,71 @@ describe("writeTextWhenReady", () => {
     const { clipboard } = fakeClipboard({ writeFails: true, writeTextFails: true });
     expect(await writeTextWhenReady(Promise.resolve("x"), env(clipboard))).toBe(false);
     expect(await writeTextWhenReady(Promise.resolve("x"), {})).toBe(false);
+  });
+});
+
+describe("loadTextToCopy", () => {
+  const STAT = { size: 4, contentType: "text/plain" };
+  const OVER_CAP = "a".repeat(2 * 1024 * 1024);
+  const noFetch = () => Promise.reject(new Error("fetched"));
+
+  async function rejection(load: Promise<string>) {
+    const err = await load.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(err).toBeInstanceOf(CopyRejected);
+    return (err as Error).message;
+  }
+
+  test("copies fetched text within the cap", async () => {
+    let fetches = 0;
+    const text = await loadTextToCopy("/a.txt", STAT, undefined, async () => {
+      fetches++;
+      return new Blob(["abcd"]);
+    });
+    expect(text).toBe("abcd");
+    expect(fetches).toBe(1);
+  });
+
+  test("a small stat with 2 MiB fetched is too large", async () => {
+    const load = loadTextToCopy("/a.txt", STAT, undefined, async () => new Blob([OVER_CAP]));
+    expect(await rejection(load)).toBe(TOO_LARGE_TO_COPY);
+  });
+
+  test("cached text copies without a fetch", async () => {
+    expect(await loadTextToCopy("/a.txt", STAT, "cached", noFetch)).toBe("cached");
+  });
+
+  test("a small stat with 2 MiB of cached text is too large", async () => {
+    expect(await rejection(loadTextToCopy("/a.txt", STAT, OVER_CAP, noFetch))).toBe(
+      TOO_LARGE_TO_COPY,
+    );
+  });
+
+  test("the cached cap counts UTF-8 bytes, not characters", async () => {
+    // 600k two-byte characters: under the cap in characters, over it in bytes.
+    const wide = "é".repeat(600_000);
+    expect(await rejection(loadTextToCopy("/a.txt", STAT, wide, noFetch))).toBe(TOO_LARGE_TO_COPY);
+  });
+
+  test("binary bytes are rejected as the wrong type", async () => {
+    const load = loadTextToCopy(
+      "/README",
+      { size: 4, contentType: "application/octet-stream" },
+      undefined,
+      async () => new Blob([new Uint8Array([0, 1, 2, 0])]),
+    );
+    expect(await rejection(load)).toBe(CANT_COPY_TYPE);
+  });
+
+  test("a stat that fails copyCheck rejects before any load", async () => {
+    const load = loadTextToCopy(
+      "/photo.png",
+      { size: 4, contentType: "image/png" },
+      undefined,
+      noFetch,
+    );
+    expect(await rejection(load)).toBe(CANT_COPY_TYPE);
   });
 });

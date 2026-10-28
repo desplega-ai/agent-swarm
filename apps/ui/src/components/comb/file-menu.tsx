@@ -32,7 +32,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgentFsAccess, useLoadTextToCopy } from "@/api/hooks/use-agent-fs";
 import { isCombFavorite, useCombFavorites } from "@/api/hooks/use-comb-favorites";
-import { copyLoadingText } from "@/components/comb/copy-file-button";
+import { copyContentsFromMenu } from "@/components/comb/copy-file-button";
 import { downloadDriveFile } from "@/components/comb/file-actions";
 import { DeleteDialog, NewEntryDialog, RenameDialog } from "@/components/comb/file-dialogs";
 import { ShareDialog } from "@/components/comb/share-dialog";
@@ -180,9 +180,13 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
       icon: ClipboardCopy,
       // The load starts inside the select, so the clipboard write keeps the gesture.
       onSelect: () =>
-        void copyLoadingText(loadText(target)).then((ok) => {
-          if (ok) toast.success("Contents copied");
-        }),
+        void copyContentsFromMenu(
+          loadText(target),
+          () =>
+            void downloadDriveFile(client, target).catch((err: unknown) =>
+              toast.error(err instanceof Error ? err.message : "Download failed"),
+            ),
+        ),
     });
   }
   if (!isFolder && openDialog && features.has(SHARE_LINKS_FEATURE)) {

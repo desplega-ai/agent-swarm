@@ -53,7 +53,7 @@ import {
   type FileThreads,
   listFileThreads,
 } from "@/lib/comb/comments";
-import { copyCheck, textToCopy } from "@/lib/comb/copy-contents";
+import { loadTextToCopy } from "@/lib/comb/copy-contents";
 import {
   HTML_SITE_TTL_SECONDS,
   siteBaseUrl,
@@ -190,9 +190,10 @@ export function useAgentFsText(target: DrivePath) {
 }
 
 /**
- * Loads a file's text to copy. Rejects with the reason (`copyCheck`) when the
- * file cannot be copied. Reuses the bytes `useAgentFsText` already loaded for
- * this revision, and the cached `stat` when the caller has none.
+ * Loads a file's text to copy (`loadTextToCopy`). Rejects with a
+ * `CopyRejected` when the file cannot be copied. Reuses the bytes
+ * `useAgentFsText` already loaded for this revision, and the cached `stat`
+ * when the caller has none.
  */
 export function useLoadTextToCopy() {
   const access = useAgentFsAccess();
@@ -210,15 +211,13 @@ export function useLoadTextToCopy() {
           { path: target.path },
           target.driveId,
         ));
-      const check = copyCheck(target.path, stat);
-      if (!check.copyable) throw new Error(check.reason);
       const loaded = queryClient.getQueryData<AgentFsText>([
         ...drivePathKey(access, target, "content"),
         fileRevision(stat),
       ]);
-      if (loaded && !loaded.tooLarge) return textToCopy(loaded.text);
-      const blob = await client.fetchRaw(target.orgId, target.driveId, target.path);
-      return textToCopy(await blob.text());
+      return loadTextToCopy(target.path, stat, loaded?.text ?? undefined, () =>
+        client.fetchRaw(target.orgId, target.driveId, target.path),
+      );
     },
     [access, queryClient],
   );

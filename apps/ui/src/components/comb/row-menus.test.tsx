@@ -54,7 +54,7 @@ mock.module("@/components/comb/filter-input", () => require("./filter-input"));
 mock.module("@/components/comb/use-url-draft", () => require("./use-url-draft"));
 mock.module("@/components/comb/presence-avatars", () => ({ PresenceDots: () => null }));
 mock.module("@/components/comb/file-actions", () => ({ downloadDriveFile: async () => {} }));
-mock.module("@/components/comb/copy-file-button", () => ({ copyLoadingText: async () => true }));
+mock.module("@/components/comb/copy-file-button", () => ({ copyContentsFromMenu: async () => {} }));
 mock.module("@/components/comb/share-dialog", () => ({ ShareDialog: () => null }));
 mock.module("@/components/comb/file-dialogs", () => ({
   DeleteDialog: () => null,

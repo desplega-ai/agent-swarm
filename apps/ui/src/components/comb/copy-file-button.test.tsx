@@ -15,6 +15,8 @@ const FILE = { orgId: "org-1", driveId: "drive-1", path: "/docs/plan.md" };
 let loads: string[] = [];
 let load: () => Promise<string> = () => Promise.resolve("# Plan");
 const errors: string[] = [];
+const successes: string[] = [];
+let errorActions: { label: string; onClick: () => void }[] = [];
 
 mock.module("@/api/hooks/use-agent-fs", () => ({
   useLoadTextToCopy: () => (target: { path: string }) => {
@@ -27,8 +29,11 @@ mock.module("@/components/comb/file-actions", () => ({
 }));
 mock.module("sonner", () => ({
   toast: {
-    error: (message: string) => errors.push(message),
-    success: () => {},
+    error: (message: string, options?: { action?: { label: string; onClick: () => void } }) => {
+      errors.push(message);
+      if (options?.action) errorActions.push(options.action);
+    },
+    success: (message: string) => successes.push(message),
   },
 }));
 // The real modules: a root `bun test` does not resolve the `@/` alias by itself.
@@ -44,7 +49,10 @@ for (const [alias, path] of [
   mock.module(alias, () => require(path));
 }
 
-const { CopyFileButton } = await import("./copy-file-button");
+const { CopyFileButton, copyContentsFromMenu } = await import("./copy-file-button");
+const { CANT_COPY_TYPE, CopyRejected, TOO_LARGE_TO_COPY } = await import(
+  "../../lib/comb/copy-contents"
+);
 
 let clipboard: string[] = [];
 
@@ -104,6 +112,8 @@ beforeEach(() => {
   load = () => Promise.resolve("# Plan");
   clipboard = [];
   errors.length = 0;
+  successes.length = 0;
+  errorActions = [];
   installClipboard(true);
 });
 
@@ -145,12 +155,30 @@ describe("CopyFileButton", () => {
   });
 
   test("a failed load copies nothing and toasts its reason", async () => {
-    load = () => Promise.reject(new Error("Can't copy this file type"));
-    const view = await mount({ size: 6, contentType: "application/octet-stream" }, "/README");
+    load = () => Promise.reject(new Error("agent-fs is not connected"));
+    const view = await mount({ size: 6, contentType: "text/markdown" });
     await view.click();
     expect(clipboard).toEqual([]);
-    expect(errors).toEqual(["Can't copy this file type"]);
+    expect(errors).toEqual(["agent-fs is not connected"]);
     expect(view.button().getAttribute("aria-label")).toBe("Copy contents");
+  });
+
+  test("bytes that turn out binary open the card with Download instead", async () => {
+    // No extension and the generic type: the stat allows a copy, the bytes do not.
+    load = () => Promise.reject(new CopyRejected(CANT_COPY_TYPE));
+    const view = await mount({ size: 6, contentType: "application/octet-stream" }, "/README");
+    expect(view.button().getAttribute("aria-label")).toBe("Copy contents");
+    await view.click();
+    expect(clipboard).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(view.button().getAttribute("aria-label")).toBe(CANT_COPY_TYPE);
+    const card = document.body.textContent ?? "";
+    expect(card).toContain(CANT_COPY_TYPE);
+    expect(card).not.toContain(`${CANT_COPY_TYPE} (`);
+    expect(card).toContain("Download instead");
+    // A second click shows the card again without another load.
+    await view.click();
+    expect(loads).toEqual(["/README"]);
   });
 
   test("an image does not copy: the click opens the card with Download instead", async () => {
@@ -172,5 +200,35 @@ describe("CopyFileButton", () => {
     expect(loads).toEqual([]);
     expect(document.body.textContent).toContain("Too large to copy (3");
     expect(document.body.textContent).toContain("Download instead");
+  });
+});
+
+describe("copyContentsFromMenu", () => {
+  test("a copy toasts Contents copied", async () => {
+    let downloads = 0;
+    await copyContentsFromMenu(Promise.resolve("# Plan"), () => downloads++);
+    expect(clipboard).toEqual(["write:# Plan"]);
+    expect(successes).toEqual(["Contents copied"]);
+    expect(downloads).toBe(0);
+  });
+
+  test("a file that cannot be copied toasts the reason with Download instead", async () => {
+    let downloads = 0;
+    await copyContentsFromMenu(
+      Promise.reject(new CopyRejected(TOO_LARGE_TO_COPY)),
+      () => downloads++,
+    );
+    expect(clipboard).toEqual([]);
+    expect(successes).toEqual([]);
+    expect(errors).toEqual([TOO_LARGE_TO_COPY]);
+    expect(errorActions.map((action) => action.label)).toEqual(["Download instead"]);
+    errorActions[0]?.onClick();
+    expect(downloads).toBe(1);
+  });
+
+  test("another failure toasts without a download", async () => {
+    await copyContentsFromMenu(Promise.reject(new Error("agent-fs is not connected")), () => {});
+    expect(errors).toEqual(["agent-fs is not connected"]);
+    expect(errorActions).toEqual([]);
   });
 });

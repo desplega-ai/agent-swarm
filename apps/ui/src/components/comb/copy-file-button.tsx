@@ -8,37 +8,65 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Spinner } from "@/components/ui/spinner";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import type { StatResult } from "@/lib/agent-fs/types";
-import { CLIPBOARD_BLOCKED, copyCheck, writeTextWhenReady } from "@/lib/comb/copy-contents";
+import {
+  CLIPBOARD_BLOCKED,
+  CopyRejected,
+  copyCheck,
+  writeTextWhenReady,
+} from "@/lib/comb/copy-contents";
 import type { DrivePath } from "@/lib/comb/paths";
 import { formatBytes } from "@/lib/format-bytes";
 
 const COPIED_MS = 1500;
 
 /**
- * Copy text that is still loading (`writeTextWhenReady`), and toast a failure:
- * the reason the load gave ("Too large to copy"), else the blocked clipboard.
- * Call it before any await in the click handler. Resolves to whether it worked.
+ * Copy text that is still loading (`writeTextWhenReady`). A load that rejects
+ * with a `CopyRejected` (the bytes are binary or above 1 MB) goes to
+ * `onCantCopy`, which offers a download. Any other failure toasts its reason,
+ * else the blocked clipboard. Call it before any await in the click handler.
+ * Resolves to whether it worked.
  */
-export async function copyLoadingText(text: Promise<string>): Promise<boolean> {
+async function copyLoadingText(
+  text: Promise<string>,
+  onCantCopy: (reason: string) => void,
+): Promise<boolean> {
   const failure = text.then(
-    () => CLIPBOARD_BLOCKED,
-    (err: unknown) => (err instanceof Error ? err.message : CLIPBOARD_BLOCKED),
+    () => null,
+    (err: unknown) => err,
   );
   if (await writeTextWhenReady(text)) return true;
-  toast.error(await failure);
+  const err = await failure;
+  if (err instanceof CopyRejected) onCantCopy(err.message);
+  else toast.error(err instanceof Error ? err.message : CLIPBOARD_BLOCKED);
   return false;
+}
+
+/**
+ * The file menu's Copy contents. The menu closes at once, so a toast says how
+ * it went, and a file that cannot be copied gets a Download instead action.
+ */
+export async function copyContentsFromMenu(text: Promise<string>, download: () => void) {
+  const ok = await copyLoadingText(text, (reason) =>
+    toast.error(reason, { action: { label: "Download instead", onClick: download } }),
+  );
+  if (ok) toast.success("Contents copied");
 }
 
 /**
  * The file header's copy button. A click copies the file's contents. Hover or
  * keyboard focus opens a card with Copy path. A file that cannot be copied
  * (`copyCheck`: not text, or above 1 MB) does not copy: a click opens the
- * card, which names the reason and offers Download instead.
+ * card, which names the reason and offers Download instead. The same happens
+ * when the loaded bytes turn out binary or above 1 MB.
  */
 export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResult }) {
   const loadText = useLoadTextToCopy();
   const path = useCopyToClipboard();
-  const check = copyCheck(file.path, stat);
+  // A rejection from the loaded bytes holds until `stat` changes.
+  const [rejected, setRejected] = useState<{ stat: StatResult; reason: string } | null>(null);
+  const loadReason = rejected?.stat === stat ? rejected.reason : null;
+  const statCheck = copyCheck(file.path, stat);
+  const check = loadReason ? { copyable: false as const, reason: loadReason } : statCheck;
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -58,7 +86,10 @@ export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResu
     }
     if (pending) return;
     setPending(true);
-    const ok = await copyLoadingText(loadText(file, stat));
+    const ok = await copyLoadingText(loadText(file, stat), (reason) => {
+      setRejected({ stat, reason });
+      setOpen(true);
+    });
     setPending(false);
     setCopied(ok);
   };
@@ -69,7 +100,10 @@ export function CopyFileButton({ file, stat }: { file: DrivePath; stat: StatResu
     ? copied
       ? "Contents copied"
       : "Click to copy the contents"
-    : `${check.reason} (${formatBytes(stat.size)})`;
+    : statCheck.copyable
+      ? // A reason from the loaded bytes: the stat size would not explain it.
+        check.reason
+      : `${check.reason} (${formatBytes(stat.size)})`;
 
   return (
     <HoverCard open={open} onOpenChange={setOpen} openDelay={300} closeDelay={300}>
