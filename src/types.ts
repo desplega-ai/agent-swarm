@@ -1248,6 +1248,32 @@ export const AgentAvatarSchema = z.discriminatedUnion("type", [
 ]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
+// Icon for the agent's Slack persona posts, separate from the dashboard avatar
+// so an agent can keep a lucide disc and still use its own Slack emoji or image.
+// Slack fetches the image itself, so the URL must be public https.
+export const AgentSlackIconSchema = z
+  .discriminatedUnion("type", [
+    z.object({
+      type: z.literal("emoji"),
+      emoji: z
+        .string()
+        .max(102)
+        .regex(/^:[a-z0-9_+'-]+:$/),
+    }),
+    z.object({
+      type: z.literal("url"),
+      url: z
+        .url({ protocol: /^https$/ })
+        .max(2048)
+        .refine((value) => {
+          const parsed = new URL(value);
+          return !parsed.username && !parsed.password;
+        }, "URL must not contain credentials"),
+    }),
+  ])
+  .openapi("AgentSlackIcon");
+export type AgentSlackIcon = z.infer<typeof AgentSlackIconSchema>;
+
 export const AgentSchema = z
   .object({
     // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
@@ -1318,6 +1344,13 @@ export const AgentSchema = z
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z
       .lazy(() => AgentAvatarSchema)
+      .nullable()
+      .optional(),
+
+    // Icon for Slack persona posts. Null/missing = :crown: for the lead, a
+    // name-hashed emoji for workers (getAgentEmoji). Migration 254 adds the column.
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
       .nullable()
       .optional(),
 

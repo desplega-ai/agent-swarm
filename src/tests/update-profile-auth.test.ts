@@ -250,6 +250,33 @@ describe("update-profile authorization", () => {
     }
   });
 
+  test("an agent sets, keeps and resets its own slackIcon", async () => {
+    const owl = { type: "emoji", emoji: ":owl:" };
+    const set = await callUpdateProfile(server, OTHER_WORKER_ID, { slackIcon: owl });
+    expect(set.structuredContent.success).toBe(true);
+    expect(set.structuredContent.message).toContain("slackIcon");
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toEqual(owl);
+
+    await callUpdateProfile(server, OTHER_WORKER_ID, { role: "Owl" });
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toEqual(owl);
+
+    await callUpdateProfile(server, OTHER_WORKER_ID, { slackIcon: null });
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toBeNull();
+
+    const inputSchema = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { inputSchema: { safeParse: (v: unknown) => { success: boolean } } }
+        >;
+      }
+    )._registeredTools["update-profile"].inputSchema;
+    expect(inputSchema.safeParse({ slackIcon: owl }).success).toBe(true);
+    expect(inputSchema.safeParse({ slackIcon: { type: "emoji", emoji: "owl" } }).success).toBe(
+      false,
+    );
+  });
+
   test("missing self agent does not write supplied profile files", async () => {
     const originalAgentId = process.env.AGENT_ID;
     const writeSpy = spyOn(Bun, "write").mockImplementation(async () => 0);

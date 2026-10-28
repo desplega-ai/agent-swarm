@@ -30,11 +30,25 @@ describe("Slack inline completion output", () => {
       thread_ts: "1",
       text: "done",
       username: "Literal Lead",
-      icon_emoji: ":crown:",
+      icon: { icon_emoji: ":crown:" },
     });
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ username: "Literal Lead", icon_emoji: ":crown:" }),
     );
+  });
+
+  test("posts an image icon as icon_url without icon_emoji", async () => {
+    const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
+    await sendWithPersona({ chat: { postMessage } } as never, {
+      channel: "C123",
+      thread_ts: "1",
+      text: "done",
+      username: "Owl",
+      icon: { icon_url: "https://example.com/owl.png" },
+    });
+    const payload = postMessage.mock.calls[0]?.[0];
+    expect(payload?.icon_url).toBe("https://example.com/owl.png");
+    expect(payload).not.toHaveProperty("icon_emoji");
   });
 
   test("posts only truncated completed Slack output that has not already been replied", () => {

@@ -23,7 +23,7 @@ import {
 } from "./inbound-files";
 import { extractSlackMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
-import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
 
@@ -257,9 +257,7 @@ async function slackFlush(
             text: formatSlackSteeringAck(steering.result),
             unfurl_links: false,
             unfurl_media: false,
-            ...(agent
-              ? { username: getAgentDisplayName(agent), icon_emoji: getAgentEmoji(agent) }
-              : {}),
+            ...(agent ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) } : {}),
           });
         } catch (error) {
           console.error("[Slack] Failed to post steering feedback:", error);
@@ -363,7 +361,7 @@ async function slackFlush(
         text: fallbackText,
         unfurl_links: false,
         unfurl_media: false,
-        ...(lead ? { username: getAgentDisplayName(lead), icon_emoji: getAgentEmoji(lead) } : {}),
+        ...(lead ? { username: getAgentDisplayName(lead), ...getAgentSlackIcon(lead) } : {}),
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

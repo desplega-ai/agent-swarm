@@ -25,6 +25,7 @@ import type {
   AgentLogEventType,
   AgentMcpServer,
   AgentSkill,
+  AgentSlackIcon,
   AgentStatus,
   AgentTask,
   AgentTaskStatus,
@@ -3744,6 +3745,8 @@ export async function updateAgentProfile(
     heartbeatMd?: string;
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar?: AgentAvatar | null;
+    /** Same null-vs-absent semantics as `avatar`. */
+    slackIcon?: AgentSlackIcon | null;
   },
   meta?: VersionMeta,
   guard?: {
@@ -3891,6 +3894,8 @@ export async function updateAgentProfile(
     // untouched) from "key present with value null" (reset).
     const avatarProvided = Object.hasOwn(updates, "avatar");
     const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
+    const slackIconProvided = Object.hasOwn(updates, "slackIcon");
+    const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
 
     const now = new Date().toISOString();
     const row = await tx.get<AgentRow>(
@@ -3906,6 +3911,7 @@ export async function updateAgentProfile(
           toolsMd = COALESCE(?, toolsMd),
           heartbeatMd = COALESCE(?, heartbeatMd),
           avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
+          slack_icon = CASE WHEN ? = 1 THEN ? ELSE slack_icon END,
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
       [
@@ -3921,6 +3927,8 @@ export async function updateAgentProfile(
         writable.heartbeatMd ?? null,
         avatarProvided ? 1 : 0,
         avatarJson,
+        slackIconProvided ? 1 : 0,
+        slackIconJson,
         now,
         id,
       ],
