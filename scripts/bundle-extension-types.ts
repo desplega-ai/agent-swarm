@@ -64,6 +64,8 @@ async function main() {
     ["CreateTaskOptions", "src/types.ts"],
     ["AgentTask", "src/types.ts"],
     ["ActiveSession", "src/types.ts"],
+    ["SteerMode", "src/types.ts"],
+    ["SteeringSource", "src/types.ts"],
     ["RequestInfo", "src/tools/utils.ts"],
   ]
     .map(

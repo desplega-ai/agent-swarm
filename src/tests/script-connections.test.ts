@@ -665,6 +665,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "254_query_audit_indexes.sql");
       // 256 alters agents, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "256_agent_slack_icon.sql");
+      // 259 alters session_summaries, which 253 (skipped above) creates.
+      markMigrationApplied(database, "259_session_summaries_open_tasks.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

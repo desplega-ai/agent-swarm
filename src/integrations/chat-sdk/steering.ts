@@ -1,5 +1,5 @@
 import { getLatestLeadTaskByContextKey } from "@/be/db";
-import { requestSteering, SteeringRequestError } from "@/be/steering";
+import { requestSteering, SteeringBlockedError, SteeringRequestError } from "@/be/steering";
 import type { AgentTask, SteerResult } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { isSteeringEnabled } from "@/utils/steering-enabled";
@@ -44,6 +44,8 @@ export async function requestChatThreadSteering(args: {
     });
     return { task, result };
   } catch (error) {
+    // A policy block must not fall back to task creation.
+    if (error instanceof SteeringBlockedError) throw error;
     const detail = error instanceof Error ? error.message : String(error);
     const what = error instanceof SteeringRequestError ? "was refused" : "failed";
     console.warn(

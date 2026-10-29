@@ -47,7 +47,7 @@ Skill disables stay proposals. Scripts are never promoted to `global` by the loo
 
 Boot seeding creates `dreaming` and `dreaming-daily`. Both arrive enabled when `SEED_AUTOMATIONS_ENABLED` is on, which is the default; see [Configuration](/docs/ui/configuration). Set `SEED_AUTOMATIONS_ENABLED=false` before first boot to seed them disabled.
 
-`dreaming-daily` runs at 03:30 UTC, after the Daily Blocker Digest (02:05 UTC), whose digest the lead reads during synthesis. A seeded schedule cannot target a workflow, so it creates one small pool task, and the worker that claims it calls `trigger-workflow`. That task first checks for any `dreaming*` run that started in the last 20 hours and skips if it finds one, because dreaming workflows share KV state.
+`dreaming-daily` runs at 03:30 UTC, after the Daily Blocker Digest (02:05 UTC), whose digest the lead reads during synthesis. It is a workflow schedule: each fire starts a `dreaming` run directly, with no agent task. A seeded schedule has no creator, so the run acts as the lead, resolved when it fires; with no lead the fire fails. Changing the inputs, cooldown or description, or turning the workflow on or off, keeps that. If anyone edits its nodes or params, the fire fails instead, because any agent can edit a workflow: re-create `dreaming-daily` as the lead to run a customized graph. The workflow's 20-hour cooldown records any run that would start within 20 hours of the last `dreaming` run start as skipped, because dreaming runs share KV state. It counts from run starts, so a long night never makes the next one skip, and of two simultaneous triggers only one starts a run.
 
 The old **Daily Evolution** schedule (`daily-compounding-reflection`) now seeds disabled. On an upgrade, the seeder turns it off only if nobody edited it. If you changed it (enabled it, edited the cron or the prompt), your copy is preserved, and both loops run until you disable one.
 
@@ -88,7 +88,7 @@ update-workflow(
 )
 ```
 
-An edited workflow or schedule counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed.
+An edited workflow or schedule counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed. A copy kept from before the cooldown existed has none: add `"cooldown": {"hours": 20, "from": "start"}` with `update-workflow`.
 
 **Run it once by hand.** Start with a dry run. It does every read and every draft, and skips Slack. It changes no profile, memory, skill, or script, writes no ledger, and writes no report or changelog to agent-fs. It still creates the run and its agent tasks, and the lead steps store their results in `dreaming-v2` KV:
 
@@ -96,11 +96,11 @@ An edited workflow or schedule counts as user-modified, so later boots keep your
 trigger-workflow(id: "<dreaming workflow id>", triggerData: { "dryRun": true })
 ```
 
-Add `"agentIds": ["<agent id>", ...]` to limit the self-reports to some agents. Drop `dryRun` for a live run. The 20-hour guard lives in the scheduled task, not in the workflow. A manual run makes the next scheduled trigger skip, but a manual run after the scheduled one is a second run on shared KV state. Avoid that.
+Add `"agentIds": ["<agent id>", ...]` to limit the self-reports to some agents. Drop `dryRun` for a live run. The 20-hour cooldown applies to every trigger, dry runs included: a manual run makes the next scheduled run skip, and a manual run within 20 hours of the nightly one is recorded as skipped.
 
 **Turn it on.** If it was seeded disabled or you turned it off, `update-schedule(name: "dreaming-daily", enabled: true)` starts the nightly trigger, and `update-workflow(id: "<dreaming workflow id>", enabled: true)` lets runs start.
 
-**Turn it off.** `update-schedule(name: "dreaming-daily", enabled: false)` stops the nightly trigger. `update-workflow(id: "<dreaming workflow id>", enabled: false)` also blocks manual runs; the trigger task then completes without starting anything.
+**Turn it off.** `update-schedule(name: "dreaming-daily", enabled: false)` stops the nightly trigger. `update-workflow(id: "<dreaming workflow id>", enabled: false)` also blocks manual runs; a scheduled fire then fails with `Workflow <id> is disabled`.
 
 ## Review a night
 

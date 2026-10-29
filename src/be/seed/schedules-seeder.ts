@@ -76,8 +76,11 @@ import {
   computeContentHash,
   createScheduledTask,
   getScheduledTaskByName,
+  getWorkflow,
+  listWorkflows,
   updateScheduledTask,
 } from "../db";
+import { getScript } from "../scripts/db";
 import { resolveSeededEnabled } from "./automation-toggle";
 import type { Seeder, SeedItem } from "./types";
 import { canonicalJson } from "./workflows-seeder";
@@ -98,7 +101,26 @@ type ScheduleBlock = {
   cron: string;
   timezone?: string;
   enabled?: boolean;
+  /** What a fire runs. Default `agent-task`: the `## Scheduled Task` prompt becomes a task. */
+  targetType?: ScheduleTargetType;
+  /** `targetType: "workflow"`: the workflow's name, resolved to its id at apply time. */
+  workflow?: string;
+  /** `targetType: "script"`: a global script, run directly with `scriptArgs`. */
+  scriptName?: string;
+  scriptArgs?: Record<string, unknown>;
 };
+
+type ScheduleTargetType = "agent-task" | "workflow" | "script";
+const TARGET_TYPES: readonly ScheduleTargetType[] = ["agent-task", "workflow", "script"];
+
+/**
+ * The non-default target of a seeded schedule. Agent-task schedules carry none
+ * of these keys, so their seed hash is unchanged from before targets existed
+ * and recorded seed state on existing installs still matches.
+ */
+type SeedScheduleTarget =
+  | { targetType: "workflow"; workflow: string }
+  | { targetType: "script"; scriptName: string; scriptArgs: Record<string, unknown> };
 
 export type SeedSchedule = {
   name: string;
@@ -112,7 +134,7 @@ export type SeedSchedule = {
   params: Record<string, unknown>;
   requiredParams: string[];
   requires: AutomationIntegrationId[];
-};
+} & (SeedScheduleTarget | { targetType?: undefined });
 
 export type ScheduleTemplateSource = { config: string; content: string };
 type ScheduleSeedItem = SeedItem & { schedule: SeedSchedule };
@@ -167,10 +189,21 @@ function parseScheduleSource(source: ScheduleTemplateSource): SeedSchedule | nul
   const block = JSON.parse(blockMatch[1]) as ScheduleBlock;
   const afterBlock = scheduleStart + blockMatch.index! + blockMatch[0].length;
   const taskHeading = source.content.indexOf("## Scheduled Task", afterBlock);
-  const taskTemplate = source.content
-    .slice(taskHeading >= 0 ? taskHeading + "## Scheduled Task".length : afterBlock)
-    .trim();
-  if (!taskTemplate) throw new Error(`Schedule template ${config.name} has no task prompt`);
+  const target = parseScheduleTarget(config.name, block);
+  let taskTemplate = "";
+  if (target) {
+    // A workflow or script fire never reads a prompt: shipping one is a mistake.
+    if (taskHeading >= 0) {
+      throw new Error(
+        `Schedule template ${config.name} targets a ${target.targetType} but ships a ## Scheduled Task prompt it would ignore`,
+      );
+    }
+  } else {
+    taskTemplate = source.content
+      .slice(taskHeading >= 0 ? taskHeading + "## Scheduled Task".length : afterBlock)
+      .trim();
+    if (!taskTemplate) throw new Error(`Schedule template ${config.name} has no task prompt`);
+  }
 
   const requires = config.requires ?? [];
   const requiredParams = config.placeholders ?? [];
@@ -196,7 +229,37 @@ function parseScheduleSource(source: ScheduleTemplateSource): SeedSchedule | nul
     params: {},
     requiredParams,
     requires,
+    ...target,
   };
+}
+
+/** Validate the block's target fields. Returns null for the default agent-task target. */
+function parseScheduleTarget(name: string, block: ScheduleBlock): SeedScheduleTarget | null {
+  const targetType = block.targetType ?? "agent-task";
+  if (!TARGET_TYPES.includes(targetType)) {
+    throw new Error(`Schedule template ${name} has unknown targetType "${targetType}"`);
+  }
+  const stray = (fields: (keyof ScheduleBlock)[]) => {
+    const set = fields.filter((field) => block[field] !== undefined);
+    if (set.length > 0) {
+      throw new Error(
+        `Schedule template ${name} (targetType ${targetType}) sets ${set.join(", ")}, which it would ignore`,
+      );
+    }
+  };
+  switch (targetType) {
+    case "agent-task":
+      stray(["workflow", "scriptName", "scriptArgs"]);
+      return null;
+    case "workflow":
+      stray(["scriptName", "scriptArgs"]);
+      if (!block.workflow) throw new Error(`Schedule template ${name} has no workflow name`);
+      return { targetType, workflow: block.workflow };
+    case "script":
+      stray(["workflow"]);
+      if (!block.scriptName) throw new Error(`Schedule template ${name} has no scriptName`);
+      return { targetType, scriptName: block.scriptName, scriptArgs: block.scriptArgs ?? {} };
+  }
 }
 
 export function loadSeedSchedules(
@@ -212,7 +275,27 @@ function scheduleSeedHash(schedule: SeedSchedule): string {
   return computeContentHash(canonicalJson(schedule));
 }
 
-function scheduleFromRow(schedule: ScheduledTask): SeedSchedule {
+async function scheduleTargetFromRow(
+  schedule: ScheduledTask,
+): Promise<SeedScheduleTarget | undefined> {
+  switch (schedule.targetType) {
+    case "workflow": {
+      const workflow = schedule.workflowId ? await getWorkflow(schedule.workflowId) : null;
+      // A dangling id can never equal a seeded name, so the row reads as edited.
+      return { targetType: "workflow", workflow: workflow?.name ?? `id:${schedule.workflowId}` };
+    }
+    case "script":
+      return {
+        targetType: "script",
+        scriptName: schedule.scriptName ?? "",
+        scriptArgs: schedule.scriptArgs ?? {},
+      };
+    default:
+      return undefined;
+  }
+}
+
+async function scheduleFromRow(schedule: ScheduledTask): Promise<SeedSchedule> {
   return {
     name: schedule.name,
     description: schedule.description ?? "",
@@ -225,7 +308,46 @@ function scheduleFromRow(schedule: ScheduledTask): SeedSchedule {
     params: schedule.params ?? {},
     requiredParams: schedule.requiredParams ?? [],
     requires: schedule.requires ?? [],
+    ...(await scheduleTargetFromRow(schedule)),
   };
+}
+
+/** Resolve a seeded target to row fields, failing the item when its target is missing. */
+async function resolveTargetFields(schedule: SeedSchedule) {
+  switch (schedule.targetType) {
+    case "workflow": {
+      const name = schedule.workflow;
+      const workflow = (await listWorkflows()).find((candidate) => candidate.name === name);
+      if (!workflow) throw new Error(`Workflow "${name}" not found`);
+      return {
+        targetType: "workflow" as const,
+        workflowId: workflow.id,
+        scriptName: null,
+        scriptArgs: null,
+        taskTemplate: null,
+      };
+    }
+    case "script": {
+      if (!(await getScript({ name: schedule.scriptName, scope: "global" }))) {
+        throw new Error(`Global script "${schedule.scriptName}" not found`);
+      }
+      return {
+        targetType: "script" as const,
+        workflowId: null,
+        scriptName: schedule.scriptName,
+        scriptArgs: schedule.scriptArgs,
+        taskTemplate: null,
+      };
+    }
+    default:
+      return {
+        targetType: "agent-task" as const,
+        workflowId: null,
+        scriptName: null,
+        scriptArgs: null,
+        taskTemplate: schedule.taskTemplate,
+      };
+  }
 }
 
 function nextRunAt(schedule: SeedSchedule): string | null {
@@ -263,7 +385,7 @@ export function createSchedulesSeeder(
 
     async upstreamHash(item): Promise<string | null> {
       const existing = await getScheduledTaskByName(item.key);
-      return existing ? scheduleSeedHash(scheduleFromRow(existing)) : null;
+      return existing ? scheduleSeedHash(await scheduleFromRow(existing)) : null;
     },
 
     async apply(item): Promise<void> {
@@ -274,8 +396,7 @@ export function createSchedulesSeeder(
         cronExpression: schedule.cronExpression,
         timezone: schedule.timezone,
         enabled: schedule.enabled,
-        targetType: "agent-task" as const,
-        taskTemplate: schedule.taskTemplate,
+        ...(await resolveTargetFields(schedule)),
         taskType: schedule.taskType,
         tags: schedule.tags,
         params: schedule.params,
@@ -284,11 +405,16 @@ export function createSchedulesSeeder(
       };
       const existing = await getScheduledTaskByName(schedule.name);
       if (existing) {
+        // Nulls clear the previous target's fields when a template changes target.
         await updateScheduledTask(existing.id, { ...data, nextRunAt: resolvedNextRunAt });
       } else {
         await createScheduledTask({
           name: schedule.name,
           ...data,
+          workflowId: data.workflowId ?? undefined,
+          scriptName: data.scriptName ?? undefined,
+          scriptArgs: data.scriptArgs ?? undefined,
+          taskTemplate: data.taskTemplate ?? undefined,
           nextRunAt: resolvedNextRunAt ?? undefined,
         });
       }

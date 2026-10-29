@@ -13,6 +13,7 @@ import {
 } from "@/be/db";
 import { rememberSessionLabel } from "@/be/db/session-labels";
 import { resolveIdentity } from "@/be/identity";
+import { SteeringBlockedError } from "@/be/steering";
 import { recordUnmappedIdentity } from "@/be/unmapped-identities";
 import { dispatchPre } from "@/extensions/dispatcher";
 import { resolveTemplate } from "@/prompts/resolver";
@@ -154,11 +155,20 @@ export async function handleChatInbound(
   // A thread with messages already waiting keeps its order: append, do not steer past them.
   // Another sender's message takes the buffer, so it gets its own header and requester.
   if (!immediate && attachments.length === 0 && text && !isChatThreadBuffered(thread.id)) {
-    const steering = await requestChatThreadSteering({
-      contextKey: chatSdkContextKey(thread.id),
-      message: text,
-      resolveSender: () => resolveChatSender(adapter, message.author.userId),
-    });
+    let steering: Awaited<ReturnType<typeof requestChatThreadSteering>>;
+    try {
+      steering = await requestChatThreadSteering({
+        contextKey: chatSdkContextKey(thread.id),
+        message: text,
+        resolveSender: () => resolveChatSender(adapter, message.author.userId),
+      });
+    } catch (error) {
+      if (!(error instanceof SteeringBlockedError)) throw error;
+      console.info(`[chat-sdk] ${thread.id}: steering blocked: ${error.reason}`);
+      stopTypingKeepalive(thread.id);
+      await setChatMessageReaction(adapter, thread.id, message.id, "failed");
+      return;
+    }
     if (steering) {
       console.log(
         `[chat-sdk] ${adapter} message steered task ${steering.task.id} (${steering.result.outcome})`,

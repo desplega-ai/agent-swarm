@@ -945,6 +945,48 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(run2!.status).toBe("skipped");
       expect(run2!.error).toBe("cooldown");
     });
+
+    test("simultaneous triggers start one run; the other records a cooldown skip", async () => {
+      const registry = createTestRegistry();
+      const def: WorkflowDefinition = {
+        nodes: [{ id: "a", type: "echo", config: { message: "hi" } }],
+      };
+      const workflow = await makeWorkflow(def, { cooldown: { hours: 20, from: "start" } });
+
+      // Both pass the pre-transaction check before either run row exists.
+      const runIds = await Promise.all([
+        startWorkflowExecution(workflow, {}, registry),
+        startWorkflowExecution(workflow, {}, registry),
+      ]);
+      const statuses = await Promise.all(
+        runIds.map(async (id) => (await getWorkflowRun(id))!.status),
+      );
+      expect(statuses.sort()).toEqual(["completed", "skipped"]);
+    });
+
+    test('from: "start" ignores a long successful run that finished inside the window', async () => {
+      const { createWorkflowRun, updateWorkflowRun } = await import("../be/db");
+      const def: WorkflowDefinition = {
+        nodes: [{ id: "a", type: "echo", config: {} }],
+      };
+      const workflow = await makeWorkflow(def);
+
+      // Started 24h ago, finished 1h ago: 24h since its start, 1h since its finish.
+      const runId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await getDbClient().run("UPDATE workflow_runs SET startedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        runId,
+      ]);
+      await updateWorkflowRun(runId, {
+        status: "completed",
+        finishedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      });
+
+      expect(await shouldSkipCooldown(workflow.id, { hours: 20, from: "start" })).toBe(false);
+      // Control: the default also counts from the successful finish.
+      expect(await shouldSkipCooldown(workflow.id, { hours: 20 })).toBe(true);
+    });
   });
 
   // ─── Input Resolution ─────────────────────────────────────
