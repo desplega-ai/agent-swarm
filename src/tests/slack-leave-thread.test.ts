@@ -15,6 +15,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { __resetInjectedEnvTracking, loadGlobalConfigsIntoEnv } from "../http/core";
+import { invokeToolInProcess, resetBridgeServerForTesting } from "../http/mcp-bridge";
 import { handleTasks } from "../http/tasks";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { createServer as createMcpServer } from "../server";
@@ -345,17 +346,59 @@ describe("SLACK_LEAVE_THREAD_DISABLE", () => {
   }
 
   test("set at session creation, the tool is absent from the MCP surface", async () => {
-    expect(
-      registeredTools(await createMcpServer({ fullSurface: true }))["slack-leave-thread"],
-    ).toBeDefined();
+    expect(registeredTools(await createMcpServer())["slack-leave-thread"]).toBeDefined();
 
     process.env.SLACK_LEAVE_THREAD_DISABLE = "true";
     try {
-      const tools = registeredTools(await createMcpServer({ fullSurface: true }));
+      const tools = registeredTools(await createMcpServer());
       expect(tools["slack-leave-thread"]).toBeUndefined();
       expect(tools["slack-reply"]).toBeDefined();
     } finally {
       delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+    }
+  });
+
+  // The scripts bridge caches the full-surface server it builds on first use.
+  test("the cached scripts bridge follows the flag per call, not the flag at first build", async () => {
+    function bridgeLeave(taskId: string) {
+      return invokeToolInProcess({
+        toolName: "slack-leave-thread",
+        args: { taskId },
+        agentId: worker.id,
+        callOrigin: "script-sdk",
+      }) as Promise<{ structuredContent: { success: boolean; message: string } }>;
+    }
+
+    resetBridgeServerForTesting();
+    process.env.SLACK_LEAVE_THREAD_DISABLE = "true";
+    try {
+      const refused = await bridgeLeave((await seedThread("C_LEAVE_I", "2600.0001")).id);
+      expect(refused.structuredContent.success).toBe(false);
+      expect(refused.structuredContent.message).toContain("SLACK_LEAVE_THREAD_DISABLE");
+
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+      const left = await bridgeLeave((await seedThread("C_LEAVE_I", "2600.0002")).id);
+      expect(left.structuredContent.success).toBe(true);
+      expect(await isSlackThreadLeft("C_LEAVE_I", "2600.0002")).toBe(true);
+    } finally {
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+    }
+
+    resetBridgeServerForTesting();
+    try {
+      expect(
+        (await bridgeLeave((await seedThread("C_LEAVE_I", "2600.0003")).id)).structuredContent
+          .success,
+      ).toBe(true);
+
+      process.env.SLACK_LEAVE_THREAD_DISABLE = "true";
+      const refused = await bridgeLeave((await seedThread("C_LEAVE_I", "2600.0004")).id);
+      expect(refused.structuredContent.success).toBe(false);
+      expect(refused.structuredContent.message).toContain("SLACK_LEAVE_THREAD_DISABLE");
+      expect(await isSlackThreadLeft("C_LEAVE_I", "2600.0004")).toBe(false);
+    } finally {
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+      resetBridgeServerForTesting();
     }
   });
 

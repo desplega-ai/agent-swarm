@@ -695,7 +695,11 @@ export async function createServer(
     registerSlackDownloadFileTool(server);
     registerSlackDeleteTool(server);
     registerSlackUpdateTool(server);
-    if (!isSlackLeaveThreadDisabled()) registerSlackLeaveThreadTool(server);
+    // The scripts bridge builds its full-surface server once and caches it, so
+    // it always registers the tool; the handler refuses while the flag is set.
+    if (opts.fullSurface === true || !isSlackLeaveThreadDisabled()) {
+      registerSlackLeaveThreadTool(server);
+    }
   }
 
   // End of default-enabled capabilities
