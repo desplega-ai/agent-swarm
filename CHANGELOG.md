@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Comb: the file header copy button copies the file's contents; the path moves to a hover card (#2555).
 
 ### Changed
-- Worker image: agent-browser 0.41.0 (#2565) and harness bumps for acp, amp, qwen, opencode and goose (#2557).
+- Worker image: agent-fs pins 0.18.13, agent-browser 0.41.0 (#2565) and harness bumps for acp, amp, qwen, opencode and goose (#2557).
 - Repo: TLA+ heartbeat spec synced with main (#2564).
 
 ### Fixed
