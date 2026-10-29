@@ -79,7 +79,8 @@ export const slackPreTaskCreateBlock: Scenario = {
       });
 
       await waitForEyes(ctx, followUp.ts);
-      await waitForReaction(ctx, followUp.ts, "no_entry");
+      // The block shows the shared skip reaction (SLACK_REACTION_SKIPPED, default mute).
+      await waitForReaction(ctx, followUp.ts, "mute");
 
       const tasksResponse = await ctx.api("GET", "/api/tasks?source=slack&fields=full&limit=100");
       expectStatus(tasksResponse, [200], "list Slack tasks after blocked buffer flush");
