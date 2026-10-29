@@ -40,6 +40,7 @@ import {
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { getApiKey } from "../utils/api-key";
+import { isCodexRejectedAccessError } from "../utils/codex-auth-failure";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -67,7 +68,7 @@ import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from ".
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
-import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { buildPoolRevalidationFailureReason, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { pruneCodexRollouts } from "./codex-rollouts";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
@@ -88,6 +89,8 @@ import type {
   SteerDelivery,
   SteerDeliveryResult,
 } from "./types";
+
+export { buildPoolRevalidationFailureReason } from "./codex-oauth/storage.js";
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
 
@@ -440,29 +443,6 @@ export async function resolveCodexAuthMode(
   }
 
   return currentMode;
-}
-
-/**
- * Build the `failureReason` for a pool-slot OAuth revalidation failure
- * (see `resolveCodexAuthMode` above).
- *
- * Wording matters: every variant carries `[auth-error]`, but the runner's
- * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
- * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
- * refresh lock") and any other thrown error (refresh-lock HTTP or network
- * failure, config-store persistence failure: "not a confirmed auth
- * rejection") are excluded as transient, so an outage does NOT bench a
- * healthy login.
- */
-export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
-  if (err instanceof CodexOAuthRefreshError) {
-    if (err.reason === "lock_timeout") {
-      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
-    }
-    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
 }
 
 /**
@@ -1594,26 +1574,11 @@ export class CodexSession implements ProviderSession {
       };
     }
 
-    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized".
-    // Also catches the "revoked-while-valid" OAuth pool failure mode: a
-    // credential revoked server-side while its access token is still
-    // unexpired never enters `getValidCodexOAuth` (the token looks fresh, it
-    // fast-returns) — the ONLY artifact of that death mode is the spawned
-    // Codex CLI self-refreshing straight from the blanked-refresh-token
-    // auth.json and surfacing this turn-level error.
-    const authPatterns = [
-      "unauthorized",
-      "http 401",
-      " 401 ",
-      "invalid api key",
-      "invalid_api_key",
-      "missing api key",
-      "no api key",
-      "authentication failed",
-      "failed to refresh token",
-      "invalid 'refresh_token'",
-    ];
-    if (authPatterns.some((p) => normalized.includes(p))) {
+    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized" — or
+    // a pool login revoked while its access token is unexpired: the spawned
+    // Codex CLI self-refreshes from the blanked-refresh-token auth.json and
+    // surfaces this turn-level error.
+    if (isCodexRejectedAccessError(normalized)) {
       const slot = this.config.codexSlot;
       const guidance =
         slot === undefined

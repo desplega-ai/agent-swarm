@@ -651,7 +651,8 @@ class ApiClient {
       | "dsh"
       | "cursor"
       | "amp"
-      | "grok";
+      | "grok"
+      | "fx";
     /** Ignored when `profile` is set. */
     model?: string | null;
     allowCustomModel?: boolean;

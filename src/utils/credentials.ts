@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import {
+  fxModelRoute,
   openAICompatibleProviders,
   providerForKeyVar,
   providerForModel,
@@ -61,6 +62,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   amp: ["AMP_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
   grok: ["XAI_API_KEY", "OPENROUTER_API_KEY"],
+  fx: ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "AI_GATEWAY_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -99,6 +101,11 @@ export function getModelAwareCredentialVars(provider: string, model?: string): r
   // grok routes `openrouter/<id>` to OpenRouter and every other model to xAI.
   if (provider === "grok" && model) {
     return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["XAI_API_KEY"];
+  }
+  // fx routes by namespace (`src/utils/fx-models.ts`); each route reads one key.
+  if (provider === "fx" && model) {
+    const route = fxModelRoute(model);
+    return "error" in route ? base : [route.keyVar];
   }
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
   // OpenAI-compatible registry providers own their key: `nan/<id>` and

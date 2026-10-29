@@ -699,6 +699,27 @@ RUN case "$TARGETARCH" in \
     && GROK_HOME=/tmp/grok-home GROK_DISABLE_AUTOUPDATER=1 /usr/local/bin/grok --version | grep -q "^grok ${GROK_VERSION} " \
     && rm -rf /tmp/grok.tgz /tmp/grok.br /tmp/grok-home /root/.cache /root/.grok
 
+# fx (Vercel Labs, Apache-2.0), the `fx` harness (`fx acp`): one static binary
+# from the release tarball, verified against the pinned SHA-512. Never use
+# fx.sh/setup.sh: it skips checksum verification. The adapter disables the
+# auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
+# by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
+# FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
+ARG FX_VERSION=0.0.15
+ARG FX_SHA512_AMD64=078c26d5f603276d1b4f5b2a56520a798ef799ba554dabf115d7bc297687339305726f619f7331edb47f9aa7d68414203433def449a5ca92ef9a4dbd6b8744b9
+ARG FX_SHA512_ARM64=f73d802a84c1e80a888c79e9895df16f4aad1606c1520bb75744c9140410947e97076ae917ce1ca180f7a7b5db0dff0ee4a4d5f4d39986f30eaf53679381af52
+RUN case "$TARGETARCH" in \
+      amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
+      arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
+      *) echo "Unsupported fx architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://releases.fx.sh/v${FX_VERSION}/fx-linux-${fx_arch}.tar.gz" -o /tmp/fx.tgz \
+    && echo "${fx_sha512}  /tmp/fx.tgz" | sha512sum -c - \
+    && tar -xzf /tmp/fx.tgz --no-same-owner -C /usr/local/bin fx \
+    && chmod 0755 /usr/local/bin/fx \
+    && HOME=/tmp/fx-home FX_AUTO_UPGRADE=0 /usr/local/bin/fx --version | grep -qx "${FX_VERSION}" \
+    && rm -rf /tmp/fx.tgz /tmp/fx-home
+
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
 # as worker-base (see that heredoc's comment).

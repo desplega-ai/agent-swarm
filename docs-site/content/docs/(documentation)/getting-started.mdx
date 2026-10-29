@@ -5,7 +5,7 @@ description: Install Agent Swarm, configure your first lead and worker agents, a
 
 This guide walks you through setting up a fully operational Agent Swarm with a lead agent and workers.
 
-> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), with Codex, opencode, pi-mono, Devin, Claude Managed Agents, Amp, Cursor, Grok, DeepSeek dsh, and ACP-compatible agents also supported. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
+> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), with Codex, opencode, pi-mono, Devin, Claude Managed Agents, Amp, Cursor, Grok, fx, DeepSeek dsh, and ACP-compatible agents also supported. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
 
 ## Prerequisites
 
@@ -174,7 +174,7 @@ Once your swarm is running, you can verify it's working:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3013` | API server port |
-| `HARNESS_PROVIDER` | `claude` | AI provider: `claude`, `codex`, `opencode`, `pi`, `devin`, `claude-managed`, `acp`, `dsh`, `amp`, `cursor`, or `grok`. See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | `claude` | AI provider: `claude`, `codex`, `opencode`, `pi`, `devin`, `claude-managed`, `acp`, `dsh`, `amp`, `cursor`, `grok`, or `fx`. See [Harness Configuration](/docs/guides/harness-configuration) |
 | `AGENT_ID` | Auto-generated | Stable UUID for task resume |
 | `AGENT_NAME` | Auto-generated | Display name for the agent |
 | `AGENT_ROLE` | `worker` | Role: `worker` or `lead` |

@@ -398,6 +398,21 @@ registerTemplate({
 });
 
 /**
+ * Last line of an fx system prompt that exceeds the 64 KiB `systemPrompt` cap.
+ * The adapter sends the first part and writes the whole prompt to a file.
+ */
+registerTemplate({
+  eventType: "system.agent.fx.system_prompt_file",
+  header: "",
+  defaultBody:
+    "These instructions are cut short. Read {{path}} before you start: it holds the complete swarm instructions, of which the text above is only the first part.",
+  variables: [
+    { name: "path", description: "Absolute path of the file with the full system prompt" },
+  ],
+  category: "system",
+});
+
+/**
  * First message of a cursor session on the first-message path. Cursor keeps
  * its own system prompt there, so the swarm's rides on top of the task prompt.
  */
@@ -444,6 +459,15 @@ registerTemplate({
   header: "",
   defaultBody:
     'Swarm tools are not in your tool list. Reach them through `tool_search` and `code_exec`. Their names use underscores, so `store-progress` is `store_progress`. Find one with `tool_search`, then call it from `code_exec`: `import { store_progress } from "agent-swarm"; text(JSON.stringify(await store_progress({ ... })));`. Pass the tool\'s arguments as one object.',
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.fx",
+  header: "",
+  defaultBody:
+    "Most swarm tools are deferred behind `capability_search`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool you know by that name directly. To find one, use `capability_search`.",
   variables: [],
   category: "system",
 });

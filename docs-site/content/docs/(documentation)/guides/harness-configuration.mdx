@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, or Grok) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, Grok, or fx) that powers your agents
 agent:
   offer: true
   when: "Someone wants agents to run on a different AI provider or coding CLI"
@@ -25,6 +25,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **Amp** | `amp` | Sourcegraph's Amp CLI in execute mode. Amp selects the model for each mode on its service |
 | **Cursor** | `cursor` | Cursor's local Agent SDK runtime with Cursor-hosted models |
 | **Grok** | `grok` | xAI's Grok CLI, run as an ACP server with a fresh session home |
+| **fx** | `fx` | Vercel Labs' fx agent, run as an ACP server on OpenRouter, OpenAI or Vercel AI Gateway keys |
 
 ## How It Works
 
@@ -46,6 +47,7 @@ HARNESS_PROVIDER=dsh             →  DshAdapter            →  spawns `dsh` in
 HARNESS_PROVIDER=amp             →  AmpAdapter            →  spawns `amp` in execute mode
 HARNESS_PROVIDER=cursor          →  CursorAdapter         →  creates a local Cursor SDK agent
 HARNESS_PROVIDER=grok            →  GrokAdapter           →  starts `grok agent` through ACP
+HARNESS_PROVIDER=fx              →  FxAdapter             →  starts `fx acp` through ACP
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
@@ -669,6 +671,18 @@ includes swarm MCP, and has no live steering or native resume. See
 [Provider Auth: Grok](/docs/guides/provider-auth/grok) for route and billing
 details.
 
+## fx
+
+Set `HARNESS_PROVIDER=fx` and one of `OPENROUTER_API_KEY` (for
+`openrouter/<vendor>/<id>`), `OPENAI_API_KEY` (for a bare id) or
+`AI_GATEWAY_API_KEY` (for `vercel/<vendor>/<id>`). Tier defaults are
+`openrouter/deepseek/deepseek-v4.1-flash` for `smol` and `regular`,
+`openrouter/deepseek/deepseek-v4-pro-0813` for `smart` and
+`openrouter/anthropic/claude-opus-5.5` for `ultra`. fx includes swarm MCP,
+steers natively and resumes sessions. Cost is a pricing-table estimate. fx
+ships only in `worker-full`. See [Provider Auth: fx](/docs/guides/provider-auth/fx)
+for routing, limits and upgrades.
+
 ## Devin
 
 Set `HARNESS_PROVIDER=devin`, `DEVIN_API_KEY`, and `DEVIN_ORG_ID`. Every tier
@@ -696,7 +710,8 @@ ACU usage.
 model-prefix routing is configured deliberately. **Amp** is a managed-mode
 choice with queue-only steering. **Cursor** suits a Cursor account that needs
 native model effort controls and live steering. **Grok** suits xAI API models
-or OpenRouter models on the Grok CLI. **Devin** runs work remotely in
+or OpenRouter models on the Grok CLI. **fx** suits OpenRouter, OpenAI or AI
+Gateway models with native steering. **Devin** runs work remotely in
 Cognition's cloud and bills in ACUs rather than worker-side tokens.
 
 **Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime. Choose `acp` when you already have (or are building) an ACP-speaking agent and want to run it as a swarm worker without writing a new adapter.

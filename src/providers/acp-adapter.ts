@@ -4,14 +4,18 @@
 import {
   client as acpClient,
   type ClientContext,
+  type ContentBlock,
+  type InitializeResponse,
   type McpServer,
   methods,
+  type NewSessionRequest,
   ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionConfigOption,
   type SessionNotification,
+  type SessionUpdate,
   type SetSessionConfigOptionRequest,
   type SetSessionConfigOptionResponse,
   type Usage,
@@ -28,6 +32,11 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { acpReportedCostUsd, translateAcpSessionNotification } from "./acp-swarm-events";
 import { type AcpTargetProfile, resolveAcpTarget } from "./acp-targets";
+import {
+  type McpLoopbackProxy,
+  needsLoopbackProxy,
+  startMcpLoopbackProxy,
+} from "./mcp-loopback-proxy";
 import type {
   CostData,
   ProviderAdapter,
@@ -36,11 +45,13 @@ import type {
   ProviderSession,
   ProviderSessionConfig,
   ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 type EventListener = (event: ProviderEvent) => void;
 /** Providers that run on this ACP client. */
-export type AcpProviderName = "acp" | "grok";
+export type AcpProviderName = "acp" | "grok" | "fx";
 const ACP_LOG_MAX_CHARS = 30_000;
 /**
  * How long an abort waits after `session/cancel` for the prompt to answer
@@ -163,6 +174,7 @@ function boundedAcpLogScalar(value: unknown): unknown {
 class SwarmAcpClient {
   /** Latest cumulative USD cost the target reported for the session. */
   reportedCostUsd: number | null = null;
+  private readonly updateListeners = new Set<(update: SessionUpdate) => void>();
 
   constructor(
     private readonly emit: (event: ProviderEvent) => void,
@@ -183,9 +195,27 @@ class SwarmAcpClient {
     const costUsd = acpReportedCostUsd(params.update);
     if (costUsd !== null) this.reportedCostUsd = costUsd;
     for (const event of translateAcpSessionNotification(params)) {
-      this.emit(this.target?.rewriteEvent?.(event) ?? event);
+      this.emit(this.target?.rewriteEvent?.(event, params.update) ?? event);
     }
+    for (const listener of this.updateListeners) listener(params.update);
   }
+
+  /** Observe raw session updates (a target's steer hook); returns the unsubscribe. */
+  onUpdate(listener: (update: SessionUpdate) => void): () => void {
+    this.updateListeners.add(listener);
+    return () => {
+      this.updateListeners.delete(listener);
+    };
+  }
+}
+
+/** What `ACPSession` needs beyond the connection, for the opt-in target hooks. */
+interface AcpSessionExtras {
+  initResult: InitializeResponse;
+  /** `harnessVariantMeta` on `session_init` (the agent's `agentInfo.version`). */
+  harnessVariantMeta?: Record<string, unknown>;
+  /** Loopback MCP forwarders this session owns; stopped when it finishes. */
+  proxies: McpLoopbackProxy[];
 }
 
 class ACPSession implements ProviderSession {
@@ -203,6 +233,8 @@ class ACPSession implements ProviderSession {
    * the fallback operator key is in use (e.g. during tests or if the API is
    * not yet upgraded). Revoked in finish(). */
   private ephemeralTokenId: string | null = null;
+  /** Present only when the target has a `steer` hook. */
+  readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
     private readonly agent: ClientContext,
@@ -214,14 +246,37 @@ class ACPSession implements ProviderSession {
     private readonly target: AcpTargetProfile,
     providerMeta?: Record<string, unknown>,
     ephemeralTokenId?: string,
+    private readonly extras?: AcpSessionExtras,
   ) {
     this.sessionId = sessionId;
     this.ephemeralTokenId = ephemeralTokenId ?? null;
     this.completionPromise = new Promise((resolve) => {
       this.completionResolve = resolve;
     });
+    const steer = target.steer;
+    if (steer && extras) {
+      const initResult = extras.initResult;
+      this.deliverSteering = async (delivery) => {
+        if (this.completed || this.aborted) {
+          return { delivered: false, reason: "The ACP session has already finished" };
+        }
+        return steer({
+          sessionId,
+          delivery,
+          initResult,
+          prompt: (params) => this.agent.request(methods.agent.session.prompt, params),
+          onUpdate: (listener) => this.client.onUpdate(listener),
+        });
+      };
+    }
     void this.consumeStderr();
-    this.emit({ type: "session_init", sessionId, provider: providerName, providerMeta });
+    this.emit({
+      type: "session_init",
+      sessionId,
+      provider: providerName,
+      providerMeta,
+      ...(extras?.harnessVariantMeta ? { harnessVariantMeta: extras.harnessVariantMeta } : {}),
+    });
     void this.runPrompt();
   }
 
@@ -385,6 +440,7 @@ class ACPSession implements ProviderSession {
     if (this.completed) return;
     this.completed = true;
     this.completionResolve(result);
+    void stopProxies(this.extras?.proxies ?? []);
     // Revoke the ephemeral token now that the session is done. Best-effort:
     // the token expires on its own, so a failure here is not critical.
     if (this.ephemeralTokenId) {
@@ -455,8 +511,9 @@ export class ACPAdapter implements ProviderAdapter {
       .connect(stream).agent;
 
     let ephemeralToken: { tokenId: string; plaintext: string } | null = null;
+    const proxies: McpLoopbackProxy[] = [];
     try {
-      await agent.request(methods.agent.initialize, {
+      const initResult = await agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: "agent-swarm", version: pkg.version },
         clientCapabilities: { session: { configOptions: { boolean: {} } } },
@@ -483,39 +540,76 @@ export class ACPAdapter implements ProviderAdapter {
       // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop -- the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
+      let mcpServers: McpServer[] = [
+        {
+          type: "http",
+          name: "swarm",
+          url: `${config.apiUrl.replace(/\/+$/, "")}/mcp`,
+          headers: [
+            { name: "Authorization", value: `Bearer ${ephemeralToken.plaintext}` },
+            { name: "X-Agent-ID", value: config.agentId },
+            { name: "X-Source-Task-Id", value: config.taskId },
+          ],
+        },
+        ...toAcpMcpServers(installedServers),
+      ];
+      if (target.requiresSecureMcpUrl) {
+        mcpServers = await secureMcpServers(
+          mcpServers,
+          initResult.agentCapabilities?.mcpCapabilities?.sse === true,
+          proxies,
+        );
+      }
       const sessionMeta = target.sessionMeta?.(config);
-      const newSession = await agent.request(methods.agent.session.new, {
-        ...(sessionMeta ? { _meta: sessionMeta } : {}),
-        cwd: config.cwd,
-        mcpServers: [
-          {
-            type: "http",
-            name: "swarm",
-            url: `${config.apiUrl.replace(/\/+$/, "")}/mcp`,
-            headers: [
-              { name: "Authorization", value: `Bearer ${ephemeralToken.plaintext}` },
-              { name: "X-Agent-ID", value: config.agentId },
-              { name: "X-Source-Task-Id", value: config.taskId },
-            ],
-          },
-          ...toAcpMcpServers(installedServers),
-        ],
-      });
+      const resumeId = target.resume ? config.resumeSessionId?.trim() : undefined;
+      let sessionId: string;
+      let advertisedOptions: SessionConfigOption[];
+      if (resumeId && initResult.agentCapabilities?.sessionCapabilities?.resume) {
+        // The target restores the session's history and system prompt itself.
+        const resumed = await agent.request(methods.agent.session.resume, {
+          ...(sessionMeta ? { _meta: sessionMeta } : {}),
+          sessionId: resumeId,
+          cwd: config.cwd,
+          mcpServers,
+        });
+        sessionId = resumeId;
+        advertisedOptions = resumed.configOptions ?? [];
+      } else {
+        if (resumeId) {
+          console.warn(
+            "\x1b[33m[acp]\x1b[0m Target does not advertise session/resume; starting a new session",
+          );
+        }
+        const systemPrompt = await sessionSystemPromptBlocks(target, config, initResult);
+        // fx 0.0.15 takes `systemPrompt` as a bare content-block array (append
+        // mode) and rejects the `{ mode, content }` object the SDK types, so the
+        // request is built untyped.
+        const newSessionParams = {
+          ...(sessionMeta ? { _meta: sessionMeta } : {}),
+          cwd: config.cwd,
+          mcpServers,
+          ...(systemPrompt ? { systemPrompt } : {}),
+        } as NewSessionRequest;
+        const newSession = await agent.request(methods.agent.session.new, newSessionParams);
+        sessionId = newSession.sessionId;
+        advertisedOptions = newSession.configOptions ?? [];
+      }
       const configOptions = await applyConfiguredOptions(
         {
           setSessionConfigOption: (params) =>
             agent.request(methods.agent.session.setConfigOption, params),
         },
-        newSession.sessionId,
-        newSession.configOptions ?? [],
+        sessionId,
+        advertisedOptions,
         target.configuredOptions(config),
       );
+      const agentVersion = initResult.agentInfo?.version?.trim();
       session = new ACPSession(
         agent,
         client,
         proc,
         config,
-        newSession.sessionId,
+        sessionId,
         this.name,
         target,
         {
@@ -523,6 +617,11 @@ export class ACPAdapter implements ProviderAdapter {
           configOptions: sanitizeAcpConfigOptions(configOptions),
         },
         ephemeralToken.tokenId,
+        {
+          initResult,
+          ...(agentVersion ? { harnessVariantMeta: { version: scrubSecrets(agentVersion) } } : {}),
+          proxies,
+        },
       );
       for (const event of preSessionEvents) session.emitFromAcp(event);
       void session.waitForCompletion().finally(cleanupArtifact);
@@ -535,6 +634,7 @@ export class ACPAdapter implements ProviderAdapter {
         void revokeAcpSessionToken(config.apiUrl, config.apiKey, ephemeralToken.tokenId);
       }
       await terminateProcessGroup(proc.pid);
+      await stopProxies(proxies);
       await cleanupArtifact();
       throw new Error(
         `ACP target failed during startup: ${describeTargetError(target, scrubSecrets(formatError(err)))}`,
@@ -542,8 +642,9 @@ export class ACPAdapter implements ProviderAdapter {
     }
   }
 
-  async canResume(_sessionId: string): Promise<boolean> {
-    return false;
+  async canResume(sessionId: string): Promise<boolean> {
+    const resume = this.options.target?.resume;
+    return resume ? resume.canResume(sessionId) : false;
   }
 
   formatCommand(commandName: string): string {
@@ -678,6 +779,69 @@ export function toAcpMcpServers(
     );
   }
   return servers;
+}
+
+/**
+ * The `systemPrompt` content blocks a target's `sessionSystemPrompt` hook
+ * produces, when the agent advertises `sessionCapabilities.systemPrompt`.
+ */
+async function sessionSystemPromptBlocks(
+  target: AcpTargetProfile,
+  config: ProviderSessionConfig,
+  initResult: InitializeResponse,
+): Promise<ContentBlock[] | undefined> {
+  if (!target.sessionSystemPrompt) return undefined;
+  if (!initResult.agentCapabilities?.sessionCapabilities?.systemPrompt) {
+    console.warn(
+      "\x1b[33m[acp]\x1b[0m Target does not advertise sessionCapabilities.systemPrompt; the swarm system prompt is not sent",
+    );
+    return undefined;
+  }
+  const plan = await target.sessionSystemPrompt(config);
+  return plan?.blocks.length ? plan.blocks : undefined;
+}
+
+/**
+ * MCP servers a target that only accepts HTTPS or explicit-loopback URLs can
+ * reach: each plain-HTTP, non-loopback origin gets one 127.0.0.1 forwarder
+ * (added to `proxies`), and SSE servers are dropped unless `sseSupported`.
+ */
+export async function secureMcpServers(
+  servers: McpServer[],
+  sseSupported: boolean,
+  proxies: McpLoopbackProxy[],
+): Promise<McpServer[]> {
+  const byOrigin = new Map<string, McpLoopbackProxy>();
+  const result: McpServer[] = [];
+  for (const server of servers) {
+    if (!("url" in server)) {
+      result.push(server);
+      continue;
+    }
+    if (server.type === "sse" && !sseSupported) {
+      console.warn(
+        `\x1b[33m[acp]\x1b[0m Skipping installed MCP server "${server.name}": the target does not support SSE MCP servers`,
+      );
+      continue;
+    }
+    if (!needsLoopbackProxy(server.url)) {
+      result.push(server);
+      continue;
+    }
+    const url = new URL(server.url);
+    let proxy = byOrigin.get(url.origin);
+    if (!proxy) {
+      proxy = await startMcpLoopbackProxy(url.origin);
+      byOrigin.set(url.origin, proxy);
+      proxies.push(proxy);
+    }
+    result.push({ ...server, url: `${proxy.url}${url.pathname}${url.search}` });
+  }
+  return result;
+}
+
+async function stopProxies(proxies: McpLoopbackProxy[]): Promise<void> {
+  await Promise.all(proxies.splice(0).map((proxy) => proxy.stop().catch(() => {})));
 }
 
 function describeTargetError(target: AcpTargetProfile, message: string): string {
