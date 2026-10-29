@@ -425,14 +425,22 @@ describe("nested source thread groups", () => {
       }
       const [sql, params] = call;
       const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
-      expect(plan.some((p) => p.detail.startsWith("SEARCH r USING INDEX"))).toBe(true);
       expect(
         plan.some((p) =>
-          p.detail.includes("SEARCH session_thread_root USING INDEX idx_agent_tasks_asset_key"),
+          /^SEARCH session_summaries USING INDEX idx_session_summaries_(key|thread) \(key>\? AND key<\?\)/.test(
+            p.detail,
+          ),
         ),
       ).toBe(true);
       expect(
-        plan.some((p) => p.detail === "SCAN r" || p.detail === "SCAN session_thread_root"),
+        plan.some((p) =>
+          p.detail.includes("SEARCH session_thread_root USING INDEX idx_session_summaries_key"),
+        ),
+      ).toBe(true);
+      expect(
+        plan.some((p) =>
+          /^SCAN (session_summaries|session_thread_root|agent_tasks)\b/.test(p.detail),
+        ),
       ).toBe(false);
       expect(sql).not.toContain('"key" LIKE');
       expect(sql).not.toContain("INDEXED BY");

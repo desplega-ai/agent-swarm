@@ -157,6 +157,10 @@ export function runContext(event: keyof SwarmEventMap, payload: unknown): RunCon
       subject =
         `task ${stringField(payload, "completedTask", "id") ?? "?"} ${stringField(payload, "status") ?? ""}`.trim();
       break;
+    case "pre.task.steer":
+      agentId = stringField(payload, "sender", "agentId");
+      subject = `${stringField(payload, "source") ?? "?"}: task ${stringField(payload, "task", "id") ?? "?"}`;
+      break;
     case "pre.slack.route":
     case "post.slack.message":
       subject = `channel ${stringField(payload, "channelId") ?? "?"}: ${snippet(field(payload, "text"), 60)}`;

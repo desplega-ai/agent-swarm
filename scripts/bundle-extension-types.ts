@@ -42,7 +42,11 @@ async function main() {
     types: ["bun"],
   };
   const program = ts.createProgram(
-    [CONTRACT_FILE, resolve("src/scripts-runtime/types/swarm-sdk.d.ts")],
+    [
+      CONTRACT_FILE,
+      resolve("src/scripts-runtime/types/swarm-sdk.d.ts"),
+      resolve("src/templates.d.ts"),
+    ],
     options,
   );
   const emit = program.emit(undefined, (fileName, data) => {
@@ -64,6 +68,8 @@ async function main() {
     ["CreateTaskOptions", "src/types.ts"],
     ["AgentTask", "src/types.ts"],
     ["ActiveSession", "src/types.ts"],
+    ["SteerMode", "src/types.ts"],
+    ["SteeringSource", "src/types.ts"],
     ["RequestInfo", "src/tools/utils.ts"],
   ]
     .map(

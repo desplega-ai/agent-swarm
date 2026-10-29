@@ -4,7 +4,7 @@
   "displayName": "Dreaming",
   "slug": "dreaming-daily",
   "title": "Dreaming Daily Trigger",
-  "description": "Trigger the dreaming workflow once a day, unless a dreaming run already started in the last 20 hours.",
+  "description": "Start the dreaming workflow once a day, directly as a workflow schedule. The workflow's 20-hour cooldown skips a second run.",
   "version": "1.0.0",
   "category": "schedules",
   "placeholders": [],

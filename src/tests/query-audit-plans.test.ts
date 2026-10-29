@@ -152,8 +152,9 @@ const CASES: Array<{
     name: "countSessions by source",
     match: /COUNT/,
     run: () => countSessions({ source: ["slack"] }),
-    uses: ["COVERING INDEX idx_agent_tasks_parentTaskId_source (parentTaskId=? AND source=?)"],
-    revert: { dropIndex: "idx_agent_tasks_parentTaskId_source" },
+    // Counts read session_summaries since migration 259.
+    uses: ["COVERING INDEX idx_session_summaries_source (source=?)"],
+    revert: { dropIndex: "idx_session_summaries_source" },
   },
   {
     // Few hits: the page reads the agent_tasks_fts candidates by rowid. The
