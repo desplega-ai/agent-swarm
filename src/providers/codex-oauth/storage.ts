@@ -9,8 +9,9 @@
  * until the 071 migration renames it.
  */
 
+import { scrubSecrets } from "../../utils/secret-scrubber.js";
 import { deriveCodexKeySuffix } from "./auth-json.js";
-import { refreshAccessToken } from "./flow.js";
+import { redactTokens, refreshAccessToken } from "./flow.js";
 import type { CodexOAuthCredentials } from "./types.js";
 
 /** Legacy single-credential key — kept for backwards-compat fallback reads. */
@@ -120,9 +121,9 @@ export function buildPoolRevalidationFailureReason(err: unknown, slot: number): 
     if (err.reason === "lock_timeout") {
       return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
     }
-    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
+    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${scrubSecrets(err.body ?? "")}) — credential likely revoked; re-run codex-login for this slot.`;
   }
-  const message = err instanceof Error ? err.message : String(err);
+  const message = scrubSecrets(err instanceof Error ? err.message : String(err));
   return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
 }
 
@@ -286,7 +287,8 @@ export async function storeCodexOAuth(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    // The store may echo the submitted value: never surface its tokens.
+    const text = redactTokens(await res.text().catch(() => ""), [creds.access, creds.refresh]);
     throw new Error(`Failed to store ${key} config: HTTP ${res.status} ${text}`);
   }
 }

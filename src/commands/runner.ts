@@ -2293,6 +2293,40 @@ export async function reportKeyCompletionOutcome(opts: {
 }
 
 /**
+ * `adapter.createSession`, counting a Codex pool auth failure toward the bench
+ * before rethrowing. A session that fails to start never reaches the
+ * completion-time report, so without this a slot whose refresh is rejected at
+ * startup (pi on the ChatGPT subscription, codex's in-process revalidation)
+ * keeps being picked. Transient reasons are not counted
+ * (`isCodexAuthFailureReason`).
+ */
+export async function createSessionReportingAuthFailure(
+  adapter: { createSession(config: ProviderSessionConfig): Promise<ProviderSession> },
+  config: ProviderSessionConfig,
+  report:
+    | {
+        apiUrl: string;
+        apiKey: string;
+        credential: { keyType: string; keySuffix: string; keyIndex: number };
+        taskId: string;
+      }
+    | undefined,
+): Promise<ProviderSession> {
+  try {
+    return await adapter.createSession(config);
+  } catch (err) {
+    if (report) {
+      await reportKeyCompletionOutcome({
+        ...report,
+        exitCode: 1,
+        failureReason: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+}
+
+/**
  * Supersede a task via the API (for graceful shutdown / context-limit /
  * operator-triggered). Returns `{ ok: true, resumeTaskId }` on success.
  * On 5xx / network failure returns `{ ok: false }` so the caller can fall
@@ -4449,7 +4483,22 @@ async function spawnProviderProcess(
     withSpan(
       "worker.session.create",
       async (span) => {
-        const createdSession = await adapter.createSession(config);
+        const createdSession = await createSessionReportingAuthFailure(
+          adapter,
+          config,
+          oauthSelection && oauthIsPoolBacked && realTaskId
+            ? {
+                apiUrl: opts.apiUrl,
+                apiKey: opts.apiKey,
+                credential: {
+                  keyType: oauthSelection.keyType,
+                  keySuffix: oauthSelection.keySuffix,
+                  keyIndex: oauthSelection.index,
+                },
+                taskId: realTaskId,
+              }
+            : undefined,
+        );
         span.setAttribute("agentswarm.provider.session_id", createdSession.sessionId || "pending");
         return createdSession;
       },

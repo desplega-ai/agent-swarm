@@ -40,6 +40,7 @@ import {
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { getApiKey } from "../utils/api-key";
+import { isCodexRejectedAccessError } from "../utils/codex-auth-failure";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -1573,26 +1574,11 @@ export class CodexSession implements ProviderSession {
       };
     }
 
-    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized".
-    // Also catches the "revoked-while-valid" OAuth pool failure mode: a
-    // credential revoked server-side while its access token is still
-    // unexpired never enters `getValidCodexOAuth` (the token looks fresh, it
-    // fast-returns) — the ONLY artifact of that death mode is the spawned
-    // Codex CLI self-refreshing straight from the blanked-refresh-token
-    // auth.json and surfacing this turn-level error.
-    const authPatterns = [
-      "unauthorized",
-      "http 401",
-      " 401 ",
-      "invalid api key",
-      "invalid_api_key",
-      "missing api key",
-      "no api key",
-      "authentication failed",
-      "failed to refresh token",
-      "invalid 'refresh_token'",
-    ];
-    if (authPatterns.some((p) => normalized.includes(p))) {
+    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized" — or
+    // a pool login revoked while its access token is unexpired: the spawned
+    // Codex CLI self-refreshes from the blanked-refresh-token auth.json and
+    // surfaces this turn-level error.
+    if (isCodexRejectedAccessError(normalized)) {
       const slot = this.config.codexSlot;
       const guidance =
         slot === undefined

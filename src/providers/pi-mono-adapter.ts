@@ -75,7 +75,10 @@ import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/open
 import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerEnvSecrets, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
-import { loadChatgptSubscriptionCredential } from "./codex-oauth/subscription.js";
+import {
+  chatgptSubscriptionAuthFailure,
+  loadChatgptSubscriptionCredential,
+} from "./codex-oauth/subscription.js";
 import type { CodexOAuthCredentials } from "./codex-oauth/types.js";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
@@ -1367,6 +1370,14 @@ export class PiMonoSession implements ProviderSession {
     }
   }
 
+  /** An AWS SDK failure, or a rejected ChatGPT subscription login. */
+  private classifyFailure(raw: string): { message: string; category: string } | undefined {
+    const aws = classifyAwsSdkError(raw);
+    if (aws) return aws;
+    const auth = chatgptSubscriptionAuthFailure(raw, this.config);
+    return auth ? { message: auth, category: "authentication_failed" } : undefined;
+  }
+
   private async runSession(): Promise<ProviderResult> {
     try {
       // Pi expands a leading `/skill:name` itself, with no tool call to observe.
@@ -1399,7 +1410,7 @@ export class PiMonoSession implements ProviderSession {
       // exactly like sibling adapters. AWS errors get a categorized, actionable
       // message; anything else surfaces its raw error text.
       if (this.terminalError) {
-        const classification = classifyAwsSdkError(this.terminalError);
+        const classification = this.classifyFailure(this.terminalError);
         const message = scrubSecrets(classification?.message ?? this.terminalError);
         const category = classification?.category;
         this.emit({ type: "error", message, category });
@@ -1451,13 +1462,14 @@ export class PiMonoSession implements ProviderSession {
       // Defense-in-depth: AWS SDK failures surface as structured events (handled
       // above in runSession), not thrown exceptions, so this catch is for genuine
       // unexpected throws (MCP / transport / etc). Still classify in case an AWS
-      // signature ever reaches here, so the red box fires like sibling adapters.
-      const awsCatchError = classifyAwsSdkError(errorMessage);
-      if (awsCatchError) {
+      // signature or a rejected subscription login ever reaches here, so the
+      // red box fires like sibling adapters.
+      const classifiedError = this.classifyFailure(errorMessage);
+      if (classifiedError) {
         this.emit({
           type: "error",
-          message: awsCatchError.message,
-          category: awsCatchError.category,
+          message: classifiedError.message,
+          category: classifiedError.category,
         });
       }
       this.emit({ type: "raw_stderr", content: `[pi-mono] Error: ${errorMessage}\n` });
@@ -1468,8 +1480,8 @@ export class PiMonoSession implements ProviderSession {
         sessionId: this._sessionId,
         cost,
         isError: true,
-        errorCategory: awsCatchError?.category,
-        failureReason: scrubSecrets(awsCatchError?.message ?? errorMessage),
+        errorCategory: classifiedError?.category,
+        failureReason: scrubSecrets(classifiedError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };
     } finally {

@@ -17,6 +17,8 @@
  * refreshing. `getValidCodexOAuth` hands out tokens with at least 12 h left.
  */
 
+import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
+import { isCodexRejectedAccessError } from "../../utils/codex-auth-failure";
 import { registerVolatileSecret } from "../../utils/secret-scrubber";
 import type { ProviderSessionConfig } from "../types";
 import { buildPoolRevalidationFailureReason, getValidCodexOAuth } from "./storage.js";
@@ -46,4 +48,20 @@ export async function loadChatgptSubscriptionCredential(
   }
   registerVolatileSecret(creds.access, "CODEX_OAUTH_ACCESS_TOKEN");
   return { ...creds, refresh: "" };
+}
+
+/**
+ * The `[auth-error]` failure reason for a subscription session whose access
+ * the ChatGPT backend rejected mid-run (a login revoked while its access
+ * token is unexpired), else undefined. The runner counts it toward the
+ * slot's auth-failure bench, as it does codex's turn-level 401.
+ */
+export function chatgptSubscriptionAuthFailure(
+  raw: string,
+  config: Pick<ProviderSessionConfig, "codexSlot" | "model">,
+): string | undefined {
+  const slot = config.codexSlot;
+  if (slot === undefined || !chatgptSubscriptionModelId(config.model)) return undefined;
+  if (!isCodexRejectedAccessError(raw)) return undefined;
+  return `[auth-error] Codex pool slot ${slot} authentication failed — re-run agent-swarm codex-login --slot ${slot}. Original error: ${raw}`;
 }

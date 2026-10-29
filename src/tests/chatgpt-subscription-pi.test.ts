@@ -7,12 +7,17 @@
 
 import { describe, expect, test } from "bun:test";
 import { CodexOAuthRefreshError } from "../providers/codex-oauth/storage";
-import { loadChatgptSubscriptionCredential } from "../providers/codex-oauth/subscription";
+import {
+  chatgptSubscriptionAuthFailure,
+  loadChatgptSubscriptionCredential,
+} from "../providers/codex-oauth/subscription";
 import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
   resolveModel,
 } from "../providers/pi-mono-adapter";
+import { supportedReasoningLevels } from "../providers/reasoning-effort";
+import { isCodexAuthFailureReason } from "../utils/codex-auth-failure";
 
 const CREDS = {
   access: "subscription-access-token-for-tests",
@@ -117,5 +122,40 @@ describe("pi model resolution and auth", () => {
     expect(auth?.auth.apiKey).toBe(CREDS.access);
     const listed = await runtime.listCredentials();
     expect(listed).toContainEqual({ providerId: "openai-codex", type: "oauth" });
+  });
+});
+
+describe("chatgptSubscriptionAuthFailure", () => {
+  const revoked =
+    "Your authentication token has been invalidated. Please try signing in again. (token_invalidated)";
+
+  test("a rejected subscription login mid-run is a counted auth failure for its slot", () => {
+    const reason = chatgptSubscriptionAuthFailure(revoked, CONFIG);
+    expect(reason).toStartWith("[auth-error] Codex pool slot 2 authentication failed");
+    expect(reason).toContain(revoked);
+    expect(isCodexAuthFailureReason(reason)).toBe(true);
+    expect(
+      isCodexAuthFailureReason(chatgptSubscriptionAuthFailure("401 Unauthorized", CONFIG)),
+    ).toBe(true);
+  });
+
+  test("other errors, models and slotless sessions are left alone", () => {
+    expect(chatgptSubscriptionAuthFailure("Codex stream ended without a stop reason", CONFIG)).toBe(
+      undefined,
+    );
+    expect(
+      chatgptSubscriptionAuthFailure(revoked, { ...CONFIG, model: "openai/gpt-5.6-sol" }),
+    ).toBe(undefined);
+    expect(chatgptSubscriptionAuthFailure(revoked, { ...CONFIG, codexSlot: undefined })).toBe(
+      undefined,
+    );
+  });
+});
+
+describe("subscription effort levels on the worker", () => {
+  test("a mixed-case prefix keeps the openai levels", () => {
+    const levels = supportedReasoningLevels("pi", "OpenAI-Codex/gpt-5.6-sol");
+    expect(levels.length).toBeGreaterThan(0);
+    expect(levels).toEqual(supportedReasoningLevels("pi", "openai/gpt-5.6-sol"));
   });
 });

@@ -210,7 +210,7 @@ export function effortLevelsFor(
     providerId = modelId.slice(0, slash);
     catalogId = modelId.slice(slash + 1);
     // A ChatGPT subscription id names an OpenAI catalog model.
-    if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER) providerId = "openai";
+    if (providerId.toLowerCase() === CHATGPT_SUBSCRIPTION_PROVIDER) providerId = "openai";
   }
   const facts =
     sectionOf(liveCatalog, providerId)?.models?.[catalogId] ??

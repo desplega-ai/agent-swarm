@@ -53,4 +53,10 @@ describe("ChatGPT subscription group", () => {
     );
     expect(effortLevelsFor("pi", "openai-codex/gpt-5.6-sol").length).toBeGreaterThan(0);
   });
+
+  test("a mixed-case prefix keeps its effort levels", () => {
+    expect(effortLevelsFor("pi", "OpenAI-Codex/gpt-5.6-sol")).toEqual(
+      effortLevelsFor("pi", "openai/gpt-5.6-sol"),
+    );
+  });
 });

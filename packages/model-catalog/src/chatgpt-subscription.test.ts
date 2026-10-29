@@ -30,4 +30,12 @@ describe("chatgptSubscriptionModelId", () => {
       reasoningLevelsForModel("pi", "openai-codex/gpt-5.6-sol", catalog).length,
     ).toBeGreaterThan(0);
   });
+
+  test("a mixed-case prefix keeps the openai effort levels", () => {
+    const catalog = { openai: { models: { "gpt-5.6-sol": { reasoning: true } } } };
+    expect(isChatgptSubscriptionModel("OpenAI-Codex/gpt-5.6-sol")).toBe(true);
+    expect(reasoningLevelsForModel("pi", "OpenAI-Codex/gpt-5.6-sol", catalog)).toEqual(
+      reasoningLevelsForModel("pi", "openai/gpt-5.6-sol", catalog),
+    );
+  });
 });
