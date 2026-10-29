@@ -162,6 +162,7 @@ import { registerSlackCreateChannelTool } from "./tools/slack-create-channel";
 import { registerSlackDeleteTool } from "./tools/slack-delete";
 import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
 import { registerSlackInviteToChannelTool } from "./tools/slack-invite-to-channel";
+import { registerSlackLeaveThreadTool } from "./tools/slack-leave-thread";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
@@ -693,6 +694,7 @@ export async function createServer(
     registerSlackDownloadFileTool(server);
     registerSlackDeleteTool(server);
     registerSlackUpdateTool(server);
+    registerSlackLeaveThreadTool(server);
   }
 
   // End of default-enabled capabilities

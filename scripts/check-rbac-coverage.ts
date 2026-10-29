@@ -137,6 +137,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/skills/skill-search.ts": PIN_REASON,
   "src/tools/skills/skill-sync-remote.ts": PIN_REASON,
   "src/tools/slack-download-file.ts": PIN_REASON,
+  "src/tools/slack-leave-thread.ts":
+    "only mutes inbound swarm handling of one thread until the next @mention; posts nothing to Slack",
   "src/tools/slack-list-channels.ts": PIN_REASON,
   "src/tools/slack-reply.ts": PIN_REASON,
   "src/tools/swarm-x.ts": PIN_REASON,
