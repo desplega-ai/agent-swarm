@@ -3,6 +3,7 @@ import type { Scenario, ScenarioContext } from "../run";
 import {
   ask,
   claim,
+  enableSlackRenderV2Only,
   findSlackTask,
   registerLead,
   waitForBotReply,
@@ -40,29 +41,45 @@ async function waitForSkippedKeyPresence(ctx: ScenarioContext, present: boolean)
   );
 }
 
+type Renderer = "legacy" | "v2";
+
 function threadReplies(ctx: ScenarioContext, threadTs: string) {
   return ctx.slack
     .messages("general")
     .filter((message) => message.thread_ts === threadTs && message.ts !== threadTs);
 }
 
+/** The v2 thread-tree status message: the bot reply whose text opens with 🧵. */
+function treeOf(ctx: ScenarioContext, threadTs: string) {
+  return threadReplies(ctx, threadTs).find((reply) => String(reply.text ?? "").startsWith("🧵"));
+}
+
 /**
  * One ask ended by MCP `store-progress status: "skipped"`. The trigger message
  * keeps exactly one reaction, the skip one; the thread gets no new message;
  * under render v2 the existing tree row is edited to the skip glyph + reason.
+ * `renderer` is the caller's expectation, never inferred from the thread, so a
+ * v2 run that silently falls back to legacy fails instead of skipping checks.
  */
 async function skipOneAsk(
   ctx: ScenarioContext,
+  renderer: Renderer,
   label: string,
   skipReaction: string,
   checkSilence: boolean,
 ): Promise<void> {
-  await registerLead(ctx, `e2e-lead-skipped-${label}-${ctx.nonce}`);
+  await registerLead(ctx, `e2e-lead-skipped-${renderer}-${label}-${ctx.nonce}`);
   const message = await ask(ctx, `ping the ${label} channel owners ${ctx.nonce}`);
-  ctx.markThread(`skipped-${label}`, "C0GENERAL0", message.ts);
+  ctx.markThread(`skipped-${renderer}-${label}`, "C0GENERAL0", message.ts);
   await waitForEyes(ctx, message.ts);
   // Legacy posts an assignment reply on acceptance; v2 posts the tree.
-  const accepted = await waitForBotReply(ctx, message.ts);
+  await waitForBotReply(ctx, message.ts);
+  let treeTs: string | undefined;
+  if (renderer === "v2") {
+    const posted = await pollUntil(() => treeOf(ctx, message.ts) !== undefined, 30_000);
+    treeTs = treeOf(ctx, message.ts)?.ts;
+    expect(posted && treeTs, `v2 never posted a 🧵 tree in C0GENERAL0 thread ${message.ts}`);
+  }
 
   const task = await findSlackTask(ctx, message.ts);
   const taskId = String(task.id);
@@ -112,16 +129,18 @@ async function skipOneAsk(
     `${label} trigger ${message.ts} should carry only ${skipReaction}, got: ${finalNames.join(", ")}`,
   );
 
-  // `--sut-env SLACK_RENDER_V2=true` answers the ask with the thread tree.
-  if (JSON.stringify(accepted).includes("🧵")) {
+  if (renderer === "v2") {
     // The tree is edited in place (silent) to show the skip and its reason.
     const edited = await pollUntil(() => {
       const tree = JSON.stringify(
-        ctx.slack.messages("general").find((candidate) => candidate.ts === accepted.ts),
+        ctx.slack.messages("general").find((candidate) => candidate.ts === treeTs),
       );
       return tree.includes(`:${skipReaction}:`) && tree.includes(reason);
     }, 30_000);
-    expect(edited, `v2 tree ${accepted.ts} never showed :${skipReaction}: with "${reason}"`);
+    expect(edited, `v2 tree ${treeTs} never showed :${skipReaction}: with "${reason}"`);
+  } else {
+    const tree = treeOf(ctx, message.ts);
+    expect(!tree, `legacy run posted a v2 🧵 tree ${tree?.ts} in thread ${message.ts}`);
   }
 
   if (!checkSilence) return;
@@ -138,24 +157,39 @@ async function skipOneAsk(
   );
 }
 
-export const slackSkippedTask: Scenario = {
-  name: "slack-skipped-task",
-  order: 115,
-  async run(ctx) {
-    await skipOneAsk(ctx, "default", "mute", true);
+async function skipAndCheckSlack(ctx: ScenarioContext, renderer: Renderer): Promise<void> {
+  await skipOneAsk(ctx, renderer, "default", "mute", true);
 
-    const configured = "see_no_evil";
-    const configId = await setSkippedReaction(ctx, configured);
-    try {
-      await skipOneAsk(ctx, "override", configured, false);
-    } finally {
-      expectStatus(
-        await ctx.api("DELETE", `/api/config/${configId}`),
-        [200],
-        `delete config ${configId}`,
-      );
-      // Later scenarios expect the code-default reaction names.
-      await waitForSkippedKeyPresence(ctx, false);
-    }
+  const configured = "see_no_evil";
+  const configId = await setSkippedReaction(ctx, configured);
+  try {
+    await skipOneAsk(ctx, renderer, "override", configured, false);
+  } finally {
+    expectStatus(
+      await ctx.api("DELETE", `/api/config/${configId}`),
+      [200],
+      `delete config ${configId}`,
+    );
+    // Later scenarios expect the code-default reaction names.
+    await waitForSkippedKeyPresence(ctx, false);
+  }
+}
+
+// registry.ts discovers both exports. Legacy must precede the scenarios that enable v2;
+// v2 must precede the scenarios that enable delegation globally.
+export const slackSkippedTaskLegacy: Scenario = {
+  name: "slack-skipped-task-legacy",
+  order: 115,
+  groups: ["visuals-legacy"],
+  run: (ctx) => skipAndCheckSlack(ctx, "legacy"),
+};
+
+export const slackSkippedTaskV2: Scenario = {
+  name: "slack-skipped-task-v2",
+  order: 139,
+  groups: ["visuals-v2"],
+  async run(ctx) {
+    await enableSlackRenderV2Only(ctx);
+    await skipAndCheckSlack(ctx, "v2");
   },
 };
