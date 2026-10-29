@@ -12,7 +12,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
     {
       title: "Leave a Slack thread",
       description:
-        "Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the current task's thread, or (lead only) channelId and threadTs.",
+        "Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the thread of your Slack-originated task, or (lead only) channelId and threadTs.",
       annotations: { openWorldHint: true, idempotentHint: true },
 
       inputSchema: z.object({
@@ -39,6 +39,16 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         return toolErr("Agent not found.");
       }
 
+      // Any thread is open to leads, like slack-post. Task Slack context can be
+      // set by any agent, so a non-lead may only leave the thread of a
+      // Slack-originated task assigned to it.
+      const isLead = can({
+        principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+        verb: "integration.slack.post",
+        resource: { kind: "none" },
+        source: "mcp",
+      }).allow;
+
       let slackChannelId: string | undefined;
       let slackThreadTs: string | undefined;
 
@@ -50,20 +60,15 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         if (!task) {
           return toolErr("Task not found.");
         }
-        if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
-          return toolErr("You don't have context for this task.");
+        if (!isLead && (task.agentId !== agent.id || task.source !== "slack")) {
+          return toolErr(
+            "Only a lead or the agent assigned a Slack-originated task can leave its thread.",
+          );
         }
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
       } else if (channelId && threadTs) {
-        // Direct thread access requires lead privileges, like slack-post.
-        const decision = can({
-          principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
-          verb: "integration.slack.post",
-          resource: { kind: "none" },
-          source: "mcp",
-        });
-        if (!decision.allow) {
+        if (!isLead) {
           return toolErr("Leaving a thread by channelId and threadTs requires lead privileges.");
         }
         slackChannelId = channelId;

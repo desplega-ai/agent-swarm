@@ -182,4 +182,23 @@ describe("slack-leave-thread", () => {
 
     expect(reservedNamespaceError(SLACK_LEFT_THREAD_KV_NAMESPACE)).not.toBeNull();
   });
+
+  test("a non-lead cannot leave a thread through a task with hand-set Slack context", async () => {
+    const forged = await createTaskExtended("forged", {
+      agentId: worker.id,
+      creatorAgentId: worker.id,
+      source: "mcp",
+      slackChannelId: "C_LEAVE_E",
+      slackThreadTs: "2200.0001",
+    });
+    const tool = buildTool();
+
+    const denied = await tool.handler({ taskId: forged.id }, meta(worker.id));
+    expect(denied.structuredContent.success).toBe(false);
+    expect(await isSlackThreadLeft("C_LEAVE_E", "2200.0001")).toBe(false);
+
+    const byLead = await tool.handler({ taskId: forged.id }, meta(lead.id));
+    expect(byLead.structuredContent.success).toBe(true);
+    expect(await isSlackThreadLeft("C_LEAVE_E", "2200.0001")).toBe(true);
+  });
 });
