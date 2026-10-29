@@ -93,6 +93,9 @@ export function isAwaitingWake(
   if (!isDeferredTask(task)) return false;
   return !deferralWakes(task, threadTasks).some(
     (wake) =>
-      wake.status === "completed" || wake.status === "failed" || wake.status === "cancelled",
+      wake.status === "completed" ||
+      wake.status === "failed" ||
+      wake.status === "cancelled" ||
+      wake.status === "skipped",
   );
 }

@@ -14907,7 +14907,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark task as completed or failed (runner endpoint) */
+        /**
+         * Mark task as completed, failed, or skipped (runner endpoint)
+         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -14921,7 +14924,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        status: "completed" | "failed";
+                        status: "completed" | "failed" | "skipped";
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
@@ -14950,7 +14953,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid status */
+                /** @description Invalid status, or a skip without a reason */
                 400: {
                     headers: {
                         [name: string]: unknown;

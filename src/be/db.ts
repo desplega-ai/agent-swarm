@@ -890,7 +890,7 @@ export async function getResolvableDeferralOutcomes(
            WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled')
+         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
     [limit],

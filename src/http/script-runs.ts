@@ -687,10 +687,13 @@ export async function handleScriptRuns(
         agentTaskRoute.respond(res, 200, { taskId: latest.id, taskOutput: latest.output ?? null });
         return true;
       }
+      // A skipped step did not do its work, so it settles as a failure, the
+      // same way the workflow engine routes it.
       if (
         latest.status === "failed" ||
         latest.status === "cancelled" ||
-        latest.status === "superseded"
+        latest.status === "superseded" ||
+        latest.status === "skipped"
       ) {
         json(res, { error: `Agent task ${latest.status}`, taskId: latest.id }, 409);
         return true;

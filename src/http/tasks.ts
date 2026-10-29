@@ -30,6 +30,7 @@ import {
   recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
+  skipTask,
   supersedeTask,
   TASK_LINEAGE_LIMITS,
   updateAgentStatusFromCapacity,
@@ -55,6 +56,7 @@ import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rb
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
@@ -653,11 +655,13 @@ const finishTask = route({
   path: "/api/tasks/{id}/finish",
   pattern: ["api", "tasks", null, "finish"],
   session: { taskParam: "id" },
-  summary: "Mark task as completed or failed (runner endpoint)",
+  summary: "Mark task as completed, failed, or skipped (runner endpoint)",
+  description:
+    "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    status: z.enum(["completed", "failed"]),
+    status: z.enum(["completed", "failed", "skipped"]),
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
@@ -667,7 +671,7 @@ const finishTask = route({
   auth: { apiKey: true, agentId: true },
   responses: {
     200: { description: "Task finished", schema: FinishTaskSuccessSchema },
-    400: { description: "Invalid status" },
+    400: { description: "Invalid status, or a skip without a reason" },
     403: { description: "Not assigned to this agent" },
     404: { description: "Task not found" },
     409: {
@@ -1769,7 +1773,23 @@ export async function handleTasks(
           return { error: "Task is assigned to another agent", status: 403 };
         }
 
-        const terminalResultGuard = await guardTerminalTaskResultWrite(task, parsed.body);
+        const skipReason =
+          parsed.body.status === "skipped"
+            ? skipReasonFrom(parsed.body.failureReason, parsed.body.output)
+            : undefined;
+        if (parsed.body.status === "skipped" && !skipReason) {
+          return {
+            error: 'Status "skipped" needs a one-line reason in failureReason',
+            status: 400,
+          };
+        }
+
+        const terminalResultGuard = await guardTerminalTaskResultWrite(
+          task,
+          parsed.body.status === "skipped"
+            ? { status: "skipped", failureReason: skipReason, force: parsed.body.force }
+            : parsed.body,
+        );
         if (terminalResultGuard.handled) {
           const { handled: _handled, ...guardResult } = terminalResultGuard;
           return { ...guardResult, alreadyFinished: true };
@@ -1793,6 +1813,12 @@ export async function handleTasks(
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
+          }
+          updatedTask = result;
+        } else if (parsed.body.status === "skipped") {
+          const result = await skipTask(parsed.params.id, skipReason!);
+          if (!result) {
+            return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
@@ -1827,7 +1853,9 @@ export async function handleTasks(
       return true;
     }
 
-    if (result.task && isFreshFinishResult(result)) {
+    if (result.task && isFreshFinishResult(result) && parsed.body.status === "skipped") {
+      finalizeSkippedTaskReaction(result.task, "tasks.finish");
+    } else if (result.task && isFreshFinishResult(result)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
 
       ensure({
@@ -1852,7 +1880,7 @@ export async function handleTasks(
       try {
         const followUp = await createWorkerTaskFollowUp({
           task: result.task,
-          status: parsed.body.status,
+          status: finishEventId,
           output: parsed.body.output,
           failureReason: parsed.body.failureReason,
         });

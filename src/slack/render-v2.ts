@@ -922,6 +922,14 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
       outcomeText(task.failureReason, "Task was cancelled."),
     );
   }
+  // Only a deferral card resolved by a skipped wake-up reaches here: a skip
+  // gets no outcome card of its own. The rewrite is an edit, so it is silent.
+  if (task.status === "skipped") {
+    return withStatusLead(
+      `:${reactionName("skipped")}: **Skipped:**`,
+      outcomeText(task.failureReason, "Task was skipped."),
+    );
+  }
   // A deferral's output is engine-authored, never posted by hand via
   // slack-reply, so it must not collapse into the "agent completed" summary
   // even when the agent also sent a slack-reply earlier in the same task.

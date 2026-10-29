@@ -28,7 +28,7 @@ import {
 } from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { can } from "@/rbac";
-import { finalizeTerminalSlackReactions } from "@/slack/ack";
+import { finalizeSkippedTaskReaction, skipReasonFrom } from "@/tasks/task-skip";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -264,12 +264,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         requestedStatus === "skipped"
           ? requestedStatus
           : undefined;
-      // A skip carries a one-line reason. Accept it from output too, since
-      // that is where a finishing call usually puts its text, and keep output
-      // empty so nothing that publishes a task result has text to post.
-      let skipReason: string | undefined;
+      const skipReason = status === "skipped" ? skipReasonFrom(failureReason, output) : undefined;
       if (status === "skipped") {
-        skipReason = (failureReason ?? output)?.replace(/\s+/g, " ").trim();
         if (!skipReason) {
           return toolErr(
             'Status "skipped" needs a one-line reason in failureReason. The task was not changed.',
@@ -717,23 +713,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
         });
       }
 
-      // A skip posts nothing to the thread: no outcome card, no relay, no lead
-      // follow-up (runTaskTerminalEffects above is completed/failed only). It
-      // only swaps the trigger message's ack reaction for the skip reaction.
+      // runTaskTerminalEffects above is completed/failed only: a skip posts
+      // nothing and only swaps the trigger message's reaction.
       const skipWasFresh =
         status === "skipped" &&
         result.success &&
         result.task?.status === "skipped" &&
         !("wasNoOp" in result && result.wasNoOp) &&
         !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
-      if (skipWasFresh && result.task?.slackChannelId) {
-        void finalizeTerminalSlackReactions([result.task]).catch((error) =>
-          console.error(
-            "[store-progress] skip reaction failed:",
-            scrubSecrets(error instanceof Error ? error.message : String(error)),
-          ),
-        );
-      }
+      if (skipWasFresh && result.task) finalizeSkippedTaskReaction(result.task, "store-progress");
 
       const learningResult = await learningWrite;
       const { success } = result;

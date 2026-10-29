@@ -11,7 +11,7 @@ import {
   SLACK_REACTION_DEFAULTS,
   type SlackReactionEvent,
 } from "./reaction-shortcode";
-import { deferralWakes, isAwaitingWake } from "./task-output";
+import { deferralWakes, isAwaitingWake, isDeferredTask } from "./task-output";
 
 export { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 
@@ -173,10 +173,11 @@ export function terminalReactionChoice(task: AgentTask): SlackReactionChoice {
 /**
  * The trigger message's terminal event. A skipped task did not answer, so it
  * does not count against the tasks that did: the skip reaction shows only when
- * every linked task skipped.
+ * every linked task skipped. A deferral is stored `completed` but its outcome
+ * is its wake-up's, which is also linked, so it does not count either.
  */
 function linkedTasksReactionEvent(linkedTasks: AgentTask[]): SlackReactionEvent {
-  const answered = linkedTasks.filter((task) => task.status !== "skipped");
+  const answered = linkedTasks.filter((task) => task.status !== "skipped" && !isDeferredTask(task));
   if (answered.length === 0) return "skipped";
   return answered.every((task) => task.status === "completed") ? "completed" : "failed";
 }
