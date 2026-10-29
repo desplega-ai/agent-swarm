@@ -139,6 +139,15 @@ describe("chatgptSubscriptionAuthFailure", () => {
     ).toBe(true);
   });
 
+  test("the backend's 401 for an unparseable access token counts too", () => {
+    // Live body for a slot holding a malformed access token (pi surfaces it without the status).
+    const reason = chatgptSubscriptionAuthFailure(
+      "Could not parse your authentication token. Please try signing in again.",
+      CONFIG,
+    );
+    expect(isCodexAuthFailureReason(reason)).toBe(true);
+  });
+
   test("other errors, models and slotless sessions are left alone", () => {
     expect(chatgptSubscriptionAuthFailure("Codex stream ended without a stop reason", CONFIG)).toBe(
       undefined,

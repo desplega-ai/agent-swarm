@@ -55,6 +55,7 @@ const REJECTED_ACCESS_PATTERNS = [
   "authentication token has been invalidated",
   "authentication token is expired",
   "refresh token was revoked",
+  "could not parse your authentication token",
 ];
 
 export function isCodexRejectedAccessError(text: string): boolean {

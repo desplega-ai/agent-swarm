@@ -40,8 +40,9 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // openai, … — strip whichever proxy prefix the user picked.
   opencode: ["openrouter/", "github-copilot/"],
   // pi-mono can hit openrouter mirrors, the github-copilot proxy, or native
-  // anthropic/openai/google providers.
-  pi: ["openrouter/", "github-copilot/"],
+  // anthropic/openai/google providers. `openai-codex/<id>` is an OpenAI id
+  // served by the ChatGPT subscription pool, priced like codex on that pool.
+  pi: ["openrouter/", "github-copilot/", "openai-codex/"],
   // codex normally reports a bare id, but a user may set MODEL_OVERRIDE to a
   // prefixed form. Be forgiving on the lookup side.
   codex: ["openai/", "github-copilot/"],
