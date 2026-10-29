@@ -14,6 +14,7 @@ import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { Badge } from "@/components/ui/badge";
 import { markdownPreview } from "@/lib/markdown-preview";
 import { promptTitle } from "@/lib/prompt-display";
+import { taskReason } from "@/lib/task-reason";
 import { cn } from "@/lib/utils";
 import { MessageTime } from "./swarm-reply";
 
@@ -24,12 +25,10 @@ const KINDS: Record<string, { label: string; icon: LucideIcon }> = {
   "reroute-decision": { label: "Reroute", icon: Shuffle },
 };
 
-/** The output to read in full: an answer, or a failure. */
+/** The output to read in full: an answer, or why there is none. */
 function fullText(task: AgentTask): string | null {
   if (task.status === "completed") return task.output?.trim() || null;
-  if (task.status === "failed" || task.status === "cancelled")
-    return task.failureReason?.trim() || null;
-  return null;
+  return taskReason(task)?.text ?? null;
 }
 
 /** One plain line: the output, the failure, else the first line of the task. */

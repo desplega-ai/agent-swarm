@@ -33,8 +33,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseJsonOutput } from "@/lib/json-output";
 import { taskIsRunning } from "@/lib/task-activity";
+import { taskReason } from "@/lib/task-reason";
 import { taskListTitle } from "@/lib/task-title";
-import { normalizeNewlines } from "@/lib/utils";
+import { cn, normalizeNewlines } from "@/lib/utils";
 
 export interface TaskDetailSheetProps {
   taskId: string;
@@ -62,6 +63,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
   const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
   const totalSessions = costs?.length ?? 0;
   const outputJson = task?.status === "completed" ? parseJsonOutput(task.output) : null;
+  const reason = task ? taskReason(task) : null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -126,16 +128,23 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
             Transcript. The Sheet header / meta / section headers are
             shrink-0 above; this div is the only thing that scrolls. */}
         <div className="flex-1 min-h-0 overflow-auto">
-          {task &&
-          (task.status === "failed" || task.status === "cancelled") &&
-          task.failureReason &&
-          task.failureReason.trim().length > 0 ? (
+          {reason ? (
             <section className="border-b border-border px-4 py-3 flex flex-col gap-2 min-w-0">
-              <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-status-error-strong">
-                {task.status === "cancelled" ? "Cancelled" : "Failure"}
+              <h4
+                className={cn(
+                  "font-mono font-bold text-[10px] uppercase tracking-[0.08em]",
+                  reason.tone === "error" ? "text-status-error-strong" : "text-muted-foreground",
+                )}
+              >
+                {reason.label}
               </h4>
-              <div className="text-sm leading-relaxed text-status-error-strong min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-                <Streamdown>{normalizeNewlines(task.failureReason.trim())}</Streamdown>
+              <div
+                className={cn(
+                  "text-sm leading-relaxed min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full",
+                  reason.tone === "error" ? "text-status-error-strong" : "text-foreground/90",
+                )}
+              >
+                <Streamdown>{normalizeNewlines(reason.text)}</Streamdown>
               </div>
             </section>
           ) : null}

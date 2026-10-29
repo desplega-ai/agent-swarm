@@ -10,6 +10,7 @@ import {
   Play,
   Reply,
   RotateCcw,
+  SkipForward,
 } from "lucide-react";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -468,6 +469,20 @@ export function TaskPrimaryAction({ model }: { model: TaskActionModel }) {
  * what to do next. It replaces the auto-opening help dialog: "Get help" opens
  * that dialog now.
  */
+/**
+ * A skipped task's reason, always open. A skip is a decision, not an error,
+ * so it reads in the neutral tone, with no Retry or Get help.
+ */
+export function TaskSkippedCallout({ reason }: { reason: string }) {
+  return (
+    <AlertCallout tone="neutral" icon={SkipForward} title="Skipped">
+      <div className="mt-1 text-sm leading-relaxed text-foreground">
+        <MarkdownView text={reason} />
+      </div>
+    </AlertCallout>
+  );
+}
+
 export function TaskFailureCallout({
   model,
   duration,

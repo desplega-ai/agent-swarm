@@ -70,6 +70,7 @@ import {
   taskDisplayEffort,
   taskDisplayModel,
 } from "@/lib/task-model-resolution";
+import { taskReason } from "@/lib/task-reason";
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -80,6 +81,7 @@ import {
   TaskActionsMenu,
   TaskFailureCallout,
   TaskPrimaryAction,
+  TaskSkippedCallout,
   useTaskActions,
 } from "./task-actions";
 import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
@@ -567,8 +569,12 @@ export default function TaskDetailPage() {
 
   // A failed task's error, always open, with Retry and Get help. "Failed
   // after" names the rail's run time, so the two never disagree.
-  const failureCallout = isFailed ? (
+  // A skipped task's reason, in the neutral tone: a skip is not a failure.
+  const skipReason = task.status === "skipped" ? taskReason(task)?.text : undefined;
+  const outcomeCallout = isFailed ? (
     <TaskFailureCallout model={actions} duration={taskRunTime(task, costs)} />
+  ) : skipReason ? (
+    <TaskSkippedCallout reason={skipReason} />
   ) : null;
 
   // THE MESSAGE BOX, one per layout tree, on the one draft. A finished task
@@ -602,7 +608,7 @@ export default function TaskDetailPage() {
   // tab has none.
   const outcomeContent = (
     <div className="space-y-2">
-      {failureCallout}
+      {outcomeCallout}
 
       {hasOutput && (
         <CollapsibleSection
@@ -628,7 +634,7 @@ export default function TaskDetailPage() {
       <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
       <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
-      {!isFailed && !hasOutput && !hasAttachments && (
+      {!isFailed && !skipReason && !hasOutput && !hasAttachments && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
           <p className="text-xs">No output available</p>
         </div>
@@ -975,7 +981,7 @@ export default function TaskDetailPage() {
               <div ref={heroEndRef} aria-hidden className="h-px" />
             </div>
             <Separator />
-            {failureCallout}
+            {outcomeCallout}
 
             {hasOutput && (
               <CollapsibleSection
