@@ -100,7 +100,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `readyOnly` | boolean | No | Only tasks with met dependencies |
 | `taskType` | string | No | Filter by type (e.g., `bug`, `feature`) |
 | `tags` | array | No | Filter by matching tags |
-| `search` | string | No | Search in task description |
+| `search` | string | No | Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: `2443` does not find `12443`, and `%` and `_` are not wildcards |
 | `scheduleId` | uuid | No | Filter by schedule ID to find tasks created by a specific schedule |
 | `workflowRunId` | string | No | Filter by workflow run ID to find the tasks of a single run |
 | `key` | string | No | Filter by exact logical asset namespace |
