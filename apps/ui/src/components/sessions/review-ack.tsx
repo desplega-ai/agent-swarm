@@ -110,6 +110,13 @@ export function ReviewAck({ reviews, className }: { reviews: AgentTask[]; classN
         Review by <Name>{reviewerName}</Name> cancelled{suffix}
       </>
     );
+  } else if (status === "skipped") {
+    label = (
+      <>
+        <SkipForward className={iconClass} aria-hidden="true" />
+        Review by <Name>{reviewerName}</Name> skipped{suffix}
+      </>
+    );
   } else if (status === "superseded") {
     label = (
       <>

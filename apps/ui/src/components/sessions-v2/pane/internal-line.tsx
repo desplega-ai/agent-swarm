@@ -47,10 +47,14 @@ function preview(task: AgentTask): string {
  */
 export function InternalLine({ task }: { task: AgentTask }) {
   const [open, setOpen] = useState(false);
+  // A superseded or skipped task is named by its status, not its type: the
+  // preview is then why it never ran, so the label must say so.
   const kind =
     task.status === "superseded"
       ? { label: "Superseded", icon: SkipForward }
-      : (KINDS[task.taskType ?? ""] ?? { label: "Handoff", icon: CornerDownRight });
+      : task.status === "skipped"
+        ? { label: "Skipped", icon: SkipForward }
+        : (KINDS[task.taskType ?? ""] ?? { label: "Handoff", icon: CornerDownRight });
   const Icon = kind.icon;
   const expandable = fullText(task) !== null;
   const row = (

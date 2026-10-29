@@ -111,6 +111,14 @@ describe("ReviewAck", () => {
     expect(superseded).not.toContain("Reviewed by");
   });
 
+  test("a skipped follow-up says the review was skipped, not 'Reviewed by'", () => {
+    const html = render([review({ status: "skipped", failureReason: "Nothing new to review." })]);
+
+    expect(html).toContain("skipped");
+    expect(html).not.toContain("Reviewed by");
+    expect(html).toContain("Nothing new to review.");
+  });
+
   test("pending and paused follow-ups don't claim someone is reviewing", () => {
     const pending = render([review({ status: "pending" })]);
     expect(pending).toContain("queued");

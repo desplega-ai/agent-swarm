@@ -63,7 +63,9 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
               ? " gave up here"
               : parent.status === "superseded"
                 ? " was superseded"
-                : " was cancelled"}
+                : parent.status === "skipped"
+                  ? " skipped this fork"
+                  : " was cancelled"}
           <span className="text-muted-foreground/70">
             {" · finished "}
             <time
