@@ -2273,7 +2273,7 @@ Edits (in place) the text of a Slack message that THIS bot authored — use it t
 
 **Leave a Slack thread**
 
-Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the current task's thread, or channelId and threadTs.
+Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the current task's thread, or (lead only) channelId and threadTs.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

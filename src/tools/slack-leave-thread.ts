@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getTaskById } from "@/be/db";
+import { can } from "@/rbac";
 import { leaveSlackThread } from "@/slack/left-threads";
 import { parseSlackTs } from "@/slack/message-text";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -11,7 +12,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
     {
       title: "Leave a Slack thread",
       description:
-        "Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the current task's thread, or channelId and threadTs.",
+        "Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the current task's thread, or (lead only) channelId and threadTs.",
       annotations: { openWorldHint: true, idempotentHint: true },
 
       inputSchema: z.object({
@@ -55,6 +56,16 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
       } else if (channelId && threadTs) {
+        // Direct thread access requires lead privileges, like slack-post.
+        const decision = can({
+          principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+          verb: "integration.slack.post",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          return toolErr("Leaving a thread by channelId and threadTs requires lead privileges.");
+        }
         slackChannelId = channelId;
         slackThreadTs = parseSlackTs(threadTs);
       } else {

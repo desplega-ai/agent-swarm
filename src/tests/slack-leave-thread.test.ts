@@ -2,8 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlinkSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, createTaskExtended, getSlackTasksInThread, initDb } from "../be/db";
+import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { registerMessageHandler, resetSlackHandlerCachesForTesting } from "../slack/handlers";
-import { isSlackThreadLeft } from "../slack/left-threads";
+import { isSlackThreadLeft, SLACK_LEFT_THREAD_KV_NAMESPACE } from "../slack/left-threads";
 import { registerSlackLeaveThreadTool } from "../tools/slack-leave-thread";
 import type { Agent } from "../types";
 
@@ -69,6 +70,7 @@ async function sendThreadReply(channel: string, threadTs: string, text: string) 
   return getSlackTasksInThread(channel, threadTs);
 }
 
+let lead: Agent;
 let worker: Agent;
 let otherWorker: Agent;
 
@@ -87,7 +89,7 @@ beforeAll(async () => {
   process.env.SLACK_RENDER_V2 = "false";
   process.env.ADDITIVE_SLACK = "false";
   process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = "false";
-  await createAgent({ name: "leave-lead", isLead: true, status: "idle", capabilities: [] });
+  lead = await createAgent({ name: "leave-lead", isLead: true, status: "idle", capabilities: [] });
   worker = await createAgent({
     name: "leave-worker",
     isLead: false,
@@ -151,7 +153,7 @@ describe("slack-leave-thread", () => {
 
   test("another thread is unaffected", async () => {
     await seedThread("C_LEAVE_B", "1900.0001");
-    await buildTool().handler({ channelId: "C_LEAVE_B", threadTs: "1900.0002" }, meta(worker.id));
+    await buildTool().handler({ channelId: "C_LEAVE_B", threadTs: "1900.0002" }, meta(lead.id));
 
     expect(await isSlackThreadLeft("C_LEAVE_B", "1900.0002")).toBe(true);
     expect(await sendThreadReply("C_LEAVE_B", "1900.0001", "plain follow-up")).toHaveLength(2);
@@ -167,5 +169,17 @@ describe("slack-leave-thread", () => {
 
     const missing = await tool.handler({ channelId: "C_LEAVE_C" }, meta(worker.id));
     expect(missing.structuredContent.success).toBe(false);
+  });
+
+  test("only a lead can leave an arbitrary thread by channelId; KV callers cannot write the state", async () => {
+    const tool = buildTool();
+    const direct = await tool.handler(
+      { channelId: "C_LEAVE_D", threadTs: "2100.0001" },
+      meta(worker.id),
+    );
+    expect(direct.structuredContent.success).toBe(false);
+    expect(await isSlackThreadLeft("C_LEAVE_D", "2100.0001")).toBe(false);
+
+    expect(reservedNamespaceError(SLACK_LEFT_THREAD_KV_NAMESPACE)).not.toBeNull();
   });
 });
