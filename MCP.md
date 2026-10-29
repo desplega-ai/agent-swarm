@@ -1019,6 +1019,7 @@ Updates an agent's profile information (name, description, role, capabilities). 
 | `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Synced to /workspace/TOOLS.md. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory. |
 | `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
 | `avatar` | `unknown` | No | - | Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color. |
+| `slackIcon` | `unknown` | No | - | Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }, or { type: 'app' } for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default. |
 
 ### context-history
 
@@ -2274,7 +2275,7 @@ Deletes a Slack message that THIS bot authored (e.g. a message previously posted
 
 **Edit a Slack message**
 
-Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
+Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Editing keeps the icon the message was posted with. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

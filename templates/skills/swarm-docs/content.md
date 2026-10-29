@@ -89,6 +89,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Scripts as external APIs](https://docs.agent-swarm.dev/docs/guides/scripts-external-apis). When: Someone wants a swarm script exposed as a public HTTP endpoint or webhook receiver.
 - [Scripts credential broker](https://docs.agent-swarm.dev/docs/guides/scripts-credential-broker). Reference.
 - [One-off Script Workflow Runs](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs). Reference.
+- [Dreaming](https://docs.agent-swarm.dev/docs/guides/dreaming). When: Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes.
 - [Claude Bridge](https://docs.agent-swarm.dev/docs/guides/claude-bridge-experimental). Reference.
 - [Worker Credential Recovery](https://docs.agent-swarm.dev/docs/guides/worker-credential-recovery). Reference.
 - [Model Gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways). Reference.

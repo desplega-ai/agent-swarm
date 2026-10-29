@@ -1301,6 +1301,37 @@ export const AgentAvatarSchema = z.discriminatedUnion("type", [
 ]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
+// Separate from `avatar` so an agent can keep its lucide disc and still post
+// to Slack with its own emoji or image.
+export const AgentSlackIconSchema = z
+  .discriminatedUnion("type", [
+    z.object({
+      type: z.literal("emoji"),
+      emoji: z
+        .string()
+        .max(102)
+        .regex(/^:[a-z0-9_+'-]+:$/),
+    }),
+    z.object({
+      type: z.literal("url"),
+      url: z
+        .url({ protocol: /^https$/ })
+        .max(2048)
+        .refine((value) => {
+          try {
+            const parsed = new URL(value);
+            return !parsed.username && !parsed.password;
+          } catch {
+            return false;
+          }
+        }, "URL must be valid and contain no credentials"),
+    }),
+    // No icon override: Slack shows the app's own avatar.
+    z.object({ type: z.literal("app") }),
+  ])
+  .openapi("AgentSlackIcon");
+export type AgentSlackIcon = z.infer<typeof AgentSlackIconSchema>;
+
 export const AgentSchema = z
   .object({
     // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
@@ -1371,6 +1402,12 @@ export const AgentSchema = z
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z
       .lazy(() => AgentAvatarSchema)
+      .nullable()
+      .optional(),
+
+    // Null/missing = the default emoji (getAgentEmoji).
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
       .nullable()
       .optional(),
 

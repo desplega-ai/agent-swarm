@@ -2871,6 +2871,7 @@ export interface paths {
                             icon: string;
                             color?: string;
                         } | null;
+                        slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
                         changedByAgentId?: string;
                         changeReason?: string;
@@ -8763,6 +8764,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/slack/app-icon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The Slack app's own avatar, shown on posts with no icon override */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description `imageUrl` is null when Slack is off or the lookup fails. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            imageUrl: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/chat/status": {
         parameters: {
             query?: never;
@@ -12508,7 +12547,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
          */
         get: {
             parameters: {
@@ -12572,6 +12611,7 @@ export interface paths {
                                 };
                                 comb: {
                                     enabled: boolean;
+                                    reason: string | null;
                                     api_url: string | null;
                                     live_url: string;
                                     org_id: string | null;
@@ -13822,6 +13862,7 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    /** @description Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. */
                     search?: string;
                     includeHeartbeat?: "true" | "false";
                     createdAfter?: string;
@@ -28088,6 +28129,19 @@ export interface components {
             })[];
             reportedAt: number;
         } | null;
+        AgentSlackIcon: {
+            /** @enum {string} */
+            type: "emoji";
+            emoji: string;
+        } | {
+            /** @enum {string} */
+            type: "url";
+            /** Format: uri */
+            url: string;
+        } | {
+            /** @enum {string} */
+            type: "app";
+        };
         Agent: {
             id: string;
             name: string;
@@ -28124,6 +28178,7 @@ export interface components {
                 icon: string;
                 color?: string;
             };
+            slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

@@ -77,6 +77,19 @@ spec:
                   name: {{ include "agent-swarm.agentFsSecretName" . }}
                   key: API_AGENT_FS_API_KEY
                   optional: true
+            {{- /* Files (Comb) turns on by itself only when a browser can reach agent-fs:
+                   the in-cluster AGENT_FS_API_URL above never qualifies. */}}
+            {{- if .Values.agentFs.publicUrl }}
+            - name: AGENT_FS_PUBLIC_URL
+              value: {{ .Values.agentFs.publicUrl | quote }}
+            {{- else if and .Values.agentFs.ingress.enabled .Values.agentFs.ingress.host }}
+            - name: AGENT_FS_PUBLIC_URL
+              value: {{ printf "%s://%s" (ternary "https" "http" (eq (include "agent-swarm.ingressHasTls" .Values.agentFs.ingress) "true")) .Values.agentFs.ingress.host | quote }}
+            {{- end }}
+            {{- if .Values.agentFs.proxy }}
+            - name: AGENT_FS_PROXY
+              value: "true"
+            {{- end }}
             {{- end }}
           startupProbe:
             httpGet:

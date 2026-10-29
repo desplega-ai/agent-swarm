@@ -1016,6 +1016,64 @@
           "reportedAt"
         ]
       },
+      "AgentSlackIcon": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "emoji"
+                ]
+              },
+              "emoji": {
+                "type": "string",
+                "maxLength": 102,
+                "pattern": "^:[a-z0-9_+'-]+:$"
+              }
+            },
+            "required": [
+              "type",
+              "emoji"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "app"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -1186,6 +1244,16 @@
                   "type",
                   "icon"
                 ]
+              }
+            ]
+          },
+          "slackIcon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentSlackIcon"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -11869,6 +11937,16 @@
                           "type",
                           "icon"
                         ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "slackIcon": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentSlackIcon"
                       },
                       {
                         "type": "null"
@@ -23745,6 +23823,42 @@
         }
       }
     },
+    "/api/integrations/slack/app-icon": {
+      "get": {
+        "summary": "The Slack app's own avatar, shown on posts with no icon override",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`imageUrl` is null when Slack is off or the lookup fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imageUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "imageUrl"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/chat/status": {
       "get": {
         "summary": "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",
@@ -30806,7 +30920,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -31040,6 +31154,12 @@
                             "enabled": {
                               "type": "boolean"
                             },
+                            "reason": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
                             "api_url": {
                               "type": [
                                 "string",
@@ -31070,6 +31190,7 @@
                           },
                           "required": [
                             "enabled",
+                            "reason",
                             "api_url",
                             "live_url",
                             "org_id",
@@ -34027,9 +34148,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards."
             },
             "required": false,
+            "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
             "name": "search",
             "in": "query"
           },

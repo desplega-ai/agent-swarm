@@ -154,11 +154,22 @@ jobs:
           ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
           bun scripts/e2e/redact.ts --out out/logs /tmp/e2e-*.log
 
+      # Test for the file inside the container, not with hashFiles(): the image runs as root and
+      # the harness writes the file mode 600, while hashFiles() runs on the host as the runner
+      # user, cannot read it, and fails the save step's condition.
+      - name: Check for a Codex auth chain to save
+        id: codex-chain-file
+        if: always() && matrix.provider == 'codex' && github.ref == 'refs/heads/main'
+        run: |
+          if [ -f .e2e-state/codex-auth.sealed ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # Save even when the leg failed: a refresh that rotated the token must still carry over.
       # A re-run attempt restores this save through the restore-keys prefix.
       - name: Save Codex auth chain
         id: save-codex-chain
-        if: always() && matrix.provider == 'codex' && github.ref == 'refs/heads/main' && hashFiles('.e2e-state/codex-auth.sealed') != ''
+        if: always() && steps.codex-chain-file.outputs.present == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .e2e-state/codex-auth.sealed
@@ -179,7 +190,7 @@ jobs:
       # The run step wrote its result before the save, and the report reads only result files.
       # Rewrite the codex leg to an auth-chain failure so a lost chain never reports green.
       - name: Fail the codex result when the chain was not saved
-        if: always() && (steps.save-codex-chain.outcome == 'failure' || steps.verify-codex-chain.outcome == 'failure')
+        if: always() && (steps.codex-chain-file.outcome == 'failure' || steps.save-codex-chain.outcome == 'failure' || steps.verify-codex-chain.outcome == 'failure')
         run: bun scripts/e2e/codex-chain-lost.ts out/e2e-results.json
 
       - name: Upload harness results

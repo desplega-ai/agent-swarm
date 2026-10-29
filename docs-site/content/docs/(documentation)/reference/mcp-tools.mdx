@@ -570,6 +570,7 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `claudeMd` | string | No | CLAUDE.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
 | `setupScript` | string | No | Startup script content |
 | `avatar` | object or null | No | Custom Lucide avatar: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`. Pass `null` to restore the deterministic default icon and color. |
+| `slackIcon` | object or null | No | Icon for the agent's Slack messages: `{ type: "emoji", emoji: ":owl:" }` or `{ type: "url", url: "https://..." }`, or `{ type: "app" }` for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass `null` to restore the default (`:crown:` for the lead). |
 
 ### context-history
 

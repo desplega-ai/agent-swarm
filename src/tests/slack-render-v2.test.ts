@@ -40,6 +40,7 @@ import {
   noteSlackOutcomeDeliveryFailure,
   startTask,
   supersedeTask,
+  updateAgentProfile,
   upsertSwarmConfig,
 } from "../be/db";
 import { upsertTaskCitations } from "../be/task-citations";
@@ -1796,6 +1797,40 @@ describe("Slack renderer v2", () => {
     expect(JSON.stringify(blocks.slice(1))).toContain(
       "Sources: <https://example.com/|[1]> Evidence",
     );
+  });
+
+  test("a URL Slack icon reaches the stream and its postMessage fallback", async () => {
+    const lead = await createAgent({ name: "Owl Lead", isLead: true, status: "idle" });
+    const iconUrl = "https://example.com/owl.png";
+    await updateAgentProfile(lead.id, { slackIcon: { type: "url", url: iconUrl } });
+    const { channelId, threadTs } = uniqueSlackAddress("C_ICON_URL");
+    const ask = await createTaskExtended("Owl outcome", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await completeTask(ask.id, "Hoot.");
+    await backdateLastUpdated([ask.id], 20);
+    await ensureSlackThreadTree([ask.id]);
+    calls.length = 0;
+    startStreamFailuresRemaining = 1;
+    try {
+      await processSlackRenderV2();
+    } finally {
+      startStreamFailuresRemaining = 0;
+    }
+
+    const stream = calls.find((call) => call.method === "chat.startStream");
+    const fallback = calls.find(
+      (call) => call.method === "chat.postMessage" && String(call.payload.text).startsWith("✅"),
+    );
+    for (const payload of [stream?.payload, fallback?.payload]) {
+      expect(payload?.icon_url).toBe(iconUrl);
+      expect(payload).not.toHaveProperty("icon_emoji");
+    }
   });
 
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {

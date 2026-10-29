@@ -24,6 +24,7 @@ import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
 import { getDbClient } from "../runtime";
+import { taskSearchCondition } from "./search-index";
 
 type TaskReadDependencies = {
   checkDependencies: (taskId: string) => Promise<{ ready: boolean; blockedBy: string[] }>;
@@ -910,8 +911,9 @@ export async function getAllTasks(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR title LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+    const search = await taskSearchCondition(filters.search, "page");
+    conditions.push(search.sql);
+    params.push(...search.params);
   }
 
   // New filters
@@ -1083,8 +1085,9 @@ export async function getTasksCount(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR title LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+    const search = await taskSearchCondition(filters.search, "count");
+    conditions.push(search.sql);
+    params.push(...search.params);
   }
 
   if (filters?.unassigned) {

@@ -1,0 +1,167 @@
+---
+title: Dreaming
+description: Run, tune, review, and undo the seeded nightly self-improvement loop that edits agent profiles, memories, and skills from the day's work.
+agent:
+  offer: true
+  when: "Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes"
+---
+
+Dreaming is a seeded workflow that makes the swarm a little better every night. Each active agent reports on its day, the lead turns those reports into a short, capped list of approved changes, guarded scripts apply them, and a final check re-reads every write. The result is a report you can read in the morning and a ledger you can roll back.
+
+It ships as three pieces:
+
+- the `dreaming` workflow (`templates/workflows/dreaming/`)
+- the `dreaming-daily` schedule that triggers it (`templates/schedules/dreaming-daily/`)
+- the `dreaming-*` catalog scripts the workflow calls, seeded at `global` scope
+
+## What one night does
+
+1. **Gather.** `dreaming-gather` reads the last day: tasks, cost, skill use, manually written memories, profiles, and workflow changes. It is read-only. It also decides who runs each step (see [Inputs](#inputs)) and which agents report. An agent reports when its status is `idle` or `busy`, its name does not start with `ext:`, and it has at least one task in the last day, not counting dreaming's own tasks. With no such agent, the run takes the quiet path and only writes the report.
+2. **Self-reports.** Each of those agents, the lead included, gets one task. The prompt forbids write tools: the agent returns proposals only (repeated procedures, skill friction, script candidates, edits to its own profile files, memory edits), each with an evidence id. `dreaming-reports-check` rejects a malformed report, retries that agent once, then records it as missing.
+3. **Synthesis.** The lead reviews the reports and the gathered data, and returns an approved action list across five lanes: new skill, skill fix, script, identity (profile files), and memory. Every rejection carries a reason. This step writes nothing.
+4. **Apply.** Guarded lanes act on the approved actions, in this order: profile and memory edits (`dreaming-apply`), profile trims (`dreaming-trim`), the lead's HEARTBEAT (`dreaming-heartbeat`), then skills and scripts. `dreaming-apply` stores a pre-image in the `dreaming-v2` KV namespace before each write: a pointer to the field's recorded profile version, the memory's stored text, or, for a new memory, only its name. A skill update stores the skill's old content. A new skill or a new script has no pre-image.
+5. **Verify.** `dreaming-verify` re-reads the claimed writes of the lanes that ran before it: profile and memory edits, trims, the HEARTBEAT, and skills. Claims it cannot confirm go into `claimMismatch`. It also flags lanes that should have run but returned nothing, writes no lane claimed, and changes from earlier nights that were later reverted. It only reads and records; it never undoes anything. On a live run it writes the run's ledger, which rollback uses: every write `dreaming-apply` and the skills lane reported as applied, including writes listed in `claimMismatch`. The long-term memory lane writes after verify, re-reads its own writes, and appends them to the same ledger.
+6. **Learn.** `dreaming-learn` scores the cuts of the last 14 days. A cut whose text came back becomes a pin: text no lane may cut again. A cut whose text shows up in a failed task's failure reason is listed as a restore candidate. It is not pinned.
+7. **Long-term memory.** The memory lanes classify swarm memories and propose `/longterm` documents. With the default inputs they only report.
+8. **Owners.** `dreaming-owners` sends one task to each owner of an item no lane closed, for example a script that only the lead can promote to `global`.
+9. **Publish.** The writer writes the report and appends one entry to a changelog. An optional Slack receipt follows.
+
+### What a night may change
+
+| Lane | What it may write | Per-night limit | Default inputs |
+| --- | --- | --- | --- |
+| Profile edits (`dreaming-apply`) | `soulMd`, `identityMd`, `claudeMd`, `toolsMd` of any agent | 6 ops, at most 1 per agent | Writes |
+| Memory (`dreaming-apply`) | `manual` memories only: store, edit, delete, rename | 5 stores, 5 edits, 10 deletes | Writes |
+| Trims (`dreaming-trim`) | One shorter rewrite of one profile field per agent, never `heartbeatMd` | 3 trims | Writes |
+| Skills | Update a non-system skill, create one swarm skill | 3 updates, 1 create | Writes |
+| Scripts | New `agent`-scope scripts, each proven by a positive and a negative control | 2 builds | Writes |
+| HEARTBEAT (`dreaming-heartbeat`) | The lead's `heartbeatMd`, plus memories for the items it moves out | 10 new memories, 12 drained pins | Report only, except removals through `dreaming-apply` |
+| Long-term memory (`dreaming-memtax-create`) | Documents under `/longterm/`, never `/longterm/facts` | 40 creates, 20 edits, 5 deletes | Report only |
+| Restores (`dreaming-apply`) | Text an earlier cut removed that turned out to be needed | 5 | Report only |
+
+The guards are strict on purpose. A profile edit either targets an exact, unique `##` heading, or replaces an exact, unique passage of at least 40 characters (`replace-exact`). Neither may add a `##` heading or shrink SOUL or IDENTITY below 200 characters. An edit that would grow a file is handed to the trim lane, which only writes it inside a rewrite that leaves the file smaller. One exception: an append of up to 400 characters under a CLAUDE.md heading grows the file directly. A memory edit that drops more than half the body is refused unless the action gives a reason. A write that would add a `[REDACTED:` marker is refused. A trim needs an agent-fs backup path, so without agent-fs the trim and heartbeat lanes refuse their writes.
+
+Skill disables stay proposals. Scripts are never promoted to `global` by the loop; the owners step asks the lead.
+
+## What a fresh install gets
+
+Boot seeding creates `dreaming` and `dreaming-daily`. Both arrive enabled when `SEED_AUTOMATIONS_ENABLED` is on, which is the default; see [Configuration](/docs/ui/configuration). Set `SEED_AUTOMATIONS_ENABLED=false` before first boot to seed them disabled.
+
+`dreaming-daily` runs at 03:30 UTC, after the Daily Blocker Digest (02:05 UTC), whose digest the lead reads during synthesis. A seeded schedule cannot target a workflow, so it creates one small pool task, and the worker that claims it calls `trigger-workflow`. That task first checks for any `dreaming*` run that started in the last 20 hours and skips if it finds one, because dreaming workflows share KV state.
+
+The old **Daily Evolution** schedule (`daily-compounding-reflection`) now seeds disabled. On an upgrade, the seeder turns it off only if nobody edited it. If you changed it (enabled it, edited the cron or the prompt), your copy is preserved, and both loops run until you disable one.
+
+### Inputs
+
+| Input | Default | Effect |
+| --- | --- | --- |
+| `leadAgentId` | empty | Who reviews and runs the writes that need lead authority. Empty means the oldest agent with `isLead`. |
+| `coderAgentId` | empty | Who drafts trims and the HEARTBEAT prune, and builds scripts. Empty leaves those tasks in the pool for any worker. |
+| `writerAgentId` | empty | Who writes the report and classifies memories. Empty leaves those tasks in the pool. |
+| `slackChannel` | empty | Channel for a receipt of up to four lines. Empty means no Slack post. |
+| `agentFsOrgId`, `agentFsDriveId`, `agentFsLiveUrl` | empty | Where the report and changelog go. Empty means the report is returned in the run output only. |
+| `v3Writes` | `off` | `on` lets the HEARTBEAT lane, the long-term memory lane, and restores write. `off` keeps them report-only. A dry run forces it off. |
+
+When the agent-fs inputs are empty, trim backups and heartbeat drafts use the assigned worker's default agent-fs drive.
+
+## Operate it
+
+Load the workflow and schedule tools with `ToolSearch` if they are not visible.
+
+**Find it.** `list-workflows` shows `dreaming` and its id. `list-schedules` shows `dreaming-daily`.
+
+**Set the inputs.** `update-workflow` with the workflow id and `input`. The object you pass replaces the stored one, so send every key:
+
+```
+update-workflow(
+  id: "<dreaming workflow id>",
+  input: {
+    "v3Writes": "off",
+    "leadAgentId": "",
+    "coderAgentId": "<coding agent id>",
+    "writerAgentId": "<writing agent id>",
+    "slackChannel": "<channel id>",
+    "agentFsOrgId": "<org id>",
+    "agentFsDriveId": "<drive id>",
+    "agentFsLiveUrl": ""
+  }
+)
+```
+
+An edited workflow or schedule counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed.
+
+**Run it once by hand.** Start with a dry run. It does every read and every draft, and skips Slack. It changes no profile, memory, skill, or script, writes no ledger, and writes no report or changelog to agent-fs. It still creates the run and its agent tasks, and the lead steps store their results in `dreaming-v2` KV:
+
+```
+trigger-workflow(id: "<dreaming workflow id>", triggerData: { "dryRun": true })
+```
+
+Add `"agentIds": ["<agent id>", ...]` to limit the self-reports to some agents. Drop `dryRun` for a live run. The 20-hour guard lives in the scheduled task, not in the workflow. A manual run makes the next scheduled trigger skip, but a manual run after the scheduled one is a second run on shared KV state. Avoid that.
+
+**Turn it on.** If it was seeded disabled or you turned it off, `update-schedule(name: "dreaming-daily", enabled: true)` starts the nightly trigger, and `update-workflow(id: "<dreaming workflow id>", enabled: true)` lets runs start.
+
+**Turn it off.** `update-schedule(name: "dreaming-daily", enabled: false)` stops the nightly trigger. `update-workflow(id: "<dreaming workflow id>", enabled: false)` also blocks manual runs; the trigger task then completes without starting anything.
+
+## Review a night
+
+`list-workflow-runs` and `get-workflow-run` show each step, its output, and its cost. The report is the readable summary:
+
+- With agent-fs inputs set, it is written to `dreaming-v2/runs/<UTC date>.md`, and one entry is appended to `dreaming-v2/changelog.md`. Without them, read the `publish` step's `markdown` output.
+- Problems come first: refused writes, claims verify could not confirm, writes no lane claimed, and reverted trims.
+- Then applied changes (verify-confirmed only) by lane, trims with a one-line revert command each, owner tasks, script builds, rejected actions, and cost and time per step.
+
+The `verify` step output has the raw lists (`claimMismatch`, `unclaimed`, `missingLanes`, `survival`) when you need more than the report.
+
+## Revert a change
+
+Run these as the lead: they write other agents' profiles and swarm memories. Each takes `dryRun` (or `execute` for long-term memory), so check what it would do before it writes.
+
+**Profile edits, memory edits, and skills.** `dreaming-rollback` undoes the run's ledger in reverse order. `actionIds` limits it to some actions:
+
+```
+script-run name="dreaming-rollback" scope="global" args={"runId":"<run id>","dryRun":true}
+script-run name="dreaming-rollback" scope="global" args={"runId":"<run id>","actionIds":["A3"]}
+```
+
+It restores a profile field from its recorded version, deletes a memory the run stored, re-stores a deleted memory under a new id, puts back an edited memory body, and restores a skill or disables one the run created. It refuses to restore a memory unless its pre-image still holds the stored bytes, so it never writes back text the secret scrubber has redacted. It cannot undo a memory rename. The ledger also holds writes verify could not confirm, so read the `verify` step's `claimMismatch` list first and pass `actionIds` to limit rollback to the writes you want undone.
+
+**Trims.** Each trim has its own revert line in the report:
+
+```
+script-run name="dreaming-trim" scope="global" args={"mode":"revert","runId":"<run id>","agentId":"<agent id>","field":"claudeMd"}
+```
+
+**HEARTBEAT.** `dreaming-heartbeat` with `{"mode":"revert","runId":"<run id>"}` returns two steps for the lead: copy the disk backup back over `/workspace/HEARTBEAT.md`, then call `mode: "restore-db"` with the backup's sha256 as `confirmDiskSha`.
+
+**Long-term memory.** `dreaming-memtax-create` with `{"mode":"rollback","targetRunId":"<run id>"}` lists what it would undo. Add `"execute":true` to undo it.
+
+Scripts built by the scripts lane are `agent`-scope rows of the agent that built them. Rollback does not touch them; delete one you do not want.
+
+## What it costs
+
+Most of the cost is fixed per night: the lead's synthesis, the skills and scripts lanes, and publishing. Each extra active agent adds one self-report. Estimated from 14 nights on one busy install:
+
+| Model class | Fixed per night | Per extra active agent | 3 agents | 20 agents |
+| --- | --- | --- | --- | --- |
+| Opus-class | about $17 | about $0.33 | about $18 | about $23 |
+| Sonnet-class | about $9 | about $0.16 | about $9 | about $12 |
+
+So expect roughly **$9 to $23 a night**. A quiet night, with no active agents, only publishes, for about $1. A low-activity install probably costs less, since the lead has less to review and fewer lanes trigger, but that has not been measured. The disabled Daily Evolution routine cost about $9.50 a night on the same install, so an upgrade where it turns off adds less than the gross figure.
+
+There is no spend cap. `dreaming-gather` compares the previous run's cost with two fixed thresholds. Above $22 it skips the HEARTBEAT draft and the memory backlog, and tells the lead to propose nothing beyond the caps. Above $25 it skips the memory lanes. Self-reports, synthesis, skills, scripts, and publishing always run.
+
+## Safety
+
+**Who the scripts run as.** The seeded workflow has no creator, so its `swarm-script` nodes run as the run's starting agent, which the server stamps on the run row: the caller for `trigger-workflow` and the REST trigger, the schedule's creator for a scheduled run, and no agent for webhooks and events. A nightly run is started by whichever pool worker claimed the `dreaming-daily` task, so its script steps run with that worker's authority, not the lead's. `trigger.agentId` is plain trigger data and never chooses the principal; before this, any agent could start the workflow with the lead's id and run its scripts as the lead.
+
+**Why a lead result is bound to the lead step.** The writes that need lead authority (`apply`, `trim-apply`, `hb-apply`, `memtax-create-apply`) run as agent tasks on the lead. Each task makes one `script-run` with `{"runId":"<run id>","fromRun":true}`. The script loads its inputs from the run's recorded steps, not from the caller, does the writes, stores the full result in `dreaming-v2` KV, and returns a pointer with the result's sha256. The next node reads the stored result only when its hash matches the pointer the engine recorded as the lead step's output.
+
+That check matters because any agent can write the `dreaming-v2` namespace. Without it, a forged KV entry could change what later steps believe was applied. The same reasoning covers inputs that come from pool workers: the long-term memory bullets are distilled on the lead, and apply accepts them only from a task the lead ran. The HEARTBEAT draft is accepted only at the exact path the lead's plan chose.
+
+**Secrets.** Pre-images in `dreaming-v2` KV hold memory and profile text. The boot scrub sweep covers that whole namespace, so a value later registered as a secret is redacted there too.
+
+## Related
+
+- [Workflows](/docs/concepts/workflows)
+- [Scheduled Tasks](/docs/concepts/scheduling)
+- [Scripts Runtime](/docs/guides/scripts-runtime)

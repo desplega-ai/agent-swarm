@@ -6,7 +6,13 @@ import * as z from "zod";
 import { getAgentById, updateAgentProfile } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { type Agent, AgentAvatarSchema, AgentStatusSchema, ProviderNameSchema } from "@/types";
+import {
+  type Agent,
+  AgentAvatarSchema,
+  AgentSlackIconSchema,
+  AgentStatusSchema,
+  ProviderNameSchema,
+} from "@/types";
 import { MAX_PROFILE_FILE_LENGTH } from "@/utils/constants";
 
 // Loose mirror of AgentSchema for tool output: every field optional, no
@@ -33,6 +39,7 @@ const agentOutputShape = z.looseObject({
   credentialMissing: z.array(z.string()).nullable().optional(),
   credStatus: z.looseObject({}).nullable().optional(),
   avatar: z.looseObject({}).nullable().optional(),
+  slackIcon: z.looseObject({}).nullable().optional(),
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
 });
@@ -154,6 +161,11 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .describe(
             "Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color.",
           ),
+        slackIcon: AgentSlackIconSchema.nullable()
+          .optional()
+          .describe(
+            "Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }, or { type: 'app' } for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -174,6 +186,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         toolsMd,
         heartbeatMd,
         avatar,
+        slackIcon,
       },
       requestInfo,
       _meta,
@@ -228,10 +241,11 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         setupScript === undefined &&
         toolsMd === undefined &&
         heartbeatMd === undefined &&
-        avatar === undefined
+        avatar === undefined &&
+        slackIcon === undefined
       ) {
         return toolErr(
-          "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
+          "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, avatar, or slackIcon) must be provided.",
           { data: { yourAgentId: requestInfo.agentId } },
         );
       }
@@ -254,7 +268,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
         // Apply name and profile fields in one DB transaction so validation or
         // update failures cannot leave a partially-applied combined payload.
-        // `avatar` is spread in only when present so `null` (reset) stays
+        // `avatar` and `slackIcon` are spread in only when present so `null` (reset) stays
         // distinguishable from "not provided".
         agent = await updateAgentProfile(
           targetAgentId,
@@ -270,6 +284,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             toolsMd,
             heartbeatMd,
             ...(avatar !== undefined ? { avatar } : {}),
+            ...(slackIcon !== undefined ? { slackIcon } : {}),
           },
           {
             changeSource: isUpdatingSelf ? "self_edit" : "lead_coaching",
@@ -361,6 +376,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (toolsMd !== undefined) updatedFields.push("toolsMd");
         if (heartbeatMd !== undefined) updatedFields.push("heartbeatMd");
         if (avatar !== undefined) updatedFields.push("avatar");
+        if (slackIcon !== undefined) updatedFields.push("slackIcon");
 
         const targetLabel = isUpdatingSelf ? "own" : `agent ${targetAgentId}`;
         return toolOk(`Updated ${targetLabel} profile: ${updatedFields.join(", ")}.`, {

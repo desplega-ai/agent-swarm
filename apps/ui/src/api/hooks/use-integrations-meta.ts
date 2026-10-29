@@ -151,3 +151,14 @@ export function useTestClaudeManagedConnection() {
     },
   });
 }
+
+/** The Slack app's own avatar, for the Slack icon preview. Fetched only while `enabled`. */
+export function useSlackAppIcon(enabled: boolean) {
+  return useQuery({
+    queryKey: ["integrations", "slack", "app-icon"],
+    queryFn: () => api.fetchSlackAppIcon(),
+    enabled,
+    // A null avatar can be a passing Slack failure: ask again on the next mount.
+    staleTime: (query) => (query.state.data?.imageUrl ? 60 * 60 * 1000 : 0),
+  });
+}

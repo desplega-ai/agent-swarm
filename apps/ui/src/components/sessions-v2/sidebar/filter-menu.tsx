@@ -3,7 +3,7 @@
  * checkbox per root source. Only ticked sources stay in the lists and counts,
  * the Inbox included; a source never seen before starts unticked. Both
  * choices are stored in this browser (`lib/sessions-show.ts`). The icon shows
- * a dot while the filter differs from the default (Mine, only `ui` on).
+ * a dot while the filter differs from the default (Mine, `comb` and `ui` on).
  */
 
 import { ListFilter } from "lucide-react";

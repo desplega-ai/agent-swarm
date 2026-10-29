@@ -99,7 +99,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
         thread_ts: task.slackThreadTs,
         text: batch.join("\n\n"),
         username: getAgentDisplayName(agent),
-        icon_emoji: getAgentEmoji(agent),
+        icon: getAgentSlackIcon(agent),
         blocks: batch.map((chunk) => ({
           type: "section",
           text: { type: "mrkdwn", text: chunk },
@@ -173,7 +173,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
               ? `${completedStatusIcon()} ${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
               : body,
           username: getAgentDisplayName(agent),
-          icon_emoji: getAgentEmoji(agent),
+          icon: getAgentSlackIcon(agent),
           blocks: blockBatches[i],
         });
       }
@@ -185,7 +185,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
         thread_ts: task.slackThreadTs,
         text: `Task failed: ${reason}`,
         username: getAgentDisplayName(agent),
-        icon_emoji: getAgentEmoji(agent),
+        icon: getAgentSlackIcon(agent),
         blocks,
       });
     } else if (task.status === "cancelled") {
@@ -195,7 +195,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
         thread_ts: task.slackThreadTs,
         text: "Task cancelled",
         username: getAgentDisplayName(agent),
-        icon_emoji: getAgentEmoji(agent),
+        icon: getAgentSlackIcon(agent),
         blocks,
       });
     }
@@ -232,7 +232,7 @@ export async function sendProgressUpdate(
       thread_ts: task.slackThreadTs,
       text: progress,
       username: getAgentDisplayName(agent),
-      icon_emoji: getAgentEmoji(agent),
+      icon: getAgentSlackIcon(agent),
       blocks,
     });
   } catch (error) {
@@ -354,7 +354,7 @@ export async function updateToFinal(
           thread_ts: task.slackThreadTs ?? messageTs,
           text: `${completedStatusIcon()} ${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
           username: getAgentDisplayName(agent),
-          icon_emoji: getAgentEmoji(agent),
+          icon: getAgentSlackIcon(agent),
           blocks: completionBlockBatches[i],
         });
       }
@@ -418,7 +418,7 @@ export async function sendWithPersona(
     thread_ts: string;
     text: string;
     username: string;
-    icon_emoji: string;
+    icon: SlackPersonaIcon;
     blocks?: unknown[];
   },
 ): Promise<string | undefined> {
@@ -433,12 +433,25 @@ export async function sendWithPersona(
     unfurl_links: false,
     unfurl_media: false,
     username: options.username,
-    icon_emoji: options.icon_emoji,
+    ...options.icon,
     // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects are typed as plain JSON
     blocks: blocks as any,
   });
 
   return result.ts;
+}
+
+/** Empty = no override, so Slack shows the app's own avatar. */
+export type SlackPersonaIcon =
+  | { icon_emoji: string }
+  | { icon_url: string }
+  | Record<string, never>;
+
+export function getAgentSlackIcon(agent: Agent): SlackPersonaIcon {
+  if (agent.slackIcon?.type === "url") return { icon_url: agent.slackIcon.url };
+  if (agent.slackIcon?.type === "emoji") return { icon_emoji: agent.slackIcon.emoji };
+  if (agent.slackIcon?.type === "app") return {};
+  return { icon_emoji: getAgentEmoji(agent) };
 }
 
 export function getAgentEmoji(agent: Agent): string {
