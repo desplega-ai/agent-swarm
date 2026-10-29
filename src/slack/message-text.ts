@@ -127,17 +127,18 @@ function renderTableCell(cell: unknown): string {
  * then one line per row, in order. Returns "" for a table with no cell text.
  */
 function renderTableBlock(block: SlackBlockInternal): string {
+  const rows = (block.rows ?? []).filter(Array.isArray).map((row) => row.map(renderTableCell));
+  if (!rows.some((cells) => cells.some(Boolean))) return "";
+  // Pad every row, header included, to the widest row so the header separator
+  // and each line have the same column count.
+  const width = Math.max(...rows.map((cells) => cells.length));
   const lines: string[] = [];
-  let hasText = false;
-  for (const row of block.rows ?? []) {
-    if (!Array.isArray(row)) continue;
-    const cells = row.map(renderTableCell);
-    if (cells.some(Boolean)) hasText = true;
-    lines.push(`| ${cells.join(" | ")} |`);
+  for (const cells of rows) {
+    const padded = [...cells, ...Array<string>(width - cells.length).fill("")];
+    lines.push(`| ${padded.join(" | ")} |`);
     // Markdown header separator after the first (header) row.
-    if (lines.length === 1) lines.push(`|${" --- |".repeat(cells.length)}`);
+    if (lines.length === 1) lines.push(`|${" --- |".repeat(width)}`);
   }
-  if (!hasText) return "";
   const caption = block.caption?.trim();
   return caption ? `${caption}\n${lines.join("\n")}` : lines.join("\n");
 }

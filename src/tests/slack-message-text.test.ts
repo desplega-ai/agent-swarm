@@ -691,6 +691,18 @@ describe("extractSlackMessageText: table blocks", () => {
     );
   });
 
+  test("pads a header narrower than its rows to the widest row", () => {
+    const cell = (text: string) => ({ type: "raw_text", text });
+    const table = { type: "table", rows: [[cell("H")], [cell("A"), cell("B")]] };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe("| H |  |\n| --- | --- |\n| A | B |");
+  });
+
+  test("pads an empty header row to the widest row", () => {
+    const cell = (text: string) => ({ type: "raw_text", text });
+    const table = { type: "table", rows: [[], [cell("A"), cell("B")]] };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe("|  |  |\n| --- | --- |\n| A | B |");
+  });
+
   test("skips a table with no cell text", () => {
     const table = { type: "table", rows: [[{ type: "raw_text", text: "" }]] };
     expect(extractSlackMessageText({ text: "hi", blocks: [table] })).toBe("hi");

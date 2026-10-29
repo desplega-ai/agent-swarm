@@ -816,7 +816,7 @@ describe("Slack ingress with files", () => {
 
     afterAll(() => getApp.mockRestore());
 
-    async function sendBuffered(text: string, files: SlackFile[] = []) {
+    async function sendBuffered(text: string, files: SlackFile[] = [], blocks?: unknown[]) {
       seq += 1;
       const ts = `1950000001.${String(seq).padStart(6, "0")}`;
       await channelMessage({
@@ -829,6 +829,7 @@ describe("Slack ingress with files", () => {
           user: "U_HUMAN",
           text,
           files,
+          blocks,
         },
         body: { event_id: `evt_inbound_files_${seq}` },
         client,
@@ -945,6 +946,38 @@ describe("Slack ingress with files", () => {
         expect(failureNotices()).toEqual([]);
       });
     }
+
+    test("!now with only a table buffers the table rows", async () => {
+      process.env.SLACK_THREAD_STEERING = "off";
+      await sendBuffered(
+        "!now",
+        [],
+        [
+          {
+            type: "rich_text",
+            elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "!now" }] }],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Acme" },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+              [
+                { type: "raw_text", text: "Globex" },
+                { type: "raw_text", text: "/casos-de-exito/globex" },
+              ],
+            ],
+          },
+        ],
+      );
+      const task = await followUp();
+      expect(task.task).toContain(
+        "| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |",
+      );
+      expect(task.task).not.toContain("!now");
+    });
 
     test("text-only follow-ups still steer the running task", async () => {
       await sendBuffered("!now use the safer approach");

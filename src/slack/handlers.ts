@@ -545,7 +545,13 @@ export function registerMessageHandler(app: App): void {
         stripped.startsWith("!now") &&
         (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
       ) {
-        const nowMessage = stripped.replace(/^!now\s*/, "").trim();
+        // Detection reads `msg.text`; the buffered text is `messageText`, which
+        // keeps any table rows `msg.text` leaves out.
+        const nowMessage = messageText
+          .replace(/<@[A-Z0-9]+>/g, "")
+          .trim()
+          .replace(/^!now\s*/, "")
+          .trim();
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
 
         console.log(
