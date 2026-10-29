@@ -546,11 +546,10 @@ export function registerMessageHandler(app: App): void {
         (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
       ) {
         // Detection reads `msg.text`; the buffered text is `messageText`, which
-        // keeps any table rows `msg.text` leaves out. Strip only the bot mention
-        // and the routing mentions before `!now`; other mentions (e.g. in table
-        // cells) stay for rewriteSlackMentions to resolve at flush.
+        // keeps any table rows `msg.text` leaves out. Strip only the mentions
+        // before `!now` (the bot and any routing mentions); later mentions,
+        // including the bot's in a table cell, stay for rewriteSlackMentions.
         const nowMessage = messageText
-          .replaceAll(`<@${botUserId}>`, "")
           .trim()
           .replace(/^(?:<@[A-Z0-9]+>\s*)*!now\s*/, "")
           .trim();

@@ -118,9 +118,16 @@ export async function routeMessage(
  * Extracts the task description from a message, removing bot mentions and agent references.
  */
 export function extractTaskFromMessage(text: string, botUserId: string): string {
-  return text
-    .replace(new RegExp(`<@${botUserId}>`, "g"), "") // Remove bot mentions
-    .replace(/swarm#[a-f0-9-]{36}/gi, "") // Remove swarm#<id>
-    .replace(/swarm#all/gi, "") // Remove swarm#all
-    .trim();
+  const botMention = new RegExp(`<@${botUserId}>`, "g");
+  return (
+    text
+      .split("\n")
+      // Remove bot mentions, except in pasted table rows (`| a | b |`): a cell
+      // that names the bot is content, left for rewriteSlackMentions.
+      .map((line) => (line.startsWith("|") ? line : line.replace(botMention, "")))
+      .join("\n")
+      .replace(/swarm#[a-f0-9-]{36}/gi, "") // Remove swarm#<id>
+      .replace(/swarm#all/gi, "") // Remove swarm#all
+      .trim()
+  );
 }

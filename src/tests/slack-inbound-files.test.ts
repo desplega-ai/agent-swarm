@@ -726,6 +726,67 @@ describe("Slack ingress with files", () => {
     );
   });
 
+  test("a mention with a table keeps a bot mention in a cell", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+    seq += 1;
+    const ts = `1850000000.${String(seq).padStart(6, "0")}`;
+    const text = "<@U_SWARM_BOT> owners:";
+    await channelMessage({
+      event: {
+        type: "message",
+        channel: "C0MENTION1",
+        ts,
+        user: "U_HUMAN",
+        text,
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "user", user_id: "U_SWARM_BOT" },
+                  { type: "text", text: " owners:" },
+                ],
+              },
+            ],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Owner" },
+                { type: "raw_text", text: "Page" },
+              ],
+              [
+                {
+                  type: "rich_text",
+                  elements: [
+                    {
+                      type: "rich_text_section",
+                      elements: [{ type: "user", user_id: "U_SWARM_BOT" }],
+                    },
+                  ],
+                },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+            ],
+          },
+        ],
+      },
+      body: { event_id: `evt_inbound_files_${seq}` },
+      client: slackClient(),
+      say: mock(async () => ({})),
+    });
+    const row = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM agent_tasks WHERE slackTriggerMessageTs = ?",
+      [ts],
+    );
+    const task = await getTaskById(row!.id);
+    expect(task!.task).toMatch(/^owners:/);
+    expect(task!.task).toMatch(/\| <@U_SWARM_BOT[|>][^\n]* \| \/casos-de-exito\/acme \|/);
+  });
+
   test("a file that cannot be downloaded is flagged to the agent and to the user", async () => {
     await createAgent({ name: "lead", isLead: true, status: "idle" });
     const file = slackFile({ url_private_download: `${slackFiles.url}forbidden/x.png` });
@@ -1014,6 +1075,44 @@ describe("Slack ingress with files", () => {
       );
       const task = await followUp();
       expect(task.task).toMatch(/\| <@U0CELLUSER1[|>][^\n]* \| \/casos-de-exito\/acme \|/);
+      expect(task.task).not.toContain("!now");
+    });
+
+    test("!now with a table keeps a bot mention in a cell", async () => {
+      process.env.SLACK_THREAD_STEERING = "off";
+      await sendBuffered(
+        "!now",
+        [],
+        [
+          {
+            type: "rich_text",
+            elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "!now" }] }],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Owner" },
+                { type: "raw_text", text: "Page" },
+              ],
+              [
+                {
+                  type: "rich_text",
+                  elements: [
+                    {
+                      type: "rich_text_section",
+                      elements: [{ type: "user", user_id: "U_SWARM_BOT" }],
+                    },
+                  ],
+                },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+            ],
+          },
+        ],
+      );
+      const task = await followUp();
+      expect(task.task).toMatch(/\| <@U_SWARM_BOT[|>][^\n]* \| \/casos-de-exito\/acme \|/);
       expect(task.task).not.toContain("!now");
     });
 
