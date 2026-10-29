@@ -24,7 +24,7 @@ import { getModelProfileByName } from "./db/model-profiles";
 import { isKnownCatalogModel } from "./model-validation";
 
 /** Harnesses whose credential var depends on the model prefix (`getModelAwareCredentialVars`). */
-const MODEL_AWARE_CREDENTIAL_HARNESSES = new Set(["pi", "opencode", "dsh", "grok"]);
+const MODEL_AWARE_CREDENTIAL_HARNESSES = new Set(["pi", "opencode", "dsh", "grok", "fx"]);
 
 const STATE_RANK: Record<ProfileCheckState, number> = { pass: 0, unverified: 1, warn: 2, fail: 3 };
 

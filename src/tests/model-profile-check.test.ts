@@ -49,7 +49,7 @@ function report(overrides: Partial<AgentCredStatus> = {}): AgentCredStatus {
   };
 }
 
-async function agent(harnessProvider: "claude" | "codex" | "pi", cred?: AgentCredStatus) {
+async function agent(harnessProvider: "claude" | "codex" | "pi" | "fx", cred?: AgentCredStatus) {
   const created = await createAgent({
     name: `check-${harnessProvider}-${crypto.randomUUID().slice(0, 8)}`,
     isLead: false,
@@ -221,6 +221,37 @@ describe("harness-credentials", () => {
     const withKey = await check(id, "pi-helmcode");
     expect(row(withKey, "harness-credentials")?.state).toBe("pass");
     expect(JSON.stringify(withKey)).not.toContain("hc-secret-value-12345");
+  });
+
+  test("an fx model judges its route's key: absent is unverified, configured passes", async () => {
+    await createModelProfile({
+      name: "fx-vercel",
+      harness: "fx",
+      model: "vercel/anthropic/claude-sonnet-4.6",
+      allowCustomModel: true,
+    });
+    const id = await agent("fx", report());
+    const result = await check(id, "fx-vercel");
+    expect(row(result, "harness-credentials")).toEqual({
+      check: "harness-credentials",
+      state: "unverified",
+      detail:
+        "vercel/anthropic/claude-sonnet-4.6 needs AI_GATEWAY_API_KEY; not in the agent's config, so only the worker env can supply it",
+    });
+    expect(result.ok).toBe(true);
+
+    // Control: another route's key does not satisfy this route.
+    await pool(id, "OPENROUTER_API_KEY", "or-secret-value-12345");
+    expect(row(await check(id, "fx-vercel"), "harness-credentials")?.state).toBe("unverified");
+
+    await pool(id, "AI_GATEWAY_API_KEY", "gw-secret-value-12345");
+    const withKey = await check(id, "fx-vercel");
+    expect(row(withKey, "harness-credentials")).toEqual({
+      check: "harness-credentials",
+      state: "pass",
+      detail: "vercel/anthropic/claude-sonnet-4.6 uses AI_GATEWAY_API_KEY",
+    });
+    expect(JSON.stringify(withKey)).not.toContain("gw-secret-value-12345");
   });
 });
 
