@@ -19,7 +19,10 @@ import { getExtensionByName, installExtension, listExtensionRuns } from "../be/e
 import { requestSteering, SteeringBlockedError } from "../be/steering";
 import type { TaskSteerEvent } from "../extensions/contract";
 import { enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
+import { handleMcpBridge } from "../http/mcp-bridge";
 import { handleTasks } from "../http/tasks";
+import { SwarmConfig } from "../scripts-runtime/swarm-config";
+import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import * as slackApp from "../slack/app";
 import { requestSlackThreadSteering } from "../slack/steering";
 import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
@@ -95,6 +98,7 @@ describe("extension steering boundary", () => {
     server = createServer(async (req, res) => {
       res.setHeader("Content-Type", "application/json");
       const path = new URL(req.url ?? "/", "http://localhost").pathname.split("/").filter(Boolean);
+      if (await handleMcpBridge(req, res, path, new URLSearchParams(), leadId)) return;
       await handleTasks(req, res, path, new URLSearchParams(), leadId);
     });
     baseUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
@@ -246,7 +250,41 @@ describe("extension steering boundary", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("Steering denied by policy");
+    expect(await lastEvent()).toMatchObject({ source: "mcp" });
     await expectNoSteering(task.id);
+  });
+
+  test("script SDK steering reaches the hook through the bridge with the script source", async () => {
+    await installPolicy({ action: "continue" });
+    const task = await runningTask();
+    const sdk = createSwarmSdk(
+      new SwarmConfig({
+        system: {
+          apiKey: { value: "steering-sdk-test-key", isSecret: true },
+          agentId: { value: leadId, isSecret: false },
+          mcpBaseUrl: { value: baseUrl, isSecret: false },
+        },
+        user: {},
+      }),
+    );
+
+    const result = await sdk.task_steer({ taskId: task.id, message: "From the script SDK" });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 200,
+      data: { success: true, outcome: "queued" },
+    });
+    expect(await lastEvent()).toMatchObject({
+      task: { id: task.id },
+      message: "From the script SDK",
+      mode: "queue",
+      source: "script",
+      sender: { kind: "agent", agentId: leadId },
+    });
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([
+      expect.objectContaining({ source: "script", body: "From the script SDK" }),
+    ]);
   });
 
   test("Slack supplies message timestamps and sender metadata without acknowledgement log rows on block", async () => {
