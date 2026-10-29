@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.0
+ARG OPENCODE_VERSION=2.2.1
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793199090-gd59795
-ARG AMP_SHA512_AMD64=943ec64b1aa1ae0e8a0636b36e5950d0e33e7847fdde30997483f67c524bba01e256a46bca8b2ba9331db4d655deda7af1c4da354d088fbd6c67b5a7b6205780
-ARG AMP_SHA512_ARM64=ad5591ac89e721ea90760cd249da5a5622d3801e98435968203333b790a90af7a71bea058135193b4aba7fb160e190bcefc75530dce0357db941c1f9e80f71a8
+ARG AMP_VERSION=0.0.1793246451-g9e5ffe
+ARG AMP_SHA512_AMD64=0606cdacfb3d79a3cda8b808a59d0a0ed5644e261afc1d356b68e3bd6bd8c6a9814b6b19c6c9583156ee76063f98132cfb53c3044229905dda6a8d192b0d70ef
+ARG AMP_SHA512_ARM64=09f1ea2ba751585d2032db3c806357a1162a78b7111daf405186db69063b5f0e6c0d628a6b28ea5f34214bd63b2cbc7aabe327f70d3d5f135d6603674f27969d
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -645,9 +645,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.56.0
-ARG GOOSE_SHA256_AMD64=225a929b35b5130fb691eafdb50be236f2c0a150019b53973775938f8f19c281
-ARG GOOSE_SHA256_ARM64=26bcb7d3f55aac485a91d81cbdecd8d90e5af1acadeca6e580b4d58b64a888e4
+ARG GOOSE_VERSION=1.57.0
+ARG GOOSE_SHA256_AMD64=10eb96cb6a159b6e1d38eeedbef6ab64cd28168aad91948f1fa5c34eefdf98e3
+ARG GOOSE_SHA256_ARM64=c32605acfd560aeb2adbf17ec359cc0217e28022a7e647b35a6af5dcfca91749
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
