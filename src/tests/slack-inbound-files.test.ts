@@ -679,6 +679,53 @@ describe("Slack ingress with files", () => {
     expect(await getTaskAttachments(task!.id)).toHaveLength(1);
   });
 
+  test("a shared message keeps the image it carries on attachments[].files", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+
+    const { task } = await sendAssistantDm({
+      subtype: undefined,
+      text: "look at this",
+      files: null,
+      attachments: [{ is_share: true, is_msg_unfurl: true, files: [slackFile()] }],
+    });
+
+    expect(task!.task).toContain("[File: screenshot.png (image/png, 11 B) id=F0SHOT0001]");
+    expect(await readStoredBytes(task!.id)).toEqual([PNG_BYTES]);
+  });
+
+  test("a pasted table reaches the task text after the line that introduces it", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+    const lead = "here are the slugs:";
+
+    const { task } = await sendAssistantDm({
+      subtype: undefined,
+      text: lead,
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [{ type: "rich_text_section", elements: [{ type: "text", text: lead }] }],
+        },
+        {
+          type: "table",
+          rows: [
+            [
+              { type: "raw_text", text: "Acme" },
+              { type: "raw_text", text: "/casos-de-exito/acme" },
+            ],
+            [
+              { type: "raw_text", text: "Globex" },
+              { type: "raw_text", text: "/casos-de-exito/globex" },
+            ],
+          ],
+        },
+      ],
+    });
+
+    expect(task!.task).toContain(
+      `${lead}\n| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |`,
+    );
+  });
+
   test("a file that cannot be downloaded is flagged to the agent and to the user", async () => {
     await createAgent({ name: "lead", isLead: true, status: "idle" });
     const file = slackFile({ url_private_download: `${slackFiles.url}forbidden/x.png` });

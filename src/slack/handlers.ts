@@ -51,7 +51,11 @@ import {
   leaveExternalChannel,
   shouldBlockChannel,
 } from "./external-channel";
-import { extractSlackMessageText } from "./message-text";
+import {
+  collectSlackMessageFiles,
+  extractSlackMessageText,
+  slackInboundMessageText,
+} from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
@@ -445,8 +449,13 @@ export function registerMessageHandler(app: App): void {
     if (isBotMessage(msg, cachedBotUserId)) {
       return ignoreSlackInbound("bot_message");
     }
-    const hasText = !!msg.text?.trim();
-    const hasFiles = !!(msg.files && msg.files.length > 0);
+    // Task text: `msg.text`, plus any table block it leaves out. Mention and
+    // routing checks below keep reading `msg.text`.
+    const messageText = slackInboundMessageText(msg);
+    // Top-level files plus those of a shared/forwarded message.
+    const messageFiles = collectSlackMessageFiles<SlackFile>(msg);
+    const hasText = !!messageText.trim();
+    const hasFiles = messageFiles.length > 0;
 
     // Require either text or files, and always require a user
     if ((!hasText && !hasFiles) || !msg.user) return ignoreSlackInbound("empty_message");
@@ -499,7 +508,7 @@ export function registerMessageHandler(app: App): void {
     });
 
     // Build effective text that includes attachment metadata
-    const effectiveText = buildEffectiveText(msg.text, msg.files);
+    const effectiveText = buildEffectiveText(msg.text, messageFiles);
 
     // Bot user ID (already cached from the bot message check above)
     if (!cachedBotUserId) {
@@ -544,14 +553,14 @@ export function registerMessageHandler(app: App): void {
         );
 
         noteSlackInboundSideEffect("thread_flush");
-        if (nowMessage || msg.files?.length) {
+        if (nowMessage || hasFiles) {
           bufferThreadMessage(
             msg.channel,
             msg.thread_ts,
             nowMessage,
             msg.user,
             msg.ts,
-            msg.files,
+            messageFiles,
             botUserId,
           );
         }
@@ -590,10 +599,10 @@ export function registerMessageHandler(app: App): void {
         bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
-          msg.text ?? "",
+          messageText,
           msg.user,
           msg.ts,
-          msg.files,
+          messageFiles,
           botUserId,
         );
 
@@ -698,8 +707,13 @@ export function registerMessageHandler(app: App): void {
         return ignoreSlackInbound("rate_limited");
       }
 
-      await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
-      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes);
+      await using inbound = await fetchSlackFiles(client, messageFiles, { transcribe: true });
+      const taskText = buildEffectiveText(
+        messageText,
+        inbound.files,
+        inbound.failed,
+        inbound.notes,
+      );
       const taskDescription = isImplicitMention
         ? taskText
         : extractTaskFromMessage(taskText, botUserId);
@@ -775,9 +789,9 @@ export function registerMessageHandler(app: App): void {
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
-    await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
+    await using inbound = await fetchSlackFiles(client, messageFiles, { transcribe: true });
     const taskDescription = extractTaskFromMessage(
-      buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes),
+      buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
       botUserId,
     );
     if (!taskDescription) {

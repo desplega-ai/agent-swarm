@@ -20,6 +20,11 @@ import {
   fetchSlackFiles,
   notifySlackFileFailures,
 } from "./inbound-files";
+import {
+  collectSlackMessageFiles,
+  type SlackMessageLike,
+  slackInboundMessageText,
+} from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { hasOtherUserMention } from "./router";
 import { markSlackSessionProcessing } from "./session-status";
@@ -161,10 +166,21 @@ export function createAssistant(
         const threadTs = (msg.thread_ts as string) || message.ts;
         const channelId = message.channel;
         statusThread = { channelId, threadTs };
-        const messageText = (msg.text as string) || "";
+        // Mention checks read the raw `text`; the task gets any table block too.
+        const rawText = (msg.text as string) || "";
+        const attachments = msg.attachments as SlackMessageLike["attachments"];
+        const messageText = slackInboundMessageText({
+          text: rawText,
+          blocks: msg.blocks as unknown[] | undefined,
+          attachments,
+        });
         // `file_share` messages land here too: an image sent with no caption
-        // arrives with empty `text` and everything in `files`.
-        const files = msg.files as SlackFile[] | undefined;
+        // arrives with empty `text` and everything in `files`. A shared or
+        // forwarded message keeps its files on `attachments[].files`.
+        const files = collectSlackMessageFiles({
+          files: msg.files as SlackFile[] | undefined,
+          attachments,
+        });
         const userId = (msg.user as string) || "";
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
@@ -181,8 +197,8 @@ export function createAssistant(
         // If the message @-mentions someone OTHER than our bot and does NOT mention
         // our bot, it is addressed to a different agent/user — do not spawn a task.
         if (cachedBotUserId) {
-          const botMentioned = messageText.includes(`<@${cachedBotUserId}>`);
-          if (!botMentioned && hasOtherUserMention(messageText, cachedBotUserId)) {
+          const botMentioned = rawText.includes(`<@${cachedBotUserId}>`);
+          if (!botMentioned && hasOtherUserMention(rawText, cachedBotUserId)) {
             console.log(
               `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,
             );
@@ -196,7 +212,7 @@ export function createAssistant(
         const requestedByUserId = userId
           ? await resolveSlackUserId(client, userId, {
               sampleEventType: "assistant_message",
-              sampleContext: messageText,
+              sampleContext: rawText,
             })
           : undefined;
 
@@ -229,14 +245,14 @@ export function createAssistant(
         // Any in-body `<@U…>` mention the requester typed is rewritten via
         // the identity primitive before it reaches agent-visible task text —
         // never a raw Slack ID. Bot-mention routing checks above use the
-        // raw `messageText`, not this rendered copy.
+        // raw `rawText`, not this rendered copy.
         const renderedMessageText = await rewriteSlackMentions(
           buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
           cachedBotUserId ?? undefined,
         );
         const slack = {
           trigger: "mention" as const,
-          messages: [{ ts: message.ts, userId, text: messageText }],
+          messages: [{ ts: message.ts, userId, text: rawText }],
         };
 
         if (workingAgent && workingAgent.status !== "offline") {
