@@ -42,7 +42,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
       // Any thread is open to leads, like slack-post. Task Slack context can be
       // set by any agent, so a non-lead may only leave the thread of a
       // Slack-originated task assigned to it.
-      const isLead = can({
+      const mayLeaveAnyThread = can({
         principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
         verb: "integration.slack.post",
         resource: { kind: "none" },
@@ -60,7 +60,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         if (!task) {
           return toolErr("Task not found.");
         }
-        if (!isLead && (task.agentId !== agent.id || task.source !== "slack")) {
+        if (!mayLeaveAnyThread && (task.agentId !== agent.id || task.source !== "slack")) {
           return toolErr(
             "Only a lead or the agent assigned a Slack-originated task can leave its thread.",
           );
@@ -68,7 +68,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
       } else if (channelId && threadTs) {
-        if (!isLead) {
+        if (!mayLeaveAnyThread) {
           return toolErr("Leaving a thread by channelId and threadTs requires lead privileges.");
         }
         slackChannelId = channelId;
