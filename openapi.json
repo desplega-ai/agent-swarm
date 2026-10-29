@@ -5181,6 +5181,13 @@
               "seconds": {
                 "type": "number",
                 "minimum": 0
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "finish",
+                  "start"
+                ]
               }
             }
           },
@@ -5938,6 +5945,13 @@
               "seconds": {
                 "type": "number",
                 "minimum": 0
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "finish",
+                  "start"
+                ]
               }
             }
           },
@@ -64049,6 +64063,13 @@
                       "seconds": {
                         "type": "number",
                         "minimum": 0
+                      },
+                      "from": {
+                        "type": "string",
+                        "enum": [
+                          "finish",
+                          "start"
+                        ]
                       }
                     }
                   },
@@ -64466,6 +64487,13 @@
                       "seconds": {
                         "type": "number",
                         "minimum": 0
+                      },
+                      "from": {
+                        "type": "string",
+                        "enum": [
+                          "finish",
+                          "start"
+                        ]
                       }
                     }
                   },

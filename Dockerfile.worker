@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793246451-g9e5ffe
-ARG AMP_SHA512_AMD64=0606cdacfb3d79a3cda8b808a59d0a0ed5644e261afc1d356b68e3bd6bd8c6a9814b6b19c6c9583156ee76063f98132cfb53c3044229905dda6a8d192b0d70ef
-ARG AMP_SHA512_ARM64=09f1ea2ba751585d2032db3c806357a1162a78b7111daf405186db69063b5f0e6c0d628a6b28ea5f34214bd63b2cbc7aabe327f70d3d5f135d6603674f27969d
+ARG AMP_VERSION=0.0.1793275344-g17bf52
+ARG AMP_SHA512_AMD64=7eb4463264d9605dee66d248719d90b0596473e326bfe7ed8b17033ec942a58db805ced695862666e1a464f19e9c91060e46d841ee2b427225be3572a8db18af
+ARG AMP_SHA512_ARM64=3827544505f873959d32398dfc4e29ea2147a666c696150d8d085ef89aea045138f84027987d85a20d62bdc4b8c4cefd87a129fad2eebfcc50ef0711b9788bec
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -634,8 +634,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.3), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.3
+# scripts are not needed for ACP (verified on 0.26.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \

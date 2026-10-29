@@ -1,3 +1,4 @@
+import { TERMINAL_TASK_STATUSES } from "../../types";
 import { getDbClient } from "./runtime";
 
 /**
@@ -37,18 +38,20 @@ export interface SessionSummaryDrift {
     | "lastActivityAt"
     | "latestStatus"
     | "pendingApproval"
+    | "openTasks"
     | "lastHumanAt"
     | "member";
   expected: string | number | null;
   stored: string | number | null;
 }
 
+const OPEN_TASK_SQL = `t.status NOT IN (${TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(", ")})`;
 const HUMAN_TASK_SQL = `t.requestedByUserId IS NOT NULL AND t.requestedByUserIdInherited = 0
   AND COALESCE(t.source, '') NOT IN ('mcp', 'system', 'schedule', 'workflow')`;
 
 /**
  * Read-only drift check: compares the stored summaries and members with a
- * fresh chain walk (the rule `sessionSummaryQuery` applies today). Returns one
+ * fresh chain walk (the rule `legacySessionSummaryQuery` applies). Returns one
  * row per mismatch, so an empty result means the tables are exact. With
  * `since`, only roots whose chain activity is at or after it are compared.
  * `latestStatus` is skipped when two chain tasks tie on the newest
@@ -64,7 +67,7 @@ export function sessionSummaryDriftQuery(since: string | null = null): {
       UNION ALL SELECT c.root_id, t.id FROM chain c JOIN agent_tasks t ON t.parentTaskId = c.id
     ), walked AS (
       SELECT c.root_id, COUNT(*) AS chainCount, t.status AS latestStatus,
-        MAX(t.lastUpdatedAt) AS lastActivityAt
+        MAX(t.lastUpdatedAt) AS lastActivityAt, SUM(${OPEN_TASK_SQL}) AS openTasks
       FROM chain c JOIN agent_tasks t ON t.id = c.id GROUP BY c.root_id
     ), expected AS (
       SELECT w.*,
@@ -98,6 +101,9 @@ export function sessionSummaryDriftQuery(since: string | null = null): {
     UNION ALL SELECT e.root_id, 'pendingApproval', e.pendingApproval, s.pendingApprovalCount > 0
       FROM expected e JOIN session_summaries s ON s.rootId = e.root_id
       WHERE (s.pendingApprovalCount > 0) IS NOT e.pendingApproval
+    UNION ALL SELECT e.root_id, 'openTasks', e.openTasks, s.openTaskCount
+      FROM expected e JOIN session_summaries s ON s.rootId = e.root_id
+      WHERE s.openTaskCount IS NOT e.openTasks
     UNION ALL SELECT e.root_id, 'lastHumanAt', e.lastHumanAt, s.lastHumanAt
       FROM expected e JOIN session_summaries s ON s.rootId = e.root_id
       WHERE s.lastHumanAt IS NOT e.lastHumanAt

@@ -292,6 +292,7 @@ Boundary code calls `dispatchPre` or `dispatchPost`.
 Boundary code never reads the registry.
 
 Call `dispatchPre` only at an entry point before a transaction starts. When the task must be created inside a transaction (schedule firing, deferred waits), call `prepareTaskWithSiblingAwareness` outside it and pass the result in.
+`requestSteering` dispatches `pre.task.steer` before resuming a paused task or writing steering rows and logs. Only nonempty message text can be modified. A block throws `SteeringBlockedError` (HTTP 403 / MCP tool error); Slack and Chat SDK consume it without falling back to task creation. Slack acknowledgement log rows are written only after an allowed steer.
 The dispatcher calls `isInTransaction()` as a defensive guard.
 If the guard detects a transaction, the dispatcher logs the event and returns `continue`.
 

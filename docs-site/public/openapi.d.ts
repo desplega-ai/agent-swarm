@@ -26429,6 +26429,8 @@ export interface paths {
                             hours?: number;
                             minutes?: number;
                             seconds?: number;
+                            /** @enum {string} */
+                            from?: "finish" | "start";
                         };
                         input?: {
                             [key: string]: string;
@@ -26619,6 +26621,8 @@ export interface paths {
                             hours?: number;
                             minutes?: number;
                             seconds?: number;
+                            /** @enum {string} */
+                            from?: "finish" | "start";
                         } | null;
                         input?: {
                             [key: string]: string;
@@ -29119,6 +29123,8 @@ export interface components {
                 hours?: number;
                 minutes?: number;
                 seconds?: number;
+                /** @enum {string} */
+                from?: "finish" | "start";
             };
             input?: {
                 [key: string]: string;
@@ -29367,6 +29373,8 @@ export interface components {
                 hours?: number;
                 minutes?: number;
                 seconds?: number;
+                /** @enum {string} */
+                from?: "finish" | "start";
             };
             input?: {
                 [key: string]: string;
