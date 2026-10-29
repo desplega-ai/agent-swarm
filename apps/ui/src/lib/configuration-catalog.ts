@@ -1340,6 +1340,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_THREAD_WAKE_ON_ANY_MESSAGE",
+        label: "Wake on replies to other users",
+        description:
+          "Treat a Slack thread reply as a follow-up even when it @-mentions another user and not the bot. Off means a reply like `@Alice wdyt?` is ignored.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
         label: "Block external Slack channels",
         description:

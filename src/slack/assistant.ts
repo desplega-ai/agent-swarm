@@ -26,7 +26,7 @@ import {
   slackInboundMessageText,
 } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
-import { hasOtherUserMention } from "./router";
+import { isAddressedToOtherUser } from "./router";
 import { markSlackSessionProcessing } from "./session-status";
 import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -195,10 +195,11 @@ export function createAssistant(
         }
 
         // If the message @-mentions someone OTHER than our bot and does NOT mention
-        // our bot, it is addressed to a different agent/user — do not spawn a task.
+        // our bot, it is addressed to a different agent/user — do not spawn a task
+        // (unless SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true).
         if (cachedBotUserId) {
           const botMentioned = rawText.includes(`<@${cachedBotUserId}>`);
-          if (!botMentioned && hasOtherUserMention(rawText, cachedBotUserId)) {
+          if (!botMentioned && isAddressedToOtherUser(rawText, cachedBotUserId)) {
             console.log(
               `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,
             );

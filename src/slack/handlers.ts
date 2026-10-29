@@ -37,7 +37,7 @@ import {
 import {
   broadcastMatches,
   extractTaskFromMessage,
-  hasOtherUserMention,
+  isAddressedToOtherUser,
   routeMessage,
 } from "./router";
 import type { AgentMatch } from "./types";
@@ -531,7 +531,7 @@ export function registerMessageHandler(app: App): void {
     // those messages are addressed to a different agent/user (e.g. Devin) and must not spawn.
     const isAssistantThread = !!msg.assistant_thread;
     const isImplicitMention =
-      isAssistantThread && !botMentioned && !hasOtherUserMention(effectiveText, botUserId);
+      isAssistantThread && !botMentioned && !isAddressedToOtherUser(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
@@ -584,9 +584,10 @@ export function registerMessageHandler(app: App): void {
     // ADDITIVE_SLACK: Buffer non-mention thread messages.
     // Skip if the message @-mentions someone other than our bot (e.g. "@Devin wdyt?"):
     // that message is directed at a different bot/user and must not be fed to
-    // the swarm as an implicit follow-up.
+    // the swarm as an implicit follow-up. SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true
+    // turns this skip off.
     if (additiveSlack && !botMentioned && msg.thread_ts && !requireMentionForThreadFollowup) {
-      if (hasOtherUserMention(effectiveText, botUserId)) {
+      if (isAddressedToOtherUser(effectiveText, botUserId)) {
         console.log(
           `[Slack] Skipping ADDITIVE buffer in ${msg.channel}/${msg.thread_ts}: message mentions another user`,
         );

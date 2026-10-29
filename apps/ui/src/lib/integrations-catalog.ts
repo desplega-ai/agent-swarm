@@ -364,6 +364,14 @@ export const INTEGRATIONS: IntegrationDef[] = [
         helpText: "When true, the bot only responds to in-thread follow-ups that @mention it.",
       },
       {
+        key: "SLACK_THREAD_WAKE_ON_ANY_MESSAGE",
+        label: "Wake on thread replies to other users",
+        type: "boolean",
+        advanced: true,
+        helpText:
+          "When true, in-thread replies that @mention another user (and not the bot) still count as follow-ups.",
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         type: "boolean",

@@ -117,6 +117,8 @@ If the assigned worker is offline or unavailable, the follow-up routes to the le
 
 By default, thread follow-ups route automatically without requiring an @mention. That includes human replies to swarm-started root messages, even when no task row existed yet for the thread. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
 
+A thread reply that @mentions another user but not the bot (for example `@Alice wdyt?`) is addressed to that user, so the swarm ignores it. This applies to follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to make the swarm wake on these replies too. Each such reply then becomes a follow-up, so pair the flag with `ADDITIVE_SLACK=true` to batch side conversations into one task. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` takes precedence over this flag.
+
 #### Live steering instead of follow-up tasks
 
 Slack can send buffered thread feedback into a task that is still running:

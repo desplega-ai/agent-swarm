@@ -694,6 +694,9 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # By default, replies to swarm-started thread roots also auto-route as follow-ups.
 # SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
 
+# Optional: Wake on thread replies that @mention another user, not the bot (default: false)
+# SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true
+
 # Steer an in-progress task from Slack thread replies (default: lead).
 # Values: off | lead | all. Explicit off preserves normal follow-up task routing.
 # SLACK_THREAD_STEERING=lead

@@ -19,6 +19,17 @@ export function hasOtherUserMention(text: string, botUserId: string): boolean {
 }
 
 /**
+ * Returns true if a thread message mentions another user, so it is addressed to
+ * that user and not to the swarm. `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` turns
+ * this guard off: the swarm then wakes on every thread message. Callers combine
+ * the result with `!botMentioned`.
+ */
+export function isAddressedToOtherUser(text: string, botUserId: string): boolean {
+  if (isEnvFlagEnabled("SLACK_THREAD_WAKE_ON_ANY_MESSAGE", false)) return false;
+  return hasOtherUserMention(text, botUserId);
+}
+
+/**
  * Build the matches for an explicit swarm#all broadcast.
  */
 export function broadcastMatches(agents: Agent[]): AgentMatch[] {
@@ -74,9 +85,9 @@ export async function routeMessage(
   // Thread follow-up — route to agent already working in this thread.
   // Skip if the message @-mentions someone other than our bot (e.g. "@Devin wdyt?")
   // and does not mention our bot: that message is directed at a different bot/user,
-  // not a follow-up intended for the swarm.
+  // not a follow-up intended for the swarm (unless SLACK_THREAD_WAKE_ON_ANY_MESSAGE).
   if (matches.length === 0 && threadContext && (!requireMentionForThreadFollowup || botMentioned)) {
-    if (!botMentioned && hasOtherUserMention(text, botUserId)) {
+    if (!botMentioned && isAddressedToOtherUser(text, botUserId)) {
       console.log(
         `[Slack] Skipping thread follow-up in ${threadContext.channelId}/${threadContext.threadTs}: message mentions another user`,
       );
