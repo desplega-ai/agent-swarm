@@ -1,12 +1,31 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createTaskExtended, getSlackTasksInThread, initDb } from "../be/db";
+import { z } from "zod";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createWorkflow,
+  getSlackTasksInThread,
+  initDb,
+  updateWorkflow,
+} from "../be/db";
+import { handleTasks } from "../http/tasks";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { registerMessageHandler, resetSlackHandlerCachesForTesting } from "../slack/handlers";
 import { isSlackThreadLeft, SLACK_LEFT_THREAD_KV_NAMESPACE } from "../slack/left-threads";
+import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
+import { slackContextKey } from "../tasks/context-key";
 import { registerSlackLeaveThreadTool } from "../tools/slack-leave-thread";
-import type { Agent } from "../types";
+import type { Agent, AgentTask } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
+import { workflowEventBus } from "../workflows/event-bus";
+import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
+import { ExecutorRegistry } from "../workflows/executors/registry";
+import { handleEventTrigger } from "../workflows/triggers";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-slack-leave-thread.sqlite";
 const BOT_USER_ID = "U_LEAVE_BOT";
@@ -75,14 +94,39 @@ let worker: Agent;
 let otherWorker: Agent;
 
 async function seedThread(channel: string, threadTs: string) {
+  // As the Slack handlers create it: only Slack ingress writes slackTriggerMessageTs.
   return createTaskExtended("original ask", {
     agentId: worker.id,
     source: "slack",
     slackChannelId: channel,
     slackThreadTs: threadTs,
+    slackTriggerMessageTs: threadTs,
     slackUserId: HUMAN,
   });
 }
+
+/** Counts how many times a workflow node actually runs. */
+class RecordingExecutor extends BaseExecutor<
+  typeof RecordingExecutor.schema,
+  typeof RecordingExecutor.outSchema
+> {
+  static readonly schema = z.object({ template: z.string().optional() });
+  static readonly outSchema = z.object({ sent: z.boolean() });
+  static runs = 0;
+
+  readonly type = "notify";
+  readonly mode = "instant" as const;
+  readonly configSchema = RecordingExecutor.schema;
+  readonly outputSchema = RecordingExecutor.outSchema;
+
+  protected async execute(): Promise<ExecutorResult<z.infer<typeof RecordingExecutor.outSchema>>> {
+    RecordingExecutor.runs++;
+    return { status: "success", output: { sent: true } };
+  }
+}
+
+let routeServer: Server;
+let routeBaseUrl: string;
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
@@ -107,9 +151,24 @@ beforeAll(async () => {
       handlers.set(type, handler);
     },
   } as never);
+
+  routeServer = createServer(async (req, res) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "test-key" });
+    const url = req.url ?? "/";
+    const handled = await handleTasks(
+      req,
+      res,
+      url.split("?")[0]?.split("/").filter(Boolean) ?? [],
+      new URLSearchParams(url.split("?")[1] ?? ""),
+      req.headers["x-agent-id"] as string | undefined,
+    );
+    if (!handled) res.writeHead(404).end();
+  });
+  routeBaseUrl = `http://127.0.0.1:${await listenOnFreePort(routeServer)}`;
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await new Promise<void>((resolve) => routeServer.close(() => resolve()));
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -200,5 +259,76 @@ describe("slack-leave-thread", () => {
     const byLead = await tool.handler({ taskId: forged.id }, meta(lead.id));
     expect(byLead.structuredContent.success).toBe(true);
     expect(await isSlackThreadLeft("C_LEAVE_E", "2200.0001")).toBe(true);
+  });
+
+  test("a non-lead cannot leave a thread through a task it created over REST with source slack", async () => {
+    const channel = "C_FORGED_HTTP";
+    const threadTs = "1700000000.000001";
+    const res = await fetch(`${routeBaseUrl}/api/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agent-id": worker.id },
+      body: JSON.stringify({
+        task: "forged slack task",
+        agentId: worker.id,
+        routingReason: "skill",
+        source: "slack",
+        contextKey: slackContextKey({ channelId: channel, threadTs }),
+      }),
+    });
+    expect(res.status).toBe(201);
+    const forged = (await res.json()) as AgentTask;
+    expect(forged.source).toBe("slack");
+    expect(forged.slackChannelId).toBe(channel);
+    expect(forged.slackThreadTs).toBe(threadTs);
+
+    const denied = await buildTool().handler({ taskId: forged.id }, meta(worker.id));
+    expect(denied.structuredContent.success).toBe(false);
+    expect(await isSlackThreadLeft(channel, threadTs)).toBe(false);
+  });
+
+  test("a plain reply in a left thread starts no workflow; a mention still does", async () => {
+    const workflow = await createWorkflow({
+      name: "leave-thread-slack-listener",
+      triggers: [{ type: "event", eventName: "slack.message" }],
+      definition: { nodes: [{ id: "n1", type: "notify", config: { template: "ping" } }] },
+    });
+    const registry = new ExecutorRegistry();
+    registry.register(new RecordingExecutor());
+    const emitted: unknown[] = [];
+    const started: Promise<string[]>[] = [];
+    const listener = (payload: unknown) => {
+      emitted.push(payload);
+      started.push(handleEventTrigger("slack.message", payload, registry));
+    };
+    workflowEventBus.on("slack.message", listener);
+    RecordingExecutor.runs = 0;
+    try {
+      const task = await seedThread("C_LEAVE_F", "2300.0001");
+      await buildTool().handler({ taskId: task.id }, meta(worker.id));
+
+      await sendThreadReply("C_LEAVE_F", "2300.0001", "people talking among themselves");
+      const mutedRuns = (await Promise.all(started)).flat();
+      expect(emitted).toHaveLength(0);
+      expect(mutedRuns).toHaveLength(0);
+      expect(RecordingExecutor.runs).toBe(0);
+
+      await sendThreadReply("C_LEAVE_F", "2300.0001", `<@${BOT_USER_ID}> back in`);
+      const mentionRuns = (await Promise.all(started)).flat();
+      expect(emitted).toHaveLength(1);
+      expect(mentionRuns).toHaveLength(1);
+      expect(RecordingExecutor.runs).toBe(1);
+    } finally {
+      workflowEventBus.off("slack.message", listener);
+      await updateWorkflow(workflow.id, { enabled: false });
+    }
+  });
+
+  test("replies buffered before the thread was left create no task when they flush", async () => {
+    const task = await seedThread("C_LEAVE_G", "2400.0001");
+    bufferThreadMessage("C_LEAVE_G", "2400.0001", "still chatting", HUMAN, "2400.0002");
+    await buildTool().handler({ taskId: task.id }, meta(worker.id));
+
+    await instantFlush("C_LEAVE_G:2400.0001");
+    expect(await getSlackTasksInThread("C_LEAVE_G", "2400.0001")).toHaveLength(1);
   });
 });

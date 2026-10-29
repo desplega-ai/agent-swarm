@@ -39,9 +39,10 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         return toolErr("Agent not found.");
       }
 
-      // Any thread is open to leads, like slack-post. Task Slack context can be
-      // set by any agent, so a non-lead may only leave the thread of a
-      // Slack-originated task assigned to it.
+      // Any thread is open to leads, like slack-post. Task Slack context and
+      // source can be set by any agent (send-task, POST /api/tasks), so a non-lead
+      // may only leave the thread of a task assigned to it that Slack ingress
+      // created: only the Slack handlers write slackTriggerMessageTs.
       const mayLeaveAnyThread = can({
         principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
         verb: "integration.slack.post",
@@ -60,7 +61,10 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         if (!task) {
           return toolErr("Task not found.");
         }
-        if (!mayLeaveAnyThread && (task.agentId !== agent.id || task.source !== "slack")) {
+        if (
+          !mayLeaveAnyThread &&
+          (task.agentId !== agent.id || task.source !== "slack" || !task.slackTriggerMessageTs)
+        ) {
           return toolErr(
             "Only a lead or the agent assigned a Slack-originated task can leave its thread.",
           );
