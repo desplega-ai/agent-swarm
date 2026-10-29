@@ -18,6 +18,7 @@ import {
   getWorkflowRun,
   initDb,
   listWorkflows,
+  updateWorkflow,
 } from "../be/db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -289,6 +290,39 @@ describe("swarm-script principal for a creator-less workflow", () => {
       [dreaming.id],
     );
     expect(runs).toEqual([]);
+  });
+
+  test("a creator-less schedule refuses the lead once a worker edits the seeded workflow", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-edited-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    await updateWorkflow(dreaming.id, { description: "edited by a worker" });
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
+        'seeded workflow "dreaming" was edited',
+      );
+    } finally {
+      await updateWorkflow(dreaming.id, { description: dreaming.description });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test("control: a creator-less workflow the seeder never wrote keeps running agentless", async () => {
+    const copy = await createWorkflow({
+      name: `principal-unseeded-${crypto.randomUUID()}`,
+      definition: dreaming.definition,
+    });
+    const schedule = await createScheduledTask({
+      name: `principal-unseeded-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: copy.id,
+    });
+    await dispatchScheduleTarget(schedule);
+    expect(gatherPrincipals()).toEqual(["workflow"]);
   });
 
   test("end to end: the seeded dreaming-daily schedule fires dreaming as the lead, once a day", async () => {

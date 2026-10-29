@@ -75,6 +75,7 @@ import type {
 import { validateDefinition } from "../../workflows/definition";
 import { computeContentHash, createWorkflow, listWorkflows, updateWorkflow } from "../db";
 import { resolveSeededEnabled } from "./automation-toggle";
+import { getSeedState } from "./state-db";
 import type { Seeder, SeedItem } from "./types";
 
 type AutomationTemplateConfig = {
@@ -218,6 +219,19 @@ function workflowFromRow(workflow: Workflow): SeedWorkflow {
     requiredParams: workflow.requiredParams ?? [],
     requires: workflow.requires ?? [],
   };
+}
+
+/**
+ * Whether a live workflow is seed source: `pristine` while it still matches
+ * what the seeder last wrote for its name, `edited` once anyone changed it,
+ * `unseeded` for a workflow the seeder never wrote.
+ */
+export async function seededWorkflowState(
+  workflow: Workflow,
+): Promise<"pristine" | "edited" | "unseeded"> {
+  const state = await getSeedState("workflow", workflow.name);
+  if (!state) return "unseeded";
+  return state.seededHash === workflowSeedHash(workflowFromRow(workflow)) ? "pristine" : "edited";
 }
 
 export function createWorkflowsSeeder(
