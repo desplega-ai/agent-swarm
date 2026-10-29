@@ -2,7 +2,9 @@
 
 Trigger the `dreaming` workflow once a day. It replaces the Daily Evolution schedule (`daily-compounding-reflection`), which now seeds disabled.
 
-A seeded schedule cannot target a workflow directly, so this schedule creates one small pool task, and the worker that claims it triggers the workflow. It runs after the Daily Blocker Digest (02:05 UTC), whose digest the workflow reads.
+This is a workflow schedule: each fire starts a `dreaming` run directly, with no agent task in between. A seeded schedule has no creator, so the run acts as the swarm's lead, resolved when it fires; with no lead the fire fails. It runs after the Daily Blocker Digest (02:05 UTC), whose digest the workflow reads.
+
+The `dreaming` workflow carries the double-run guard as a 20-hour cooldown: a run that would start within 20 hours of another `dreaming` run start (any status, manual runs included) is recorded as skipped. Dreaming runs share KV state, so they must never run twice in a day.
 
 ## Schedule
 
@@ -10,18 +12,8 @@ A seeded schedule cannot target a workflow directly, so this schedule creates on
 {
   "cron": "30 3 * * *",
   "timezone": "UTC",
-  "enabled": true
+  "enabled": true,
+  "targetType": "workflow",
+  "workflow": "dreaming"
 }
 ```
-
-## Scheduled Task
-
-Task Type: Dreaming trigger
-
-Trigger today's run of the `dreaming` workflow. Do nothing else: no report, no memory, no Slack.
-
-1. Double-run guard. Run `db-query` with exactly this SQL:
-   `SELECT w.name, r.id, r.status, r.startedAt FROM workflow_runs r JOIN workflows w ON w.id = r.workflowId WHERE w.name LIKE 'dreaming%' AND julianday(r.startedAt) >= julianday('now', '-20 hours') ORDER BY r.startedAt DESC LIMIT 5`
-   If it returns any row, complete this task without triggering, with the output `skipped: workflow <name> run <id> started at <startedAt>, within 20 hours`. Dreaming workflows share KV state, so they must never run twice in a day. If the query fails, complete without triggering and give the error.
-2. Find the workflow named exactly `dreaming` with `list-workflows`. If it is missing or disabled, complete with that reason and trigger nothing.
-3. Call `trigger-workflow` with its id and no `triggerData`. Complete with the run id it returns.

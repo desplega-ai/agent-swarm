@@ -14,6 +14,8 @@ import {
   createScheduledTask,
   createWorkflow,
   getDbClient,
+  getScheduledTaskByName,
+  getWorkflowRun,
   initDb,
   listWorkflows,
 } from "../be/db";
@@ -21,6 +23,7 @@ import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import * as runCredential from "../be/scripts/run-credential";
 import { runSeeder } from "../be/seed";
+import { createSchedulesSeeder } from "../be/seed/schedules-seeder";
 import { createWorkflowsSeeder } from "../be/seed/workflows-seeder";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
@@ -160,9 +163,20 @@ afterAll(async () => {
   await removeDbFiles();
 });
 
-beforeEach(() => {
-  // Dreaming has no cooldown, so earlier runs (parked on an agent-task) do not
-  // block the next trigger.
+/** Move every dreaming run start out of its 20-hour cooldown window. */
+async function ageDreamingRuns(): Promise<void> {
+  await getDbClient().run(
+    `UPDATE workflow_runs SET startedAt = '2000-01-01T00:00:00.000Z',
+       finishedAt = CASE WHEN finishedAt IS NULL THEN NULL ELSE '2000-01-01T00:00:00.000Z' END
+     WHERE workflowId = ?`,
+    [dreaming.id],
+  );
+}
+
+beforeEach(async () => {
+  // Dreaming has a 20-hour cooldown. Age earlier runs (parked on an agent-task)
+  // so they do not block the next trigger.
+  await ageDreamingRuns();
   calls = [];
   scriptResult = QUIET_GATHER;
 });
@@ -241,6 +255,64 @@ describe("swarm-script principal for a creator-less workflow", () => {
     expect(gatherPrincipals()).toEqual([leadId]);
   });
 
+  test("a creator-less schedule runs as the lead, resolved at fire time", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-seeded-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+      targetAgentId: workerId,
+    });
+    expect(schedule.createdByAgentId).toBeUndefined();
+    await dispatchScheduleTarget(schedule);
+    expect(gatherPrincipals()).toEqual([leadId]);
+  });
+
+  test("a creator-less schedule fails its fire when the swarm has no lead", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-leadless-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    await getDbClient().run("UPDATE agents SET isLead = 0 WHERE id = ?", [leadId]);
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
+        "has no creator and the swarm has no lead",
+      );
+    } finally {
+      await getDbClient().run("UPDATE agents SET isLead = 1 WHERE id = ?", [leadId]);
+    }
+    expect(calls).toEqual([]);
+    const runs = await getDbClient().query<{ id: string }>(
+      "SELECT id FROM workflow_runs WHERE workflowId = ? AND startedAt > '2001-01-01'",
+      [dreaming.id],
+    );
+    expect(runs).toEqual([]);
+  });
+
+  test("end to end: the seeded dreaming-daily schedule fires dreaming as the lead, once a day", async () => {
+    const seeded = await runSeeder(createSchedulesSeeder(), { quiet: true });
+    expect(seeded.failed).toEqual([]);
+    const schedule = await getScheduledTaskByName("dreaming-daily");
+    expect(schedule).toMatchObject({ targetType: "workflow", workflowId: dreaming.id });
+    expect(schedule?.taskTemplate).toBeUndefined();
+    expect(schedule?.createdByAgentId).toBeUndefined();
+
+    const first = await dispatchScheduleTarget(schedule!);
+    expect(first.task).toBeUndefined();
+    expect(first.workflowRunIds).toHaveLength(1);
+    expect(gatherPrincipals()).toEqual([leadId]);
+    const run = await getWorkflowRun(first.workflowRunIds![0]!);
+    expect(run?.triggerData).toMatchObject({ scheduleName: "dreaming-daily" });
+
+    // The cooldown replaces the old task prompt's 20-hour double-run guard.
+    const second = await dispatchScheduleTarget(schedule!);
+    const skipped = await getWorkflowRun(second.workflowRunIds![0]!);
+    expect(skipped).toMatchObject({ status: "skipped", error: "cooldown" });
+    expect(gatherPrincipals()).toEqual([leadId]);
+  });
+
   test("control: a workflow with a creator still runs as its creator", async () => {
     const owned = await createWorkflow({
       name: `principal-owned-${crypto.randomUUID()}`,
@@ -251,10 +323,9 @@ describe("swarm-script principal for a creator-less workflow", () => {
     expect(gatherPrincipals()).toEqual([leadId]);
   });
 
-  test("control: the seeded schedule's fire (a worker triggers with no data) runs the *-lead nodes on the lead", async () => {
-    // dreaming-daily makes a pool task; the worker that claims it calls
-    // trigger-workflow with no triggerData. Scripts run as that worker, while
-    // synthesize and apply-lead target gather's leadAgentId.
+  test("control: a worker's manual trigger with no data runs the *-lead nodes on the lead", async () => {
+    // A worker that calls trigger-workflow with no triggerData. Scripts run as
+    // that worker, while synthesize and apply-lead target gather's leadAgentId.
     scriptResult = {
       ok: true,
       agents: [{ id: workerId, name: "principal-worker" }],

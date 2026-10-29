@@ -6283,7 +6283,7 @@ export interface UpdateScheduledTaskData {
   description?: string;
   cronExpression?: string | null;
   intervalMs?: number | null;
-  taskTemplate?: string;
+  taskTemplate?: string | null;
   taskType?: string;
   tags?: string[];
   priority?: number;

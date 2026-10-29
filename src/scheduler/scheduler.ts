@@ -11,6 +11,7 @@ import {
 import {
   getDbClient,
   getDueScheduledTasks,
+  getLeadAgent,
   getScheduledTaskById,
   getUserById,
   getWorkflow,
@@ -252,8 +253,7 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
-        // The creator, as for script schedules: `targetAgentId` is caller-chosen.
-        triggeredByAgentId: schedule.createdByAgentId,
+        triggeredByAgentId: await scheduledWorkflowPrincipal(schedule),
         requestedByUserId: schedule.createdBy,
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
@@ -293,6 +293,24 @@ export async function dispatchScheduleTarget(
       return { triggeredWorkflows, workflowRunIds };
     }
   }
+}
+
+/**
+ * The agent a scheduled workflow run acts as: the schedule's creator, as for
+ * script schedules (`targetAgentId` and trigger data are caller-chosen, so
+ * neither is ever the principal). A creator-less (seeded) schedule runs as the
+ * lead, resolved at fire time. With no lead the fire fails instead of running
+ * the workflow's scripts with no agent.
+ */
+async function scheduledWorkflowPrincipal(schedule: ScheduledTask): Promise<string> {
+  if (schedule.createdByAgentId) return schedule.createdByAgentId;
+  const lead = await getLeadAgent();
+  if (!lead) {
+    throw new Error(
+      `Schedule "${schedule.name}" has no creator and the swarm has no lead to run its workflow as`,
+    );
+  }
+  return lead.id;
 }
 
 async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): Promise<void> {
