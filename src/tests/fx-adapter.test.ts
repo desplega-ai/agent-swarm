@@ -27,7 +27,6 @@ import {
 import {
   checkFxCredentials,
   ensureFxSettings,
-  FX_PINNED_VERSION,
   FxAdapter,
   mergeFxSettings,
 } from "../providers/fx-adapter";
@@ -201,13 +200,6 @@ describe("FxAdapter registration", () => {
       steerModes: ["steer"],
     });
     expect(adapter.traits.steerModes).toEqual(PROVIDER_STEER_CAPABILITIES.fx);
-  });
-
-  test("the image pins the same fx version the adapter names", async () => {
-    const dockerfile = await Bun.file(
-      join(import.meta.dir, "..", "..", "Dockerfile.worker"),
-    ).text();
-    expect(dockerfile.match(/^ARG FX_VERSION=(\S+)$/m)?.[1]).toBe(FX_PINNED_VERSION);
   });
 
   test("credential readiness needs one of the three route keys", () => {

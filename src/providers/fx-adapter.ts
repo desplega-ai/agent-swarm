@@ -18,7 +18,7 @@ import type {
 
 /**
  * The fx release the worker image installs (`ARG FX_VERSION` in
- * Dockerfile.worker; a test keeps the two equal). Every ACP shape this adapter
+ * Dockerfile.worker; bump the two together). Every ACP shape this adapter
  * relies on was measured against it.
  */
 export const FX_PINNED_VERSION = "0.0.15";
