@@ -4206,7 +4206,11 @@ export function implicitCloseActiveToolSpans(
   return closed;
 }
 
-async function spawnProviderProcess(
+/**
+ * Start a provider session for a task. The new-task and resumed-task paths of
+ * the poll loop both start here; exported so tests can drive that boundary.
+ */
+export async function spawnProviderProcess(
   adapter: Awaited<ReturnType<typeof createProviderAdapter>>,
   opts: {
     prompt: string;

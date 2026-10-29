@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { resetFetchForTesting, setFetchForTesting } from "../providers/codex-oauth/flow.js";
+import { persistCodexOAuth, storeCodexOAuth } from "../providers/codex-oauth/storage.js";
 import { loadChatgptSubscriptionCredential } from "../providers/codex-oauth/subscription.js";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure";
@@ -21,6 +22,13 @@ const CONFIG = { apiUrl: API_URL, apiKey: "test-key", codexSlot: 0, model: "open
 const originalFetch = globalThis.fetch;
 let logged: string[] = [];
 const spies: Array<{ mockRestore: () => void }> = [];
+
+/** A transport error whose message echoes the request carrying the tokens. */
+function rejectedPersist(): never {
+  throw new TypeError(
+    `fetch failed: socket closed while sending {"value":"{\\"access\\":\\"${NEW_ACCESS}\\",\\"refresh\\":\\"${NEW_REFRESH}\\"}"} (${encodeURIComponent(NEW_REFRESH)})`,
+  );
+}
 
 /** Config store holding one expired slot; `putResponse` answers the persist. */
 function installConfigStore(putResponse: () => Response): void {
@@ -126,6 +134,61 @@ describe("pool refresh failure egress", () => {
     expect(reason).toContain("HTTP 500");
     expect(isCodexAuthFailureReason(reason)).toBe(false);
     expectNoSecret(reason);
+    expectNoSecret(logged.join("\n"));
+  });
+
+  test("a persist fetch rejection echoing the rotated tokens never reaches the reason or logs", async () => {
+    installConfigStore(rejectedPersist);
+    setFetchForTesting((async () =>
+      Response.json({
+        access_token: NEW_ACCESS,
+        refresh_token: NEW_REFRESH,
+        expires_in: 864000,
+      })) as typeof fetch);
+
+    const reason = await failureOf(loadChatgptSubscriptionCredential(CONFIG));
+
+    expect(reason).toContain("Failed to store codex_oauth_0 config: fetch failed");
+    expect(isCodexAuthFailureReason(reason)).toBe(false);
+    expectNoSecret(reason);
+    expectNoSecret(logged.join("\n"));
+  });
+});
+
+describe("persist egress", () => {
+  const rotated: CodexOAuthCredentials = {
+    access: NEW_ACCESS,
+    refresh: NEW_REFRESH,
+    expires: Date.now() + 864000_000,
+    accountId: "acct-egress",
+  };
+
+  test("storeCodexOAuth rethrows a fetch rejection with no token and no raw cause", async () => {
+    globalThis.fetch = (async () => rejectedPersist()) as unknown as typeof fetch;
+
+    let thrown: unknown;
+    try {
+      await storeCodexOAuth(API_URL, "test-key", rotated, 0);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const err = thrown as Error;
+    expect(err.message).toContain("fetch failed");
+    expect(err.cause).toBeUndefined();
+    expectNoSecret(Bun.inspect(err));
+  });
+
+  test("persistCodexOAuth logs a fetch rejection or an echoing response without tokens", async () => {
+    globalThis.fetch = (async () => rejectedPersist()) as unknown as typeof fetch;
+    await persistCodexOAuth(API_URL, "test-key", rotated, 0);
+    globalThis.fetch = (async () =>
+      new Response(`rejected value ${NEW_ACCESS} ${NEW_REFRESH}`, { status: 500 })) as typeof fetch;
+    await persistCodexOAuth(API_URL, "test-key", rotated, 0);
+
+    expect(logged.join("\n")).toContain("fetch failed");
+    expect(logged.join("\n")).toContain("HTTP 500");
     expectNoSecret(logged.join("\n"));
   });
 });

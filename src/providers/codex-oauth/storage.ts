@@ -271,24 +271,33 @@ export async function storeCodexOAuth(
   slot = 0,
 ): Promise<void> {
   const key = codexOAuthKeyForSlot(slot);
-  const res = await fetch(`${apiUrl}/api/config`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      scope: "global",
-      key,
-      value: JSON.stringify(creds),
-      isSecret: true,
-      description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by codex-login)`,
-    }),
-  });
+  // The request carries the tokens, so a transport error or the store's reply
+  // may echo them. Every error leaving here is rebuilt from redacted text,
+  // with no `cause` pointing back at the raw one.
+  const redact = (text: string) => redactTokens(text, [creds.access, creds.refresh]);
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}/api/config`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        scope: "global",
+        key,
+        value: JSON.stringify(creds),
+        isSecret: true,
+        description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by codex-login)`,
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to store ${key} config: ${redact(message)}`);
+  }
 
   if (!res.ok) {
-    // The store may echo the submitted value: never surface its tokens.
-    const text = redactTokens(await res.text().catch(() => ""), [creds.access, creds.refresh]);
+    const text = redact(await res.text().catch(() => ""));
     throw new Error(`Failed to store ${key} config: HTTP ${res.status} ${text}`);
   }
 }
@@ -369,7 +378,11 @@ export async function persistCodexOAuth(
   try {
     await storeCodexOAuth(apiUrl, apiKey, creds, slot);
   } catch (err) {
-    console.error("[codex-oauth] persistCodexOAuth failed (non-fatal):", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      "[codex-oauth] persistCodexOAuth failed (non-fatal):",
+      redactTokens(message, [creds.access, creds.refresh]),
+    );
   }
 }
 
