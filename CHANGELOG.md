@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-10-29
+
+### Added
+- Agents: each agent can post to Slack under its own icon (an emoji, an image URL, or the Slack app's icon) through `update-profile` `slackIcon`; `slack-update` keeps the icon a message was posted with (#2551).
+- Deploy: one-click deploy from a cloud-init paste on any VPS, plus DigitalOcean image and Railway template options (#2528).
+- Comb: Files turns on by default when a browser can reach agent-fs; `COMB_ENABLED` overrides and `AGENT_FS_PUBLIC_URL` sets the browser URL (#2544).
+- Evals: pi runs against Helmcode direct with a `helmcode` preset (#2548).
+- Docs: dreaming loop guide (#2552).
+
+### Changed
+- Tasks: `get-tasks` `search` runs through an FTS5 token index. It matches words or phrases with a prefix match on the last word, or a task id by prefix; it is no longer a substring match (#2553).
+- Performance: slow queries from the query audit are indexed and rewritten (#2531); session chain summaries live in trigger-kept tables (#2534); sidebar lists load with the tree and refetch less (#2535).
+- Release notes show the pinned agent-fs version (#2550).
+- Worker image: agent-fs pins 0.18.12 (#2549), agent-browser 0.40.0 (#2540) and harness bumps (#2538).
+- Repo: `glama.json` for the Glama MCP directory (#2546); TLA+ specs synced with main (#2541).
+
+### Fixed
+- Slack: an event whose socket ack fails because the client is not ready is still processed (#2490).
+- Comb: Files-page sends are attributed to the comment author and show in sessions (#2545).
+- Runner: the default lead profile is saved on first boot (#2537).
+- UI: setup prepares the first session before leaving (#2542); Home uses a neutral greeting (#2539).
+- Nightly E2E: the Codex chain save is gated on an in-container file check (#2554).
+
 ## [2.7.2] - 2026-10-28
 
 ### Added
