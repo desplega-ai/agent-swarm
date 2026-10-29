@@ -2458,7 +2458,7 @@ Read the most recent messages of a Chat SDK thread, oldest first. Every agent ca
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `threadId` | `string` | Yes | - | Full SDK thread id with the adapter prefix, such as telegram:12345. |
-| `limit` | `number` | No | - | Number of messages to return (default ${DEFAULT_LIMIT}). |
+| `limit` | `number` | No | - | Number of messages to return (default 30). |
 
 ### register-chat-channel
 
