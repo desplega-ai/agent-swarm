@@ -13073,6 +13073,9 @@ export async function listRecentSessions(
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const query = sessionSummaryQuery(opts);
   const threadRoots = threadRootsSql();
+  const order = (a: string) =>
+    `${opts.triage === "later" ? `${a}.snoozeUntil ASC,` : ""}
+    ${a}.lastActivityAt DESC, ${a}.rootCreatedAt DESC, ${a}.root_id DESC`;
   const rootRows = await getDbClient().query<
     AgentTaskRow & {
       __chainCount: number;
@@ -13084,13 +13087,14 @@ export async function listRecentSessions(
       __threadRoots: number;
     }
   >(
+    // Page first on the summaries, then read agent_tasks for the page roots only.
     `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
       a.latestStatus AS __latestStatus, a.readState AS __readState,
       a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
       ${threadRoots.sql} AS __threadRoots
-    FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
-    ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
-      a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
+    FROM (SELECT * FROM (${query.sql}) page ORDER BY ${order("page")} LIMIT ? OFFSET ?) a
+    CROSS JOIN agent_tasks r ON r.id = a.root_id
+    ORDER BY ${order("a")}`,
     [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
   const fields = await sessionPageFields(
