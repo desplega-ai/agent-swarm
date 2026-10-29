@@ -631,7 +631,8 @@ class ApiClient {
       | "dsh"
       | "cursor"
       | "amp"
-      | "grok";
+      | "grok"
+      | "fx";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */

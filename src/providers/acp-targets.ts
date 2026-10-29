@@ -1,13 +1,24 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type {
+  ContentBlock,
+  InitializeResponse,
+  PromptRequest,
+  PromptResponse,
+  SessionUpdate,
+} from "@agentclientprotocol/sdk/unstable";
 import {
   baseUrlOverride,
   normalizeGrokModel,
   providerBaseUrl,
   providerForModel,
 } from "@desplega/model-catalog";
+import { resolveTemplateAsync, resolveTemplateFromCode } from "../prompts/resolver";
+import "../prompts/session-templates";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
+import { requireFxRoute } from "../utils/fx-models";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   ACP_TARGET_IDS,
   type AcpTarget,
@@ -20,11 +31,44 @@ import {
   type OpencodeConfig,
 } from "./opencode-adapter";
 import { applyReasoningEffort } from "./reasoning-effort";
-import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
+import type {
+  CostData,
+  CostModelUsage,
+  ProviderEvent,
+  ProviderSessionConfig,
+  SteerDelivery,
+  SteerDeliveryResult,
+} from "./types";
+
+/** What a target's `sessionSystemPrompt` hook sends as `session/new` `systemPrompt`. */
+export interface AcpSessionSystemPrompt {
+  /** Text content blocks, sent as the `systemPrompt` array (append mode). */
+  blocks: ContentBlock[];
+  /** Set when the blocks carry only part of the prompt and the whole of it is in this file. */
+  artifactPath?: string;
+}
+
+/** What the adapter hands a target's `steer` hook for one steering message. */
+export interface AcpSteerContext {
+  sessionId: string;
+  delivery: SteerDelivery;
+  /** The `initialize` result, for capability gating. */
+  initResult: InitializeResponse;
+  /** Sends `session/prompt` on the session's ACP connection. */
+  prompt(params: PromptRequest): Promise<PromptResponse>;
+  /** Observes raw session updates until the returned function is called. */
+  onUpdate(listener: (update: SessionUpdate) => void): () => void;
+}
+
+/** Native session resume over `session/resume`. */
+export interface AcpResumeHook {
+  readonly method: "session/resume";
+  canResume(sessionId: string): Promise<boolean>;
+}
 
 export interface AcpTargetProfile {
   /** An operator-selectable ACP target, or a first-class harness built on the ACP client. */
-  readonly target: AcpTarget | "grok";
+  readonly target: AcpTarget | "grok" | "fx";
   command(config: ProviderSessionConfig): string[];
   env(config: ProviderSessionConfig): Record<string, string>;
   configuredOptions(config: ProviderSessionConfig): Record<string, string | boolean>;
@@ -35,8 +79,11 @@ export interface AcpTargetProfile {
   sessionMeta?(config: ProviderSessionConfig): Record<string, unknown> | undefined;
   /** A clearer message for a target error whose own text misleads, else undefined. */
   describeError?(message: string): string | undefined;
-  /** Rewrites a translated event for display, e.g. unwrapping a tool proxy. */
-  rewriteEvent?(event: ProviderEvent): ProviderEvent;
+  /**
+   * Rewrites a translated event for display, e.g. unwrapping a tool proxy.
+   * `update` is the ACP session update the event was translated from.
+   */
+  rewriteEvent?(event: ProviderEvent, update?: SessionUpdate): ProviderEvent;
   /** Usage, cost and the model that ran, from the `session/prompt` response `_meta`. */
   promptCost?(
     meta: Record<string, unknown> | null | undefined,
@@ -47,6 +94,23 @@ export interface AcpTargetProfile {
     meta: Record<string, unknown> | null | undefined,
     model: string,
   ): Extract<ProviderEvent, { type: "context_usage" }> | undefined;
+  // Opt-in hooks. A target without them behaves exactly as before they existed.
+  /**
+   * The standard `systemPrompt` for `session/new`. Sent only when the agent
+   * advertises `sessionCapabilities.systemPrompt`.
+   */
+  sessionSystemPrompt?(config: ProviderSessionConfig): Promise<AcpSessionSystemPrompt | undefined>;
+  /**
+   * The target accepts MCP URLs only over HTTPS or explicit loopback HTTP. A
+   * plain-HTTP, non-loopback server URL (the swarm API at `http://api:3013`)
+   * goes through a per-session 127.0.0.1 forwarder, and SSE servers are dropped
+   * unless the agent advertises `mcpCapabilities.sse`.
+   */
+  readonly requiresSecureMcpUrl?: boolean;
+  /** Live steering. Absent means the session has no `deliverSteering`. */
+  steer?(context: AcpSteerContext): Promise<SteerDeliveryResult>;
+  /** Native resume: `config.resumeSessionId` is resumed instead of creating a session. */
+  readonly resume?: AcpResumeHook;
 }
 
 export class AcpTargetResolutionError extends Error {
@@ -693,6 +757,242 @@ export const grokTargetProfile: AcpTargetProfile = {
   describeError(message) {
     if (!GROK_AUTH_ERROR_RE.test(message)) return undefined;
     return `Grok rejected the credentials (XAI_API_KEY or OPENROUTER_API_KEY invalid or missing): ${message}`;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// fx (Vercel Labs' `fx acp`), measured against fx 0.0.15 on 2026-10-29.
+// ---------------------------------------------------------------------------
+
+/** Above this many UTF-8 bytes the prompt goes to a file; fx caps `systemPrompt` at 64 KiB. */
+export const FX_SYSTEM_PROMPT_INLINE_MAX_BYTES = 60 * 1024;
+/** How much of an oversized prompt is still sent inline, ahead of the pointer line. */
+export const FX_SYSTEM_PROMPT_HEAD_BYTES = 56 * 1024;
+const FX_SYSTEM_PROMPT_FILE_TEMPLATE = "system.agent.fx.system_prompt_file";
+/** fx streams this notice as an assistant message chunk; it is not model output. */
+const FX_CONTEXT_NOTICE_PREFIX = "[context] ";
+const FX_AUTH_ERROR_RE =
+  /authentication is unavailable|credential is unavailable|MissingApiKey|unauthorized|\b401\b/i;
+
+/**
+ * Per-task scratch dir for fx: `acp.log` (`--log-file`) and, for an oversized
+ * prompt, `SYSTEM.md`. Outside the task cwd, removed when the session ends.
+ */
+export function fxRunDir(config: Pick<ProviderSessionConfig, "taskId">): string {
+  const safe = config.taskId.replace(/[^A-Za-z0-9._-]/g, "_") || "session";
+  return join(tmpdir(), `fx-${safe}`);
+}
+
+/** The first `max` bytes of `bytes` as text, never ending inside a UTF-8 sequence. */
+function utf8Head(bytes: Uint8Array, max: number): string {
+  let end = Math.min(max, bytes.length);
+  // Back off continuation bytes (10xxxxxx) so a multi-byte character is not split.
+  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+  return new TextDecoder().decode(bytes.subarray(0, end));
+}
+
+async function fxSystemPromptPointer(path: string): Promise<string> {
+  try {
+    const result = await resolveTemplateAsync(FX_SYSTEM_PROMPT_FILE_TEMPLATE, { path });
+    if (!result.skipped && result.text.trim()) return result.text;
+  } catch {
+    // Fall through to the code default.
+  }
+  // A skipped or blank override must not drop the pointer to the full prompt.
+  return resolveTemplateFromCode(FX_SYSTEM_PROMPT_FILE_TEMPLATE, { path }).text;
+}
+
+/**
+ * The `systemPrompt` fx gets. Up to 60 KiB it is the prompt itself. A larger
+ * one is written whole to `<dir>/SYSTEM.md`; fx then gets its first 56 KiB plus
+ * a line telling the model to read that file first (fx returns `-32602
+ * systemPrompt exceeds the 64 KiB limit` above 65,536 bytes).
+ */
+export async function fxSystemPrompt(
+  systemPrompt: string,
+  dir: string,
+): Promise<AcpSessionSystemPrompt | undefined> {
+  if (!systemPrompt.trim()) return undefined;
+  const bytes = new TextEncoder().encode(systemPrompt);
+  if (bytes.length <= FX_SYSTEM_PROMPT_INLINE_MAX_BYTES) {
+    return { blocks: [{ type: "text", text: systemPrompt }] };
+  }
+  const artifactPath = join(dir, "SYSTEM.md");
+  await mkdir(dir, { recursive: true });
+  await Bun.write(artifactPath, systemPrompt);
+  await chmod(artifactPath, 0o600);
+  const head = utf8Head(bytes, FX_SYSTEM_PROMPT_HEAD_BYTES);
+  const pointer = await fxSystemPromptPointer(artifactPath);
+  return { blocks: [{ type: "text", text: `${head}\n\n${pointer}` }], artifactPath };
+}
+
+/** `~/.fx/sessions/v2/<id>/log.jsonl`: where fx 0.0.15 keeps a saved session. */
+export async function fxSessionExists(
+  sessionId: string,
+  home: string | undefined,
+): Promise<boolean> {
+  if (!home || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return false;
+  return Bun.file(join(home, ".fx", "sessions", "v2", sessionId, "log.jsonl")).exists();
+}
+
+type FxToolCallMeta = { fx?: { toolCall?: { mcp?: { server?: unknown; tool?: unknown } } } };
+
+/**
+ * fx's display adjustments:
+ * - The `[context] … capability_search` notice arrives as its own assistant
+ *   chunk. It becomes an `fx_context_notice` custom event, so it never reaches
+ *   the task output.
+ * - A `tool_call` titles the action ("Running", "Get the agent swarm") and
+ *   names the tool in a non-standard `name` field (`shell`, `skill`,
+ *   `mcp_swarm_get-swarm`), with the MCP server and tool in
+ *   `_meta.fx.toolCall.mcp`. The tool start carries that name, MCP calls as
+ *   `mcp__<server>__<tool>` like every other harness.
+ */
+export function rewriteFxEvent(event: ProviderEvent, update?: SessionUpdate): ProviderEvent {
+  if (
+    event.type === "message" &&
+    event.role === "assistant" &&
+    event.content.startsWith(FX_CONTEXT_NOTICE_PREFIX)
+  ) {
+    return {
+      type: "custom",
+      name: "fx_context_notice",
+      data: { text: event.content, messageId: event.messageId ?? null },
+    };
+  }
+  if (event.type === "tool_start" && update?.sessionUpdate === "tool_call") {
+    const mcp = (update._meta as FxToolCallMeta | null | undefined)?.fx?.toolCall?.mcp;
+    if (typeof mcp?.server === "string" && typeof mcp.tool === "string" && mcp.server && mcp.tool) {
+      return { ...event, toolName: `mcp__${mcp.server}__${mcp.tool}` };
+    }
+    const name = (update as { name?: unknown }).name;
+    if (typeof name === "string" && name.trim()) return { ...event, toolName: name.trim() };
+  }
+  return event;
+}
+
+/**
+ * fx's native steer: a second `session/prompt` with `_meta.fx.steer` during the
+ * running turn. fx applies it at the next tool boundary without cancelling and
+ * echoes it as a `user_message_chunk` carrying `_meta.fx.steering`; the steer
+ * request itself resolves with the turn, `_meta.fx.steering: "absorbed"`.
+ * Either one counts as delivered. The echo arrives first, so the row is
+ * `delivered` while the turn still runs and `accept-steer` can mark it handled.
+ * Any other answer is undeliverable and the runner promotes the message.
+ */
+export async function steerFx({
+  sessionId,
+  delivery,
+  initResult,
+  prompt,
+  onUpdate,
+}: AcpSteerContext): Promise<SteerDeliveryResult> {
+  if (delivery.mode !== "steer") {
+    return { delivered: false, reason: `fx supports steer only, not ${delivery.mode}` };
+  }
+  const meta = initResult.agentCapabilities?._meta as { fx?: { steering?: unknown } } | undefined;
+  if (meta?.fx?.steering !== true) {
+    return { delivered: false, reason: "fx did not advertise _meta.fx.steering" };
+  }
+  return new Promise<SteerDeliveryResult>((resolve) => {
+    let settled = false;
+    let stopListening = () => {};
+    const settle = (result: SteerDeliveryResult) => {
+      if (settled) return;
+      settled = true;
+      stopListening();
+      resolve(result);
+    };
+    stopListening = onUpdate((update) => {
+      if (update.sessionUpdate !== "user_message_chunk") return;
+      const steering = (update._meta as { fx?: { steering?: unknown } } | null | undefined)?.fx
+        ?.steering;
+      if (!steering || update.content.type !== "text" || update.content.text !== delivery.text) {
+        return;
+      }
+      settle({ delivered: true, mode: "steer" });
+    });
+    prompt({
+      sessionId,
+      prompt: [{ type: "text", text: delivery.text }],
+      _meta: { fx: { steer: true } },
+    }).then(
+      (response) => {
+        const state = (response._meta as { fx?: { steering?: unknown } } | null | undefined)?.fx
+          ?.steering;
+        settle(
+          state === "absorbed"
+            ? { delivered: true, mode: "steer" }
+            : {
+                delivered: false,
+                reason: `fx did not absorb the steer (stopReason ${response.stopReason}, steering ${JSON.stringify(state ?? null)})`,
+              },
+        );
+      },
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        settle({ delivered: false, reason: scrubSecrets(`fx steer failed: ${message}`) });
+      },
+    );
+  });
+}
+
+export const fxTargetProfile: AcpTargetProfile = {
+  target: "fx",
+  command(config) {
+    const binary = readEnv(config, "FX_BINARY")?.trim() || "fx";
+    const route = requireFxRoute(config.model);
+    return [
+      binary,
+      "acp",
+      "--model",
+      route.fxModel,
+      "--log-file",
+      join(fxRunDir(config), "acp.log"),
+    ];
+  },
+  env(config) {
+    const route = requireFxRoute(config.model);
+    const env = baseTargetEnv(config);
+    // Only the route's own key: an OpenRouter session never sees OPENAI_API_KEY.
+    copyEnvKeys(config, env, [route.keyVar]);
+    // Process-local selection and permissions. `session/set_mode` and the
+    // `mode` / `provider` config options persist into ~/.fx/settings.json, so
+    // the adapter never sends them. Auto mode's reviewer holds swarm MCP calls
+    // headless, so the session runs full-access.
+    env.FX_PROVIDER = route.fxProvider;
+    env.FX_PERMISSION_MODE = "full-access";
+    env.FX_AUTO_UPGRADE = "0";
+    env.FX_NO_OPEN_BROWSER = "1";
+    return env;
+  },
+  // The model rides on `--model`. Only fx's AI Gateway provider has an
+  // `effort` option; custom connections send no reasoning control.
+  configuredOptions(config): Record<string, string | boolean> {
+    if (!config.reasoningEffort) return {};
+    const effort = applyReasoningEffort("fx", config.model.trim(), config.reasoningEffort);
+    return effort.kind === "fx-effort" ? { effort: effort.reasoningEffort } : {};
+  },
+  async writeSystemPromptArtifact(config) {
+    // acp.log can hold session/new params, including the ephemeral MCP bearer.
+    await mkdir(fxRunDir(config), { recursive: true, mode: 0o700 });
+  },
+  async cleanupSystemPromptArtifact(config) {
+    await rm(fxRunDir(config), { recursive: true, force: true });
+  },
+  sessionSystemPrompt(config) {
+    return fxSystemPrompt(config.systemPrompt ?? "", fxRunDir(config));
+  },
+  requiresSecureMcpUrl: true,
+  steer: steerFx,
+  resume: {
+    method: "session/resume",
+    canResume: (sessionId) => fxSessionExists(sessionId, process.env.HOME),
+  },
+  rewriteEvent: rewriteFxEvent,
+  describeError(message) {
+    if (!FX_AUTH_ERROR_RE.test(message)) return undefined;
+    return `fx could not authenticate the model route (OPENROUTER_API_KEY, OPENAI_API_KEY or AI_GATEWAY_API_KEY invalid or missing): ${message}`;
   },
 };
 

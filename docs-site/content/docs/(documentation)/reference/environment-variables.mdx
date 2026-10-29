@@ -210,6 +210,17 @@ See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes an
 
 See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation and cost tracking.
 
+**fx** (`HARNESS_PROVIDER=fx`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | One of the three | — | OpenRouter key, for `openrouter/<vendor>/<id>` models (the tier defaults) |
+| `OPENAI_API_KEY` | One of the three | — | OpenAI key, for bare model ids such as `gpt-5-mini` |
+| `AI_GATEWAY_API_KEY` | One of the three | — | Vercel AI Gateway key, for `vercel/<vendor>/<id>` models |
+| `FX_BINARY` | No | `fx` on `PATH` | Path to another trusted fx executable |
+
+The adapter sets `FX_PROVIDER`, `FX_PERMISSION_MODE=full-access`, `FX_AUTO_UPGRADE=0` and `FX_NO_OPEN_BROWSER=1` on each fx process; do not set them on the worker. `ANTHROPIC_API_KEY` and `NAN_API_KEY` do not work with fx. See [Provider Auth: fx](/docs/guides/provider-auth/fx) for routing, steering and cost tracking.
+
 **opencode** (`HARNESS_PROVIDER=opencode`):
 
 | Variable | Required | Default | Description |

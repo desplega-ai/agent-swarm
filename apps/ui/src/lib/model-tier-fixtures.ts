@@ -33,6 +33,12 @@ export const DEFAULT_TIER_VALUES: Record<string, Record<ModelTier, string>> = {
   },
   devin: { smol: "devin", regular: "devin", smart: "devin", ultra: "devin" },
   amp: { smol: "low", regular: "medium", smart: "high", ultra: "ultra" },
+  fx: {
+    smol: "openrouter/deepseek/deepseek-v4.1-flash",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash",
+    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    ultra: "openrouter/anthropic/claude-opus-5.5",
+  },
 };
 
 const TIERS: ModelTier[] = ["smol", "regular", "smart", "ultra"];

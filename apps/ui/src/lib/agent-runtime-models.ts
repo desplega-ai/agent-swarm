@@ -3,6 +3,7 @@ import {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  fxCatalogRef,
   grokCatalogRef,
   harnessModelIds,
   isReasoningHarness,
@@ -31,7 +32,8 @@ export type LocalHarnessProvider =
   | "dsh"
   | "cursor"
   | "amp"
-  | "grok";
+  | "grok"
+  | "fx";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -179,7 +181,7 @@ function runtimeSectionModels(
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
  * family), `<provider>/<id>` for pi and opencode, `openrouter/<id>` or a bare
  * DeepSeek API id for dsh, a bare Cursor model id for cursor, a bare xAI id
- * for grok.
+ * for grok, `openrouter/<id>`, `vercel/<id>` or a bare OpenAI id for fx.
  */
 export function effortLevelsFor(
   harness: string,
@@ -201,6 +203,12 @@ export function effortLevelsFor(
     ({ providerId, modelId: catalogId } = cursorCatalogRef(modelId));
   } else if (harness === "grok") {
     ({ providerId, modelId: catalogId } = grokCatalogRef(modelId));
+  } else if (harness === "fx") {
+    // Only the Vercel AI Gateway route takes an effort: fx's custom
+    // connections (OpenRouter, OpenAI) send no reasoning field.
+    const ref = fxCatalogRef(modelId);
+    if (!ref) return [];
+    ({ providerId, modelId: catalogId } = ref);
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -258,6 +266,7 @@ export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
   "amp",
   "cursor",
   "grok",
+  "fx",
   "acp",
 ];
 
@@ -316,6 +325,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   amp: "Amp",
   cursor: "Cursor",
   grok: "Grok",
+  fx: "fx",
 } satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
@@ -440,6 +450,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   amp: "low",
   // The grok regular-tier default (DEFAULT_MODEL_TIER_MAP.grok in src/types.ts).
   grok: "grok-4.3",
+  // The fx regular-tier default (DEFAULT_MODEL_TIER_MAP.fx in src/types.ts).
+  fx: "openrouter/deepseek/deepseek-v4.1-flash",
   acp: "",
 };
 
@@ -575,6 +587,7 @@ export function modelGroupsForHarness(
   if (harness === "amp") return ampModelGroups(configs, envPresence, liveCatalog);
   if (harness === "cursor") return cursorModelGroups(configs, envPresence, liveCatalog);
   if (harness === "grok") return grokModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "fx") return fxModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -823,6 +836,58 @@ function grokModelGroups(
       requiredKey: openrouterMeta.requiredKey,
       enabled: hasRuntimeCredential(openrouterMeta.requiredKey, configs, envPresence),
     },
+  ];
+}
+
+/**
+ * fx reaches models three ways (`src/utils/fx-models.ts`): `openrouter/<id>`
+ * on OPENROUTER_API_KEY, a bare OpenAI id on OPENAI_API_KEY, and
+ * `vercel/<id>` on Vercel AI Gateway's AI_GATEWAY_API_KEY. Only the gateway
+ * route takes a reasoning effort. NaN, Helmcode and Anthropic keys do not work
+ * with fx, so they get no group.
+ */
+function fxModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const routed = (providerId: "openrouter" | "vercel", effort: boolean): ModelGroup => {
+    const meta = SNAPSHOT_META[providerId];
+    const models: ModelOption[] = Object.values(runtimeSectionModels(providerId, liveCatalog))
+      .map((m) => ({
+        id: `${providerId}/${m.id}`,
+        label: modelDisplayName(m.name) ?? m.id,
+        provider: meta.label,
+        providerId: meta.iconKey,
+        requiredKey: meta.requiredKey,
+        ...catalogFacts(m),
+        reasoningLevels: effort ? reasoningLevelsFor("fx", m.id, m) : [],
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return {
+      provider: meta.label,
+      models,
+      requiredKey: meta.requiredKey,
+      enabled: hasRuntimeCredential(meta.requiredKey, configs, envPresence),
+    };
+  };
+  const openaiModels = runtimeSectionModels("openai", liveCatalog);
+  const openai: ModelOption[] = harnessModelIds("codex", openaiModels).map((id) => ({
+    id,
+    label: modelDisplayName(openaiModels[id]?.name) ?? humanizeModelId(id),
+    ...OPENAI_META,
+    ...catalogFacts({ ...openaiModels[id], id }),
+    reasoningLevels: [],
+  }));
+  return [
+    routed("openrouter", false),
+    {
+      provider: OPENAI_META.provider,
+      models: openai,
+      requiredKey: OPENAI_META.requiredKey,
+      enabled: hasRuntimeCredential(OPENAI_META.requiredKey, configs, envPresence),
+    },
+    routed("vercel", true),
   ];
 }
 
@@ -1158,6 +1223,7 @@ export function isLocalHarness(
     value === "amp" ||
     value === "cursor" ||
     value === "grok" ||
+    value === "fx" ||
     value === "acp"
   );
 }

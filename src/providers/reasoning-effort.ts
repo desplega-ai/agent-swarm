@@ -17,6 +17,7 @@ import {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  fxCatalogRef,
   grokCatalogRef,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
@@ -37,7 +38,8 @@ export type ReasoningHarness =
   | "dsh"
   | "cursor"
   | "amp"
-  | "grok";
+  | "grok"
+  | "fx";
 
 export interface ReasoningCapability {
   supported: boolean;
@@ -65,6 +67,7 @@ export type ReasoningEffortApplication =
   | { kind: "amp-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "cursor-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "grok-effort"; reasoningEffort: ReasoningEffort }
+  | { kind: "fx-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "noop" };
 
 // --- Capability lookup --------------------------------------------------------
@@ -102,6 +105,11 @@ function lookupModel(
     ({ providerId, modelId } = cursorCatalogRef(model));
   } else if (harness === "grok") {
     ({ providerId, modelId } = grokCatalogRef(model));
+  } else if (harness === "fx") {
+    // Only the AI Gateway route (`vercel/…`) has an effort control.
+    const ref = fxCatalogRef(model);
+    if (!ref) return undefined;
+    ({ providerId, modelId } = ref);
   } else {
     ({ providerId, modelId } = splitProviderModel(model));
     if (!providerId) return undefined;
@@ -240,6 +248,10 @@ export function applyReasoningEffort(
       // Grok's `--reasoning-effort` takes the normalized names as-is; see
       // `src/providers/grok-adapter.ts`.
       return { kind: "grok-effort", reasoningEffort: level };
+    case "fx":
+      // fx's `effort` config option takes the normalized names; the adapter
+      // sets it on the AI Gateway route only (see `fxTargetProfile`).
+      return { kind: "fx-effort", reasoningEffort: level };
     default: {
       const _exhaustive: never = harness;
       return _exhaustive;
@@ -256,6 +268,7 @@ const REASONING_HARNESSES: ReadonlySet<string> = new Set<ReasoningHarness>([
   "cursor",
   "amp",
   "grok",
+  "fx",
 ]);
 
 /**

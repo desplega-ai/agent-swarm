@@ -34,10 +34,58 @@ export function harnessCatalogSection(harness: string): "anthropic" | "openai" |
 
 /**
  * Whether `harnessModelMismatch` judges this harness: the pinned-section
- * harnesses, plus grok, which runs bare xAI ids and `openrouter/<id>` only.
+ * harnesses, plus grok, which runs bare xAI ids and `openrouter/<id>` only,
+ * and fx, which runs the three routes of {@link fxModelRoute}.
  */
 export function isHarnessModelJudged(harness: string | null | undefined): boolean {
-  return !!harness && (harnessCatalogSection(harness) !== null || harness === "grok");
+  return (
+    !!harness && (harnessCatalogSection(harness) !== null || harness === "grok" || harness === "fx")
+  );
+}
+
+/** Where the fx harness sends a model: the fx provider, the id fx gets and the key it reads. */
+export type FxRoute =
+  | { fxProvider: "openrouter"; fxModel: string; keyVar: "OPENROUTER_API_KEY" }
+  | { fxProvider: "gateway"; fxModel: string; keyVar: "AI_GATEWAY_API_KEY" }
+  | { fxProvider: "openai"; fxModel: string; keyVar: "OPENAI_API_KEY" };
+
+/** Why a swarm model string has no fx route, for a namespace that has a known reason. */
+const FX_REJECTED_NAMESPACES: Readonly<Record<string, string>> = {
+  nan: "fx rejects NaN's streams (InconsistentFinishReason on its trailing usage chunk, fx 0.0.15)",
+  helmcode: "Helmcode is not verified on fx yet",
+  anthropic:
+    "fx cannot speak the Anthropic Messages API; use openrouter/anthropic/<id> or vercel/anthropic/<id>",
+};
+
+const FX_ROUTES_HINT =
+  "The fx harness runs openrouter/<vendor>/<id> (OPENROUTER_API_KEY), vercel/<vendor>/<id> (AI_GATEWAY_API_KEY) or a bare OpenAI id (OPENAI_API_KEY).";
+
+/**
+ * The fx route for a swarm model string, or the reason it has none:
+ *
+ * - `openrouter/<vendor>/<id>` runs on the `openrouter` custom connection as `<vendor>/<id>`;
+ * - `vercel/<vendor>/<id>` runs on fx's built-in `gateway` provider as `<vendor>/<id>`;
+ * - a bare id (no slash) runs on the `openai` custom connection.
+ *
+ * Shape only: no catalog lookup. Pure.
+ */
+export function fxModelRoute(model: string): FxRoute | { error: string } {
+  const id = model.trim();
+  if (!id) return { error: `An empty model has no fx route. ${FX_ROUTES_HINT}` };
+  const slash = id.indexOf("/");
+  if (slash < 0) return { fxProvider: "openai", fxModel: id, keyVar: "OPENAI_API_KEY" };
+  const namespace = id.slice(0, slash).toLowerCase();
+  const rest = id.slice(slash + 1).trim();
+  if (namespace === "openrouter" && rest) {
+    return { fxProvider: "openrouter", fxModel: rest, keyVar: "OPENROUTER_API_KEY" };
+  }
+  if (namespace === "vercel" && rest) {
+    return { fxProvider: "gateway", fxModel: rest, keyVar: "AI_GATEWAY_API_KEY" };
+  }
+  const reason = FX_REJECTED_NAMESPACES[namespace];
+  return {
+    error: `Model "${id}" has no fx route${reason ? `: ${reason}` : ""}. ${FX_ROUTES_HINT}`,
+  };
 }
 
 const XAI_PREFIX_RE = /^xai\//i;
@@ -192,8 +240,8 @@ const MAX_EXAMPLE_IDS = 8;
 
 /**
  * Null when `model` runs on `harness`, else the reason. Only the pinned
- * harnesses (claude, claude-managed, codex) and grok (`grokModelMismatch`)
- * are judged; every other harness,
+ * harnesses (claude, claude-managed, codex), grok (`grokModelMismatch`) and fx
+ * (`fxModelMismatch`) are judged; every other harness,
  * and an id the catalog does not know at all, passes (the catalog membership
  * check decides those). Legacy shortnames and `modelTier` never reach here as
  * a cross-harness problem: a bare `opus` on codex is unknown to every section.
@@ -207,6 +255,7 @@ export function harnessModelMismatch(
   context: { agentName?: string | null; agentId?: string | null } = {},
 ): string | null {
   if (harness === "grok") return grokModelMismatch(model, sections, context);
+  if (harness === "fx") return fxModelMismatch(model, sections, context);
   const section = harness ? harnessCatalogSection(harness) : null;
   if (!harness || !section) return null;
   const id = model.trim().replace(CONTEXT_SUFFIX_RE, "");
@@ -276,6 +325,55 @@ function grokModelMismatch(
     if (other?.models && Object.hasOwn(other.models, bare)) return fail();
   }
   return null;
+}
+
+/**
+ * The fx harness routes by namespace ({@link fxModelRoute}). A `latest:openrouter`
+ * or `latest:openai` alias resolves onto a route (`openrouter/<id>`, a bare
+ * OpenAI id); `latest:anthropic` resolves to a bare Claude id fx would send to
+ * OpenAI, so it fails. A bare id another section lists but `openai` does not
+ * (`claude-opus-5-5`, `grok-4.6`) would reach OpenAI too, so it fails; an id no
+ * section knows passes, as for every judged harness.
+ */
+function fxModelMismatch(
+  model: string,
+  sections: HarnessCatalogSections,
+  context: { agentName?: string | null; agentId?: string | null },
+): string | null {
+  const id = model.trim();
+  if (!id) return null;
+  const agent = context.agentId
+    ? ` of agent "${context.agentName ?? context.agentId}" (${context.agentId})`
+    : "";
+  const fail = (reason: string) =>
+    `Model "${id}" does not run on the fx harness${agent}. ${reason} Use modelTier (smol, regular, smart, ultra) for portable intent, or omit model and let the assignee resolve it.`;
+  if (isAlias(id)) {
+    const parsed = parseAlias(id);
+    if (!parsed) return null;
+    return parsed.kind === "openrouter" || parsed.kind === "openai"
+      ? null
+      : fail(`A latest:${parsed.kind} alias resolves to an id fx cannot route. ${FX_ROUTES_HINT}`);
+  }
+  const route = fxModelRoute(id);
+  if ("error" in route) return fail(route.error);
+  if (route.fxProvider !== "openai") return null;
+  if (Object.hasOwn(sections.openai?.models ?? {}, id)) return null;
+  for (const [name, other] of Object.entries(sections)) {
+    if (name === "openai" || !other?.models) continue;
+    if (Object.hasOwn(other.models, id) || (name === "anthropic" && isClaudeShortname(id, other))) {
+      return fail(
+        `A bare id runs on OpenAI (OPENAI_API_KEY), and "${id}" is in the ${name} catalog, not openai. ${FX_ROUTES_HINT}`,
+      );
+    }
+  }
+  return null;
+}
+
+function isClaudeShortname(
+  id: string,
+  section: { models?: Record<string, HarnessCatalogModel> },
+): boolean {
+  return Object.hasOwn(buildClaudeShortnameMap(section.models), id);
 }
 
 function grokMismatchMessage(

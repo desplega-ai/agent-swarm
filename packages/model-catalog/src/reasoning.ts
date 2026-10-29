@@ -11,6 +11,7 @@
  */
 import {
   buildClaudeShortnameMap,
+  fxModelRoute,
   type HarnessCatalogModel,
   normalizeGrokModel,
 } from "./harness-models.ts";
@@ -29,6 +30,7 @@ export const REASONING_HARNESSES = [
   "cursor",
   "amp",
   "grok",
+  "fx",
 ] as const;
 export type ReasoningHarnessName = (typeof REASONING_HARNESSES)[number];
 
@@ -55,6 +57,18 @@ export function grokCatalogRef(model: string): { providerId: string; modelId: st
     return { providerId: "openrouter", modelId: id.slice("openrouter/".length) };
   }
   return { providerId: "xai", modelId: id };
+}
+
+/**
+ * An fx model string names its route ({@link fxModelRoute}). Only the
+ * `vercel/<vendor>/<id>` route (fx's built-in AI Gateway provider) has an
+ * effort control: fx's custom connections (OpenRouter, OpenAI) send no
+ * provider-specific reasoning field. Null for those routes.
+ */
+export function fxCatalogRef(model: string): { providerId: string; modelId: string } | null {
+  const route = fxModelRoute(model);
+  if ("error" in route || route.fxProvider !== "gateway") return null;
+  return { providerId: "vercel", modelId: route.fxModel };
 }
 
 /**
@@ -166,6 +180,13 @@ function applyHarnessOverrides(
     result = result.filter((l) => l !== "max");
   }
 
+  if (harness === "fx") {
+    // fx's `effort` option (AI Gateway route) lists `auto` and the model's
+    // levels, with no `none` (gpt-5-mini under fx 0.0.15: auto, minimal, low,
+    // medium, high), so `off` has no value to send.
+    result = result.filter((l) => l !== "off");
+  }
+
   if (harness === "codex") {
     // The catalog already tends to get this right per model. This is
     // defense-in-depth for `*-codex` ids missing from it (the fallback path),
@@ -252,6 +273,10 @@ export function reasoningLevelsForModel(
     ({ providerId, modelId: catalogId } = cursorCatalogRef(model));
   } else if (harness === "grok") {
     ({ providerId, modelId: catalogId } = grokCatalogRef(model));
+  } else if (harness === "fx") {
+    const ref = fxCatalogRef(model);
+    if (!ref) return [];
+    ({ providerId, modelId: catalogId } = ref);
   } else {
     const slash = model.indexOf("/");
     if (slash <= 0) return [];

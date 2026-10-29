@@ -151,7 +151,8 @@ export function useUpdateAgentRuntime() {
         | "dsh"
         | "cursor"
         | "amp"
-        | "grok";
+        | "grok"
+        | "fx";
       model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;

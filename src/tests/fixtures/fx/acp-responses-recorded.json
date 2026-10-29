@@ -1,0 +1,157 @@
+{
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": true,
+        "audio": false,
+        "embeddedContext": true
+      },
+      "mcpCapabilities": {
+        "http": true,
+        "sse": false,
+        "acp": false
+      },
+      "sessionCapabilities": {
+        "list": {},
+        "resume": {},
+        "close": {},
+        "systemPrompt": {}
+      },
+      "_meta": {
+        "fx": {
+          "steering": true
+        }
+      }
+    },
+    "agentInfo": {
+      "name": "fx",
+      "title": "fx",
+      "version": "0.0.15"
+    },
+    "authMethods": []
+  },
+  "newSession": {
+    "sessionId": "fxSession001",
+    "configOptions": [
+      {
+        "id": "provider",
+        "name": "Provider",
+        "category": "model",
+        "type": "select",
+        "currentValue": "openrouter",
+        "options": [
+          {
+            "value": "gateway",
+            "name": "Vercel AI Gateway"
+          },
+          {
+            "value": "codex",
+            "name": "Codex subscription"
+          },
+          {
+            "value": "grok",
+            "name": "Grok subscription"
+          },
+          {
+            "value": "openrouter",
+            "name": "openrouter"
+          },
+          {
+            "value": "openai",
+            "name": "openai"
+          }
+        ]
+      },
+      {
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "openai/gpt-5-mini",
+        "options": [
+          {
+            "value": "openai/gpt-5-mini",
+            "name": "openai/gpt-5-mini"
+          }
+        ]
+      },
+      {
+        "id": "mode",
+        "name": "Session Mode",
+        "description": "Controls how the agent requests permission",
+        "category": "mode",
+        "type": "select",
+        "currentValue": "full-access",
+        "options": [
+          {
+            "value": "auto",
+            "name": "Auto",
+            "description": "Check actions with an automatic safety review instead of asking",
+            "_meta": {
+              "fx": {
+                "permissionMode": "auto"
+              }
+            }
+          },
+          {
+            "value": "ask",
+            "name": "Ask",
+            "description": "Request permission before making any changes",
+            "_meta": {
+              "fx": {
+                "permissionMode": "ask"
+              }
+            }
+          },
+          {
+            "value": "full-access",
+            "name": "Full access",
+            "description": "Run every action without asking, outside the sandbox",
+            "_meta": {
+              "fx": {
+                "permissionMode": "yolo"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "modes": {
+      "currentModeId": "full-access",
+      "availableModes": [
+        {
+          "id": "auto",
+          "name": "Auto",
+          "description": "Check actions with an automatic safety review instead of asking"
+        },
+        {
+          "id": "ask",
+          "name": "Ask",
+          "description": "Request permission before making any changes"
+        },
+        {
+          "id": "full-access",
+          "name": "Full access",
+          "description": "Run every action without asking, outside the sandbox"
+        }
+      ]
+    }
+  },
+  "prompt": {
+    "stopReason": "end_turn",
+    "usage": {
+      "inputTokens": 58620,
+      "outputTokens": 1183
+    }
+  },
+  "steer": {
+    "stopReason": "end_turn",
+    "_meta": {
+      "fx": {
+        "steering": "absorbed"
+      }
+    }
+  }
+}

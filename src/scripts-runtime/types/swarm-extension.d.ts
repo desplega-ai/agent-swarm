@@ -98,6 +98,7 @@ declare module "swarm-extension" {
             | "amp"
             | "cursor"
             | "grok"
+            | "fx"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -233,6 +234,7 @@ declare module "swarm-extension" {
       | "amp"
       | "cursor"
       | "grok"
+      | "fx"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -255,6 +257,7 @@ declare module "swarm-extension" {
             | "amp"
             | "cursor"
             | "grok"
+            | "fx"
             | undefined;
           leadOnly?: boolean | undefined;
         }

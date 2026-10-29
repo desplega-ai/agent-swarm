@@ -299,6 +299,8 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     // strips the prefix, so we seed the bare id under `pi` too. Without this
     // every gh-copilot-backed pi run fell through to `costSource='unpriced'`.
     add(id, projectCostBlock("pi", id, model.cost));
+    // fx runs a bare OpenAI id on its `openai` custom connection.
+    add(id, projectCostBlock("fx", id, model.cost));
   }
 
   // ---- Cursor (bare vendor ids through Cursor's hosted inference) --------
@@ -358,6 +360,13 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
         anthropicBilled: id.startsWith("anthropic/"),
       }),
     );
+    // fx runs `openrouter/<id>` on its OpenRouter custom connection.
+    add(
+      id,
+      projectCostBlock("fx", id, model.cost, {
+        anthropicBilled: id.startsWith("anthropic/"),
+      }),
+    );
     // Gemini specifically: also project under the 'gemini' provider so
     // internal-ai callers that tag with provider='gemini' find a hit.
     if (id.startsWith("google/")) {
@@ -367,6 +376,20 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
       // whether the caller passes "google/..." or the stripped name.
       add(id, projectCostBlock("gemini", id, model.cost));
     }
+  }
+
+  // ---- fx on Vercel AI Gateway (`vercel/<vendor>/<id>`) -------------------
+  // The prefix is stripped at lookup, so a gateway id lands on the same key as
+  // its OpenRouter twin. OpenRouter's row wins where both list the model (one
+  // source per key); the gateway section fills the ids OpenRouter lacks.
+  for (const [id, model] of Object.entries(cache.vercel?.models ?? {})) {
+    if (!model?.cost || openrouter[id]?.cost) continue;
+    add(
+      id,
+      projectCostBlock("fx", id, model.cost, {
+        anthropicBilled: id.startsWith("anthropic/"),
+      }),
+    );
   }
 
   // ---- OpenAI-compatible registry providers ($0 flat-rate subscriptions) --

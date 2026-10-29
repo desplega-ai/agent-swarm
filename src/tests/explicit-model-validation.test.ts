@@ -331,6 +331,44 @@ describe("grok model namespace", () => {
   });
 });
 
+describe("fx model routes", () => {
+  test("an unrouted namespace, a bare non-OpenAI id or latest:anthropic is refused, even with allowCustomModel", async () => {
+    for (const [model, reason] of [
+      ["nan/glm5.3-flash", "InconsistentFinishReason"],
+      ["helmcode/qwen3.6", "Helmcode is not verified on fx"],
+      ["anthropic/claude-opus-5-5", "Anthropic Messages API"],
+      ["claude-opus-5-5", "is in the anthropic catalog"],
+      ["latest:anthropic/opus", "latest:anthropic alias"],
+    ] as const) {
+      for (const allowCustomModel of [false, true]) {
+        const error = await explicitModelError({ model, harnessProvider: "fx", allowCustomModel });
+        expect(error).toContain(`Model "${model}" does not run on the fx harness`);
+        expect(error).toContain(reason);
+      }
+    }
+  });
+
+  test("the OpenRouter, AI Gateway and OpenAI routes pass", async () => {
+    for (const model of [
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "vercel/anthropic/claude-opus-5.5",
+      "gpt-5-mini",
+      "latest:openrouter/deepseek/deepseek-v4.1-*",
+    ]) {
+      expect(await explicitModelError({ model, harnessProvider: "fx" })).toBeNull();
+    }
+  });
+
+  test("MODEL_TIER_FX_<TIER> refuses a model fx cannot route", () => {
+    expect(validateTierConfigValue("MODEL_TIER_FX_SMART", "nan/glm5.3-flash")).toContain(
+      'model "nan/glm5.3-flash" does not run on the fx harness',
+    );
+    expect(
+      validateTierConfigValue("MODEL_TIER_FX_SMOL", "openrouter/deepseek/deepseek-v4.1-flash"),
+    ).toBeNull();
+  });
+});
+
 describe("MODEL_TIER_<PROVIDER>_<TIER> values", () => {
   test("a model from another harness family is rejected on write", () => {
     expect(validateTierConfigValue("MODEL_TIER_CODEX_SMART", "claude-opus-5-5")).toBe(

@@ -69,6 +69,10 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // The Grok CLI reports a bare xAI id (`grok-4.6`) or `openrouter/<vendor>/<id>`
   // for an OpenRouter model; stripping the prefix lands it on the openrouter rows.
   grok: ["openrouter/", "xai/"],
+  // fx reports the swarm model string: `openrouter/<vendor>/<id>` (OpenRouter
+  // connection), `vercel/<vendor>/<id>` (AI Gateway) or a bare OpenAI id.
+  // Stripping the route prefix lands the first two on `<vendor>/<id>` rows.
+  fx: ["openrouter/", "vercel/"],
 };
 
 /** `gpt-5-nano-2025-08-07` -> `gpt-5-nano`. Anthropic's 8-digit dates (`-20251001`) are real catalog ids and are left alone. */

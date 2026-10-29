@@ -2,6 +2,8 @@ export { modelDisplayName } from "./display.ts";
 export {
   buildClaudeShortnameMap,
   compareNewestFirst,
+  type FxRoute,
+  fxModelRoute,
   HARNESS_CATALOG_SECTION,
   type HarnessCatalogModel,
   type HarnessCatalogSections,
@@ -48,6 +50,7 @@ export {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  fxCatalogRef,
   grokCatalogRef,
   isReasoningHarness,
   nearestReasoningLevel,

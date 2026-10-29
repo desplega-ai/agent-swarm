@@ -472,7 +472,8 @@
               "dsh",
               "amp",
               "cursor",
-              "grok"
+              "grok",
+              "fx"
             ]
           },
           "providerMeta": {
@@ -546,7 +547,8 @@
               "dsh",
               "amp",
               "cursor",
-              "grok"
+              "grok",
+              "fx"
             ]
           },
           "capabilities": {
@@ -742,6 +744,7 @@
               "amp",
               "cursor",
               "grok",
+              "fx",
               null
             ],
             "default": null
@@ -1177,7 +1180,8 @@
               "dsh",
               "amp",
               "cursor",
-              "grok"
+              "grok",
+              "fx"
             ]
           },
           "harnessProvider": {
@@ -1197,6 +1201,7 @@
               "amp",
               "cursor",
               "grok",
+              "fx",
               null
             ]
           },
@@ -3569,7 +3574,8 @@
               "dsh",
               "amp",
               "cursor",
-              "grok"
+              "grok",
+              "fx"
             ]
           },
           "model": {
@@ -10617,7 +10623,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "harness_provider": {
@@ -10633,7 +10640,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -10967,7 +10975,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   }
                 },
@@ -11186,7 +11195,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "model": {
@@ -12366,6 +12376,7 @@
                         "amp",
                         "cursor",
                         "grok",
+                        "fx",
                         null
                       ]
                     },
@@ -12386,6 +12397,7 @@
                         "amp",
                         "cursor",
                         "grok",
+                        "fx",
                         null
                       ]
                     },
@@ -12508,6 +12520,7 @@
                               "amp",
                               "cursor",
                               "grok",
+                              "fx",
                               null
                             ]
                           },
@@ -12528,6 +12541,7 @@
                               "amp",
                               "cursor",
                               "grok",
+                              "fx",
                               null
                             ]
                           },
@@ -28026,7 +28040,8 @@
                 "dsh",
                 "amp",
                 "cursor",
-                "grok"
+                "grok",
+                "fx"
               ]
             },
             "required": false,
@@ -28066,7 +28081,8 @@
                               "dsh",
                               "amp",
                               "cursor",
-                              "grok"
+                              "grok",
+                              "fx"
                             ]
                           },
                           "model": {
@@ -28167,7 +28183,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "model": {
@@ -28237,7 +28254,8 @@
                         "dsh",
                         "amp",
                         "cursor",
-                        "grok"
+                        "grok",
+                        "fx"
                       ]
                     },
                     "model": {
@@ -28377,7 +28395,8 @@
                         "dsh",
                         "amp",
                         "cursor",
-                        "grok"
+                        "grok",
+                        "fx"
                       ]
                     },
                     "model": {
@@ -28536,7 +28555,8 @@
                         "dsh",
                         "amp",
                         "cursor",
-                        "grok"
+                        "grok",
+                        "fx"
                       ]
                     },
                     "model": {
@@ -28876,7 +28896,8 @@
                               "dsh",
                               "amp",
                               "cursor",
-                              "grok"
+                              "grok",
+                              "fx"
                             ]
                           },
                           "tier": {
@@ -30832,7 +30853,8 @@
                               "dsh",
                               "amp",
                               "cursor",
-                              "grok"
+                              "grok",
+                              "fx"
                             ]
                           },
                           "providers": {
@@ -30853,7 +30875,8 @@
                                     "dsh",
                                     "amp",
                                     "cursor",
-                                    "grok"
+                                    "grok",
+                                    "fx"
                                   ]
                                 },
                                 "state": {
@@ -31225,7 +31248,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   }
                 },
@@ -31873,7 +31897,8 @@
                                   "dsh",
                                   "amp",
                                   "cursor",
-                                  "grok"
+                                  "grok",
+                                  "fx"
                                 ]
                               },
                               "state": {
@@ -33032,7 +33057,8 @@
                                   "dsh",
                                   "amp",
                                   "cursor",
-                                  "grok"
+                                  "grok",
+                                  "fx"
                                 ]
                               },
                               "state": {
@@ -34224,7 +34250,8 @@
                                   "dsh",
                                   "amp",
                                   "cursor",
-                                  "grok"
+                                  "grok",
+                                  "fx"
                                 ]
                               },
                               "requestedByUserId": {
@@ -34718,7 +34745,8 @@
                           "dsh",
                           "amp",
                           "cursor",
-                          "grok"
+                          "grok",
+                          "fx"
                         ]
                       },
                       "model": {
@@ -35793,7 +35821,8 @@
                               "dsh",
                               "amp",
                               "cursor",
-                              "grok"
+                              "grok",
+                              "fx"
                             ]
                           },
                           "requestedByUserId": {
@@ -36014,7 +36043,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   }
                 },
@@ -39201,7 +39231,8 @@
                 "dsh",
                 "amp",
                 "cursor",
-                "grok"
+                "grok",
+                "fx"
               ]
             },
             "required": true,
@@ -39286,7 +39317,8 @@
                 "dsh",
                 "amp",
                 "cursor",
-                "grok"
+                "grok",
+                "fx"
               ]
             },
             "required": true,
@@ -39404,7 +39436,8 @@
                 "dsh",
                 "amp",
                 "cursor",
-                "grok"
+                "grok",
+                "fx"
               ]
             },
             "required": true,
@@ -39490,7 +39523,8 @@
                 "dsh",
                 "amp",
                 "cursor",
-                "grok"
+                "grok",
+                "fx"
               ]
             },
             "required": true,
@@ -49912,7 +49946,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "createdAt": {
@@ -51284,7 +51319,8 @@
                                       "dsh",
                                       "amp",
                                       "cursor",
-                                      "grok"
+                                      "grok",
+                                      "fx"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -66657,7 +66693,8 @@
                       "dsh",
                       "amp",
                       "cursor",
-                      "grok"
+                      "grok",
+                      "fx"
                     ]
                   },
                   "maxTasks": {
