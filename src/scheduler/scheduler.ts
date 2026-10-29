@@ -300,10 +300,11 @@ export async function dispatchScheduleTarget(
  * The agent a scheduled workflow run acts as: the schedule's creator, as for
  * script schedules (`targetAgentId` and trigger data are caller-chosen, so
  * neither is ever the principal). A creator-less (seeded) schedule that fires
- * an unedited seeded workflow runs as the lead, resolved at fire time; with no
- * lead the fire fails instead of running agentless. Any agent can edit a
- * seeded workflow, so an edited one never inherits the lead and its fire
- * fails. Workflows the seeder never wrote keep their previous principal.
+ * a seeded workflow runs as the lead, resolved at fire time; with no lead the
+ * fire fails instead of running agentless. Operator settings such as inputs
+ * or on/off keep that. Any agent can edit a workflow, so one whose nodes or
+ * params changed never inherits the lead and its fire fails. Workflows the
+ * seeder never wrote keep their previous principal.
  */
 async function scheduledWorkflowPrincipal(
   schedule: ScheduledTask,
@@ -315,7 +316,7 @@ async function scheduledWorkflowPrincipal(
   if (seeded === "unseeded") return undefined;
   if (seeded === "edited") {
     throw new Error(
-      `Schedule "${schedule.name}" has no creator and seeded workflow "${workflow.name}" was edited, so it will not run as the lead. Re-create the schedule as the agent it should run as.`,
+      `Schedule "${schedule.name}" has no creator and the nodes or params of seeded workflow "${workflow.name}" were edited, so it will not run as the lead. Re-create the schedule as the agent it should run as.`,
     );
   }
   const lead = await getLeadAgent();

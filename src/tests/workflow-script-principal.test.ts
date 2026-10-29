@@ -13,6 +13,7 @@ import {
   createAgent,
   createScheduledTask,
   createWorkflow,
+  createWorkflowRun,
   getDbClient,
   getScheduledTaskByName,
   getWorkflowRun,
@@ -38,6 +39,7 @@ import {
   workflowEventBus,
 } from "../workflows";
 import { handleEventTrigger } from "../workflows/triggers";
+import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { listenOnFreePort } from "./test-net";
 
 // A creator-less workflow (the seeded `dreaming`) runs its `swarm-script` nodes as
@@ -163,6 +165,17 @@ afterAll(async () => {
   closeDb();
   await removeDbFiles();
 });
+
+/** Put the seeded dreaming row back after a test edits it. */
+async function restoreDreaming(): Promise<void> {
+  await updateWorkflow(dreaming.id, {
+    description: dreaming.description,
+    definition: dreaming.definition,
+    input: dreaming.input,
+    cooldown: dreaming.cooldown,
+    enabled: dreaming.enabled,
+  });
+}
 
 /** Move every dreaming run start out of its 20-hour cooldown window. */
 async function ageDreamingRuns(): Promise<void> {
@@ -292,22 +305,104 @@ describe("swarm-script principal for a creator-less workflow", () => {
     expect(runs).toEqual([]);
   });
 
-  test("a creator-less schedule refuses the lead once a worker edits the seeded workflow", async () => {
+  test("a creator-less schedule keeps the lead after the documented input setup and enable", async () => {
+    // The guide's setup: update-workflow with every input key, then turn it on.
+    // Both snapshot the seeded state first, as the tool and REST paths do.
+    await snapshotAndUpdateWorkflow(
+      dreaming.id,
+      { input: { ...dreaming.input, leadAgentId: leadId, slackChannel: "C123" } },
+      { changedByAgentId: workerId },
+    );
+    await snapshotAndUpdateWorkflow(dreaming.id, { enabled: false });
+    await snapshotAndUpdateWorkflow(dreaming.id, {
+      enabled: true,
+      description: "tuned by the operator",
+      cooldown: { hours: 22, from: "start" },
+    });
+    const schedule = await createScheduledTask({
+      name: `principal-tuned-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    try {
+      await dispatchScheduleTarget(schedule);
+      expect(gatherPrincipals()).toEqual([leadId]);
+      expect(calls[0]?.args.leadAgentId).toBe(leadId);
+    } finally {
+      await restoreDreaming();
+    }
+  });
+
+  test("a creator-less schedule refuses the lead once a worker edits the seeded nodes", async () => {
     const schedule = await createScheduledTask({
       name: `principal-edited-${crypto.randomUUID().slice(0, 8)}`,
       cronExpression: "0 0 1 1 *",
       targetType: "workflow",
       workflowId: dreaming.id,
     });
-    await updateWorkflow(dreaming.id, { description: "edited by a worker" });
+    const [gather, ...rest] = dreaming.definition.nodes;
+    await snapshotAndUpdateWorkflow(
+      dreaming.id,
+      {
+        input: { ...dreaming.input, leadAgentId: leadId },
+        definition: {
+          ...dreaming.definition,
+          nodes: [{ ...gather!, config: { ...gather!.config, scriptName: "evil" } }, ...rest],
+        },
+      },
+      { changedByAgentId: workerId },
+    );
     try {
       await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
-        'seeded workflow "dreaming" was edited',
+        'the nodes or params of seeded workflow "dreaming" were edited',
       );
     } finally {
-      await updateWorkflow(dreaming.id, { description: dreaming.description });
+      await restoreDreaming();
     }
     expect(calls).toEqual([]);
+  });
+
+  test("a creator-less schedule refuses the lead for an edit with no seeded snapshot", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-unsnapshotted-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    // Delete the history so no snapshot proves the seeded state.
+    await getDbClient().run("DELETE FROM workflow_versions WHERE workflowId = ?", [dreaming.id]);
+    await updateWorkflow(dreaming.id, { description: "edited without a snapshot" });
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("were edited");
+    } finally {
+      await restoreDreaming();
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test("a long successful night does not make the next nightly fire skip", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-long-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    // Last night started 24h ago and finished 1h ago.
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: dreaming.id });
+    await getDbClient().run(
+      "UPDATE workflow_runs SET status = 'completed', startedAt = ?, finishedAt = ? WHERE id = ?",
+      [
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        runId,
+      ],
+    );
+    const fired = await dispatchScheduleTarget(schedule);
+    const run = await getWorkflowRun(fired.workflowRunIds![0]!);
+    expect(run?.status).not.toBe("skipped");
+    expect(gatherPrincipals()).toEqual([leadId]);
   });
 
   test("control: a creator-less workflow the seeder never wrote keeps running agentless", async () => {

@@ -2606,6 +2606,10 @@ export const CooldownConfigSchema = z
     hours: z.number().min(0).optional(),
     minutes: z.number().min(0).optional(),
     seconds: z.number().min(0).optional(),
+    // "finish" (default): also wait out the window after the last successful
+    // run finished. "start": count only from run starts, so a long run never
+    // pushes the next fixed-time trigger out.
+    from: z.enum(["finish", "start"]).optional(),
   })
   .refine((v) => v.hours !== undefined || v.minutes !== undefined || v.seconds !== undefined, {
     message: "At least one of hours, minutes, or seconds is required",
