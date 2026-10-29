@@ -29,6 +29,11 @@ describe("extension bundle validation", () => {
     expect(await validateBundle(bundle)).toEqual({ ok: true, manifest: bundle.manifest });
   });
 
+  test("accepts the steering event and message rewrite types", async () => {
+    const bundle = await loadBundleFixture("steering-policy");
+    expect(await validateBundle(bundle)).toEqual({ ok: true, manifest: bundle.manifest });
+  });
+
   test("accepts zod and stdlib imports", async () => {
     const bundle = await loadBundleFixture("minimal");
     bundle.files["hooks.ts"] = `import { table } from "stdlib";

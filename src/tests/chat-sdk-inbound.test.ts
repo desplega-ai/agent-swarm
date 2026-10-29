@@ -12,13 +12,16 @@ import {
   createUser,
   getDbClient,
   getKv,
+  getLogsByTaskId,
   getTaskAttachments,
   getTaskById,
   initDb,
   startTask,
   upsertKv,
 } from "../be/db";
+import { installExtension } from "../be/extensions/db";
 import { linkIdentity } from "../be/users";
+import { enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { drainBackground } from "../integrations/chat-sdk/background";
 import { CHAT_CHANNEL_SETTINGS_NAMESPACE } from "../integrations/chat-sdk/reactions";
@@ -41,6 +44,8 @@ import {
   type TelegramHarness,
   telegramUpdate,
 } from "./chat-sdk-harness";
+
+import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-chat-sdk-inbound.sqlite";
 const ENV_KEYS = [
@@ -269,6 +274,31 @@ describe("Chat SDK inbound pipeline", () => {
     // A reaction acknowledges the steering message; no text reply.
     expect(reactionsOn(-2005, steer)).toEqual(["✍"]);
     expect(sendCount()).toBe(sendsBefore);
+  });
+
+  test("an extension-blocked steer never falls back to a follow-up task", async () => {
+    await postTelegramUpdate(telegramUpdate(group(-2025), "@swarm_test_bot plan the report"));
+    await flushChatBuffers();
+    const [task] = await chatTasks(-2025);
+    expect(task).toBeDefined();
+    await startTask(task!.id);
+    const bundle = await loadBundleFixture("steering-policy");
+    const { extension } = await installExtension({ ...bundle, config: { action: "block" } });
+    await enableExtension(extension.id);
+    try {
+      const blocked = telegramUpdate(group(-2025), "Do not deliver this correction");
+      await postTelegramUpdate(blocked);
+      await flushChatBuffers();
+      expect(await chatTasks(-2025)).toHaveLength(1);
+      expect(await steeringRows(task!.id)).toEqual([]);
+      expect(reactionsOn(-2025, blocked)).toEqual(["👎"]);
+      expect(
+        (await getLogsByTaskId(task!.id)).filter((log) => log.eventType === "task_steering"),
+      ).toEqual([]);
+    } finally {
+      await stopExtensionRuntime();
+      await getDbClient().run("DELETE FROM extensions WHERE id = ?", [extension.id]);
+    }
   });
 
   test("a channel that opts into text acks also gets the steering reply", async () => {
