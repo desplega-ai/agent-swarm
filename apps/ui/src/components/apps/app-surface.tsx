@@ -122,6 +122,7 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<AgentTaskStatus> = new Set<AgentTaskSt
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 
 // Dev-only read-out of the whole global apps store, for console QA:

@@ -5,6 +5,7 @@ export const TERMINAL_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 
 /** `true` only when every task in the list has reached a terminal status. */

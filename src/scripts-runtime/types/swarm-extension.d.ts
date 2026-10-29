@@ -121,7 +121,8 @@ declare module "swarm-extension" {
       | "completed"
       | "failed"
       | "cancelled"
-      | "superseded";
+      | "superseded"
+      | "skipped";
     source:
       | "workflow"
       | "schedule"

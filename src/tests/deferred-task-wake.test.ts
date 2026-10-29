@@ -17,6 +17,7 @@ import {
   getScheduledTaskById,
   getTaskById,
   initDb,
+  skipTask,
   startTask,
   supersedeTask,
   updateScheduledTask,
@@ -253,6 +254,7 @@ describe("defer-task wakeOn", () => {
     "completed",
     "failed",
     "cancelled",
+    "skipped",
   ])("all is the default and waits for the final member to be %s", async (status) => {
     const { producers, schedule } = await multiFixture();
     await completeTask(producers[0]!.id, "first result");
@@ -262,7 +264,8 @@ describe("defer-task wakeOn", () => {
     expect(await dispatchDeferredTaskWait(schedule.id, "task.completed")).toEqual({});
     if (status === "completed") await completeTask(producers[1]!.id, "second result");
     else if (status === "failed") await failTask(producers[1]!.id, "second result failed");
-    else await cancelTask(producers[1]!.id, "second result cancelled");
+    else if (status === "cancelled") await cancelTask(producers[1]!.id, "second result cancelled");
+    else await skipTask(producers[1]!.id, "second result not mine");
     await reconcileDeferredTaskWaits(producers[1]!.id);
     const found = await children(schedule.id);
     expect(found).toHaveLength(1);
@@ -275,11 +278,13 @@ describe("defer-task wakeOn", () => {
     "completed",
     "failed",
     "cancelled",
+    "skipped",
   ])("explicit any wakes on the first %s member", async (status) => {
     const { producers, schedule } = await multiFixture("any");
     if (status === "completed") await completeTask(producers[1]!.id, "ready");
     else if (status === "failed") await failTask(producers[1]!.id, "failed");
-    else await cancelTask(producers[1]!.id, "cancelled");
+    else if (status === "cancelled") await cancelTask(producers[1]!.id, "cancelled");
+    else await skipTask(producers[1]!.id, "not mine");
     await reconcileDeferredTaskWaits(producers[1]!.id);
     expect(await children(schedule.id)).toHaveLength(1);
     expect((await children(schedule.id))[0]!.task).toContain("any tasks matched settled");

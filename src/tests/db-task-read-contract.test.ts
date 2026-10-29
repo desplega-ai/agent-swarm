@@ -565,6 +565,7 @@ value:setSlackMessageTracking
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
+value:skipTask
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv

@@ -420,7 +420,7 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
  * - completed: Follow up, Copy answer, and "..." (Retry, Copy task id).
  * - failed: "..." only. The error callout under the hero holds Retry, Copy
  *   diagnostics and Get help.
- * - cancelled, superseded: Retry and "...".
+ * - cancelled, superseded, skipped: Retry and "...".
  * - in progress: Pause, Cancel and "...". Paused: Resume, Cancel and "...".
  * - not started yet: Cancel and "...".
  */
@@ -433,7 +433,9 @@ export function TaskActions({ model, className }: { model: TaskActionModel; clas
       {status === "completed" && model.answer ? (
         <CopyValueButton value={model.answer}>Copy answer</CopyValueButton>
       ) : null}
-      {status === "cancelled" || status === "superseded" ? <RetryButton model={model} /> : null}
+      {status === "cancelled" || status === "superseded" || status === "skipped" ? (
+        <RetryButton model={model} />
+      ) : null}
       {status === "in_progress" ? <PauseButton model={model} /> : null}
       {status === "paused" ? <ResumeButton model={model} /> : null}
       {terminal || !model.allowed.cancel ? null : <CancelTaskButton onConfirm={model.cancel} />}
@@ -450,6 +452,7 @@ export function TaskPrimaryAction({ model }: { model: TaskActionModel }) {
     case "failed":
     case "cancelled":
     case "superseded":
+    case "skipped":
       return <RetryButton model={model} />;
     case "in_progress":
       return <PauseButton model={model} />;

@@ -10,6 +10,7 @@ import {
   getResolvedConfig,
   getTaskById,
   insertTaskAttachment,
+  skipTask,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
@@ -27,6 +28,7 @@ import {
 } from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { can } from "@/rbac";
+import { finalizeTerminalSlackReactions } from "@/slack/ack";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -149,7 +151,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
     {
       title: "Store task progress",
       description:
-        "Stores the progress of a specific task. Can also mark task as completed or failed, which will set the agent back to idle.",
+        "Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
@@ -161,10 +163,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ),
         progress: z.string().optional().describe("The progress update to store."),
         status: z
-          .enum(["completed", "failed", "in_progress", "pending"])
+          .enum(["completed", "failed", "skipped", "in_progress", "pending"])
           .optional()
           .describe(
-            "Set to 'completed' or 'failed' to finish the task. 'in_progress' and 'pending' store progress only and do not change task status.",
+            "Set to 'completed' or 'failed' to finish the task. Set 'skipped' to end a task that is not yours to handle (a Slack thread message addressed to someone else, or one you have nothing to add to); it posts nothing to the thread, creates no follow-up, and needs a one-line reason in failureReason. Never skip an explicit @mention of you or work assigned to you. 'in_progress' and 'pending' store progress only and do not change task status.",
           ),
         output: z
           .string()
@@ -175,7 +177,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
         failureReason: z
           .string()
           .optional()
-          .describe("The reason for failure (used when failing)."),
+          .describe(
+            "The reason for failure (used when failing), or the one-line reason for a skip (required with status 'skipped').",
+          ),
         attachments: z
           .array(AttachmentInputSchema)
           .max(20)
@@ -255,9 +259,23 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
       }
       const status =
-        requestedStatus === "completed" || requestedStatus === "failed"
+        requestedStatus === "completed" ||
+        requestedStatus === "failed" ||
+        requestedStatus === "skipped"
           ? requestedStatus
           : undefined;
+      // A skip carries a one-line reason. Accept it from output too, since
+      // that is where a finishing call usually puts its text, and keep output
+      // empty so nothing that publishes a task result has text to post.
+      let skipReason: string | undefined;
+      if (status === "skipped") {
+        skipReason = (failureReason ?? output)?.replace(/\s+/g, " ").trim();
+        if (!skipReason) {
+          return toolErr(
+            'Status "skipped" needs a one-line reason in failureReason. The task was not changed.',
+          );
+        }
+      }
 
       // Stock Claude occasionally puts the next tool parameter inside output.
       // Strip the leaked tail before validation/persistence; recovered pointers
@@ -510,8 +528,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // fields untouched.
         const terminalResultGuard = await guardTerminalTaskResultWrite(existingTask, {
           status,
-          output,
-          failureReason,
+          ...(status === "skipped" ? { failureReason: skipReason } : { output, failureReason }),
           force,
         });
         if (terminalResultGuard.handled) {
@@ -646,6 +663,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
               await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
+        } else if (status === "skipped") {
+          const result = await skipTask(taskId, skipReason!);
+          if (result) {
+            updatedTask = result;
+            if (existingTask.agentId) {
+              await updateAgentStatusFromCapacity(existingTask.agentId);
+            }
+          }
         } else {
           // Progress update - ensure status reflects current load
           if (existingTask.agentId) {
@@ -681,7 +706,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       // src/tasks/task-terminal-effects.ts. Skipped on no-op (idempotent
       // re-call on a terminal task) and on forced text-only overwrites, so a
       // replay never duplicates memories or follow-up tasks.
-      if (shouldRunTerminalSideEffects && status) {
+      if (shouldRunTerminalSideEffects && (status === "completed" || status === "failed")) {
         await runTaskTerminalEffects({
           task: result.task!,
           status,
@@ -690,6 +715,24 @@ export const registerStoreProgressTool = (server: McpServer) => {
           agentId: requestInfo.agentId,
           persistMemory,
         });
+      }
+
+      // A skip posts nothing to the thread: no outcome card, no relay, no lead
+      // follow-up (runTaskTerminalEffects above is completed/failed only). It
+      // only swaps the trigger message's ack reaction for the skip reaction.
+      const skipWasFresh =
+        status === "skipped" &&
+        result.success &&
+        result.task?.status === "skipped" &&
+        !("wasNoOp" in result && result.wasNoOp) &&
+        !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
+      if (skipWasFresh && result.task?.slackChannelId) {
+        void finalizeTerminalSlackReactions([result.task]).catch((error) =>
+          console.error(
+            "[store-progress] skip reaction failed:",
+            scrubSecrets(error instanceof Error ? error.message : String(error)),
+          ),
+        );
       }
 
       const learningResult = await learningWrite;

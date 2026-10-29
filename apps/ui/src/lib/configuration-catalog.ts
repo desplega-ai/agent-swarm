@@ -1198,6 +1198,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REACTION_SKIPPED",
+        label: "Skipped-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "mute",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_STATUS_ICON_COMPLETED",
         label: "Completed status icon",
         description:

@@ -153,7 +153,8 @@
               "completed",
               "failed",
               "cancelled",
-              "superseded"
+              "superseded",
+              "skipped"
             ]
           },
           "source": {
@@ -10091,7 +10092,8 @@
                             "completed",
                             "failed",
                             "cancelled",
-                            "superseded"
+                            "superseded",
+                            "skipped"
                           ]
                         }
                       },
@@ -34106,7 +34108,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "source": {
@@ -34305,7 +34308,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "createdAt": {
@@ -35675,7 +35679,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "source": {
@@ -36481,7 +36486,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -49273,7 +49279,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -51186,7 +51193,8 @@
                                       "completed",
                                       "failed",
                                       "cancelled",
-                                      "superseded"
+                                      "superseded",
+                                      "skipped"
                                     ]
                                   },
                                   "source": {
@@ -51347,7 +51355,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "readState": {

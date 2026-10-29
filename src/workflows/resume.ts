@@ -144,6 +144,24 @@ export function setupWorkflowResumeListener(
   };
   eventBus.on("task.cancelled", onTaskCancelled);
 
+  // A skipped task did not do the node's work: route it like a cancel, never
+  // as a success, so the node's failure policy decides what happens next.
+  const onTaskSkipped = async (data: unknown) => {
+    try {
+      const event = data as TaskEvent;
+      if (!event.workflowRunId || !event.workflowRunStepId) return;
+      await handleTaskFailure(
+        event,
+        `Task was skipped: ${event.failureReason ?? "no reason given"}`,
+        registry,
+        { retryable: false },
+      );
+    } catch (err) {
+      console.error("[workflows] Handle task skip error:", err);
+    }
+  };
+  eventBus.on("task.skipped", onTaskSkipped);
+
   const onApprovalResolved = async (data: unknown) => {
     try {
       const event = data as ApprovalEvent;
@@ -170,6 +188,7 @@ export function setupWorkflowResumeListener(
     eventBus.off("task.completed", onTaskCompleted);
     eventBus.off("task.failed", onTaskFailed);
     eventBus.off("task.cancelled", onTaskCancelled);
+    eventBus.off("task.skipped", onTaskSkipped);
     eventBus.off("approval.resolved", onApprovalResolved);
     eventBus.off("workflow.child.finished", onChildRunFinished);
   };

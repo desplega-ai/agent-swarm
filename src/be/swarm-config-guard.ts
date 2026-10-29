@@ -535,6 +535,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_REACTION_STEERED",
     "SLACK_REACTION_COMPLETED",
     "SLACK_REACTION_FAILED",
+    "SLACK_REACTION_SKIPPED",
     "SLACK_STATUS_ICON_COMPLETED",
   ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive

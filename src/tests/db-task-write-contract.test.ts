@@ -588,6 +588,7 @@ value:setSlackMessageTracking
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
+value:skipTask
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv
@@ -656,6 +657,7 @@ value:recordTaskProviderIfUnset
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
 value:settleSupersededTaskDependents
+value:skipTask
 value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId

@@ -408,6 +408,7 @@ export {
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
   settleSupersededTaskDependents,
+  skipTask,
   startTask,
   supersedeTask,
   updateTaskClaudeSessionId,
@@ -984,7 +985,7 @@ export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
            AND task.createdAt >= state.activated_at
-           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          )
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
@@ -2373,7 +2374,7 @@ export async function findRecentSimilarTasks(opts: {
 
   // Exclude all terminal statuses — only active or recently created.
   // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -3649,7 +3650,9 @@ export async function checkDependencies(taskId: string): Promise<{
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
     const depTask = await getTaskById(depId);
-    if (!depTask || depTask.status !== "completed") {
+    // A skipped dependency settled without work to hand on; it does not
+    // block, the same as a completed one.
+    if (!depTask || (depTask.status !== "completed" && depTask.status !== "skipped")) {
       blockedBy.push(depId);
     }
   }
@@ -8335,7 +8338,7 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
       CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wrs.status = 'waiting'
         AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')
+        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );
 }

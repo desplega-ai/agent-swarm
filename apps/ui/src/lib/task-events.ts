@@ -61,6 +61,7 @@ export const TASK_STATUS_TONE: Record<string, TaskEventTone> = {
   failed: "error",
   cancelled: "neutral",
   superseded: "neutral",
+  skipped: "neutral",
 };
 
 function statusTone(status: string): TaskEventTone {
@@ -84,6 +85,7 @@ function describeStatusChange(
     case "failed":
     case "cancelled":
     case "superseded":
+    case "skipped":
     case "paused":
       return { label: statusLabel(to), tone };
     case "reviewing":
