@@ -66,7 +66,8 @@ export interface CostData {
     | "dsh"
     | "cursor"
     | "amp"
-    | "grok";
+    | "grok"
+    | "fx";
 }
 
 import type { ProviderName, SteerMode } from "../types";

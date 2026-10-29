@@ -103,6 +103,13 @@ elif [ "$HARNESS_PROVIDER" = "grok" ]; then
     if [ -z "$XAI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
         echo "Warning: grok provider has no credentials yet (XAI_API_KEY or OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
+elif [ "$HARNESS_PROVIDER" = "fx" ]; then
+    # fx reaches models through OpenRouter (openrouter/<vendor>/<id>), OpenAI
+    # (a bare id) or Vercel AI Gateway (vercel/<vendor>/<id>). It cannot use
+    # ANTHROPIC_API_KEY: fx has no Anthropic Messages protocol.
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "${AI_GATEWAY_API_KEY:-}" ]; then
+        echo "Warning: fx provider has no credentials yet (OPENROUTER_API_KEY / OPENAI_API_KEY / AI_GATEWAY_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    fi
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     if [ -z "$CURSOR_API_KEY" ]; then
         echo "Warning: cursor provider has no credentials yet (CURSOR_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
@@ -368,6 +375,14 @@ elif [ "$HARNESS_PROVIDER" = "grok" ]; then
         exit 1
     fi
     echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
+elif [ "$HARNESS_PROVIDER" = "fx" ]; then
+    # fx ships only in worker-full (Dockerfile.worker FX_VERSION, SHA-512 pinned).
+    FX_BIN="${FX_BINARY:-fx}"
+    if ! command -v "$FX_BIN" >/dev/null 2>&1; then
+        echo "FATAL: fx CLI not found: '$FX_BIN'. Use worker-full, or install the pinned fx release binary (Dockerfile.worker FX_VERSION) during image provisioning."
+        exit 1
+    fi
+    echo "fx CLI: $(command -v "$FX_BIN") ($(FX_AUTO_UPGRADE=0 "$FX_BIN" --version 2>/dev/null))"
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     # @cursor/sdk runs in-process inside the worker binary; its ripgrep comes
     # from the platform package installed in worker-full (CURSOR_RIPGREP_PATH).

@@ -332,7 +332,7 @@ List model profiles: named harness + model + effort combinations. Pass a profile
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok \| fx` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
 
 ### get-task-details
 
@@ -458,7 +458,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex and cursor; claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex, cursor and fx (fx supports steer only); claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

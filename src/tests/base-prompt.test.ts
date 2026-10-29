@@ -1290,6 +1290,18 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain('import { store_progress } from "agent-swarm"');
   });
 
+  test("fx gets capability_search guidance with mcp_swarm_ tool names", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "fx",
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("already in your tool list");
+    expect(result).toContain("`capability_search`");
+    expect(result).toContain("`store-progress` is `mcp_swarm_store-progress`");
+  });
+
   test("codex gets exec guidance with the normalized tool name", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,

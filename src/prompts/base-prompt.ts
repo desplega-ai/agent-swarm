@@ -78,12 +78,15 @@ const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"
 /**
  * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
  * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
- * with its own call shape, so the generic lines are wrong for them.
+ * with its own call shape, and fx defers them behind `capability_search` under
+ * `mcp_<server>_<tool>` names, so the generic lines are wrong for them.
  */
 function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
   switch (provider) {
     case "amp":
       return "system.agent.tool_discovery.amp";
+    case "fx":
+      return "system.agent.tool_discovery.fx";
     case "codex":
       return "system.agent.tool_discovery.codex";
     case "opencode":

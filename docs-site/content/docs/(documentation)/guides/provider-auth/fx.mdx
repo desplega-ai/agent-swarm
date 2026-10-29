@@ -1,0 +1,97 @@
+---
+title: fx
+description: Run fx workers on Vercel Labs' fx agent with an OpenRouter, OpenAI or Vercel AI Gateway key, pick a model, and understand how fx runs are priced
+---
+
+`fx` workers run [fx](https://fx.sh), Vercel Labs' open-source terminal coding agent ([source](https://github.com/vercel-labs/fx), Apache-2.0, pinned to 0.0.15), as an [Agent Client Protocol](https://agentclientprotocol.com) server: `fx acp`. The agent loop and tools run inside the worker. Inference runs on OpenRouter, OpenAI or Vercel AI Gateway, picked by the model string.
+
+For the adapter internals, see [Harness Providers](/docs/guides/harness-providers).
+
+## Configure the worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=fx
+OPENROUTER_API_KEY=sk-or-...
+```
+
+Any one of `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` is enough to start. You can store the key as a swarm secret instead of the worker environment. A worker with none of the three waits until one appears in the swarm config. **Test connection** reuses the OpenRouter, OpenAI and AI Gateway checks, which list models and run none.
+
+The full worker image (`worker-full`) installs the pinned release binary at `/usr/local/bin/fx`, verified against a SHA-512 pin. The slim image has none: the entrypoint fails when `fx` is absent, and logs `fx --version` when it is present.
+
+`ANTHROPIC_API_KEY` does not work with fx: fx speaks only the OpenAI Chat Completions protocol to custom providers. Run Claude models through OpenRouter or AI Gateway instead.
+
+## Models
+
+The model string picks the route and the key:
+
+| Swarm model string | fx provider | fx `--model` | Key |
+|---|---|---|---|
+| `openrouter/<vendor>/<id>` | `openrouter` (custom connection) | `<vendor>/<id>` | `OPENROUTER_API_KEY` |
+| `vercel/<vendor>/<id>` | `gateway` (built in) | `<vendor>/<id>` | `AI_GATEWAY_API_KEY` |
+| a bare `<id>` (no slash) | `openai` (custom connection) | `<id>` | `OPENAI_API_KEY` |
+
+Each fx process gets only the key its route needs. Any other string is refused at task creation and claim: `nan/...` and `helmcode/...` (see [Limits](#limits)), and `anthropic/...` direct ids. The dashboard picker groups the models by route: OpenRouter, OpenAI and Vercel AI Gateway.
+
+The tier defaults below all route through OpenRouter. A worker with only `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` passes the credential check, but tier-resolved tasks then fail: set `OPENROUTER_API_KEY`, or pin a model on that route (`MODEL_OVERRIDE`, or the agent or task model).
+
+| Tier | Model | Per 1M tokens (input / output) |
+|---|---|---|
+| `smol` | `openrouter/deepseek/deepseek-v4.1-flash` | $0.14 / $0.42 |
+| `regular` | `openrouter/deepseek/deepseek-v4.1-flash` | $0.14 / $0.42 |
+| `smart` | `openrouter/deepseek/deepseek-v4-pro-0813` | $0.66 / $1.98 |
+| `ultra` | `openrouter/anthropic/claude-opus-5.5` | $4.00 / $20.00 |
+
+Reasoning effort applies only on the AI Gateway route, and only when fx advertises an `effort` option for the model. fx has no reasoning controls for custom connections, so OpenRouter and OpenAI models take none.
+
+## Settings and sessions
+
+fx has no config-directory override, so the adapter leaves `HOME` alone (skills, git and `gh` keep working) and merges the swarm's keys into `~/.fx/settings.json`. The merge is atomic and keeps every other key. It writes:
+
+- the `openrouter` and `openai` custom connections, which name the key's environment variable, never its value;
+- `auto_upgrade: false`;
+- `session_titles: false`, because a title is an extra, unmetered model call.
+
+Per process, the adapter sets `FX_PROVIDER`, `FX_PERMISSION_MODE=full-access` (every tool runs without review), `FX_AUTO_UPGRADE=0` and `FX_NO_OPEN_BROWSER=1`, and passes `--model`. It never sets a mode over ACP: `session/set_mode` would save the mode into `~/.fx/settings.json`. fx's `auto` mode is not used, because its safety reviewer held a plain swarm MCP call and never asked for permission.
+
+fx keeps sessions under `~/.fx` (`/home/worker/.fx` in the image), Nothing prunes them yet, so they accumulate per worker: include `~/.fx` in any disk or workspace-retention cleanup you run on workers.
+
+## Swarm tools and skills
+
+The swarm MCP server goes in `session/new` as a Streamable HTTP server. fx accepts only HTTPS or loopback HTTP MCP URLs, so when the API URL is plain HTTP on another host (`http://api:3013` in Docker) the adapter starts a `127.0.0.1` forwarder for the session. SSE MCP servers are dropped with a warning, because fx does not support them.
+
+fx names the tools `mcp_<server>_<tool>`. The swarm's tool schemas exceed fx's 64 KiB always-loaded budget, so fx defers them behind its `capability_search` tool. The model can still call a swarm tool directly by name.
+
+fx reads `~/.claude/skills/` natively, so the swarm's skills load with no extra setup.
+
+The swarm prompt goes in the ACP `systemPrompt` field, which fx appends to its own prompt. fx caps it at 64 KiB. A prompt over 60 KiB is written to a file in the session's temp directory, and fx gets the first 56 KiB plus a line telling the model to read that file first.
+
+## Steering, resume and cancel
+
+- **Steering.** fx steers natively. A steer is a second `session/prompt` with `_meta.fx.steer: true`, applied at the next tool boundary without cancelling the turn. Only an `absorbed` answer counts as delivered. Any other answer is reported undeliverable, and the message becomes a follow-up task.
+- **Resume.** The adapter implements `session/resume`, which restores the history and the appended system prompt in a new `fx acp` process. The runner does not resume native sessions today, so this path is dormant: follow-up tasks get their context from the swarm's context preamble, as on every harness.
+- **Cancel.** `session/cancel` stops the running tool, returns `stopReason: "cancelled"` with usage, and the adapter kills the process tree.
+
+## Cost
+
+fx reports `inputTokens` and `outputTokens` on each prompt and the context fill in `usage_update`. It reports no USD and no cache-read or cache-write split. The API prices the tokens from the pricing table, with the `openrouter/` or `vercel/` prefix stripped, and tags the row `costSource: pricing-table`. Treat it as an estimate:
+
+- every input token is priced at the uncached rate, so the figure is high when the provider caches;
+- fx's token counts leave out its sub-agent and helper-model calls, so those are not counted at all.
+
+See [Cost and context computation](/docs/guides/cost-and-context-computation).
+
+## Limits
+
+- **NaN keys do not work** with fx 0.0.15. Every NaN model fails with `InconsistentFinishReason`: NaN's trailing usage chunk carries a choice with no `finish_reason` after the `stop` chunk, and fx's parser rejects it. `nan/...` and `helmcode/...` models are refused until a fixed fx ships.
+- **No Anthropic keys.** fx has no Anthropic Messages protocol and no custom-header auth.
+- **No fx subscription logins** (fx's Codex or Grok sign-in), no `fx ask`, no Ultrafast and no `auto` mode.
+- The AI Gateway route has not run live yet.
+
+## Upgrading fx
+
+fx is pre-1.0, and its ACP shapes change between releases. Bump it in one change:
+
+1. Set `FX_VERSION` in `Dockerfile.worker` and `FX_PINNED_VERSION` in `src/providers/fx-adapter.ts` to the new version. A unit test fails when they differ.
+2. Replace `FX_SHA512_AMD64` and `FX_SHA512_ARM64` with the SHA-512 of `https://releases.fx.sh/v<version>/fx-linux-x86_64.tar.gz` and `fx-linux-aarch64.tar.gz` (`curl -fsSL <url> | sha512sum`).
+3. Build `worker-full`, then run `bun run e2e --only health --harness fx` in it with `OPENROUTER_API_KEY` set, and run `bun run test:root -- src/tests/fx-adapter.test.ts`.

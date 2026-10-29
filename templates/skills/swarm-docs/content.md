@@ -97,6 +97,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Cursor](https://docs.agent-swarm.dev/docs/guides/provider-auth/cursor). Reference.
 - [Amp](https://docs.agent-swarm.dev/docs/guides/provider-auth/amp). Reference.
 - [Grok](https://docs.agent-swarm.dev/docs/guides/provider-auth/grok). Reference.
+- [fx](https://docs.agent-swarm.dev/docs/guides/provider-auth/fx). Reference.
 - [DeepSeek Harness (dsh)](https://docs.agent-swarm.dev/docs/guides/provider-auth/dsh). Reference.
 - [x402 Payments](https://docs.agent-swarm.dev/docs/guides/x402-payments). Reference.
 - [Multi-runtime agents](https://docs.agent-swarm.dev/docs/guides/multi-runtime-agents). Reference.

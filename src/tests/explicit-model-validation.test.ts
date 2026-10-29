@@ -331,6 +331,44 @@ describe("grok model namespace", () => {
   });
 });
 
+describe("fx model routes", () => {
+  test("an unrouted namespace, a bare non-OpenAI id or latest:anthropic is refused, even with allowCustomModel", async () => {
+    for (const [model, reason] of [
+      ["nan/glm5.3-flash", "InconsistentFinishReason"],
+      ["helmcode/qwen3.6", "Helmcode is not verified on fx"],
+      ["anthropic/claude-opus-5-5", "Anthropic Messages API"],
+      ["claude-opus-5-5", "is in the anthropic catalog"],
+      ["latest:anthropic/opus", "latest:anthropic alias"],
+    ] as const) {
+      for (const allowCustomModel of [false, true]) {
+        const error = await explicitModelError({ model, harnessProvider: "fx", allowCustomModel });
+        expect(error).toContain(`Model "${model}" does not run on the fx harness`);
+        expect(error).toContain(reason);
+      }
+    }
+  });
+
+  test("the OpenRouter, AI Gateway and OpenAI routes pass", async () => {
+    for (const model of [
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "vercel/anthropic/claude-opus-5.5",
+      "gpt-5-mini",
+      "latest:openrouter/deepseek/deepseek-v4.1-*",
+    ]) {
+      expect(await explicitModelError({ model, harnessProvider: "fx" })).toBeNull();
+    }
+  });
+
+  test("MODEL_TIER_FX_<TIER> refuses a model fx cannot route", () => {
+    expect(validateTierConfigValue("MODEL_TIER_FX_SMART", "nan/glm5.3-flash")).toContain(
+      'model "nan/glm5.3-flash" does not run on the fx harness',
+    );
+    expect(
+      validateTierConfigValue("MODEL_TIER_FX_SMOL", "openrouter/deepseek/deepseek-v4.1-flash"),
+    ).toBeNull();
+  });
+});
+
 describe("MODEL_TIER_<PROVIDER>_<TIER> values", () => {
   test("a model from another harness family is rejected on write", () => {
     expect(validateTierConfigValue("MODEL_TIER_CODEX_SMART", "claude-opus-5-5")).toBe(
@@ -764,5 +802,66 @@ describe("nan and helmcode catalog models", () => {
       model: "helmcode/glm5.3",
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("ChatGPT subscription models (openai-codex/<id>)", () => {
+  let piId = "";
+
+  beforeAll(async () => {
+    piId = (
+      await createAgent({
+        name: "validation-pi-subscription",
+        isLead: false,
+        status: "idle",
+        harnessProvider: "pi",
+      })
+    ).id;
+  });
+
+  test("known when the bare id is an openai catalog model", () => {
+    const catalog = { openai: { models: { "gpt-5.6-sol": {} } } };
+    expect(isKnownCatalogModel("openai-codex/gpt-5.6-sol", catalog)).toBe(true);
+    expect(isKnownCatalogModel("openai-codex/gpt-9", catalog)).toBe(false);
+    expect(isKnownCatalogModel("openai-codex/openai/gpt-5.6-sol", catalog)).toBe(false);
+  });
+
+  test("pi takes it; opencode, codex, claude and grok get a mismatch", async () => {
+    const model = "openai-codex/gpt-5.6-sol";
+    expect(await explicitModelError({ model, harnessProvider: "pi" })).toBeNull();
+    for (const harnessProvider of ["opencode", "codex", "claude", "grok"]) {
+      const error = await explicitModelError({ model, harnessProvider, allowCustomModel: true });
+      expect(error).toContain(`does not run on the ${harnessProvider} harness`);
+    }
+    expect(await explicitModelError({ model, harnessProvider: "codex" })).toContain(
+      'On codex, use "gpt-5.6-sol"',
+    );
+  });
+
+  test("send-task to a pi agent and the agent runtime PATCH accept it", async () => {
+    const sender = ownerCtx({ agentId: leadId });
+    const accepted = await sendTaskHandler(sender, {
+      task: "run on the chatgpt subscription",
+      offerMode: false,
+      allowDuplicate: false,
+      agentId: piId,
+      model: "openai-codex/gpt-5.6-sol",
+      routingReason: "human_pinned",
+      routingNote: "pinned to check the subscription model id",
+    });
+    expect({ ok: accepted.ok, message: accepted.message }).toEqual({
+      ok: true,
+      message: expect.any(String),
+    });
+
+    const res = await api("PATCH", `/api/agents/${piId}/runtime`, {
+      harness_provider: "pi",
+      model: "openai-codex/gpt-5.6-sol",
+      reasoning_effort: "high",
+    });
+    expect({ status: res.status, body: res.body }).toEqual({
+      status: 200,
+      body: expect.anything(),
+    });
   });
 });

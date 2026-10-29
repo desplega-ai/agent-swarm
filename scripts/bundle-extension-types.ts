@@ -45,6 +45,7 @@ async function main() {
     [
       CONTRACT_FILE,
       resolve("src/scripts-runtime/types/swarm-sdk.d.ts"),
+      // Ambient `*.md` / `*.wasm` module declarations for text imports the contract reaches transitively.
       resolve("src/templates.d.ts"),
     ],
     options,
