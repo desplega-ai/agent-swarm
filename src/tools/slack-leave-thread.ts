@@ -2,7 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getTaskById } from "@/be/db";
 import { can } from "@/rbac";
-import { leaveSlackThread } from "@/slack/left-threads";
+import {
+  isSlackLeaveThreadDisabled,
+  leaveSlackThread,
+  SLACK_LEAVE_THREAD_DISABLE,
+} from "@/slack/left-threads";
 import { parseSlackTs } from "@/slack/message-text";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -30,6 +34,11 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
       }),
     },
     async ({ taskId, channelId, threadTs }, requestInfo, _meta) => {
+      // Sessions created before the flag was set still list the tool.
+      if (isSlackLeaveThreadDisabled()) {
+        return toolErr(`slack-leave-thread is disabled by ${SLACK_LEAVE_THREAD_DISABLE}.`);
+      }
+
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }

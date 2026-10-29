@@ -11,6 +11,7 @@ import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
+import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppActionRunTool } from "./tools/app-action-run";
 import { registerAppDiffTool } from "./tools/app-diff";
@@ -694,7 +695,7 @@ export async function createServer(
     registerSlackDownloadFileTool(server);
     registerSlackDeleteTool(server);
     registerSlackUpdateTool(server);
-    registerSlackLeaveThreadTool(server);
+    if (!isSlackLeaveThreadDisabled()) registerSlackLeaveThreadTool(server);
   }
 
   // End of default-enabled capabilities

@@ -8,12 +8,16 @@ import {
   createAgent,
   createTaskExtended,
   createWorkflow,
+  deleteSwarmConfig,
   getSlackTasksInThread,
   initDb,
   updateWorkflow,
+  upsertSwarmConfig,
 } from "../be/db";
+import { __resetInjectedEnvTracking, loadGlobalConfigsIntoEnv } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
+import { createServer as createMcpServer } from "../server";
 import { registerMessageHandler, resetSlackHandlerCachesForTesting } from "../slack/handlers";
 import { isSlackThreadLeft, SLACK_LEFT_THREAD_KV_NAMESPACE } from "../slack/left-threads";
 import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
@@ -35,6 +39,7 @@ const previousEnv = {
   SLACK_RENDER_V2: process.env.SLACK_RENDER_V2,
   ADDITIVE_SLACK: process.env.ADDITIVE_SLACK,
   SLACK_BLOCK_EXTERNAL_CHANNELS: process.env.SLACK_BLOCK_EXTERNAL_CHANNELS,
+  SLACK_LEAVE_THREAD_DISABLE: process.env.SLACK_LEAVE_THREAD_DISABLE,
 };
 
 type Handler = (args: Record<string, unknown>) => Promise<void>;
@@ -133,6 +138,7 @@ beforeAll(async () => {
   process.env.SLACK_RENDER_V2 = "false";
   process.env.ADDITIVE_SLACK = "false";
   process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = "false";
+  delete process.env.SLACK_LEAVE_THREAD_DISABLE;
   lead = await createAgent({ name: "leave-lead", isLead: true, status: "idle", capabilities: [] });
   worker = await createAgent({
     name: "leave-worker",
@@ -330,5 +336,53 @@ describe("slack-leave-thread", () => {
 
     await instantFlush("C_LEAVE_G:2400.0001");
     expect(await getSlackTasksInThread("C_LEAVE_G", "2400.0001")).toHaveLength(1);
+  });
+});
+
+describe("SLACK_LEAVE_THREAD_DISABLE", () => {
+  function registeredTools(server: McpServer): Record<string, unknown> {
+    return (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
+  }
+
+  test("set at session creation, the tool is absent from the MCP surface", async () => {
+    expect(
+      registeredTools(await createMcpServer({ fullSurface: true }))["slack-leave-thread"],
+    ).toBeDefined();
+
+    process.env.SLACK_LEAVE_THREAD_DISABLE = "true";
+    try {
+      const tools = registeredTools(await createMcpServer({ fullSurface: true }));
+      expect(tools["slack-leave-thread"]).toBeUndefined();
+      expect(tools["slack-reply"]).toBeDefined();
+    } finally {
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+    }
+  });
+
+  test("set through a global config reload after registration, the call fails naming the flag", async () => {
+    const task = await seedThread("C_LEAVE_H", "2500.0001");
+    const tool = buildTool();
+    const row = await upsertSwarmConfig({
+      scope: "global",
+      key: "SLACK_LEAVE_THREAD_DISABLE",
+      value: "true",
+    });
+    try {
+      await loadGlobalConfigsIntoEnv(true);
+      const refused = await tool.handler({ taskId: task.id }, meta(worker.id));
+      expect(refused.structuredContent.success).toBe(false);
+      expect(refused.structuredContent.message).toContain("SLACK_LEAVE_THREAD_DISABLE");
+      expect(await isSlackThreadLeft("C_LEAVE_H", "2500.0001")).toBe(false);
+
+      await deleteSwarmConfig(row.id);
+      await loadGlobalConfigsIntoEnv(true);
+      const left = await tool.handler({ taskId: task.id }, meta(worker.id));
+      expect(left.structuredContent.success).toBe(true);
+      expect(await isSlackThreadLeft("C_LEAVE_H", "2500.0001")).toBe(true);
+    } finally {
+      await deleteSwarmConfig(row.id);
+      __resetInjectedEnvTracking();
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+    }
   });
 });

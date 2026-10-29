@@ -1,4 +1,5 @@
 import { deleteKv, getKv, upsertKv } from "../be/db";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 
 /**
  * Slack threads the swarm left via `slack-leave-thread`.
@@ -9,6 +10,17 @@ import { deleteKv, getKv, upsertKv } from "../be/db";
  * restart keeps it.
  */
 export const SLACK_LEFT_THREAD_KV_NAMESPACE = "slack-left-thread";
+
+/** Operator flag that turns the `slack-leave-thread` tool off. */
+export const SLACK_LEAVE_THREAD_DISABLE = "SLACK_LEAVE_THREAD_DISABLE";
+
+/**
+ * Read at call time, not cached: a global swarm_config row is hydrated into
+ * process.env on every config reload, so a flip applies without a restart.
+ */
+export function isSlackLeaveThreadDisabled(): boolean {
+  return isEnvFlagEnabled(SLACK_LEAVE_THREAD_DISABLE, false);
+}
 
 function threadKey(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
