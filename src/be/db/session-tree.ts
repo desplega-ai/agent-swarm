@@ -67,22 +67,49 @@ export interface SessionFilters {
 
 type SqlFragment = { sql: string; params: (string | number | null)[] };
 
+/** How long a finished, read Inbox session stays quiet before it moves to Done on its own. */
+const AUTO_DONE_QUIET_MS = 24 * 3600000;
+
 /**
  * Shared read-state rule with bound ISO timestamps for the list and tree.
  * Done holds through agent activity (progress, status changes, child tasks):
  * only `a.reopensDone`, counted in `sessionSummaryQuery`, brings it back.
+ *
+ * Auto-Done: an Inbox session (`inboxScopeCondition` on its root `r`) reads
+ * as Done once it reads as read, every chain task is finished, no approval
+ * waits, and neither the chain nor the viewer's triage row changed for 24
+ * hours. Nothing is written, so any new activity brings it back to the Inbox,
+ * and a "back to Inbox" (which writes the row) holds for another 24 hours.
+ * Later, Done marks, and groups are never auto-Done.
  */
-function sessionReadStateSql(now = new Date().toISOString()): SqlFragment {
+function sessionReadStateSql(
+  userId: string | null | undefined,
+  now = new Date().toISOString(),
+): SqlFragment {
+  const quiet = new Date(Date.parse(now) - AUTO_DONE_QUIET_MS).toISOString();
+  const scope = inboxScopeCondition(userId);
+  const autoDone = `(a.openTasks = 0 AND a.pendingApproval = 0 AND a.lastActivityAt <= ? AND ${scope.sql})`;
+  const autoDoneParams = [quiet, ...scope.params];
   return {
     sql: `CASE
-      WHEN s.id IS NULL THEN CASE WHEN a.lastActivityAt > ? THEN 'unread' ELSE 'read' END
+      WHEN s.id IS NULL THEN CASE
+        WHEN a.lastActivityAt > ? THEN 'unread'
+        WHEN ${autoDone} THEN 'done'
+        ELSE 'read' END
       WHEN s.status = 'dismissed' THEN 'done'
       WHEN s.status = 'done' THEN CASE WHEN a.reopensDone > 0 THEN 'unread' ELSE 'done' END
       WHEN s.status = 'snoozed' THEN CASE WHEN s.snoozeUntil > ? THEN 'later' ELSE 'unread' END
       WHEN a.lastActivityAt > COALESCE(s.lastReadAt, s.lastUpdatedAt) THEN 'unread'
+      WHEN ${autoDone} AND s.lastUpdatedAt <= ? THEN 'done'
       ELSE 'read'
     END`,
-    params: [new Date(Date.parse(now) - 7 * 86400000).toISOString(), now],
+    params: [
+      new Date(Date.parse(now) - 7 * 86400000).toISOString(),
+      ...autoDoneParams,
+      now,
+      ...autoDoneParams,
+      quiet,
+    ],
   };
 }
 
@@ -138,6 +165,30 @@ function groupCondition(group: string): SqlFragment {
       ...threadRoots.params,
       NESTED_THREAD_MIN_ROOTS,
     ],
+  };
+}
+
+/** No group: roots at `shared/` and at the viewer's `personal/<me>/`, with their direct leaves. */
+function noGroupCondition(userId: string | null | undefined): SqlFragment {
+  const groups = [groupCondition("shared/")];
+  if (userId) groups.push(groupCondition(`personal/${userId}/`));
+  return {
+    sql: `(${groups.map((g) => g.sql).join(" OR ")})`,
+    params: groups.flatMap((g) => g.params),
+  };
+}
+
+/**
+ * Roots the Inbox holds: No group and the source sections (Slack, Telegram,
+ * Discord), which file sessions on their own. A session that a person filed
+ * into a group (My groups, Shared with me) shows under that group only.
+ */
+function inboxScopeCondition(userId: string | null | undefined): SqlFragment {
+  const ranges = sourceKeyRanges();
+  const noGroup = noGroupCondition(userId);
+  return {
+    sql: `(${ranges.map(() => '(r."key" >= ? AND r."key" < ?)').join(" OR ")} OR ${noGroup.sql})`,
+    params: [...ranges.flatMap(({ lo, hi }) => [lo, hi]), ...noGroup.params],
   };
 }
 
@@ -205,20 +256,21 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     add({ sql: 'r."key" >= ? AND r."key" < ?', params: [lo, hi] });
   }
   if (opts.groupKey) add(groupCondition(normalizeAssetKey(opts.groupKey)));
-  if (opts.noGroup) {
-    const groups = [groupCondition("shared/")];
-    if (opts.viewer?.userId) groups.push(groupCondition(`personal/${opts.viewer.userId}/`));
-    add({
-      sql: `(${groups.map((g) => g.sql).join(" OR ")})`,
-      params: groups.flatMap((g) => g.params),
-    });
-  }
+  if (opts.noGroup) add(noGroupCondition(opts.viewer?.userId));
+  if (opts.triage === "inbox") add(inboxScopeCondition(opts.viewer?.userId));
   if (opts.triage === "later" || opts.triage === "done") {
-    add({
+    const marked: SqlFragment = {
       sql: `r.id IN (SELECT itemId FROM inbox_item_state
         WHERE userId = ? AND itemType = 'to_read' AND status IN (${opts.triage === "later" ? "'snoozed'" : "'done','dismissed'"}))`,
       params: [opts.viewer?.userId ?? null],
-    });
+    };
+    // Done also holds auto-Done Inbox sessions, which have no Done row.
+    const scope = inboxScopeCondition(opts.viewer?.userId);
+    add(
+      opts.triage === "done" && opts.viewer?.userId
+        ? { sql: `(${marked.sql} OR ${scope.sql})`, params: [...marked.params, ...scope.params] }
+        : marked,
+    );
   }
   return { sql: conditions.join(" AND "), params };
 }
@@ -231,7 +283,9 @@ function hasSessionChainFilter(opts: SessionFilters): boolean {
   return !!(opts.triage || opts.status || opts.withUserId || excludesTriaged(opts));
 }
 
-const runningSql = `latestStatus NOT IN (${TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",")})`;
+const terminalSql = TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",");
+const runningSql = `latestStatus NOT IN (${terminalSql})`;
+const openTaskSql = `chain.status NOT IN (${terminalSql})`;
 
 /**
  * Sources of tasks that agents and the server create: delegation and scripts
@@ -269,7 +323,9 @@ const reopensDoneSql = `(d.id IS NOT NULL AND (
  */
 export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
   const root = sessionRootFilter(opts);
-  const read = opts.viewer?.userId ? sessionReadStateSql(opts.now) : { sql: "NULL", params: [] };
+  const read = opts.viewer?.userId
+    ? sessionReadStateSql(opts.viewer.userId, opts.now)
+    : { sql: "NULL", params: [] };
   const params = [...root.params];
   if (opts.withUserId) params.push(opts.withUserId);
   params.push(opts.viewer?.userId ?? null, ...read.params, opts.viewer?.userId ?? null);
@@ -309,13 +365,14 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
         ${opts.withUserId ? "SUM(chain.requestedByUserId = ?) AS withUser," : ""}
         SUM(EXISTS (SELECT 1 FROM approval_requests ar
           WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending')) AS pendingApproval,
+        SUM(${openTaskSql}) AS openTasks,
         SUM(${reopensDoneSql}) AS reopensDone
       FROM chain LEFT JOIN inbox_item_state d
         ON d.userId = ? AND d.itemType = 'to_read' AND d.itemId = chain.root_id AND d.status = 'done'
       GROUP BY chain.root_id
     ), state AS (
       SELECT a.*, ${read.sql} AS readState, s.snoozeUntil
-      FROM agg a LEFT JOIN inbox_item_state s
+      FROM agg a CROSS JOIN agent_tasks r ON r.id = a.root_id LEFT JOIN inbox_item_state s
         ON s.userId = ? AND s.itemType = 'to_read' AND s.itemId = a.root_id
     ), summary AS (
       SELECT *, (COALESCE(readState = 'unread' AND latestStatus = 'failed', 0) OR pendingApproval) AS needsYou
@@ -576,7 +633,8 @@ export async function getSessionTree(
     }
     if (row.readState === "later" || row.readState === "done") add(result[row.readState], row);
     else {
-      add(result.inbox, row);
+      // A session filed into a group shows under it only (`inboxScopeCondition`).
+      if (noGroup || sourceOfKey(key)) add(result.inbox, row);
       if (noGroup) add(result.noGroup, row);
       else if (group) add(group, row);
     }

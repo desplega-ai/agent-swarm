@@ -48,7 +48,7 @@ const EMPTY: Record<EmptyKind, { icon: LucideIcon; title: string; hint?: ReactNo
     ),
   },
   nogroup: { icon: SquareDashed, title: "Every session has a group." },
-  group: { icon: Hash, title: "Nothing in your Inbox here." },
+  group: { icon: Hash, title: "Nothing open here." },
   // SPEC R6: the first visit after the release, when every session has the default key.
   groups: {
     icon: FolderPlus,

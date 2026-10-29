@@ -21,19 +21,21 @@ The sidebar shows these sections, from top to bottom:
 
 | Section | What it holds |
 | --- | --- |
-| **Inbox** | Every session that is not in Later or Done |
-| **Later** | The sessions that you snoozed, in order of wake time |
-| **Done** | The sessions that you marked Done |
-| **No group** | Inbox sessions that are in no group |
+| **Inbox** | Sessions in no group or in a source section, that are not in Later or Done |
 | **My groups** | Groups under `shared/` and under your own `personal/<user-id>/` key, nested by path |
 | **Shared with me** | Groups under other people's `personal/<user-id>/` keys, with one entry for each owner |
 | **Slack**, **Telegram**, **Discord** | The [source sections](#sources): one group for each channel, DM, or chat |
+| **No group** | Inbox sessions that are in no group |
+| **Later** | The sessions that you snoozed, in order of wake time |
+| **Done** | The sessions that you marked Done, and the finished sessions that moved there on their own |
 
 The sidebar shows the sessions that you started and the sessions that other people share with you.
 
 The filter menu at the end of the search row picks the sources the sidebar shows. Only sessions started from the dashboard (`ui`) are on by default. Every other source, Slack, GitHub, or one the sidebar has not seen before, stays off until you tick it. A session under a [source key](/docs/guides/asset-namespaces#source-keys) counts as that source. So an agent session in a Slack thread counts as Slack, not as MCP, and only the Slack tick shows it. The Inbox, Later, Done, the groups, the source sections, and their counts follow the filter. A direct link to a session that the filter leaves out still opens it.
 
-Groups and No group list only Inbox sessions. A session in Later or Done shows in Later or Done, not in its group.
+Groups and No group list only sessions that are not in Later or Done. A session in Later or Done shows in Later or Done, not in its group.
+
+A session that is filed into a group, in My groups or Shared with me, shows under that group only, not in the Inbox. A session in a source section stays in the Inbox too, because the source files it there on its own.
 
 Each list shows its 10 newest sessions, by latest activity. **Show 10 more** shows the next 10. After that, **View all N** opens the full list in the [group tab](#group-tab).
 
@@ -175,6 +177,7 @@ A session **needs you** when it is unread and its latest task failed. It also ne
 - Agent work does not bring a Done session back: progress, status changes, finished tasks, and tasks that agents create or delegate leave it in Done.
 - A Done session goes back to the Inbox, as unread, only when it needs you: an approval request created after you marked it Done, or a new message from a person in the session.
 - `e` on a session in Done moves it back to the Inbox. In the session header, the **Done** button of a session in Done shows pressed. Click it to move the session back to the Inbox.
+- An Inbox session moves to Done on its own when it reads as read, every task in it is finished, no approval waits, and nothing happened in it for 24 hours. A session with no read mark from you reads as read only after 7 days, so it waits that long. Any new activity brings it back to the Inbox, as unread. A session that you move back to the Inbox stays there for 24 hours. Sessions in a group or in Later never move on their own.
 
 ### Later
 
