@@ -52,6 +52,57 @@ beforeEach(async () => {
 });
 
 describe("runtime pools persistence", () => {
+  test("pool caches default off, persist across edits, and can be disabled explicitly", async () => {
+    const controller = await createRuntimeController({ name: "cache-controller", kind: "docker" });
+    const base = {
+      name: "cached-pool",
+      kind: "docker" as const,
+      placements: [controller.id],
+      image: "worker:test",
+    };
+    const pool = await createRuntimePool(base);
+    expect(pool.cache).toBeNull();
+    expect((await updateRuntimePool(pool.id, { cache: { mountPath: "/cache" } })).cache).toEqual({
+      mountPath: "/cache",
+    });
+    expect((await updateRuntimePool(pool.id, { name: "renamed-pool" })).cache).toEqual({
+      mountPath: "/cache",
+    });
+    expect((await getRuntimePool(pool.id))?.cache).toEqual({ mountPath: "/cache" });
+    expect((await updateRuntimePool(pool.id, { cache: null })).cache).toBeNull();
+  });
+
+  test("pool cache validation rejects unsafe mount paths and unsupported providers", async () => {
+    const docker = await createRuntimeController({
+      name: "docker-cache-validation",
+      kind: "docker",
+    });
+    for (const mountPath of ["/", "//", "relative", "/cache/..", "/./cache", "/cache\0bad"]) {
+      await expect(
+        createRuntimePool({
+          name: "invalid-path",
+          kind: "docker",
+          placements: [docker.id],
+          image: "worker:test",
+          cache: { mountPath },
+        }),
+      ).rejects.toThrow("mountPath");
+    }
+    for (const kind of ["static", "e2b", "boxd"] as const) {
+      const controller = await createRuntimeController({ name: `${kind}-cache-validation`, kind });
+      await expect(
+        createRuntimePool({
+          name: "unsupported-cache",
+          kind,
+          placements: [controller.id],
+          image: "worker:test",
+          cache: { mountPath: "/cache" },
+        }),
+      ).rejects.toThrow("does not support persistent pool caches");
+    }
+    expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
+  });
+
   test("maps persisted task wake and agent provisioning state without changing routing", async () => {
     const agent = await createAgent({ name: "worker", status: "offline", isLead: false });
     expect(agent).toMatchObject({ runtimeProvisionAttempts: 0, runtimeProvisionRetryAt: null });

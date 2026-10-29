@@ -119,7 +119,12 @@ async function dockerApi<T>(
 
 export class DockerRuntimeProvider implements RuntimeProvider {
   readonly kind = "docker" as const;
-  readonly traits = { canProvision: true, ephemeralDisk: true, supportsPause: false };
+  readonly traits = {
+    canProvision: true,
+    ephemeralDisk: true,
+    supportsPause: false,
+    persistentCache: true,
+  };
 
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
     try {
@@ -132,6 +137,37 @@ export class DockerRuntimeProvider implements RuntimeProvider {
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
     try {
+      let cacheWarning: string | undefined;
+      let cacheMount: { Type: "volume"; Source: string; Target: string } | undefined;
+      if (req.cache) {
+        try {
+          const volume = await dockerApi<{ Name: string; Labels?: Record<string, string> }>(
+            target,
+            "POST",
+            "/volumes/create",
+            {
+              Name: req.cache.key,
+              Labels: {
+                [RUNTIME_LABELS.owner]: req.ownerId,
+                [RUNTIME_LABELS.poolId]: req.poolId,
+                "swarm.cache": "true",
+              },
+            },
+          );
+          // Docker reuses an existing name without replacing its labels.
+          if (
+            volume.Name !== req.cache.key ||
+            volume.Labels?.[RUNTIME_LABELS.owner] !== req.ownerId ||
+            volume.Labels?.[RUNTIME_LABELS.poolId] !== req.poolId ||
+            volume.Labels?.["swarm.cache"] !== "true"
+          ) {
+            throw new Error(`Cache volume ${req.cache.key} is not owned by this swarm and pool`);
+          }
+          cacheMount = { Type: "volume", Source: req.cache.key, Target: req.cache.mountPath };
+        } catch (error) {
+          cacheWarning = redactWithEnv(scrubSecrets(String(error)), req.env);
+        }
+      }
       const path = `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`;
       const body = {
         Image: req.image,
@@ -154,6 +190,7 @@ export class DockerRuntimeProvider implements RuntimeProvider {
           NetworkMode: target.DOCKER_NETWORK,
           Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
           NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
+          ...(cacheMount ? { Mounts: [cacheMount] } : {}),
         },
       };
       let created: { Id: string };
@@ -182,7 +219,11 @@ export class DockerRuntimeProvider implements RuntimeProvider {
         );
         throw err;
       }
-      return { kind: "docker", externalId: created.Id };
+      return {
+        kind: "docker",
+        externalId: created.Id,
+        ...(cacheWarning ? { meta: { cacheWarning } } : {}),
+      };
     } catch (err) {
       throw new Error(redactWithEnv(String(err), req.env));
     }

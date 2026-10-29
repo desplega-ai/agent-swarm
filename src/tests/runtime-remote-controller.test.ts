@@ -56,7 +56,11 @@ import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 class FakeProvider implements RuntimeProvider {
   readonly kind = "docker" as const;
-  readonly traits = { canProvision: true, ephemeralDisk: true, supportsPause: false };
+  readonly traits: RuntimeProvider["traits"] = {
+    canProvision: true,
+    ephemeralDisk: true,
+    supportsPause: false,
+  };
   requests: ProvisionRequest[] = [];
   terminated: string[] = [];
   owners: string[] = [];
@@ -205,13 +209,17 @@ function request(ownerId: string): ProvisionRequest {
 }
 
 test("hello sets online and all controller commands make round trips through the CLI client", async () => {
+  fake.traits.persistentCache = true;
   await connect();
   const row = await getRuntimeController(controllerId);
   expect(row?.lastSeenAt).toBeTruthy();
   const commands = await getControllerCommands(controllerId);
   expect(commands.workerApiUrl).toBe("http://remote-worker.invalid");
   const req = request(await ensureRuntimeOwnerId());
+  expect(commands.traits.persistentCache).toBe(true);
+  req.cache = { key: `swarm-cache-${req.poolId}`, mountPath: "/cache" };
   const handle = await commands.provision(req);
+  expect(fake.requests[0]?.cache).toEqual(req.cache);
   expect(handle.controllerId).toBe(controllerId);
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "running" });
   expect(await commands.list(req.ownerId)).toEqual([handle]);

@@ -212,6 +212,36 @@ Adapter errors pass through `scrubSecrets`. Provision errors also redact sensiti
 The adapter does not register request environment values in the process-wide secret registry.
 If container start fails, the adapter attempts forced deletion before it returns the original error.
 
+### Persistent pool cache
+
+Pools accept `cache: { mountPath: "/home/worker/.cache" }` or `null` (the default).
+`RuntimeProviderTraits.persistentCache` is optional; absent means unsupported.
+The supervisor passes `ProvisionRequest.cache: { key: "swarm-cache-<poolId>", mountPath }`
+only to a controller that advertises the capability. The working disk still has
+`ephemeralDisk: true`. Docker is the first supported adapter; static, E2B, and boxd
+reject cache configuration until their adapters implement it.
+
+Docker creates the named volume with authoritative `swarm.owner`, `swarm.pool-id`,
+and `swarm.cache=true` labels, verifies the returned ownership, and mounts it with
+`HostConfig.Mounts` (`Type: "volume"`). Repeated and concurrent provisions reuse
+the pool's volume. Foreign or unlabeled volumes are never adopted.
+An older remote controller or a failed volume preparation starts the runtime
+without cache and records a scrubbed `Persistent cache:` warning in the pool's
+`lastError`, without advancing its provision failure counter.
+Successful cache provisioning clears only cache warnings, preserving other errors.
+Protocol version 1 accepts both legacy hello messages and the new optional fields.
+
+Cache contents must tolerate concurrent writers. Do not store working trees,
+credentials, or runtime state there. The operator chooses cache environment
+variables and makes the mount writable for the image's worker user through the
+image or root setup script. A mount does not configure package managers by itself.
+Container termination and failed-start cleanup remove anonymous volumes only;
+the named cache survives. Setting `cache: null`, disabling/deleting a pool, or
+changing its placement also retains the volume. New runtimes use the updated
+configuration; running runtimes keep their existing mount until termination.
+Unused cache volumes can be inspected by their owner/pool labels and removed with
+`docker volume rm swarm-cache-<poolId>` after their runtimes have stopped.
+
 ## e2b
 
 `E2B_API_KEY` is required. `E2B_API_BASE` selects a custom endpoint.

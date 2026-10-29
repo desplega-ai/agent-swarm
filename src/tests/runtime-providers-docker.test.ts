@@ -61,6 +61,126 @@ afterEach(async () => {
 });
 
 describe("Docker runtime provider", () => {
+  test("cache volumes are shared across runtimes and survive container termination", async () => {
+    const volumes = new Map<
+      string,
+      { Name: string; Labels: Record<string, string>; content: string }
+    >();
+    const mounts: unknown[] = [];
+    handler = (url, init) => {
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      if (url.pathname.endsWith("/volumes/create")) {
+        if (!volumes.has(body.Name)) volumes.set(body.Name, { ...body, content: "" });
+        return Response.json(volumes.get(body.Name));
+      }
+      if (url.pathname.endsWith("/containers/create")) {
+        mounts.push(body.HostConfig.Mounts);
+        return Response.json({ Id: crypto.randomUUID() });
+      }
+      return new Response(null, { status: 204 });
+    };
+    const cache = { key: "swarm-cache-pool-1", mountPath: "/cache" };
+    const first = await provider.provision(target, { ...request, cache });
+    volumes.get(cache.key)!.content = "cached git objects";
+    await provider.terminate(target, first);
+    const second = await provider.provision(target, {
+      ...request,
+      runtimeId: crypto.randomUUID(),
+      cache,
+    });
+    await provider.terminate(target, second);
+    expect(volumes.size).toBe(1);
+    expect(volumes.get(cache.key)?.content).toBe("cached git objects");
+    expect(volumes.get(cache.key)?.Labels).toEqual({
+      [RUNTIME_LABELS.owner]: request.ownerId,
+      [RUNTIME_LABELS.poolId]: request.poolId,
+      "swarm.cache": "true",
+    });
+    expect(mounts).toEqual(
+      Array(2).fill([{ Type: "volume", Source: cache.key, Target: "/cache" }]),
+    );
+    expect(
+      calls
+        .filter(({ init }) => init.method === "DELETE")
+        .every(
+          ({ url }) =>
+            url.pathname.includes("/containers/") && url.searchParams.get("v") === "true",
+        ),
+    ).toBe(true);
+    expect(provider.traits).toMatchObject({ persistentCache: true, ephemeralDisk: true });
+  });
+
+  test("cache provisioning fails open with a scrubbed warning and no mount", async () => {
+    const secret = "cache-volume-short-secret";
+    handler = (url) =>
+      url.pathname.endsWith("/volumes/create")
+        ? new Response(`volume unavailable ${secret}`, { status: 500 })
+        : url.pathname.endsWith("/containers/create")
+          ? Response.json({ Id: handle.externalId })
+          : new Response(null, { status: 204 });
+    const result = await provider.provision(target, {
+      ...request,
+      cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      env: { API_KEY: secret },
+    });
+    expect(result.meta?.cacheWarning).toContain("volume unavailable");
+    expect(result.meta?.cacheWarning).not.toContain(secret);
+    const body = JSON.parse(
+      String(calls.find(({ url }) => url.pathname.endsWith("/containers/create"))?.init.body),
+    );
+    expect(body.HostConfig.Mounts).toBeUndefined();
+    expect(calls.at(-1)?.url.pathname).toEndWith("/containers/container-1/start");
+  });
+
+  for (const mismatched of ["owner", "poolId", "cache"] as const) {
+    test(`cache volumes with a mismatched ${mismatched} label are never mounted or relabeled`, async () => {
+      const labels = {
+        [RUNTIME_LABELS.owner]: request.ownerId,
+        [RUNTIME_LABELS.poolId]: request.poolId,
+        "swarm.cache": "true",
+      };
+      labels[mismatched === "cache" ? "swarm.cache" : RUNTIME_LABELS[mismatched]] = "foreign";
+      handler = (url) =>
+        url.pathname.endsWith("/volumes/create")
+          ? Response.json({ Name: "swarm-cache-pool-1", Labels: labels })
+          : url.pathname.endsWith("/containers/create")
+            ? Response.json({ Id: handle.externalId })
+            : new Response(null, { status: 204 });
+      const result = await provider.provision(target, {
+        ...request,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      });
+      expect(result.meta?.cacheWarning).toContain("not owned");
+      expect(JSON.parse(String(calls[1]?.init.body)).HostConfig.Mounts).toBeUndefined();
+      expect(calls.some(({ init }) => init.method === "DELETE")).toBe(false);
+    });
+  }
+
+  test("cache mounts survive the missing-image retry", async () => {
+    let creates = 0;
+    handler = (url, init) => {
+      if (url.pathname.endsWith("/volumes/create"))
+        return Response.json(JSON.parse(String(init.body)));
+      if (url.pathname.endsWith("/containers/create")) {
+        expect(JSON.parse(String(init.body)).HostConfig.Mounts).toEqual([
+          { Type: "volume", Source: "swarm-cache-pool-1", Target: "/cache" },
+        ]);
+        return ++creates === 1
+          ? new Response("No such image", { status: 404 })
+          : Response.json({ Id: handle.externalId });
+      }
+      return url.pathname.endsWith("/images/create")
+        ? new Response('{"status":"complete"}\n')
+        : new Response(null, { status: 204 });
+    };
+    await provider.provision(target, {
+      ...request,
+      cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+    });
+    expect(creates).toBe(2);
+    expect(calls.filter(({ url }) => url.pathname.endsWith("/volumes/create"))).toHaveLength(1);
+  });
+
   for (const message of [
     "client version 1.44 is too old. Minimum supported API version is 1.47",
     "API version is unsupported",

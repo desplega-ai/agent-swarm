@@ -19,6 +19,8 @@ export interface RuntimeProviderTraits {
   ephemeralDisk: boolean;
   /** Provider can pause and resume a runtime. */
   supportsPause: boolean;
+  /** Can mount a persistent cache shared by all runtimes of one pool. */
+  persistentCache?: boolean;
   /** Provider hard cap on runtime lifetime, if any. */
   maxTtlSec?: number;
   /** Continuous runtime limit for the configured infrastructure tier. */
@@ -45,6 +47,8 @@ export interface ProvisionRequest {
   /** Worker env: MCP_BASE_URL, AGENT_ID, API key or scoped token, pool env. */
   env: Record<string, string>;
   resources?: { cpu?: number; memoryMb?: number };
+  /** Provider-neutral cache identity, allocated by the API rather than the operator. */
+  cache?: { key: string; mountPath: string };
   ttlSec?: number;
   /** Ownership labels, used by list() to find runtimes this swarm started. */
   labels: Record<string, string>;

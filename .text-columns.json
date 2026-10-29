@@ -3794,6 +3794,9 @@
     "resources": {
       "exempt": "JSON resource settings"
     },
+    "cache": {
+      "exempt": "JSON container cache mount path; must round trip byte exact"
+    },
     "resolved_image": {
       "exempt": "provider artifact reference"
     },

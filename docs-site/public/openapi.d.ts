@@ -29417,6 +29417,10 @@ export interface components {
                 memoryMb?: number;
             } | null;
             /** @default null */
+            cache: {
+                mountPath: string;
+            } | null;
+            /** @default null */
             ttlSec: number | null;
             /** @default true */
             enabled: boolean;
@@ -33455,6 +33459,10 @@ export interface operations {
                         memoryMb?: number;
                     } | null;
                     /** @default null */
+                    cache?: {
+                        mountPath: string;
+                    } | null;
+                    /** @default null */
                     ttlSec?: number | null;
                     /** @default true */
                     enabled?: boolean;
@@ -33657,6 +33665,9 @@ export interface operations {
                     resources?: {
                         cpu?: number;
                         memoryMb?: number;
+                    } | null;
+                    cache?: {
+                        mountPath: string;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;

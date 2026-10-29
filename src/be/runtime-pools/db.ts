@@ -29,10 +29,11 @@ type ControllerRow = Omit<
   config: string;
   secretConfig: string | null;
 };
-type PoolRow = Omit<RuntimePool, "placements" | "env" | "resources" | "enabled"> & {
+type PoolRow = Omit<RuntimePool, "placements" | "env" | "resources" | "cache" | "enabled"> & {
   placements: string;
   env: string;
   resources: string | null;
+  cache: string | null;
   enabled: number;
 };
 const controllerColumns = `id, name, kind, placement, config, secret_config AS secretConfig,
@@ -40,7 +41,7 @@ const controllerColumns = `id, name, kind, placement, config, secret_config AS s
   created_by AS createdBy, updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
 const poolColumns = `id, name, kind, placements, image, lifecycle, idle_minutes AS idleMinutes,
   slots_per_runtime AS slotsPerRuntime, max_runtimes AS maxRuntimes, min_runtimes AS minRuntimes,
-  delivery, env, resources, ttl_sec AS ttlSec, resolved_image AS resolvedImage, enabled,
+  delivery, env, resources, cache, ttl_sec AS ttlSec, resolved_image AS resolvedImage, enabled,
   consecutive_failures AS consecutiveFailures, circuit_open_until AS circuitOpenUntil,
   last_error AS lastError, last_error_at AS lastErrorAt, created_by AS createdBy,
   updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
@@ -70,6 +71,7 @@ function rowToPool(row: PoolRow): RuntimePool {
     placements: JSON.parse(row.placements),
     env: JSON.parse(row.env),
     resources: row.resources ? JSON.parse(row.resources) : null,
+    cache: row.cache ? JSON.parse(row.cache) : null,
     enabled: row.enabled === 1,
   };
 }
@@ -291,6 +293,9 @@ export async function getRuntimePool(id: string): Promise<RuntimePool | null> {
 }
 async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Promise<void> {
   supportedKind(data.kind);
+  if (data.cache && !(await createRuntimeProvider(data.kind)).traits.persistentCache) {
+    throw new RuntimePoolError(`${data.kind} does not support persistent pool caches`);
+  }
   const controller = await getRuntimeController(data.placements[0]!);
   if (!controller) throw new RuntimePoolError("Controller not found");
   if (data.kind !== controller.kind)
@@ -316,7 +321,7 @@ export async function createRuntimePool(
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? OR id = ?", [data.name, id]))
       throw new RuntimePoolError("Pool already exists", 409);
     await tx.run(
-      `INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes, slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, ttl_sec, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes, slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, cache, ttl_sec, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         data.name,
@@ -331,6 +336,7 @@ export async function createRuntimePool(
         data.delivery,
         JSON.stringify(data.env),
         data.resources ? JSON.stringify(data.resources) : null,
+        data.cache ? JSON.stringify(data.cache) : null,
         data.ttlSec,
         Number(data.enabled),
         actor,
@@ -365,7 +371,7 @@ export async function updateRuntimePool(
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
     await tx.run(
-      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
+      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, cache = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
       [
         data.name,
         data.kind,
@@ -384,6 +390,7 @@ export async function updateRuntimePool(
         data.delivery,
         JSON.stringify(data.env),
         data.resources ? JSON.stringify(data.resources) : null,
+        data.cache ? JSON.stringify(data.cache) : null,
         data.ttlSec,
         Number(data.enabled),
         actor,

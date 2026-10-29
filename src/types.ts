@@ -2198,6 +2198,22 @@ export const RuntimeControllerSchema = RuntimeControllerCreateSchema.omit({ secr
   .openapi("RuntimeController");
 export type RuntimeController = z.infer<typeof RuntimeControllerSchema>;
 
+export const RuntimePoolCacheSchema = z
+  .object({
+    mountPath: z
+      .string()
+      .min(2)
+      .refine(
+        (path) =>
+          path.startsWith("/") &&
+          path.split("/").some((part) => part.length > 0) &&
+          !path.includes("\0") &&
+          !path.split("/").some((part) => part === "." || part === ".."),
+        "Cache mountPath must be an absolute container path other than /, without . or .. segments",
+      ),
+  })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2212,6 +2228,7 @@ export const RuntimePoolCreateSchema = z
     delivery: DeliveryModeSchema.nullable().default(null),
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
+    cache: RuntimePoolCacheSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2225,6 +2242,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   delivery: DeliveryModeSchema.nullable().optional(),
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
+  cache: RuntimePoolCacheSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
