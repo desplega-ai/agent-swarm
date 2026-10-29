@@ -6287,7 +6287,7 @@ export interface UpdateScheduledTaskData {
   description?: string;
   cronExpression?: string | null;
   intervalMs?: number | null;
-  taskTemplate?: string;
+  taskTemplate?: string | null;
   taskType?: string;
   tags?: string[];
   priority?: number;
@@ -6458,9 +6458,36 @@ export async function updateScheduledTask(
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
   return await getDbClient().transaction(async (tx) => {
+    // An unfired deferral is the only continuation of a suppressed completion.
+    // Read under the delete's write lock so a concurrent wake cannot be missed.
+    const deferred = await tx.get<{ parentTaskId: string }>(
+      `SELECT parentTaskId FROM scheduled_tasks
+       WHERE id = ? AND taskType = 'deferred' AND parentTaskId IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM agent_tasks WHERE scheduleId = scheduled_tasks.id)`,
+      [id],
+    );
     // Favorites carry no FK to the entity; drop every user's star with it.
     await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
     const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+    if (result.changes > 0 && deferred) {
+      getDbClient().afterCommit(async () => {
+        try {
+          const parent = await getTaskById(deferred.parentTaskId);
+          if (!parent?.deferredAt) return;
+          const { createWorkerTaskFollowUp } = await import("../tasks/worker-follow-up");
+          await createWorkerTaskFollowUp({
+            task: parent,
+            status: "failed",
+            failureReason: "Deferred continuation schedule deleted before its wake-up",
+          });
+        } catch (error) {
+          console.error(
+            "[deleteScheduledTask] deferred deletion follow-up failed:",
+            scrubSecrets(error instanceof Error ? error.message : String(error)),
+          );
+        }
+      });
+    }
     return result.changes > 0;
   });
 }
@@ -13055,6 +13082,9 @@ export async function listRecentSessions(
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const query = sessionSummaryQuery(opts);
   const threadRoots = threadRootsSql();
+  const order = (a: string) =>
+    `${opts.triage === "later" ? `${a}.snoozeUntil ASC,` : ""}
+    ${a}.lastActivityAt DESC, ${a}.rootCreatedAt DESC, ${a}.root_id DESC`;
   const rootRows = await getDbClient().query<
     AgentTaskRow & {
       __chainCount: number;
@@ -13066,13 +13096,14 @@ export async function listRecentSessions(
       __threadRoots: number;
     }
   >(
+    // Page first on the summaries, then read agent_tasks for the page roots only.
     `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
       a.latestStatus AS __latestStatus, a.readState AS __readState,
       a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
       ${threadRoots.sql} AS __threadRoots
-    FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
-    ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
-      a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
+    FROM (SELECT * FROM (${query.sql}) page ORDER BY ${order("page")} LIMIT ? OFFSET ?) a
+    CROSS JOIN agent_tasks r ON r.id = a.root_id
+    ORDER BY ${order("a")}`,
     [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
   const fields = await sessionPageFields(

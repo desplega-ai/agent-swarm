@@ -9,7 +9,9 @@ import {
 import {
   buildSandboxedCommand,
   createCappedStreamState,
+  DEFAULT_SANDBOX_LIMITS,
   readStreamCapped,
+  type SandboxEnvironmentMode,
   sandboxSpawnEnv,
   snapshotCapped,
 } from "../../utils/sandboxed-process";
@@ -49,11 +51,76 @@ function withDeadline<T>(promise: Promise<T>, ms: number, onDeadline: () => T): 
 }
 
 // ─── Schemas ────────────────────────────────────────────────
+const RESERVED_ENV_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+  "PWD",
+  "SHLVL",
+  "OLDPWD",
+  // These affect native loading or libc initialization before the wrapper's ulimit.
+  "GCONV_PATH",
+  "GLIBC_TUNABLES",
+  "LOCPATH",
+  "NLSPATH",
+  "GETCONF_DIR",
+  // Shell startup controls and variables Bash rewrites or owns.
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "ENV",
+  "SHELLOPTS",
+  "IFS",
+  "OPTIND",
+  "OPTERR",
+  "PS0",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PPID",
+  "UID",
+  "EUID",
+  "LINENO",
+  "RANDOM",
+  "SRANDOM",
+  "SECONDS",
+  "EPOCHSECONDS",
+  "EPOCHREALTIME",
+  "HISTCMD",
+  "COMP_WORDBREAKS",
+  "_",
+]);
+const RESERVED_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_"];
 
 export const ScriptConfigSchema = z.object({
   runtime: z.enum(["bash", "ts", "python"]),
   script: z.string(),
   args: z.array(z.string()).optional(),
+  env: z
+    .record(
+      z
+        .string()
+        .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid environment variable name")
+        .refine(
+          (key) => {
+            const name = key.toUpperCase();
+            return (
+              !RESERVED_ENV_KEYS.has(name) &&
+              !RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+            );
+          },
+          {
+            message: "Cannot override a reserved script environment variable",
+          },
+        ),
+      z.string().refine((value) => !value.includes("\0"), {
+        message: "Environment variable values cannot contain NUL bytes",
+      }),
+    )
+    .optional(),
   timeout: z.number().int().min(1000).max(MAX_SCRIPT_WALL_CLOCK_MS).default(30_000),
   cwd: z.string().optional(),
 });
@@ -179,11 +246,11 @@ export class ScriptExecutor extends BaseExecutor<
     }
 
     // Workflow-authored scripts run with attacker-influenceable data available
-    // via {{...}} interpolation into `args` (trigger/webhook payloads etc — the
-    // `script` string itself is never interpolated, see engine.ts
-    // interpolateNodeConfig). Sandbox the same way as every other
-    // spawn-user-code path: ulimits + a clean minimal env (never the server's
-    // full process.env, which carries operator secrets) + a scoped tmpdir
+    // via {{...}} interpolation into args/env (trigger/webhook payloads etc).
+    // Source interpolation is restricted to the engine's trusted-source
+    // allowlist. Loader/shell env names are rejected by config validation before
+    // spawn. Use ulimits + an explicit env (never the server's full process.env,
+    // which carries operator secrets) + a scoped tmpdir
     // when the workflow author didn't pin an explicit `cwd`.
     const scopedTmpdir = cwd
       ? undefined
@@ -197,22 +264,20 @@ export class ScriptExecutor extends BaseExecutor<
       LANG: process.env.LANG ?? "C.UTF-8",
       LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
       TMPDIR: workdir ?? process.env.TMPDIR ?? "/tmp",
+      ...config.env,
     };
 
     try {
+      const launch: SandboxEnvironmentMode = config.env
+        ? { kind: "spawn", env }
+        : { kind: "inline", env: sandboxSpawnEnv(env) };
       const proc = registerProcessGroup(
-        Bun.spawn(buildSandboxedCommand(cmd, env), {
+        Bun.spawn(buildSandboxedCommand(cmd, env, DEFAULT_SANDBOX_LIMITS, launch.kind), {
           stdout: "pipe",
           stderr: "pipe",
           cwd: workdir,
           detached: detachedProcessGroup,
-          // On POSIX, Bun.spawn only needs PATH to locate `sh` for argv[0] —
-          // the sandboxed command's `env -i` prelude scrubs the child down to
-          // `env` above, so the server's secrets never reach it either way. On
-          // win32 there is no such prelude, so `sandboxSpawnEnv` passes `env`
-          // through directly instead — see `buildSandboxedCommand`'s win32 doc
-          // comment.
-          env: sandboxSpawnEnv(env),
+          env: launch.env,
         }),
       );
 

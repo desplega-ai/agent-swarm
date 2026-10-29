@@ -330,6 +330,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `ADDITIVE_SLACK` | Set to `true` to enable non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | Debounce window for thread buffer in ms (default: `10000`) |
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | Set to `true` to require @mention for thread follow-up routing (default: `false`) |
+| `SLACK_THREAD_WAKE_ON_ANY_MESSAGE` | Set to `true` to treat thread replies that @mention another user (and not the bot) as follow-ups instead of skipping them (default: `false`). See [Slack: Thread follow-up routing](/docs/integrations/slack#thread-follow-up-routing) |
 | `LEAD_MONITOR_CHANNELS` | Set to `true` to have the lead agent additionally poll monitored Slack channels for non-mention activity (not just @mentions/DMs), throttled to once per 60s per poll cycle |
 | `LEAD_MONITOR_CHANNEL_IDS` | Comma-separated Slack channel IDs allowlist restricting `LEAD_MONITOR_CHANNELS` activity monitoring to specific channels. Unset monitors every channel the bot is a member of |
 | `SLACK_BLOCK_EXTERNAL_CHANNELS` | Set to `true` to keep the bot out of external Slack Connect channels: no tasks from them, no writes to them, and the bot leaves on join or share (default: `false`). Read on every event, so a change in global config applies without a restart. See [Slack: External channels](/docs/integrations/slack#external-slack-connect-channels) |

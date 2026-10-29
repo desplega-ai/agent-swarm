@@ -637,7 +637,7 @@ Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
 | `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
-| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
+| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds, from? }`; `from: "start"` counts only from run starts |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
 

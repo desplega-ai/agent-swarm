@@ -71,10 +71,18 @@ import type {
   TriggerConfig,
   Workflow,
   WorkflowDefinition,
+  WorkflowSnapshot,
 } from "../../types";
 import { validateDefinition } from "../../workflows/definition";
-import { computeContentHash, createWorkflow, listWorkflows, updateWorkflow } from "../db";
+import {
+  computeContentHash,
+  createWorkflow,
+  getWorkflowVersions,
+  listWorkflows,
+  updateWorkflow,
+} from "../db";
 import { resolveSeededEnabled } from "./automation-toggle";
+import { getSeedState } from "./state-db";
 import type { Seeder, SeedItem } from "./types";
 
 type AutomationTemplateConfig = {
@@ -218,6 +226,62 @@ function workflowFromRow(workflow: Workflow): SeedWorkflow {
     requiredParams: workflow.requiredParams ?? [],
     requires: workflow.requires ?? [],
   };
+}
+
+function workflowFromSnapshot(snapshot: WorkflowSnapshot): SeedWorkflow {
+  return {
+    name: snapshot.name,
+    description: snapshot.description ?? "",
+    enabled: snapshot.enabled,
+    definition: snapshot.definition,
+    triggers: snapshot.triggers,
+    cooldown: snapshot.cooldown,
+    input: snapshot.input,
+    triggerSchema: snapshot.triggerSchema,
+    params: snapshot.params ?? {},
+    requiredParams: snapshot.requiredParams ?? [],
+    requires: snapshot.requires ?? [],
+  };
+}
+
+/**
+ * What a run executes, without the settings an operator is told to change:
+ * inputs (plain data, resolved the same for every caller), on/off, cooldown,
+ * description and event triggers.
+ */
+function executableSurface(workflow: SeedWorkflow): string {
+  const {
+    input: _input,
+    enabled: _enabled,
+    cooldown: _cooldown,
+    description: _description,
+    triggers: _triggers,
+    ...surface
+  } = workflow;
+  return canonicalJson(surface);
+}
+
+/**
+ * Whether a live workflow still runs seed source: `pristine` while what it
+ * executes matches what the seeder last wrote for its name, `edited` once
+ * anyone changed that, `unseeded` for a workflow the seeder never wrote.
+ * Operator settings (see `executableSurface`) keep it `pristine`. The seeded
+ * state is the live row itself or, once edited, the version snapshot taken
+ * before the first edit; an edit with no such snapshot counts as `edited`.
+ */
+export async function seededWorkflowState(
+  workflow: Workflow,
+): Promise<"pristine" | "edited" | "unseeded"> {
+  const state = await getSeedState("workflow", workflow.name);
+  if (!state) return "unseeded";
+  const live = workflowFromRow(workflow);
+  if (workflowSeedHash(live) === state.seededHash) return "pristine";
+  for (const version of await getWorkflowVersions(workflow.id)) {
+    const seeded = workflowFromSnapshot(version.snapshot);
+    if (workflowSeedHash(seeded) !== state.seededHash) continue;
+    return executableSurface(seeded) === executableSurface(live) ? "pristine" : "edited";
+  }
+  return "edited";
 }
 
 export function createWorkflowsSeeder(

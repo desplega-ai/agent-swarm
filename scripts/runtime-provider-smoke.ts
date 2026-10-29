@@ -18,6 +18,9 @@
  *   bun scripts/runtime-provider-smoke.ts --provider e2b \
  *     --api http://localhost:3913 --worker-api https://<ngrok-host> \
  *     --image agent-swarm-worker-1-168-0
+ *   BOXD_API_KEY=bxd_... bun scripts/runtime-provider-smoke.ts --provider boxd \
+ *     --api http://localhost:3913 --worker-api https://<public-api-host> \
+ *     --image ghcr.io/desplega-ai/agent-swarm-worker:slim
  */
 import { parseArgs } from "node:util";
 import { createRuntimeProvider, type RuntimeProviderKind } from "../src/runtime-providers";
@@ -39,7 +42,7 @@ const { values: args } = parseArgs({
 
 const kind = args.provider as RuntimeProviderKind;
 if (!kind || !args.image || !args["worker-api"]) {
-  console.error("required: --provider docker|e2b --image <image|template> --worker-api <url>");
+  console.error("required: --provider docker|e2b|boxd --image <image|template> --worker-api <url>");
   process.exit(2);
 }
 const apiKey = args["api-key"] ?? getApiKey();
@@ -60,12 +63,20 @@ const target: Record<string, string | undefined> =
         DOCKER_NETWORK: process.env.DOCKER_NETWORK,
         DOCKER_EXTRA_HOSTS: process.env.DOCKER_EXTRA_HOSTS,
       }
-    : {
-        E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
-        E2B_API_BASE: process.env.E2B_API_BASE,
-        E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
-        WORKER_API_URL: args["worker-api"],
-      };
+    : kind === "boxd"
+      ? {
+          BOXD_API_KEY: process.env.BOXD_API_KEY,
+          BOXD_ORG: process.env.BOXD_ORG,
+          BOXD_BASE_URL: process.env.BOXD_BASE_URL,
+          BOXD_SNAPSHOT: process.env.BOXD_SNAPSHOT,
+          WORKER_API_URL: args["worker-api"],
+        }
+      : {
+          E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
+          E2B_API_BASE: process.env.E2B_API_BASE,
+          E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
+          WORKER_API_URL: args["worker-api"],
+        };
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T | undefined> {
   const res = await fetch(`${args.api}${path}`, {

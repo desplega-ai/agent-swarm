@@ -47,7 +47,7 @@ Commands carry an ID, operation, and payload. Results carry the same ID and succ
 Provision commands use `RUNTIME_PROVISION_TIMEOUT_SEC`, with a default of 300 seconds.
 Other commands have a 60-second timeout. A timeout fails only that command and preserves the socket.
 The remote protocol includes renewal, pause, and resume for E2B lease management.
-The CLI accepts static, Docker, and E2B providers. It rejects the reserved `k8s` kind.
+The CLI accepts static, Docker, E2B, and boxd providers. It rejects the reserved `k8s` kind.
 The API pings every 15 seconds and checks token validity.
 The CLI client also pings every 15 seconds. It drops a socket that receives no frame (message, ping, or pong) for 45 seconds and reconnects, so a network cut is detected within 60 seconds.
 A new authenticated session replaces the previous session for that controller.
@@ -83,6 +83,7 @@ They do not increment provision failures, apply backoff, or change the pool circ
 | `static` | `StaticRuntimeProvider` | Operators manage workers. Provision and terminate reject requests. Status is unknown and list is empty. |
 | `docker` | `DockerRuntimeProvider` | Creates and starts worker containers through a local Unix socket. |
 | `e2b` | `E2BRuntimeProvider` | Creates worker sandboxes and starts `/docker-entrypoint.sh` as a tracked background process. |
+| `boxd` | `BoxdRuntimeProvider` | Creates isolated boxd microVMs and runs the worker image in each machine's Docker daemon. |
 
 The schema reserves another kind for a future adapter. The factory rejects that kind until the adapter exists.
 
@@ -181,9 +182,9 @@ The controller sets `handle.controllerId`. Adapters never set it.
 
 Controllers supply a stable `ownerId` for their swarm. Keep this value stable across restarts.
 Adapters stamp `swarm.owner`, `swarm.runtime-id`, `swarm.pool-id`, and `swarm.agent-id` on every created runtime.
-These labels override user labels. Docker uses container labels and E2B uses sandbox metadata.
+These labels override user labels. Docker uses container labels, E2B uses sandbox metadata, and boxd uses machine labels.
 Listing requires both the runtime label and the matching owner label. Runtimes without an owner label remain excluded.
-Two swarms on one Docker host or E2B team must use different owner IDs.
+Two swarms on one Docker host, E2B team, or boxd org must use different owner IDs.
 Termination and status use explicit handles. Controllers must obtain those handles from their own records or owner-filtered lists.
 
 ## static
@@ -270,6 +271,41 @@ An unwanted paused runtime terminates without resuming.
 If the worker process fails during provision, the adapter attempts sandbox deletion before it returns the original error.
 See [E2B dispatch](./e2b-dispatch.md) for templates and tracked process behavior.
 
+## boxd
+
+`BOXD_API_KEY` is required. An org API key selects its org. `BOXD_ORG` names an org for a personal key.
+`BOXD_BASE_URL` selects another API endpoint.
+Worker URLs must use HTTPS and use the same resolver as E2B.
+With `BOXD_API_KEY` in the API environment, seeding creates a `builtin-boxd` controller and copies that key into its encrypted configuration.
+Without the key, seeding creates no boxd controller. Other controllers require their own stored key.
+
+Each runtime is one machine named `swarm-rt-<runtime-id>`. Provision creates it with `isolated: true`.
+An isolated machine has no metadata endpoint, no in-VM `boxd` CLI, and no account integrations, so worker code cannot reach the controller's boxd account.
+Auto-suspend and auto-hibernate are off, because a frozen worker cannot receive work. Machines have no lease and run until termination.
+The adapter then runs `docker run -d --name swarm-worker` with the pool image in the machine.
+The command line carries only environment variable names. The values travel as exec environment.
+If any step after create fails (the delete deadline, readiness, or the container start), the adapter deletes the machine before it returns the original error.
+The adapter sets `BOXD_DELETE_AFTER_SEC` after create returns rather than through create, so a failure to set it still reaches that cleanup.
+`BOXD_START_TIMEOUT_SEC` bounds `docker run`, image pull included (default 600).
+Workers use Docker's default bridge network, so the machine's public HTTPS address serves nothing.
+
+Pool `resources` select the smallest boxd size that covers them: 1 vCPU and 4 GiB, 2 and 8, 4 and 16, or 8 and 32.
+Larger requests fail. Without `resources`, boxd applies the org default size.
+`BOXD_SNAPSHOT` restores a snapshot instead of booting a fresh machine. The snapshot's size applies and pool `resources` are ignored.
+A snapshot with the worker image already pulled skips the image pull at every provision.
+`BOXD_DELETE_AFTER_SEC` sets a wall-clock deadline at which boxd deletes the machine in any state.
+Use it as a safety net for per-task pools. An idle runtime that outlives the deadline is deleted and recovered.
+
+Status reads the machine. A missing machine reports `exited`. Suspended and hibernated machines report `paused`.
+A running machine reports its worker container: `exited` for exit code 0, `failed` for other exit codes.
+A container lookup that fails, or takes longer than `BOXD_STATUS_TIMEOUT_SEC` (default 15), reports `unknown`. Authentication and transport failures on the machine lookup remain errors.
+`list` filters machines by the runtime label and the owner label.
+boxd answers a delete before teardown finishes. Terminate then waits until the machine lookup reports it missing, so status and list agree.
+It waits up to `BOXD_TEARDOWN_TIMEOUT_SEC` (default 30). A lookup that still finds the machine at that point, or fails for another reason, fails the terminate so the supervisor retries it; a repeated terminate is safe.
+Pause suspends the machine to RAM. Resume wakes a suspended or hibernated machine.
+The supervisor does not pause boxd runtimes in this release.
+The adapter keeps one SDK client per credential, because boxd rate-limits key exchanges.
+
 ## Adding a provider
 
 1. Add the kind to `RuntimeProviderKindSchema` in `src/types.ts`.
@@ -285,7 +321,7 @@ Any change to this contract requires a runbook update in the same PR.
 ## Verification
 
 ```bash
-bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts
+bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts src/tests/runtime-providers-boxd.test.ts
 bash scripts/check-db-boundary.sh
 bun run lint
 bun run tsc:check:tsc
@@ -303,6 +339,7 @@ bun scripts/runtime-provider-smoke.ts --provider docker \
 The script exits unsuccessfully unless the task completes and its runtime disappears after termination.
 Omit `--owner-id` to generate an isolated owner. Use `--keep` to inspect the runtime after the task.
 Optional E2B smoke uses `--provider e2b`, an E2B template, and an HTTPS URL reachable by the sandbox.
+Optional boxd smoke uses `--provider boxd`, `BOXD_API_KEY` in the environment, a worker image, and an HTTPS URL reachable by the machine.
 
 ## Push delivery
 

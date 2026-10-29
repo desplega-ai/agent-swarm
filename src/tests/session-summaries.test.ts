@@ -13,11 +13,17 @@ import {
   upsertInboxState,
 } from "../be/db";
 import { findSessionSummaryDrift } from "../be/db/session-summaries";
-import { sessionSummaryQuery } from "../be/db/session-tree";
+import {
+  legacySessionSummaryQuery,
+  type SessionFilters,
+  sessionSummaryQuery,
+} from "../be/db/session-tree";
 import { deleteTask } from "../be/db/tasks/write";
 
 const dbPath = join(tmpdir(), `session-summaries-${process.pid}-${Date.now()}.sqlite`);
-const MIGRATION = join(import.meta.dir, "../be/migrations/253_session_summaries.sql");
+const MIGRATIONS = ["253_session_summaries.sql", "259_session_summaries_open_tasks.sql"].map(
+  (name) => join(import.meta.dir, "../be/migrations", name),
+);
 const BASE = Date.parse("2026-10-01T00:00:00.000Z");
 let users: string[] = [];
 
@@ -209,7 +215,7 @@ const SCHEDULE = [
 /** Each Done-marked root's read state from the chain walk equals the stored rule. */
 async function expectReopensDoneMatches() {
   const viewer = users[0]!;
-  const legacy = sessionSummaryQuery({ viewer: { userId: viewer, scope: "all" } });
+  const legacy = legacySessionSummaryQuery({ viewer: { userId: viewer, scope: "all" } });
   const rows = await client().query<{ root_id: string; readState: string; stored: string }>(
     `SELECT a.root_id, a.readState,
       CASE WHEN s.lastHumanAt > d.lastUpdatedAt THEN 'unread' ELSE 'done' END AS stored
@@ -224,6 +230,49 @@ async function expectReopensDoneMatches() {
       state: row.readState,
     });
   return rows.length;
+}
+
+/** A random filter set, as the list, count and tree send them. */
+function randomFilters(): SessionFilters {
+  const opts: SessionFilters = {
+    viewer: { userId: rand() < 0.15 ? null : pick(users), scope: pick(["all", "mine", "shared"]) },
+    now: at(),
+  };
+  if (rand() < 0.2) opts.source = [pick(["ui", "slack", "mcp", "api"])];
+  if (rand() < 0.2) opts.showSource = [pick(["ui", "slack", "api"])];
+  if (rand() < 0.2) opts.hideSource = [pick(["mcp", "system"])];
+  if (rand() < 0.4) opts.triage = pick(["inbox", "later", "done", "unread"] as const);
+  if (rand() < 0.3) opts.status = pick(["running", "failed", "needs"] as const);
+  if (rand() < 0.2) opts.withUserId = pick(users);
+  if (rand() < 0.2) opts.q = pick(["task", "ab", "zz"]);
+  if (rand() < 0.2) opts.noGroup = true;
+  else if (rand() < 0.1) opts.groupKey = "shared/";
+  if (rand() < 0.3) opts.tree = true;
+  if (rand() < 0.2) opts.mine = true;
+  return opts;
+}
+
+/** The summary query returns the chain walk's rows for random filters. */
+async function expectSummaryQueryMatchesLegacy(sets: number) {
+  const columns = `root_id, chainCount, lastActivityAt, latestStatus, readState, snoozeUntil,
+    needsYou, pendingApproval > 0 AS pendingApproval, openTasks`;
+  // Skip roots whose newest timestamp ties across chain tasks: the walk's status
+  // is arbitrary there, and so are needsYou and the status filters.
+  const untied = `(SELECT COUNT(*) FROM session_members m JOIN agent_tasks t ON t.id = m.taskId
+    WHERE m.rootId = q.root_id AND t.lastUpdatedAt = q.lastActivityAt) = 1`;
+  let rows = 0;
+  for (let i = 0; i < sets; i++) {
+    const opts = randomFilters();
+    const read = async (query: { sql: string; params: unknown[] }) =>
+      await client().query<Record<string, unknown>>(
+        `SELECT ${columns} FROM (${query.sql}) q WHERE ${untied} ORDER BY root_id`,
+        query.params as (string | number | null)[],
+      );
+    const expected = await read(legacySessionSummaryQuery(opts));
+    expect({ opts, rows: await read(sessionSummaryQuery(opts)) }).toEqual({ opts, rows: expected });
+    rows += expected.length;
+  }
+  return rows;
 }
 
 beforeAll(async () => {
@@ -245,8 +294,9 @@ describe("session_summaries", () => {
   test("500 random writes keep the summaries equal to the chain walk", async () => {
     const counts: Record<string, number> = {};
     // The most chains, human events and pending approvals any checkpoint compared.
-    const seen = { chains: 0, humans: 0, pending: 0 };
+    const seen = { chains: 0, humans: 0, pending: 0, open: 0 };
     let doneChecks = 0;
+    let summaryRows = 0;
     for (let i = 1; i <= 500; i++) {
       const op = pick(SCHEDULE);
       counts[op] = (counts[op] ?? 0) + 1;
@@ -257,9 +307,11 @@ describe("session_summaries", () => {
           drift: [],
         });
         doneChecks += await expectReopensDoneMatches();
+        summaryRows += await expectSummaryQueryMatchesLegacy(5);
         const shape = (await client().get<typeof seen>(
           `SELECT SUM(chainCount > 2) AS chains, SUM(lastHumanAt IS NOT NULL) AS humans,
-            SUM(pendingApprovalCount > 0) AS pending FROM session_summaries`,
+            SUM(pendingApprovalCount > 0) AS pending, SUM(openTaskCount > 1) AS open
+          FROM session_summaries`,
         ))!;
         for (const key of Object.keys(seen) as (keyof typeof seen)[])
           seen[key] = Math.max(seen[key], shape[key] ?? 0);
@@ -270,7 +322,9 @@ describe("session_summaries", () => {
     expect(seen.chains).toBeGreaterThan(5);
     expect(seen.humans).toBeGreaterThan(5);
     expect(seen.pending).toBeGreaterThan(0);
+    expect(seen.open).toBeGreaterThan(0);
     expect(doneChecks).toBeGreaterThan(0);
+    expect(summaryRows).toBeGreaterThan(100);
   }, 60_000);
 
   test("the drift check reports a corrupted summary and member (positive control)", async () => {
@@ -279,13 +333,13 @@ describe("session_summaries", () => {
     expect(await findSessionSummaryDrift()).toEqual([]);
 
     await client().run(
-      "UPDATE session_summaries SET chainCount = chainCount + 5, lastHumanAt = 'x' WHERE rootId = ?",
+      "UPDATE session_summaries SET chainCount = chainCount + 5, openTaskCount = 7, lastHumanAt = 'x' WHERE rootId = ?",
       [root],
     );
     await client().run("DELETE FROM session_members WHERE taskId = ?", [child]);
     const drift = await findSessionSummaryDrift();
     expect(drift.map((d) => `${d.rootId}:${d.field}`).sort()).toEqual(
-      [`${root}:chainCount`, `${root}:lastHumanAt`, `${root}:member`].sort(),
+      [`${root}:chainCount`, `${root}:lastHumanAt`, `${root}:member`, `${root}:openTasks`].sort(),
     );
 
     await client().run("INSERT INTO session_members (taskId, rootId) VALUES (?, ?)", [child, root]);
@@ -356,18 +410,24 @@ describe("session_summaries", () => {
     await client().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [root, child]);
   });
 
-  test("the migration backfill rebuilds the same summaries", async () => {
+  test("the migration backfills rebuild the same summaries", async () => {
     const before = await client().query<Record<string, unknown>>(
       "SELECT * FROM session_summaries ORDER BY rootId",
     );
     expect(before.length).toBeGreaterThan(20);
-    const sql = await Bun.file(MIGRATION).text();
-    const backfill = sql.slice(sql.indexOf("-- Backfill:"));
-    expect(backfill).toContain("INSERT INTO session_members");
+    const backfills = await Promise.all(
+      MIGRATIONS.map(async (path) => {
+        const sql = await Bun.file(path).text();
+        return sql.slice(sql.indexOf("-- Backfill:"));
+      }),
+    );
+    expect(backfills[0]).toContain("INSERT INTO session_members");
+    expect(backfills[1]).toContain("openTaskCount");
     await client().transaction(async (tx) => {
       await tx.run("DELETE FROM session_summaries");
       await tx.run("DELETE FROM session_members");
-      for (const statement of backfill
+      for (const statement of backfills
+        .join("\n")
         .split(/;\s*\n/)
         .filter((s) => s.replace(/--.*$/gm, "").trim()))
         await tx.run(statement);

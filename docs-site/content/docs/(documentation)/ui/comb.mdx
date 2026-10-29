@@ -84,6 +84,7 @@ Hover a row in the tree and click **...**, or right-click a row in the tree or t
 | --- | --- |
 | **Open**, **Open in new tab** | Opens the file or folder in Comb |
 | **Copy link**, **Copy path** | Copies the Comb link, or the drive path (`/docs/plan.md`) |
+| **Copy contents** | Copies a file's text (text, code, markdown, CSV, JSON, YAML, SVG up to 1 MB). Any other file shows why with **Download instead** |
 | **Share...** | Makes a share link (files, see [Share links](#share-links)) |
 | **Add to favorites** | Stars it (see [Home, Recent, and Favorites](#home-recent-and-favorites)) |
 | **Download** | Downloads the file |
@@ -92,7 +93,7 @@ Hover a row in the tree and click **...**, or right-click a row in the tree or t
 | **Delete...** | Deletes the file. Its versions are kept (`agent-fs revert` brings it back). Its comments are removed. |
 | **Open in agent-fs** | Opens it in the agent-fs live UI |
 
-**New**, **Rename**, and **Delete** use the agent-fs `write`, `mv`, and `rm` ops, like the live UI, and need the editor role in the drive. A name in the tree that does not fit shows in full on hover. **Copy path** is also an icon in each file and folder header.
+**New**, **Rename**, and **Delete** use the agent-fs `write`, `mv`, and `rm` ops, like the live UI, and need the editor role in the drive. A name in the tree that does not fit shows in full on hover. **Copy path** is also an icon in each folder header. In a file header, the copy icon copies the file's contents, and hovering it shows **Copy path**. A file that is not text, or is larger than 1 MB, does not copy: hovering or clicking the icon says why and offers **Download instead**. The same check runs on the loaded bytes, so a file that turns out binary or larger than 1 MB gets the same offer.
 
 ### Search
 

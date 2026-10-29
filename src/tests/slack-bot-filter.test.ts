@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
 import { isBotMessage } from "../slack/handlers";
-import { hasOtherUserMention, routeMessage } from "../slack/router";
+import { hasOtherUserMention, isAddressedToOtherUser, routeMessage } from "../slack/router";
 import type { Agent } from "../types";
 
 const TEST_DB_PATH = "./test-slack-bot-filter.sqlite";
@@ -157,5 +157,57 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
     expect(matches).toHaveLength(0);
     // Silence unused lead warning — lead exists but should not be routed to
     expect(leadAgent.id).toBeDefined();
+  });
+});
+
+describe("SLACK_THREAD_WAKE_ON_ANY_MESSAGE", () => {
+  const BOT_ID = "UBOT123";
+  const original = process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+    else process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = original;
+  });
+
+  test("isAddressedToOtherUser follows hasOtherUserMention when the flag is unset", () => {
+    delete process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+    expect(isAddressedToOtherUser("<@UDEVIN01> wdyt?", BOT_ID)).toBe(true);
+    expect(isAddressedToOtherUser("no mentions", BOT_ID)).toBe(false);
+  });
+
+  test("isAddressedToOtherUser returns false for other-user mentions when the flag is true", () => {
+    process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = "true";
+    expect(isAddressedToOtherUser("<@UDEVIN01> wdyt?", BOT_ID)).toBe(false);
+  });
+
+  test("follow-up mentioning another user routes to the active worker when the flag is true", async () => {
+    process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = "true";
+    const channelId = "C_BF_500";
+    const threadTs = "1500.0001";
+    await createTaskExtended("original", {
+      agentId: workerAgent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackUserId: "U_HUMAN",
+    });
+
+    const matches = await routeMessage("<@UDEVIN01> wdyt?", BOT_ID, false, {
+      channelId,
+      threadTs,
+    });
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].agent.id).toBe(workerAgent.id);
+  });
+
+  test("the flag does not make a thread with no swarm activity route", async () => {
+    process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = "true";
+    const matches = await routeMessage("<@UDEVIN01> hi", BOT_ID, false, {
+      channelId: "C_BF_600",
+      threadTs: "1600.0001",
+    });
+
+    expect(matches).toHaveLength(0);
   });
 });

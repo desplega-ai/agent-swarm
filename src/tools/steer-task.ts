@@ -99,7 +99,8 @@ export async function steerTaskHandler(
       message,
       mode,
       onUnsupported,
-      source: "mcp",
+      source:
+        ctx.kind === "owner" && ctx.requestInfo?.callOrigin === "script-sdk" ? "script" : "mcp",
       createdByKind: ctx.kind === "owner" ? "agent" : "user",
       createdByAgentId: ctx.kind === "owner" ? ctx.agentId : undefined,
       createdByUserId: ctx.kind === "user" ? ctx.userId : undefined,

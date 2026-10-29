@@ -1,15 +1,21 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  cancelTask,
   closeDb,
   completeTask,
   createAgent,
   createTaskExtended,
+  deleteScheduledTask,
   failTask,
+  getChildTasks,
   getDbClient,
   getLogsByTaskIdAndEventType,
+  getScheduledTaskById,
+  getTaskById,
   initDb,
   startTask,
+  updateScheduledTask,
 } from "../be/db";
 import {
   DEFERRED_WAIT_WOKE_EVENT,
@@ -20,6 +26,7 @@ import {
 } from "../scheduler/deferred-task-waits";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { registerDeferTaskTool } from "../tools/defer-task";
+import { registerDeleteScheduleTool } from "../tools/schedules/delete-schedule";
 import type { AgentTask } from "../types";
 
 type Result = { structuredContent: { success: boolean; message: string; scheduleId?: string } };
@@ -28,6 +35,8 @@ type Tool = { handler: (args: unknown, extra: unknown) => Promise<Result> };
 let leadId: string;
 let workerId: string;
 let tool: Tool;
+let deleteTool: Tool;
+let otherWorkerId: string;
 
 beforeAll(async () => {
   initDb(":memory:");
@@ -50,7 +59,12 @@ beforeAll(async () => {
     })
   ).id;
   const server = new McpServer({ name: "wake-follow-up-test", version: "1.0.0" });
+  otherWorkerId = (await createAgent({ name: "Other worker", status: "busy" })).id;
   registerDeferTaskTool(server);
+  registerDeleteScheduleTool(server);
+  deleteTool = (server as unknown as { _registeredTools: Record<string, Tool> })._registeredTools[
+    "delete-schedule"
+  ]!;
   tool = (server as unknown as { _registeredTools: Record<string, Tool> })._registeredTools[
     "defer-task"
   ]!;
@@ -65,12 +79,19 @@ async function activeTask(agentId: string, options: Parameters<typeof createTask
 }
 
 /** `waiterAgentId` defers a fresh task until `producers` settle. */
-async function deferOn(producers: AgentTask[], mode: "all" | "any", waiterAgentId = leadId) {
-  const waiter = await activeTask(waiterAgentId);
+async function deferOn(
+  producers: AgentTask[],
+  mode: "all" | "any",
+  waiterAgentId = leadId,
+  options: Parameters<typeof createTaskExtended>[1] = {},
+) {
+  const waiter = await activeTask(waiterAgentId, options);
   const result = await tool.handler(
     {
       taskId: waiter.id,
-      wakeOn: { taskIds: producers.map((producer) => producer.id), event: "settled", mode },
+      wakeOn: producers.length
+        ? { taskIds: producers.map((producer) => producer.id), event: "settled", mode }
+        : undefined,
       delayMs: 3600000,
       summary: "Delegated",
       note: "Review the worker result",
@@ -108,6 +129,186 @@ async function suppressions(taskId: string) {
 }
 
 describe("worker follow-up vs. deferred wake", () => {
+  test.each([
+    "event",
+    "timer",
+    "failed dispatch",
+  ])("another worker deleting an unfired %s deferral notifies the Lead once", async (kind) => {
+    const producer = await activeTask(workerId);
+    const instructions = "Report that the scheduled continuation stopped.";
+    const { waiter, scheduleId } = await deferOn(
+      kind === "event" ? [producer] : [],
+      "all",
+      workerId,
+      {
+        followUpConfig: { onFailed: instructions },
+      },
+    );
+    if (kind === "failed dispatch") {
+      await updateScheduledTask(scheduleId, {
+        enabled: false,
+        lastRunAt: new Date().toISOString(),
+      });
+    }
+    expect(await getChildTasks(waiter.id)).toHaveLength(0);
+    const result = await deleteTool.handler(
+      { scheduleId },
+      { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": otherWorkerId } } },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect(await getScheduledTaskById(scheduleId)).toBeNull();
+    const deadline = Date.now() + 1000;
+    let followUps = await getChildTasks(waiter.id);
+    while (followUps.length === 0 && Date.now() < deadline) {
+      await Bun.sleep(5);
+      followUps = await getChildTasks(waiter.id);
+    }
+    expect(followUps).toHaveLength(1);
+    expect(followUps[0]?.agentId).toBe(leadId);
+    expect(followUps[0]?.task).toContain("Deferred continuation schedule deleted");
+    expect(followUps[0]?.task).toContain(instructions);
+    expect(await deleteScheduledTask(scheduleId)).toBe(false);
+    await Bun.sleep(25);
+    expect(await getChildTasks(waiter.id)).toHaveLength(1);
+  });
+
+  test("deleting ordinary or consumed schedules creates no Lead follow-up", async () => {
+    for (const consumed of [false, true]) {
+      const producer = await activeTask(workerId);
+      const { waiter, scheduleId } = await deferOn([producer], "all", workerId);
+      if (consumed) await dispatchDeferredTaskWait(scheduleId, "ceiling");
+      else await updateScheduledTask(scheduleId, { taskType: "ordinary" });
+      const before = await getChildTasks(waiter.id);
+      expect(await deleteScheduledTask(scheduleId)).toBe(true);
+      await Bun.sleep(25);
+      expect(await getChildTasks(waiter.id)).toEqual(before);
+    }
+  });
+
+  test("schedule deletion respects disabled follow-ups and Lead ownership", async () => {
+    for (const agentId of [workerId, leadId]) {
+      const producer = await activeTask(workerId);
+      const { waiter, scheduleId } = await deferOn([producer], "all", agentId, {
+        followUpConfig: agentId === workerId ? { disabled: true } : undefined,
+      });
+      expect(await deleteScheduledTask(scheduleId)).toBe(true);
+      await Bun.sleep(25);
+      expect(await getChildTasks(waiter.id)).toHaveLength(0);
+    }
+  });
+
+  test("rolled-back schedule deletion creates no Lead follow-up", async () => {
+    const producer = await activeTask(workerId);
+    const { waiter, scheduleId } = await deferOn([producer], "all", workerId);
+    await expect(
+      getDbClient().transaction(async () => {
+        expect(await deleteScheduledTask(scheduleId)).toBe(true);
+        throw new Error("Roll back schedule deletion");
+      }),
+    ).rejects.toThrow("Roll back schedule deletion");
+    await Bun.sleep(25);
+    expect(await getScheduledTaskById(scheduleId)).not.toBeNull();
+    expect(await getChildTasks(waiter.id)).toHaveLength(0);
+  });
+
+  for (const cause of ["event", "ceiling"] as const) {
+    test(`a worker's ${cause} wake-up cancellation notifies the Lead once`, async () => {
+      const producer = await activeTask(workerId);
+      const instructions = "Tell the requester that the continuation stopped.";
+      const { waiter, scheduleId } = await deferOn([producer], "all", workerId, {
+        followUpConfig: { onFailed: instructions },
+      });
+      expect(await getChildTasks(waiter.id)).toHaveLength(0);
+      if (cause === "event") {
+        await completeTask(producer.id, "Ready");
+        await reconcileDeferredTaskWaits(producer.id);
+      } else {
+        await dispatchDeferredTaskWait(scheduleId, "ceiling");
+      }
+      const [wake] = await wakeChildren(scheduleId);
+      expect(wake?.agentId).toBe(workerId);
+      const reason = "No longer needed";
+      expect((await cancelTask(wake!.id, reason))?.status).toBe("cancelled");
+      const deadline = Date.now() + 1000;
+      let followUps = await getChildTasks(wake!.id);
+      while (followUps.length === 0 && Date.now() < deadline) {
+        await Bun.sleep(5);
+        followUps = await getChildTasks(wake!.id);
+      }
+      expect(followUps).toHaveLength(1);
+      expect(followUps[0]?.agentId).toBe(leadId);
+      expect(followUps[0]?.task).toContain(`Deferred continuation cancelled: ${reason}`);
+      expect(followUps[0]?.task).toContain(instructions);
+      expect(await cancelTask(wake!.id, reason)).toBeNull();
+      await Bun.sleep(25);
+      expect(await getChildTasks(wake!.id)).toHaveLength(1);
+    });
+  }
+
+  test("wake-up cancellation respects disabled follow-ups and Lead ownership", async () => {
+    for (const agentId of [workerId, leadId]) {
+      const producer = await activeTask(workerId);
+      const { scheduleId } = await deferOn([producer], "all", agentId, {
+        followUpConfig: agentId === workerId ? { disabled: true } : undefined,
+      });
+      await dispatchDeferredTaskWait(scheduleId, "ceiling");
+      const [wake] = await wakeChildren(scheduleId);
+      expect((await cancelTask(wake!.id))?.status).toBe("cancelled");
+      await Bun.sleep(25);
+      expect(await getChildTasks(wake!.id)).toHaveLength(0);
+    }
+  });
+
+  test("ordinary worker cancellation creates no Lead follow-up", async () => {
+    const task = await activeTask(workerId);
+    expect((await cancelTask(task.id))?.status).toBe("cancelled");
+    await Bun.sleep(25);
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+  });
+
+  test("a rolled-back wake-up cancellation creates no Lead follow-up", async () => {
+    const producer = await activeTask(workerId);
+    const { scheduleId } = await deferOn([producer], "all", workerId);
+    await dispatchDeferredTaskWait(scheduleId, "ceiling");
+    const [wake] = await wakeChildren(scheduleId);
+    await expect(
+      getDbClient().transaction(async () => {
+        expect((await cancelTask(wake!.id))?.status).toBe("cancelled");
+        throw new Error("Roll back cancellation");
+      }),
+    ).rejects.toThrow("Roll back cancellation");
+    await Bun.sleep(25);
+    expect((await getTaskById(wake!.id))?.status).toBe("pending");
+    expect(await getChildTasks(wake!.id)).toHaveLength(0);
+  });
+
+  test("a deferred worker suppresses onCompleted until its real completion", async () => {
+    const options = {
+      followUpConfig: { onCompleted: "Route the finished result to Reviewer." },
+    };
+    const deferred = await activeTask(workerId, options);
+    const completed = await completeTask(deferred.id, "Checking back later.", {
+      deferredAt: new Date().toISOString(),
+    });
+
+    expect(
+      await createWorkerTaskFollowUp({
+        task: completed!,
+        status: "completed",
+        output: completed!.output,
+      }),
+    ).toBeNull();
+    expect(await suppressions(deferred.id)).toEqual([
+      { reason: "worker_deferred", status: "completed" },
+    ]);
+
+    const finished = await activeTask(workerId, options);
+    const followUp = await settle(finished);
+    expect(followUp?.taskType).toBe("follow-up");
+    expect(followUp?.task).toContain(options.followUpConfig.onCompleted);
+    expect(await suppressions(finished.id)).toHaveLength(0);
+  });
+
   test("any-mode wake suppresses the follow-up and records the waiter", async () => {
     await initDeferredTaskWaits();
     const first = await activeTask(workerId);

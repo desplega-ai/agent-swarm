@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.4] - 2026-10-29
+
+### Added
+- Runtime pools: boxd microVMs as a runtime provider, configured with `BOXD_API_KEY` (#2354).
+- Workflows: inline script nodes accept per-run environment variables (#2560).
+- Sessions: groups sit under the Inbox, filed sessions no longer show twice, and finished sessions move to Done on their own (#2566).
+- Comb: the file header copy button copies the file's contents; the path moves to a hover card (#2555).
+
+### Changed
+- Worker image: agent-fs pins 0.18.13, agent-browser 0.41.0 (#2565) and harness bumps for acp, amp, qwen, opencode and goose (#2557).
+- Repo: TLA+ heartbeat spec synced with main (#2564).
+
+### Fixed
+- Tasks: the task search backfill paces itself and keeps resuming through a locked database (#2556).
+- Slack: inbound messages keep table rows and files inside shared messages (#2561).
+- Tasks: deferred worker completions no longer trigger completion review or `onCompleted` follow-ups early (#2558).
+- MCP docs: generated tool descriptions show resolved constant values (#2563).
+- UI: setup waits for saved model configs before leaving (#2559).
+
 ## [2.7.3] - 2026-10-29
 
 ### Added

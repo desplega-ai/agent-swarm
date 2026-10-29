@@ -53,6 +53,7 @@ import {
   type FileThreads,
   listFileThreads,
 } from "@/lib/comb/comments";
+import { loadTextToCopy } from "@/lib/comb/copy-contents";
 import {
   HTML_SITE_TTL_SECONDS,
   siteBaseUrl,
@@ -186,6 +187,40 @@ export function useAgentFsText(target: DrivePath) {
     gcTime: 0,
     placeholderData: keepUnderPrefix(fileKey),
   });
+}
+
+/**
+ * Loads a file's text to copy (`loadTextToCopy`). Rejects with a
+ * `CopyRejected` when the file cannot be copied. Reuses the bytes
+ * `useAgentFsText` already loaded for this revision, and the cached `stat`
+ * when the caller has none.
+ */
+export function useLoadTextToCopy() {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (target: DrivePath, known?: StatResult): Promise<string> => {
+      const client = access.client;
+      if (!client) throw new Error("agent-fs is not connected");
+      const stat =
+        known ??
+        queryClient.getQueryData<StatResult>(drivePathKey(access, target, "stat")) ??
+        (await client.callOp<StatResult>(
+          target.orgId,
+          "stat",
+          { path: target.path },
+          target.driveId,
+        ));
+      const loaded = queryClient.getQueryData<AgentFsText>([
+        ...drivePathKey(access, target, "content"),
+        fileRevision(stat),
+      ]);
+      return loadTextToCopy(target.path, stat, loaded?.text ?? undefined, () =>
+        client.fetchRaw(target.orgId, target.driveId, target.path),
+      );
+    },
+    [access, queryClient],
+  );
 }
 
 function sameKeyPrefix(key: QueryKey, prefix: readonly unknown[]): boolean {

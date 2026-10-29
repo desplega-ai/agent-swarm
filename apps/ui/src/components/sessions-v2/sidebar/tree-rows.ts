@@ -262,9 +262,9 @@ interface BuildTreeRowsInput {
 }
 
 /**
- * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, Later, Done,
- * No group, My groups, Shared with me, then one section per source
- * (SPEC R4, plan Phase 5). `containers` names the lists to
+ * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, then the
+ * groups (My groups, Shared with me, one section per source, No group), then
+ * Later and Done, so ongoing work sits right under the Inbox. `containers` names the lists to
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
  */
@@ -333,9 +333,6 @@ export function buildTreeRows({
     if (open) fill(id, key, counts.total, 1, flat, id);
   };
   box("inbox", tree.inbox, true);
-  box("later", tree.later, true);
-  box("done", tree.done, true);
-  box("nogroup", tree.noGroup, false);
 
   // My groups. A folded group shows its whole subtree in its counts, an open
   // one its own sessions only (they list under it, after its subgroups).
@@ -432,6 +429,10 @@ export function buildTreeRows({
     });
     if (open) for (const node of section.nodes) groupNode(node, 1, true);
   }
+
+  box("nogroup", tree.noGroup, false);
+  box("later", tree.later, true);
+  box("done", tree.done, true);
 
   return { rows, containers };
 }

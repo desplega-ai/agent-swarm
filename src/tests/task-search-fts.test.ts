@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -15,6 +15,8 @@ import { appendDraftTaskText } from "../be/db/tasks/draft-text";
 import {
   backfillTaskSearchIndex,
   buildTaskFtsMatch,
+  startTaskSearchBackfill,
+  stopTaskSearchBackfill,
   TASK_FTS_COMPLETE,
 } from "../be/db/tasks/search-index";
 
@@ -46,6 +48,11 @@ async function indexedThrough(): Promise<number> {
   return (await getDbClient().get<{ indexedThrough: number }>(
     "SELECT indexedThrough FROM agent_tasks_fts_state WHERE id = 1",
   ))!.indexedThrough;
+}
+
+// What bun:sqlite throws when another connection holds the write lock.
+function busyError(): Error {
+  return Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
 }
 
 async function clearTasks(): Promise<void> {
@@ -227,6 +234,186 @@ describe("task search over agent_tasks_fts", () => {
     expect(await found("edit")).toEqual(["covered edit", "uncovered edit"]);
     expect(await found("arrived")).toEqual(["arrived mid backfill"]);
     expect(await backfillTaskSearchIndex(2)).toMatchObject({ indexed: 0 });
+  });
+
+  test("a batch that hits SQLITE_BUSY rolls back and is retried exactly once", async () => {
+    const client = getDbClient();
+    for (let i = 0; i < 7; i++) await newTask(`busy item number${i}`);
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    // The second batch writes its rows, then fails like a COMMIT that lost
+    // the write lock to another process: the whole batch rolls back.
+    const transaction = client.transaction.bind(client);
+    let calls = 0;
+    const spy = spyOn(client, "transaction").mockImplementation((fn, opts) => {
+      calls += 1;
+      const call = calls;
+      return transaction(async (tx) => {
+        const result = await fn(tx);
+        if (call === 2) throw busyError();
+        return result;
+      }, opts);
+    });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await backfillTaskSearchIndex(2, { yieldMs: 0, retryBackoffMs: [1] });
+      expect(result.indexed).toBe(7);
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+    }
+    expect(calls).toBe(5);
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
+    await expectIndexInSync();
+    expect(await found("busy")).toHaveLength(7);
+  });
+
+  test("waits while the WAL is over its cap, at most walMaxWaitMs per batch", async () => {
+    const client = getDbClient();
+    for (let i = 0; i < 4; i++) await newTask(`paced item number${i}`);
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    const GB = 1024 ** 3;
+    const transaction = client.transaction.bind(client);
+    const events: string[] = [];
+    const spy = spyOn(client, "transaction").mockImplementation((fn, opts) => {
+      events.push("batch");
+      return transaction(fn, opts);
+    });
+    // Read 1 sets the cap from a small WAL. Before batch 1 the WAL is over it
+    // twice, then drops. Before batch 2 it stays over it: the wait times out.
+    const sizes = [0, GB, GB, 0];
+    let reads = 0;
+    const walBytes = () => {
+      const size = sizes[reads] ?? GB;
+      reads += 1;
+      if (size > 0) events.push("wal-high");
+      return size;
+    };
+    try {
+      const result = await backfillTaskSearchIndex(2, {
+        yieldMs: 0,
+        walBytes,
+        walPollMs: 1,
+        walMaxWaitMs: 3,
+      });
+      expect(result.indexed).toBe(4);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(events.slice(0, 7)).toEqual([
+      "wal-high",
+      "wal-high",
+      "batch",
+      "wal-high",
+      "wal-high",
+      "wal-high",
+      "batch",
+    ]);
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
+    await expectIndexInSync();
+  });
+
+  test("a run that gives up resumes from the watermark until the index is complete", async () => {
+    const client = getDbClient();
+    for (let i = 0; i < 5; i++) await newTask(`stuck item number${i}`);
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    // Batch 1 commits. Then two BUSY failures end the first run, and the
+    // resumed run first hits a non-BUSY error, which is retried as well.
+    const transaction = client.transaction.bind(client);
+    let calls = 0;
+    const spy = spyOn(client, "transaction").mockImplementation((fn, opts) => {
+      calls += 1;
+      if (calls === 2 || calls === 3) return Promise.reject(busyError());
+      if (calls === 4) return Promise.reject(new Error("disk I/O error"));
+      return transaction(fn, opts);
+    });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const opts = { batchSize: 2, yieldMs: 0, retryBackoffMs: [1], maxRetries: 1, resumeMs: 20 };
+      await startTaskSearchBackfill(opts);
+      expect(calls).toBe(3);
+      expect(await indexedThrough()).toBeGreaterThan(0);
+      expect(await indexedThrough()).toBeLessThan(TASK_FTS_COMPLETE);
+      expect(String(error.mock.calls[0]?.[0])).toContain("resuming in 20ms");
+
+      const deadline = Date.now() + 5_000;
+      while ((await indexedThrough()) < TASK_FTS_COMPLETE && Date.now() < deadline) {
+        await Bun.sleep(10);
+      }
+      await stopTaskSearchBackfill();
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+      log.mockRestore();
+    }
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
+    await expectIndexInSync();
+    expect(await found("stuck")).toHaveLength(5);
+  });
+
+  test("stopTaskSearchBackfill cancels a pending resume", async () => {
+    const client = getDbClient();
+    await newTask("never resumed");
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    let calls = 0;
+    const spy = spyOn(client, "transaction").mockImplementation(() => {
+      calls += 1;
+      return Promise.reject(busyError());
+    });
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await startTaskSearchBackfill({ maxRetries: 0, resumeMs: 30 });
+      await stopTaskSearchBackfill();
+      await Bun.sleep(80);
+    } finally {
+      spy.mockRestore();
+      error.mockRestore();
+    }
+    expect(calls).toBe(1);
+    expect(await indexedThrough()).toBe(0);
+    await startTaskSearchBackfill();
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
+  });
+
+  test("stopTaskSearchBackfill cuts a busy-retry wait short", async () => {
+    const client = getDbClient();
+    await newTask("waiting item");
+    await client.run("INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')");
+    await client.run("UPDATE agent_tasks_fts_state SET indexedThrough = 0 WHERE id = 1");
+
+    let calls = 0;
+    const spy = spyOn(client, "transaction").mockImplementation(() => {
+      calls += 1;
+      return Promise.reject(busyError());
+    });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // The default backoff waits a full second before the first retry.
+      const running = startTaskSearchBackfill();
+      while (calls === 0) await Bun.sleep(1);
+      const stoppedAt = performance.now();
+      await stopTaskSearchBackfill();
+      expect(performance.now() - stoppedAt).toBeLessThan(500);
+      await running;
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+    }
+    expect(calls).toBe(1);
+    expect(await indexedThrough()).toBe(0);
+    // The next start resumes.
+    await startTaskSearchBackfill();
+    expect(await indexedThrough()).toBe(TASK_FTS_COMPLETE);
   });
 });
 
