@@ -1,3 +1,9 @@
+export {
+  CHATGPT_SUBSCRIPTION_HARNESSES,
+  CHATGPT_SUBSCRIPTION_PROVIDER,
+  chatgptSubscriptionModelId,
+  isChatgptSubscriptionModel,
+} from "./chatgpt-subscription.ts";
 export { modelDisplayName } from "./display.ts";
 export {
   buildClaudeShortnameMap,

@@ -766,3 +766,64 @@ describe("nan and helmcode catalog models", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("ChatGPT subscription models (openai-codex/<id>)", () => {
+  let piId = "";
+
+  beforeAll(async () => {
+    piId = (
+      await createAgent({
+        name: "validation-pi-subscription",
+        isLead: false,
+        status: "idle",
+        harnessProvider: "pi",
+      })
+    ).id;
+  });
+
+  test("known when the bare id is an openai catalog model", () => {
+    const catalog = { openai: { models: { "gpt-5.6-sol": {} } } };
+    expect(isKnownCatalogModel("openai-codex/gpt-5.6-sol", catalog)).toBe(true);
+    expect(isKnownCatalogModel("openai-codex/gpt-9", catalog)).toBe(false);
+    expect(isKnownCatalogModel("openai-codex/openai/gpt-5.6-sol", catalog)).toBe(false);
+  });
+
+  test("pi takes it; opencode, codex, claude and grok get a mismatch", async () => {
+    const model = "openai-codex/gpt-5.6-sol";
+    expect(await explicitModelError({ model, harnessProvider: "pi" })).toBeNull();
+    for (const harnessProvider of ["opencode", "codex", "claude", "grok"]) {
+      const error = await explicitModelError({ model, harnessProvider, allowCustomModel: true });
+      expect(error).toContain(`does not run on the ${harnessProvider} harness`);
+    }
+    expect(await explicitModelError({ model, harnessProvider: "codex" })).toContain(
+      'On codex, use "gpt-5.6-sol"',
+    );
+  });
+
+  test("send-task to a pi agent and the agent runtime PATCH accept it", async () => {
+    const sender = ownerCtx({ agentId: leadId });
+    const accepted = await sendTaskHandler(sender, {
+      task: "run on the chatgpt subscription",
+      offerMode: false,
+      allowDuplicate: false,
+      agentId: piId,
+      model: "openai-codex/gpt-5.6-sol",
+      routingReason: "human_pinned",
+      routingNote: "pinned to check the subscription model id",
+    });
+    expect({ ok: accepted.ok, message: accepted.message }).toEqual({
+      ok: true,
+      message: expect.any(String),
+    });
+
+    const res = await api("PATCH", `/api/agents/${piId}/runtime`, {
+      harness_provider: "pi",
+      model: "openai-codex/gpt-5.6-sol",
+      reasoning_effort: "high",
+    });
+    expect({ status: res.status, body: res.body }).toEqual({
+      status: 200,
+      body: expect.anything(),
+    });
+  });
+});

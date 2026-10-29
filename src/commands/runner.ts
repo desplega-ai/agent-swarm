@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
@@ -2067,6 +2068,7 @@ export interface CodexOAuthCredentialInfo {
 export async function resolveCodexOAuthCredentialInfo(
   apiUrl?: string,
   apiKey?: string,
+  opts: { poolOnly?: boolean } = {},
 ): Promise<CodexOAuthCredentialInfo | null> {
   // Pool path: enumerate slots from the config store, pick one with rate-limit
   // awareness, materialise auth.json for the selected slot.
@@ -2114,9 +2116,12 @@ export async function resolveCodexOAuthCredentialInfo(
           // Pool slots are shared across concurrent tasks: never hand the
           // spawned Codex CLI a refresh token it could rotate outside the
           // `/api/oauth/refresh-locks` lock (see `credentialsToAuthJson`).
-          await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
-            includeRefreshToken: false,
-          });
+          // pi gets its credential from the adapter instead.
+          if (!opts.poolOnly) {
+            await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
+              includeRefreshToken: false,
+            });
+          }
           const authJson = credentialsToAuthJson(slotEntry.creds, {
             includeRefreshToken: false,
           });
@@ -2134,6 +2139,9 @@ export async function resolveCodexOAuthCredentialInfo(
       console.warn(`[credentials] Codex OAuth pool selection failed (non-fatal): ${err}`);
     }
   }
+
+  // pi subscription sessions run on a pool slot or not at all.
+  if (opts.poolOnly) return null;
 
   // Fallback: read existing auth.json (single-credential or pre-pool deploy).
   // NOT pool-backed — `authJsonToCredentialSelection`'s default `slot = 0` is
@@ -4358,6 +4366,25 @@ async function spawnProviderProcess(
         oauthSelection &&
         !oauthSelection.isRateLimitFallback);
     if (oauthSelection && realTaskId && oauthIsPrimary) {
+      reportKeyUsage(
+        opts.apiUrl,
+        opts.apiKey,
+        oauthSelection.keyType,
+        oauthSelection,
+        realTaskId,
+      ).catch(() => {});
+    }
+  } else if (adapter.name === "pi" && isChatgptSubscriptionModel(model)) {
+    // An `openai-codex/<id>` model runs on the same pool, with the same slot
+    // pick and usage bookkeeping. The adapter revalidates `codexSlot` through
+    // the refresh lock and hands the harness the access token only
+    // (`loadChatgptSubscriptionCredential`); no slot fails the session there.
+    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, {
+      poolOnly: true,
+    });
+    oauthSelection = oauthInfo?.selection;
+    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    if (oauthSelection && realTaskId) {
       reportKeyUsage(
         opts.apiUrl,
         opts.apiKey,

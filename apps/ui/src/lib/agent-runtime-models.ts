@@ -1,5 +1,7 @@
 import {
   buildClaudeShortnameMap,
+  CHATGPT_SUBSCRIPTION_PROVIDER,
+  chatgptSubscriptionModelId,
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
@@ -207,6 +209,8 @@ export function effortLevelsFor(
     if (slash <= 0) return [];
     providerId = modelId.slice(0, slash);
     catalogId = modelId.slice(slash + 1);
+    // A ChatGPT subscription id names an OpenAI catalog model.
+    if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER) providerId = "openai";
   }
   const facts =
     sectionOf(liveCatalog, providerId)?.models?.[catalogId] ??
@@ -457,6 +461,45 @@ function hasCodexOAuthSlot(configs: SwarmConfig[] | undefined): boolean {
   return Boolean(configs?.some((c) => CODEX_OAUTH_SLOT_RE.test(c.key) && c.value !== ""));
 }
 
+/** Picker label of the ChatGPT subscription group (pi). */
+export const CHATGPT_SUBSCRIPTION_LABEL = "ChatGPT (via subscription)";
+
+/**
+ * A codex-list option re-keyed as its ChatGPT subscription twin
+ * (`openai-codex/<id>`, run on the codex_oauth pool). No cost: the
+ * subscription, not the token, is what the swarm pays for.
+ */
+function subscriptionModel(harness: string, model: ModelOption, row: CachedModel): ModelOption {
+  return {
+    ...model,
+    id: `${CHATGPT_SUBSCRIPTION_PROVIDER}/${model.id}`,
+    provider: CHATGPT_SUBSCRIPTION_LABEL,
+    requiredKey: "CODEX_OAUTH",
+    cost: undefined,
+    reasoningLevels: reasoningLevelsFor(harness, model.id, row),
+  };
+}
+
+/**
+ * pi can run the codex harness's models on the shared ChatGPT subscription
+ * pool (`openai-codex/<id>`). The group exists only while a `codex_oauth` slot
+ * does: without one there is nothing to run them on.
+ */
+function chatgptSubscriptionGroup(
+  harness: "pi",
+  configs: SwarmConfig[] | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  if (!hasCodexOAuthSlot(configs)) return [];
+  const rows = (liveCatalog?.openai ?? CACHE.openai)?.models ?? {};
+  const models = directModels("codex", liveCatalog).map((m) =>
+    subscriptionModel(harness, m, rows[m.id] ?? { id: m.id }),
+  );
+  return [
+    { provider: CHATGPT_SUBSCRIPTION_LABEL, models, requiredKey: "CODEX_OAUTH", enabled: true },
+  ];
+}
+
 /**
  * Other names a credential is accepted under: each registry provider's key
  * aliases. The runner copies an alias into the canonical var when only the
@@ -659,6 +702,7 @@ export function modelGroupsForHarness(
 
     return [
       ...snapshotGroups,
+      ...chatgptSubscriptionGroup("pi", configs, liveCatalog),
       opencodeGoGroup("pi", configs, envPresence, liveCatalog, liveOpencodeGoModels),
       bedrockGroup,
     ];
@@ -989,6 +1033,18 @@ export function findKnownModel(
   for (const harness of ["claude", "codex"] as const) {
     const found = directModels(harness, liveCatalog).find((m) => m.id === aliased);
     if (found) return found;
+  }
+  const subscriptionId = chatgptSubscriptionModelId(model);
+  if (subscriptionId) {
+    const found = directModels("codex", liveCatalog).find((m) => m.id === subscriptionId);
+    return {
+      id: model,
+      label: found?.label ?? humanizeModelId(subscriptionId),
+      provider: CHATGPT_SUBSCRIPTION_LABEL,
+      providerId: "openai",
+      requiredKey: "CODEX_OAUTH",
+      contextWindow: found?.contextWindow,
+    };
   }
   for (const providerId of SNAPSHOT_ORDER) {
     const meta = SNAPSHOT_META[providerId];

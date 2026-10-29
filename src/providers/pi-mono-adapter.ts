@@ -18,6 +18,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CHATGPT_SUBSCRIPTION_PROVIDER,
+  chatgptSubscriptionModelId,
   ignoredBaseUrlVar,
   type OpenAICompatibleProvider,
   openAICompatibleKeyVars,
@@ -29,6 +31,7 @@ import {
   providerKeyFromEnv,
   providerKeyVars,
 } from "@desplega/model-catalog";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   getBuiltinModel as getModel,
   getBuiltinModels as getModels,
@@ -71,6 +74,9 @@ import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerEnvSecrets, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
+import { loadChatgptSubscriptionCredential } from "./codex-oauth/subscription.js";
+import type { CodexOAuthCredentials } from "./codex-oauth/types.js";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
@@ -328,6 +334,17 @@ export async function checkPiMonoCredentials(
     }
   }
 
+  // A ChatGPT subscription model runs on the codex_oauth pool only: the
+  // session gets a per-task in-memory credential, never auth.json or a key.
+  if (chatgptSubscriptionModelId(env.MODEL_OVERRIDE)) {
+    if (hasCodexOAuthPoolSlots(env)) return { ready: true, missing: [], satisfiedBy: "env" };
+    return {
+      ready: false,
+      missing: ["CODEX_OAUTH"],
+      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} runs on the ChatGPT subscription pool; add a codex_oauth slot (codex-login) or pick a model with its own API key.`,
+    };
+  }
+
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
   const fsProbe = opts.fs?.existsSync ?? existsSync;
   const authFile = `${homeDir}/.pi/agent/auth.json`;
@@ -351,11 +368,13 @@ export async function checkPiMonoCredentials(
   // Permissive case: any one supported key works. A registry provider key
   // (NaN, Helmcode) only serves `<id>/*` models, but it is still a usable pi
   // credential (the task's explicit model is checked above once it is set).
+  // The codex_oauth pool likewise serves only `openai-codex/*` models.
   if (
     env.ANTHROPIC_API_KEY ||
     env.OPENROUTER_API_KEY ||
     env.OPENAI_API_KEY ||
-    openAICompatibleKeyVars().some((k) => env[k])
+    openAICompatibleKeyVars().some((k) => env[k]) ||
+    hasCodexOAuthPoolSlots(env)
   ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
@@ -518,12 +537,16 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
 export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
   modelsPath?: string,
+  subscription?: CodexOAuthCredentials,
 ): Promise<ModelRuntime> {
   // A per-session models.json (`writeSessionModelsJson`) still shares the
   // agent dir's catalog cache, which only holds built-in provider catalogs.
-  const modelRuntime = await ModelRuntime.create(
-    modelsPath ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") } : {},
-  );
+  const modelRuntime = await ModelRuntime.create({
+    ...(modelsPath
+      ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") }
+      : {}),
+    ...(subscription ? { credentials: await subscriptionCredentialStore(subscription) } : {}),
+  });
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
@@ -532,6 +555,28 @@ export async function createPiRuntimeAuth(
   }
 
   return modelRuntime;
+}
+
+/**
+ * A ChatGPT subscription session's credential store: in memory, per session,
+ * holding only the pool slot's `openai-codex` OAuth entry with the refresh
+ * token blanked (`loadChatgptSubscriptionCredential`). It replaces
+ * `~/.pi/agent/auth.json` for this session, so nothing reaches disk and
+ * concurrent sessions on different slots never share an entry. A refresh pi
+ * attempts fails on the empty token and stays in memory.
+ */
+async function subscriptionCredentialStore(
+  creds: CodexOAuthCredentials,
+): Promise<InMemoryCredentialStore> {
+  const store = new InMemoryCredentialStore();
+  await store.modify(CHATGPT_SUBSCRIPTION_PROVIDER, async () => ({
+    type: "oauth",
+    access: creds.access,
+    refresh: "",
+    expires: creds.expires,
+    accountId: creds.accountId,
+  }));
+  return store;
 }
 
 /**
@@ -783,6 +828,9 @@ function resolveModelInner(
 ) {
   if (!modelStr) return undefined;
 
+  const subscriptionId = chatgptSubscriptionModelId(modelStr);
+  if (subscriptionId) return resolveSubscriptionModel(subscriptionId, modelRuntime);
+
   const lower = modelStr.toLowerCase();
   const isAnthropicShortname =
     lower === "opus" || lower === "sonnet" || lower === "haiku" || lower === "fable";
@@ -845,6 +893,24 @@ function resolveModelInner(
   }
 
   return undefined;
+}
+
+/**
+ * `openai-codex/<id>`: pi-ai's ChatGPT backend provider. Its builtin list
+ * trails the OpenAI catalog ids the picker offers (the codex harness list), so
+ * an id it does not ship reuses a shipped model's transport settings under the
+ * requested id. The ChatGPT backend rejects an id the subscription does not
+ * serve, which fails the task with the upstream error.
+ */
+function resolveSubscriptionModel(
+  modelId: string,
+  modelRuntime: Pick<ModelRuntime, "getModel"> | undefined,
+) {
+  const provider = CHATGPT_SUBSCRIPTION_PROVIDER as "openai-codex";
+  const known = getModel(provider, modelId as never) ?? modelRuntime?.getModel(provider, modelId);
+  if (known) return known;
+  const template = getModels(provider)[0];
+  return template ? { ...template, id: modelId, name: modelId } : undefined;
 }
 
 /** Manage AGENTS.md symlink for pi-mono CLAUDE.md compatibility */
@@ -1992,7 +2058,14 @@ export class PiMonoAdapter implements ProviderAdapter {
     const { createdSymlink, customTools, deferTools, piMcpServers } = setup;
     // The runtime is created before resolving so custom providers, which only
     // exist in its composed store, can resolve.
-    const modelRuntime = await createPiRuntimeAuth(sessionEnv, sessionModels.modelsPath);
+    const subscription = chatgptSubscriptionModelId(config.model)
+      ? await loadChatgptSubscriptionCredential(config)
+      : undefined;
+    const modelRuntime = await createPiRuntimeAuth(
+      sessionEnv,
+      sessionModels.modelsPath,
+      subscription,
+    );
     const resolvedModel = resolveModel(config.model, sessionEnv, modelRuntime);
     // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
     // to models resolved through the runtime's composed store; the builtin

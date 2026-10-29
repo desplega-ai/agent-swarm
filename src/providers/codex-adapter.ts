@@ -67,7 +67,7 @@ import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from ".
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
-import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { buildPoolRevalidationFailureReason, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { pruneCodexRollouts } from "./codex-rollouts";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
@@ -88,6 +88,8 @@ import type {
   SteerDelivery,
   SteerDeliveryResult,
 } from "./types";
+
+export { buildPoolRevalidationFailureReason } from "./codex-oauth/storage.js";
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
 
@@ -440,29 +442,6 @@ export async function resolveCodexAuthMode(
   }
 
   return currentMode;
-}
-
-/**
- * Build the `failureReason` for a pool-slot OAuth revalidation failure
- * (see `resolveCodexAuthMode` above).
- *
- * Wording matters: every variant carries `[auth-error]`, but the runner's
- * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
- * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
- * refresh lock") and any other thrown error (refresh-lock HTTP or network
- * failure, config-store persistence failure: "not a confirmed auth
- * rejection") are excluded as transient, so an outage does NOT bench a
- * healthy login.
- */
-export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
-  if (err instanceof CodexOAuthRefreshError) {
-    if (err.reason === "lock_timeout") {
-      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
-    }
-    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
 }
 
 /**

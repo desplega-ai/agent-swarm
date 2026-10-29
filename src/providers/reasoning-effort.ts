@@ -14,6 +14,7 @@
  */
 
 import {
+  CHATGPT_SUBSCRIPTION_PROVIDER,
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
@@ -105,6 +106,8 @@ function lookupModel(
   } else {
     ({ providerId, modelId } = splitProviderModel(model));
     if (!providerId) return undefined;
+    // A ChatGPT subscription id names an OpenAI catalog model.
+    if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER) providerId = "openai";
   }
   const facts = runtimeCatalogModel(providerId, modelId);
   return facts ? { id: modelId, facts } : undefined;

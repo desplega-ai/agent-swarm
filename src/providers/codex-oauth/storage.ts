@@ -103,6 +103,30 @@ export class CodexOAuthRefreshError extends Error {
 }
 
 /**
+ * Build the `failureReason` for a pool-slot OAuth revalidation failure
+ * (`resolveCodexAuthMode` in codex-adapter.ts, and the pi ChatGPT
+ * subscription path in `subscription.ts`).
+ *
+ * Wording matters: every variant carries `[auth-error]`, but the runner's
+ * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
+ * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
+ * refresh lock") and any other thrown error (refresh-lock HTTP or network
+ * failure, config-store persistence failure: "not a confirmed auth
+ * rejection") are excluded as transient, so an outage does NOT bench a
+ * healthy login.
+ */
+export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
+  if (err instanceof CodexOAuthRefreshError) {
+    if (err.reason === "lock_timeout") {
+      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
+    }
+    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
+}
+
+/**
  * Acquire the cross-process refresh lock for a Codex OAuth slot via the API
  * server's `oauth_refresh_locks` table (migration 077). Worker-side code
  * can't reach that table directly (no `bun:sqlite`/`be/db` imports), so this
