@@ -361,6 +361,32 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
     expectExact(body.cost.totalCostUsd, expected);
   });
 
+  // Boot-seeded rows only: fx reports the swarm model string with its route
+  // prefix and no cache split, so input and output price at the table rate.
+  test("fx runs price from the seeded rates on each route", async () => {
+    const openRouter = await postCost({
+      sessionId: "fx-openrouter",
+      provider: "fx",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      totalCostUsd: 0,
+      inputTokens: 58_620,
+      outputTokens: 1_183,
+    });
+    expect(openRouter.cost.costSource).toBe("pricing-table");
+    expectExact(openRouter.cost.totalCostUsd, (58_620 * 0.14 + 1_183 * 0.42) / 1_000_000);
+
+    const openAi = await postCost({
+      sessionId: "fx-openai",
+      provider: "fx",
+      model: "gpt-5-mini",
+      totalCostUsd: 0,
+      inputTokens: 9_286,
+      outputTokens: 506,
+    });
+    expect(openAi.cost.costSource).toBe("pricing-table");
+    expectExact(openAi.cost.totalCostUsd, (9_286 * 0.25 + 506 * 2) / 1_000_000);
+  });
+
   test("legacy cache writes without a TTL split keep the 5m class", async () => {
     await seedModelRates("claude", "claude-legacy-cache-write", {
       input: 5,

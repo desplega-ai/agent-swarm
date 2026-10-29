@@ -143,4 +143,44 @@ describe("resolveCodexOAuthCredentialInfo — issue #1102 bug 1", () => {
     expect(info!.selection.index).toBe(0);
     expect(info!.selection.total).toBe(1);
   });
+
+  it("poolOnly (pi subscription) picks a slot without writing ~/.codex/auth.json", async () => {
+    const creds = {
+      access:
+        "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjLXBvb2wifX0=.sig",
+      refresh: "rt_pool",
+      expires: Date.now() + 3_600_000,
+      accountId: "acc-pool",
+    };
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/api/config/resolved")) {
+        return new Response(
+          JSON.stringify({ configs: [{ key: "codex_oauth_1", value: JSON.stringify(creds) }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (href.includes("/api/keys/available")) {
+        return new Response(JSON.stringify({ availableIndices: [1] }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const info = await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, {
+      poolOnly: true,
+    });
+
+    expect(info?.isPoolBacked).toBe(true);
+    expect(info?.selection.index).toBe(1);
+    expect(await Bun.file(join(tmpHome, ".codex", "auth.json")).exists()).toBe(false);
+  });
+
+  it("poolOnly ignores a standalone auth.json: no slot means no subscription", async () => {
+    mockEmptyConfigStore();
+    await writeStandaloneAuthJson();
+
+    expect(
+      await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, { poolOnly: true }),
+    ).toBeNull();
+  });
 });

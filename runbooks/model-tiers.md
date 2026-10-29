@@ -30,6 +30,7 @@ Each harness/provider maps the same tier to its own concrete model:
 | `opencode` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `cursor` | `gpt-5.4-mini` | `claude-sonnet-5-5` | `claude-opus-5-5` | `claude-fable-5-1` |
 | `grok` | `grok-build-0.1` | `grok-4.3` | `grok-4.6` | `grok-4.7` |
+| `fx` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `devin` | `devin` | `devin` | `devin` | `devin` |
 
 Update `DEFAULT_MODEL_TIER_MAP` and this table together when defaults change.
@@ -154,6 +155,7 @@ A concrete `model` or `latest:` alias must also run on the harness that will run
 | `claude-managed` | `anthropic` | same as `claude` | `latest:anthropic/...` |
 | `codex` | `openai` | an `openai` id that passes `isHarnessCatalogModel("codex", id)` | `latest:openai/...` |
 | `grok` | `xai` | a `grok-*` or `xai` id, bare or `xai/`-qualified (the adapter drops the prefix; the API catalog has no `xai` section, so `xai/<id>` needs `allowCustomModel`), or `openrouter/<vendor>/<id>`; another vendor's catalog id or namespace is refused | `latest:openrouter/...` |
+| `fx` | none (`src/utils/fx-models.ts`) | `openrouter/<vendor>/<id>` (`OPENROUTER_API_KEY`), `vercel/<vendor>/<id>` (`AI_GATEWAY_API_KEY`) or a bare OpenAI id (`OPENAI_API_KEY`); `nan/`, `helmcode/` and direct `anthropic` ids are refused (fx 0.0.15 fails on NaN streams and has no Anthropic protocol) | `latest:openrouter/...`, `latest:openai/...` |
 | `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified, including `nan/<id>` and `helmcode/<id>` | any |
 | `dsh`, `cursor`, `devin`, `acp` | free-form | any string | any |
 | `amp` | none (`src/utils/amp-models.ts`) | a mode (`low`, `medium`, `high`, `ultra`) or a `provider/model` pin (for example `openai/gpt-5-nano`) | none |

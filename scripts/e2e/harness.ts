@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  fxModelRoute,
   openAICompatibleBaseUrlVars,
   openAICompatibleKeyVars,
   providerForModel,
@@ -25,6 +26,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   cursor: "gpt-5.4-nano",
   // xAI's cheapest model (`grok models` with an API key).
   grok: "grok-build-0.1",
+  // The cheapest OpenRouter model verified live under fx 0.0.15.
+  fx: "openrouter/openai/gpt-5-mini",
   // The generic ACP provider on its opencode target (`opencode acp`).
   acp: "openrouter/deepseek/deepseek-v4-flash",
 };
@@ -64,6 +67,7 @@ const PROVIDER_CREDENTIAL_KEYS = {
     keys: ["XAI_API_KEY", "GROK_BINARY", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
     fallbackKeys: [],
   },
+  fx: { keys: ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "AI_GATEWAY_API_KEY"], fallbackKeys: [] },
   acp: {
     keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
     fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
@@ -199,6 +203,11 @@ function requireCredential(provider: string): void {
       Bun.which(process.env.GROK_BINARY || "grok"),
       "Grok requires a preinstalled grok executable",
     );
+  } else if (provider === "fx") {
+    const route = fxModelRoute(modelFor(provider));
+    if ("error" in route) throw new Error(route.error);
+    expect(process.env[route.keyVar], `fx requires ${route.keyVar} for the selected model`);
+    expect(Bun.which("fx"), "fx requires a preinstalled fx executable");
   } else if (provider === "amp") {
     expect(process.env.AMP_API_KEY, "Amp requires AMP_API_KEY");
     expect(
@@ -430,7 +439,7 @@ async function runHarnessAttempt(
   let result: HarnessAttempt;
   try {
     expect(
-      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "acp"].includes(
+      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "fx", "acp"].includes(
         provider,
       ),
       `Unsupported harness provider: ${provider}`,

@@ -369,6 +369,19 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
   "http://localhost:3013/api/keys/available?keyType=CODEX_OAUTH&totalKeys=3"
 ```
 
+## Using the pool from pi
+
+pi workers can run ChatGPT models on the same pool. Name the model `openai-codex/<id>`, where `<id>` is any model the Codex harness lists (for example `openai-codex/gpt-5.6-sol`). Set it as the agent's model, a task's `model`, or a schedule's model. It needs no `OPENAI_API_KEY`.
+
+When at least one `codex_oauth_<n>` slot exists, the dashboard's pi model picker shows these models in a **ChatGPT (via subscription)** group. With no slot, the group is hidden.
+
+At task time the runner picks a slot the same way it does for Codex: same availability filter, rate-limit tracking and auth-failure benching. The pi adapter then revalidates the slot through the locked `getValidCodexOAuth(...)` refresh. pi gets an in-memory `openai-codex` credential for that session only, holding the access token and an empty refresh token. Nothing is written to `~/.pi/agent/auth.json`, so pi cannot rotate the shared token family.
+
+- **Readiness:** a pi worker whose `MODEL_OVERRIDE` is an `openai-codex/` model reports ready only when the pool has slots (`CODEX_OAUTH_POOL_SLOTS`).
+- **Harness check:** other harnesses reject an `openai-codex/` model. On Codex, use the bare id.
+- **Long sessions:** pi cannot refresh the access token. A session that outlives it fails, the same as Codex. Tasks draw tokens with at least 12 hours left.
+- **opencode is not supported yet.** opencode 2.x keeps credentials in its own SQLite store (`opencode auth import`), not in a per-session file. When a refresh fails it drops to API-key mode without an error.
+
 ## Related
 
 - [Harness Configuration](/docs/guides/harness-configuration) — Configure which harness type (Claude Code, Codex, pi) workers use

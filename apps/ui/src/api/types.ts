@@ -482,6 +482,7 @@ export const PROVIDER_NAMES = [
   "amp",
   "cursor",
   "grok",
+  "fx",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export function isProviderName(value: string | null | undefined): value is ProviderName {

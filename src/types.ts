@@ -185,6 +185,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "grok-4.6",
     ultra: "grok-4.7",
   },
+  // fx runs these on its `openrouter` custom connection (OPENROUTER_API_KEY),
+  // pi's tested OpenRouter set; each ran under fx 0.0.15 (2026-10-29 probe).
+  fx: {
+    smol: "openrouter/deepseek/deepseek-v4.1-flash",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash",
+    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    ultra: "openrouter/anthropic/claude-opus-5.5",
+  },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
   // config option with a target-specific startup fallback.
@@ -436,6 +444,7 @@ export const ProviderNameSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -596,6 +605,10 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // Grok runs on the ACP client: one `session/prompt` turn, interrupted only
   // by `session/cancel`. No Grok surface (ACP or headless) exposes a steer.
   grok: [],
+  // `fx acp` steers natively: a `session/prompt` with `_meta.fx.steer` during a
+  // running turn lands at the next tool boundary without cancelling it (fx
+  // 0.0.15 probe, 2026-10-29). Queue is not measured, so it is not advertised.
+  fx: ["steer"],
 };
 
 export type DevinProviderMeta = {
@@ -619,6 +632,7 @@ export type ProviderMetaMap = {
   amp: NoProviderMeta;
   cursor: NoProviderMeta;
   grok: NoProviderMeta;
+  fx: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -3842,6 +3856,7 @@ export const PricingProviderSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 
