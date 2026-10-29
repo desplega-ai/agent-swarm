@@ -192,6 +192,14 @@ export async function runController(args: string[]): Promise<void> {
       E2B_API_BASE: process.env.E2B_API_BASE,
       E2B_TTL_SEC: process.env.E2B_TTL_SEC,
       E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
+      BOXD_API_KEY: process.env.BOXD_API_KEY,
+      BOXD_ORG: process.env.BOXD_ORG,
+      BOXD_BASE_URL: process.env.BOXD_BASE_URL,
+      BOXD_SNAPSHOT: process.env.BOXD_SNAPSHOT,
+      BOXD_DELETE_AFTER_SEC: process.env.BOXD_DELETE_AFTER_SEC,
+      BOXD_START_TIMEOUT_SEC: process.env.BOXD_START_TIMEOUT_SEC,
+      BOXD_STATUS_TIMEOUT_SEC: process.env.BOXD_STATUS_TIMEOUT_SEC,
+      BOXD_TEARDOWN_TIMEOUT_SEC: process.env.BOXD_TEARDOWN_TIMEOUT_SEC,
     };
     const provider = await createRuntimeProvider(kind, target);
     const config = provider.checkConfig(target);

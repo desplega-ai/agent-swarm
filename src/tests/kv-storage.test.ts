@@ -17,6 +17,7 @@ import {
   sweepExpiredKvPrefix,
   upsertKv,
 } from "../be/db";
+import { runMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 
 const TEST_DB_PATH = "./test-kv-storage.sqlite";
 
@@ -103,6 +104,33 @@ describe("kv-storage helpers", () => {
     expect(await sweepExpiredKv(NS, now)).toBe(1);
     expect(await countKv(NS, {})).toBe(1);
     expect((await getKv(NS, "live-spill"))?.value).toBe("new");
+  });
+
+  test("the MCP overflow sweep removes expired spills of every agent", async () => {
+    const now = Date.now();
+    await upsertKv({
+      namespace: "mcp:overflow:agent-c",
+      key: "expired-c",
+      value: "x",
+      valueType: "string",
+      expiresAt: now - 1,
+    });
+    await upsertKv({
+      namespace: "mcp:overflow:agent-d",
+      key: "live-d",
+      value: "x",
+      valueType: "string",
+      expiresAt: now + 10_000,
+    });
+
+    expect(await runMcpOverflowSweep(now)).toBeGreaterThanOrEqual(1);
+    // Raw read: getKv deletes an expired row itself.
+    const expired = await getDbClient().get<{ key: string }>(
+      "SELECT key FROM kv_entries WHERE namespace = ? AND key = ?",
+      ["mcp:overflow:agent-c", "expired-c"],
+    );
+    expect(expired).toBeNull();
+    expect((await getKv("mcp:overflow:agent-d", "live-d"))?.value).toBe("x");
   });
 
   test("prefix sweep removes expired entries across per-agent overflow namespaces", async () => {

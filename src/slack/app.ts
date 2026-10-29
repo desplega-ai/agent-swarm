@@ -5,13 +5,15 @@ import { getSlackConfiguration } from "./config";
 import { type SlackConnectionState, setSlackConnectionState } from "./connection-state";
 import { installSlackEgressScrub } from "./egress-scrub";
 import { installSlackExternalChannelGuard } from "./external-channel-egress";
-import { slackInboundOutcomeMiddleware } from "./inbound-dispatch";
+import { recoverSlackInboundAfterRestart, slackInboundOutcomeMiddleware } from "./inbound-dispatch";
+import { installSocketAckRecovery } from "./socket-ack";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
 let app: App | null = null;
 let receiver: SocketModeReceiver | null = null;
 let initialized = false;
+let inboundDrain: ReturnType<typeof installSocketAckRecovery> | null = null;
 
 const SOCKET_EVENT_STATES: Record<string, SlackConnectionState> = {
   connecting: "connecting",
@@ -105,6 +107,10 @@ export async function initSlackApp(): Promise<App | null> {
     ...(clientOptions ? { clientOptions } : {}),
   });
 
+  // Events whose Socket Mode ack failed are stored as receipts; the drain hands
+  // them back to Bolt, so a crash or a failing listener leaves recoverable work.
+  inboundDrain = installSocketAckRecovery(receiver.client, app);
+
   // Failed validation must remain retryable without requiring stopSlackApp().
   initialized = true;
 
@@ -147,8 +153,12 @@ export async function startSlackApp(): Promise<boolean> {
     // Establish the durable cutoff before Socket Mode can deliver new asks.
     const { isSlackRenderV2Enabled } = await import("./render-v2");
     if (isSlackRenderV2Enabled()) await ensureSlackRenderV2Activation();
+    // Receipts stored before the last restart: interrupted ones turn uncertain,
+    // pending ones are processed once the app can dispatch them.
+    await recoverSlackInboundAfterRestart();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
+    void inboundDrain?.wake();
     await emitBuiltInIntegrationConnectedOnce("slack");
 
     // Start watching for task completions
@@ -161,6 +171,8 @@ export async function startSlackApp(): Promise<boolean> {
 
 export async function stopSlackApp(): Promise<void> {
   stopTaskWatcher();
+  inboundDrain?.stop();
+  inboundDrain = null;
 
   if (app) {
     await app.stop();

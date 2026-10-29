@@ -13,6 +13,7 @@
  * the swarm routes agentId-less tasks to it). Eval tasks are otherwise
  * directly assigned to a worker's agentId.
  */
+import { providerForModel, providerKeyFromEnv } from "@desplega/model-catalog";
 import {
   createSandbox,
   type E2BSandboxInfo,
@@ -177,7 +178,17 @@ export function credentialsForConfig(config: HarnessConfig): Record<string, stri
       // Credential gate is MODEL_OVERRIDE-prefix-aware: forward the key matching
       // the model's provider prefix.
       const prefix = config.model?.split("/")[0];
-      if (prefix === "anthropic") need("ANTHROPIC_API_KEY");
+      const registry = providerForModel(config.model);
+      if (registry) {
+        // nan/, helmcode/, vercel/: the registry names the key var (aliases included).
+        const value = providerKeyFromEnv(registry, process.env);
+        if (!value) {
+          throw new Error(
+            `config "${config.id}" (${config.provider}) requires ${registry.envVar} in the environment`,
+          );
+        }
+        out[registry.envVar] = value;
+      } else if (prefix === "anthropic") need("ANTHROPIC_API_KEY");
       else if (prefix === "openai") need("OPENAI_API_KEY");
       else need("OPENROUTER_API_KEY"); // openrouter/... or unset model
       break;

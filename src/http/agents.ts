@@ -61,6 +61,7 @@ import {
   AgentCredStatusSchema,
   AgentLatestModelSchema,
   AgentSchema,
+  AgentSlackIconSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
   DeliveryModeSchema,
@@ -530,6 +531,11 @@ const updateAgentProfileRoute = route({
     heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
+    // z.lazy keeps `| null` in the OpenAPI body: a named schema's $ref drops it.
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
+      .nullable()
+      .optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -976,11 +982,12 @@ export async function handleAgentsRest(
       body.setupScript === undefined &&
       body.toolsMd === undefined &&
       body.heartbeatMd === undefined &&
-      body.avatar === undefined
+      body.avatar === undefined &&
+      body.slackIcon === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, avatar, or slackIcon) must be provided",
         400,
       );
       return true;
@@ -1017,6 +1024,7 @@ export async function handleAgentsRest(
           // Only include the key when the client sent it, so `null` (reset)
           // is distinguishable from "not provided" (leave untouched).
           ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+          ...(body.slackIcon !== undefined ? { slackIcon: body.slackIcon } : {}),
         },
         versionMeta,
         {

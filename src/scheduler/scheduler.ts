@@ -11,6 +11,7 @@ import {
 import {
   getDbClient,
   getDueScheduledTasks,
+  getLeadAgent,
   getScheduledTaskById,
   getUserById,
   getWorkflow,
@@ -26,8 +27,9 @@ import {
 import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
 import { runScriptWithRunCredential } from "@/be/scripts/run-credential";
+import { seededWorkflowState } from "@/be/seed/workflows-seeder";
 import { telemetry } from "@/telemetry";
-import type { AgentTask, ScheduledTask } from "@/types";
+import type { AgentTask, ScheduledTask, Workflow } from "@/types";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
 import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
@@ -252,8 +254,7 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
-        // The creator, as for script schedules: `targetAgentId` is caller-chosen.
-        triggeredByAgentId: schedule.createdByAgentId,
+        triggeredByAgentId: await scheduledWorkflowPrincipal(schedule, workflow),
         requestedByUserId: schedule.createdBy,
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
@@ -293,6 +294,38 @@ export async function dispatchScheduleTarget(
       return { triggeredWorkflows, workflowRunIds };
     }
   }
+}
+
+/**
+ * The agent a scheduled workflow run acts as: the schedule's creator, as for
+ * script schedules (`targetAgentId` and trigger data are caller-chosen, so
+ * neither is ever the principal). A creator-less (seeded) schedule that fires
+ * a seeded workflow runs as the lead, resolved at fire time; with no lead the
+ * fire fails instead of running agentless. Operator settings such as inputs
+ * or on/off keep that. Any agent can edit a workflow, so one whose nodes or
+ * params changed never inherits the lead and its fire fails. Workflows the
+ * seeder never wrote keep their previous principal.
+ */
+async function scheduledWorkflowPrincipal(
+  schedule: ScheduledTask,
+  workflow: Workflow,
+): Promise<string | undefined> {
+  if (schedule.createdByAgentId) return schedule.createdByAgentId;
+  if (workflow.createdByAgentId) return undefined;
+  const seeded = await seededWorkflowState(workflow);
+  if (seeded === "unseeded") return undefined;
+  if (seeded === "edited") {
+    throw new Error(
+      `Schedule "${schedule.name}" has no creator and the nodes or params of seeded workflow "${workflow.name}" were edited, so it will not run as the lead. Re-create the schedule as the agent it should run as.`,
+    );
+  }
+  const lead = await getLeadAgent();
+  if (!lead) {
+    throw new Error(
+      `Schedule "${schedule.name}" has no creator and the swarm has no lead to run its workflow as`,
+    );
+  }
+  return lead.id;
 }
 
 async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): Promise<void> {

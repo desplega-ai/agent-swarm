@@ -393,7 +393,7 @@ function reportStaticConfigIssues(
   const result = schema.safeParse(config);
   if (result.success) return;
   for (const rawIssue of result.error?.issues ?? []) {
-    const issue = rawIssue as { path: PropertyKey[]; message: string };
+    const issue = rawIssue as { path: PropertyKey[]; message: string; code?: string };
     const issuePath = issue.path.map(String);
     const path = [pathPrefix, ...issuePath].join(".");
     let value: unknown = config;
@@ -404,7 +404,10 @@ function reportStaticConfigIssues(
       }
       value = (value as Record<PropertyKey, unknown>)[segment];
     }
-    if (containsInterpolationToken(value)) continue;
+    // Record keys are static config structure, not interpolated values. In
+    // particular, ScriptConfigSchema's reserved env names must fail at
+    // authoring time even when the value at that key is a deferred template.
+    if (containsInterpolationToken(value) && issue.code !== "invalid_key") continue;
     const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
     errors.push(
       `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,

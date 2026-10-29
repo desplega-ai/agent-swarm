@@ -135,6 +135,12 @@ export interface AgentAvatarLucide {
 }
 export type AgentAvatar = AgentAvatarLucide;
 
+/** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
+export type AgentSlackIcon =
+  | { type: "emoji"; emoji: string }
+  | { type: "url"; url: string }
+  | { type: "app" };
+
 export interface Agent {
   id: string;
   name: string;
@@ -145,6 +151,8 @@ export interface Agent {
   capabilities?: string[];
   /** Custom avatar. Null/missing = fall back to the deterministic hash-derived icon/color. */
   avatar?: AgentAvatar | null;
+  /** Slack persona icon. Null/missing = :crown: for the lead, a hashed emoji for workers. */
+  slackIcon?: AgentSlackIcon | null;
   claudeMd?: string;
   soulMd?: string;
   identityMd?: string;
@@ -188,7 +196,7 @@ export type RuntimeInstanceStatus = "active" | "offline";
 
 // ── Runtime pools (mirror RuntimePoolSchema / RuntimeControllerSchema in src/types.ts) ──
 
-export type RuntimeProviderKind = "static" | "docker" | "e2b" | "k8s";
+export type RuntimeProviderKind = "static" | "docker" | "e2b" | "boxd" | "k8s";
 export type RuntimeDeliveryMode = "poll" | "push";
 export type RuntimePoolLifecycle = "idle" | "per-task";
 
@@ -3438,8 +3446,13 @@ export interface StatusActivity {
 
 /** Comb, the agent-fs review space in the dashboard (`/file`). */
 export interface StatusComb {
-  /** `COMB_ENABLED` is on and `AGENT_FS_API_URL` is set. */
+  /**
+   * Files is on: `AGENT_FS_API_URL` is set and `COMB_ENABLED` is not `false`,
+   * and (when `COMB_ENABLED` is unset) a browser can reach agent-fs.
+   */
   enabled: boolean;
+  /** What is missing while Files is off. Null when on. Absent on older APIs. */
+  reason?: string | null;
   /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else `AGENT_FS_API_URL`). */
   api_url: string | null;
   /** agent-fs live UI host, for "Open in agent-fs" links. */

@@ -52,7 +52,7 @@ import {
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { completedStatusIcon, reactionName, type SlackReactionEvent } from "./reaction-shortcode";
-import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
@@ -675,7 +675,7 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       blocks: treeBlocks(text),
       unfurl_links: false,
       unfurl_media: false,
-      ...(agent ? { username: getAgentDisplayName(agent), icon_emoji: getAgentEmoji(agent) } : {}),
+      ...(agent ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) } : {}),
       metadata: {
         event_type: SLACK_RENDER_METADATA_EVENT,
         event_payload: { message_id: reservation.id, kind: "tree" },
@@ -1312,10 +1312,10 @@ export async function streamOutcomeCard(
     markdown_text: presentation,
   };
   const agent = task.agentId ? await getAgentById(task.agentId) : undefined;
-  if (agent) {
-    startPayload.username = getAgentDisplayName(agent);
-    startPayload.icon_emoji = getAgentEmoji(agent);
-  }
+  const persona = agent
+    ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) }
+    : {};
+  Object.assign(startPayload, persona);
   if (!task.slackChannelId.startsWith("D") && task.slackUserId) {
     const teamId = await slackTeamId(app.client);
     if (teamId) {
@@ -1379,8 +1379,7 @@ export async function streamOutcomeCard(
           thread_ts: task.slackThreadTs,
           text: presentation,
           blocks: [{ type: "markdown", text: presentation }, ...captions],
-          ...(startPayload.username ? { username: startPayload.username } : {}),
-          ...(startPayload.icon_emoji ? { icon_emoji: startPayload.icon_emoji } : {}),
+          ...persona,
         });
         deliveredViaFallback = true;
       }

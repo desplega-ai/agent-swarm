@@ -500,6 +500,9 @@
     "avatar": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
+    "slack_icon": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
     "modelTierOverrides": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },

@@ -11,6 +11,7 @@
 import path from "node:path";
 import { openAICompatibleProviderIds } from "@desplega/model-catalog";
 import { Glob } from "bun";
+import ts from "typescript";
 
 const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
 const TYPES_FILE = path.join(import.meta.dir, "../src/types.ts");
@@ -218,6 +219,80 @@ async function discoverToolFiles(): Promise<string[]> {
   return files;
 }
 
+type ResolveInterpolation = (expression: string) => string;
+
+/** Read literal constants without loading tool modules or their runtime dependencies. */
+function interpolationResolver(filePath: string, toolName: string): ResolveInterpolation {
+  const sources = new Map<string, ts.SourceFile>();
+  function source(file: string): ts.SourceFile {
+    let parsed = sources.get(file);
+    if (!parsed) {
+      parsed = ts.createSourceFile(file, ts.sys.readFile(file) ?? "", ts.ScriptTarget.Latest, true);
+      sources.set(file, parsed);
+    }
+    return parsed;
+  }
+  function literal(file: string, name: string): string | undefined {
+    for (const statement of source(file).statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      if (!(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || declaration.name.text !== name) continue;
+        const value = declaration.initializer;
+        if (value && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) {
+          return value.text;
+        }
+        if (value && ts.isNumericLiteral(value)) return String(Number(value.text));
+        if (
+          value &&
+          ts.isPrefixUnaryExpression(value) &&
+          ts.isNumericLiteral(value.operand) &&
+          (value.operator === ts.SyntaxKind.MinusToken ||
+            value.operator === ts.SyntaxKind.PlusToken)
+        ) {
+          return String(
+            Number(value.operand.text) * (value.operator === ts.SyntaxKind.MinusToken ? -1 : 1),
+          );
+        }
+      }
+    }
+    return undefined;
+  }
+  return (expression) => {
+    if (/^openAICompatibleProviderIds\(\)\.join\(["'], ["']\)$/.test(expression)) {
+      return openAICompatibleProviderIds().join(", ");
+    }
+    if (/^[A-Za-z_$][\w$]*$/.test(expression)) {
+      const local = literal(filePath, expression);
+      if (local !== undefined) return local;
+      for (const statement of source(filePath).statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier))
+          continue;
+        const specifier = statement.moduleSpecifier.text;
+        if (!specifier.startsWith(".") && !specifier.startsWith("@/")) continue;
+        const bindings = statement.importClause?.namedBindings;
+        if (!bindings || !ts.isNamedImports(bindings)) continue;
+        const binding = bindings.elements.find((element) => element.name.text === expression);
+        if (!binding) continue;
+        const target = specifier.startsWith("@/")
+          ? path.join(TOOLS_DIR, "..", specifier.slice(2))
+          : path.resolve(path.dirname(filePath), specifier);
+        let importedFile: string;
+        try {
+          importedFile = Bun.resolveSync(target, path.dirname(filePath));
+        } catch {
+          break;
+        }
+        const value = literal(importedFile, binding.propertyName?.text ?? binding.name.text);
+        if (value !== undefined) return value;
+      }
+    }
+    throw new Error(
+      `Tool "${toolName}": cannot resolve description interpolation \${${expression}}`,
+    );
+  };
+}
+
 /**
  * Walk `source` starting at `startIdx` and parse a chain of one or more JS
  * string literals joined by `+`. Returns the concatenated decoded value plus
@@ -231,11 +306,12 @@ async function discoverToolFiles(): Promise<string[]> {
  *
  * Backslash escapes are decoded for common cases (`\n`, `\t`, `\r`, `\\`,
  * matching the opening quote) — anything else passes through as-is. Known
- * provider-id interpolation is resolved without evaluating arbitrary source.
+ * provider-id and literal-constant interpolations resolve without evaluating tool source.
  */
 function parseStringLiteralChain(
   source: string,
   startIdx: number,
+  resolveInterpolation: ResolveInterpolation,
 ): { value: string; endIdx: number } | null {
   let i = startIdx;
   while (i < source.length && /\s/.test(source[i]!)) i++;
@@ -259,6 +335,13 @@ function parseStringLiteralChain(
         else if (next === '"' || next === "'" || next === "`") result += next;
         else result += next;
         i += 2;
+        continue;
+      }
+      if (quote === "`" && c === "$" && source[i + 1] === "{") {
+        const end = source.indexOf("}", i + 2);
+        const expression = source.slice(i + 2, end === -1 ? undefined : end).trim();
+        result += resolveInterpolation(expression);
+        i = end === -1 ? source.length : end + 1;
         continue;
       }
       if (c === quote) {
@@ -285,10 +368,7 @@ function parseStringLiteralChain(
 
   if (!parsedAtLeastOne) return null;
   return {
-    value: result.replace(
-      /\$\{openAICompatibleProviderIds\(\)\.join\(["'], ["']\)\}/g,
-      openAICompatibleProviderIds().join(", "),
-    ),
+    value: result,
     endIdx: i,
   };
 }
@@ -297,8 +377,12 @@ function parseStringLiteralChain(
  * Convenience: parse a literal chain at `startIdx` and return the cleaned-up
  * single-line description, or empty string when no literal is found.
  */
-function readDescriptionAt(source: string, startIdx: number): string {
-  const parsed = parseStringLiteralChain(source, startIdx);
+function readDescriptionAt(
+  source: string,
+  startIdx: number,
+  resolveInterpolation: ResolveInterpolation,
+): string {
+  const parsed = parseStringLiteralChain(source, startIdx, resolveInterpolation);
   if (!parsed) return "";
   return parsed.value.replace(/\s+/g, " ").trim();
 }
@@ -308,12 +392,16 @@ function readDescriptionAt(source: string, startIdx: number): string {
  * inside `content`. Returns the resolved string, or empty string when the
  * constant's RHS isn't a string-literal chain.
  */
-function resolveStringConstant(constName: string, content: string): string {
+function resolveStringConstant(
+  constName: string,
+  content: string,
+  resolveInterpolation: ResolveInterpolation,
+): string {
   const re = new RegExp(`(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`);
   const match = re.exec(content);
   if (!match || match.index === undefined) return "";
   const startIdx = match.index + match[0].length;
-  return readDescriptionAt(content, startIdx);
+  return readDescriptionAt(content, startIdx, resolveInterpolation);
 }
 
 /**
@@ -347,6 +435,7 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
   for (let idx = 0; idx < registrations.length; idx++) {
     const match = registrations[idx]!;
     const name = match[1]!;
+    const resolveInterpolation = interpolationResolver(filePath, name);
     const start = match.index ?? 0;
     const end =
       idx + 1 < registrations.length
@@ -362,7 +451,7 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
     let descKeyMatch: RegExpExecArray | null;
     while ((descKeyMatch = descKeyRegex.exec(snippet)) !== null) {
       const startIdx = descKeyMatch.index + descKeyMatch[0].length;
-      const parsed = parseStringLiteralChain(snippet, startIdx);
+      const parsed = parseStringLiteralChain(snippet, startIdx, resolveInterpolation);
       if (!parsed) continue;
       description = parsed.value.replace(/\s+/g, " ").trim();
       break;
@@ -370,16 +459,21 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
 
     // Helper calls pass description and raw input shape as their second and
     // third arguments, rather than a registrar options object.
-    let fields = parseSchemaFields(snippet, schemaContent);
+    let fields = parseSchemaFields(snippet, schemaContent, resolveInterpolation);
     if (!description && match[0].startsWith("register(")) {
       const descriptionStart = snippet.indexOf(",", match[0].length);
-      const positional = parseStringLiteralChain(snippet, descriptionStart + 1);
+      const positional = parseStringLiteralChain(
+        snippet,
+        descriptionStart + 1,
+        resolveInterpolation,
+      );
       if (positional) {
         description = positional.value.replace(/\s+/g, " ").trim();
         const shapeStart = snippet.indexOf(",", positional.endIdx) + 1;
         fields = parseSchemaFields(
           `inputSchema: z.object(${snippet.slice(shapeStart)}`,
           schemaContent,
+          resolveInterpolation,
         );
         // Resolve a helper's shared literal shape, e.g. {...base, ...shape}.
         const shared = content.match(
@@ -392,6 +486,7 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
             ...parseSchemaFields(
               `inputSchema: z.object(${content.slice(sharedDecl.index + sharedDecl[0].length)}`,
               content,
+              resolveInterpolation,
             ),
           );
         }
@@ -412,7 +507,11 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
  * threaded through so `parseField` can resolve `.describe(CONST_NAME)`
  * references back to their string-literal definitions.
  */
-function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
+function parseSchemaFields(
+  content: string,
+  fullContent: string,
+  resolveInterpolation: ResolveInterpolation,
+): FieldInfo[] {
   const fields: FieldInfo[] = [];
 
   // Find inputSchema block
@@ -477,7 +576,7 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
     const isEndOfField = (char === "," && depth === 0) || j === objectContent.length - 1;
 
     if (isEndOfField && currentField.trim()) {
-      const field = parseField(currentField, fullContent);
+      const field = parseField(currentField, fullContent, resolveInterpolation);
       if (field) fields.push(field);
       currentField = "";
     }
@@ -505,7 +604,11 @@ function findSchemaConstantObjectStart(constName: string, source: string): numbe
  * source; it's used to resolve `.describe(CONST_NAME)` references back to the
  * string literal the constant holds.
  */
-function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
+function parseField(
+  fieldStr: string,
+  fullContent: string,
+  resolveInterpolation: ResolveInterpolation,
+): FieldInfo | null {
   // Strip line comments preceding the field name — a `// note` above a field
   // would otherwise make the name regex fail and silently drop the parameter
   // row from the generated docs.
@@ -606,7 +709,7 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
     const openMatch = /\.describe\s*\(\s*/.exec(typeChain.slice(describeOpen))!;
     const argStart = describeOpen + openMatch[0].length;
     if (typeChain[argStart] === '"' || typeChain[argStart] === "'" || typeChain[argStart] === "`") {
-      description = readDescriptionAt(typeChain, argStart);
+      description = readDescriptionAt(typeChain, argStart, resolveInterpolation);
     } else {
       // `.describe(CONSTANT)` — resolve UPPER_SNAKE identifiers from the
       // full file. Lower-case identifiers are deliberately ignored: they're
@@ -615,7 +718,7 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
       const tail = typeChain.slice(argStart);
       const constRefMatch = /^([A-Z_][A-Z0-9_]*)\s*\)/.exec(tail);
       if (constRefMatch) {
-        description = resolveStringConstant(constRefMatch[1]!, fullContent);
+        description = resolveStringConstant(constRefMatch[1]!, fullContent, resolveInterpolation);
       }
     }
   }
@@ -821,4 +924,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
 }
 
 // Run
-generateDocs().catch(console.error);
+generateDocs().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

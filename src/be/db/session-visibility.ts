@@ -13,8 +13,9 @@ export function sessionViewerCondition(viewer: SessionViewer): {
   sql: string;
   params: (string | null)[];
 } {
-  const shared = `EXISTS (SELECT 1 FROM session_shares s
-      WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
+  // Uncorrelated, so SQLite builds the shared set once instead of probing per root.
+  const shared = `r.id IN (SELECT s.rootTaskId FROM session_shares s
+      WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
   if (viewer.scope === "mine") {
     return { sql: "r.requestedByUserId = ?", params: [viewer.userId] };
   }
@@ -55,8 +56,8 @@ export function sessionMineCondition(userId: string | null): {
   return {
     sql: `((r.requestedByUserId = ? AND (r.source NOT IN (${machine})
         OR (r.source = 'system' AND r.taskType IN (${humanSystem}))))
-      OR EXISTS (SELECT 1 FROM session_shares s
-        WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?)))`,
+      OR r.id IN (SELECT s.rootTaskId FROM session_shares s
+        WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?)))`,
     params: [userId, ...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES, userId],
   };
 }

@@ -18,7 +18,7 @@ import { buildTreeBlocks, formatDuration } from "./blocks";
 import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
 import {
   getAgentDisplayName,
-  getAgentEmoji,
+  getAgentSlackIcon,
   sendInlineTaskOutput,
   sendProgressUpdate,
   sendTaskResponse,
@@ -491,7 +491,7 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
       unfurl_links: false,
       unfurl_media: false,
       username: getAgentDisplayName(agent),
-      icon_emoji: getAgentEmoji(agent),
+      ...getAgentSlackIcon(agent),
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });

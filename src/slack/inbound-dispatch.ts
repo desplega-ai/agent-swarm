@@ -9,6 +9,7 @@ import {
   getNextSlackInboundAvailableAt,
   getSlackInboundReceiptStats,
   markInterruptedSlackInboundReceiptsUncertain,
+  recordSlackInboundInline,
   releaseSlackInboundReceipt,
   SLACK_INBOUND_LIMITS,
   type SlackInboundAdmission,
@@ -16,6 +17,7 @@ import {
   type SlackInboundReceipt,
   type SlackInboundReceiptStats,
   type SlackInboundTransport,
+  touchSlackInboundDuplicate,
 } from "../be/db-queries/slack-inbound";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration, type SlackMode } from "./config";
@@ -128,6 +130,8 @@ export function resolveSlackInboundOutcome(
 // ─── Outcome counters (Socket Mode is observed, not stored) ─────────────────
 
 type OutcomeCounters = Record<SlackInboundOutcomeState, number> & {
+  /** Socket acks that failed because the client was not ready; the event still ran. */
+  ackNotReady: number;
   lastOutcomeAt: string | null;
   lastFailure: { code: string; at: string } | null;
 };
@@ -138,6 +142,7 @@ function emptyCounters(): OutcomeCounters {
     ignored: 0,
     failed: 0,
     uncertain: 0,
+    ackNotReady: 0,
     lastOutcomeAt: null,
     lastFailure: null,
   };
@@ -157,6 +162,11 @@ function recordOutcome(transport: SlackInboundTransport, outcome: SlackInboundOu
     bucket.lastFailure = { code: outcome.code, at };
     console.warn(`[Slack] inbound ${transport} delivery ${outcome.state}: ${outcome.code}`);
   }
+}
+
+/** Count a Socket Mode ack that failed because the client was not ready. */
+export function recordSlackSocketAckNotReady(): void {
+  counters.socket.ackNotReady += 1;
 }
 
 /** Test-only. */
@@ -288,6 +298,54 @@ export function computeSlackInboundKey(
     apiAppId,
     eventId: null,
   };
+}
+
+/** Dedup key for a Socket Mode `event_callback` body, or null for any other envelope. */
+function socketEventKey(body: unknown): Extract<SlackInboundKeyResult, { ok: true }> | null {
+  if ((body as { type?: unknown } | null)?.type !== "event_callback") return null;
+  const key = computeSlackInboundKey("event", "", body);
+  return key.ok ? key : null;
+}
+
+/**
+ * Is this Socket Mode event already stored as a receipt (admitted after a
+ * failed ack)? Counts the sighting. A stored receipt is owned by the drain, so
+ * a redelivery needs no second run.
+ */
+export async function isSlackSocketEventStored(
+  body: unknown,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const key = socketEventKey(body);
+  return key ? touchSlackInboundDuplicate(key.dedupKey, now) : false;
+}
+
+/**
+ * Remember a Socket Mode event that runs inline after a failed ack, so its
+ * redelivery is dropped by `isSlackSocketEventStored` even after a restart.
+ * Stores the dedup key only, never the payload. `invalid` when the envelope has
+ * no usable key (nothing to remember, the caller still runs it).
+ */
+export async function recordSlackSocketEventRanInline(
+  body: unknown,
+  retry: { retryNum?: number | null; retryReason?: string | null } = {},
+  now: Date = new Date(),
+): Promise<"recorded" | "duplicate" | "invalid"> {
+  const key = socketEventKey(body);
+  if (!key) return "invalid";
+  return recordSlackInboundInline(
+    {
+      dedupKey: key.dedupKey,
+      transport: "socket",
+      kind: "event",
+      payloadType: key.payloadType,
+      apiAppId: key.apiAppId,
+      eventId: key.eventId,
+      retryNum: retry.retryNum,
+      retryReason: retry.retryReason,
+    },
+    now,
+  );
 }
 
 export interface AdmitSlackInboundInput {

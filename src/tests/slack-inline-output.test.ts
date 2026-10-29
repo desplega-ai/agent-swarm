@@ -2,10 +2,11 @@ import { describe, expect, mock, test } from "bun:test";
 import { MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   formatInlineCompletionOutputChunks,
+  getAgentSlackIcon,
   sendWithPersona,
   shouldPostInlineCompletionOutput,
 } from "../slack/responses";
-import type { AgentTask } from "../types";
+import type { Agent, AgentTask } from "../types";
 
 const TASK_ID = "abcdef12-3456-7890-abcd-ef1234567890";
 
@@ -30,11 +31,37 @@ describe("Slack inline completion output", () => {
       thread_ts: "1",
       text: "done",
       username: "Literal Lead",
-      icon_emoji: ":crown:",
+      icon: { icon_emoji: ":crown:" },
     });
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ username: "Literal Lead", icon_emoji: ":crown:" }),
     );
+  });
+
+  test("posts each agent's Slack icon choice and nothing else", async () => {
+    const cases: [Partial<Agent>, Record<string, string>][] = [
+      [{ slackIcon: { type: "emoji", emoji: ":owl:" } }, { icon_emoji: ":owl:" }],
+      [{ slackIcon: { type: "url", url: "https://a/o.png" } }, { icon_url: "https://a/o.png" }],
+      [{ slackIcon: { type: "app" } }, {}],
+      [{ isLead: true, slackIcon: null }, { icon_emoji: ":crown:" }],
+      [{ slackIcon: null }, { icon_emoji: ":star:" }],
+    ];
+    for (const [overrides, icon] of cases) {
+      const postMessage = mock(async (_payload: Record<string, unknown>) => ({ ts: "1" }));
+      const agent = { id: "a1", name: "Owl Worker", isLead: false, ...overrides } as Agent;
+      await sendWithPersona({ chat: { postMessage } } as never, {
+        channel: "C123",
+        thread_ts: "1",
+        text: "done",
+        username: "Owl Worker",
+        icon: getAgentSlackIcon(agent),
+      });
+      const payload = postMessage.mock.calls[0]?.[0] ?? {};
+      const sent = Object.fromEntries(
+        Object.entries(payload).filter(([key]) => key.startsWith("icon_")),
+      );
+      expect(sent).toEqual(icon);
+    }
   });
 
   test("posts only truncated completed Slack output that has not already been replied", () => {

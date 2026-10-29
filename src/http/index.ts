@@ -15,8 +15,10 @@ import {
   getSwarmConfigs,
   upsertSwarmConfig,
 } from "../be/db";
+import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -528,6 +530,9 @@ async function shutdown() {
   // Stop the unified OAuth pending-session garbage collector (all flows)
   stopOAuthPendingGc();
 
+  // Stop the expired MCP overflow sweep
+  stopMcpOverflowSweep();
+
   // Stop memory expired-row garbage collector
   stopMemoryGc();
 
@@ -536,6 +541,9 @@ async function shutdown() {
 
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
+
+  // Stop the task search index backfill after its current batch.
+  await stopTaskSearchBackfill();
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
@@ -866,6 +874,9 @@ httpServer
     // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
     startOAuthPendingGc();
 
+    // Delete expired MCP overflow values (10-min tick, off the spill path)
+    startMcpOverflowSweep();
+
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
     await startMemoryGc();
 
@@ -876,6 +887,10 @@ httpServer
     // Finish the human-free reclassification a request left queued (a very large
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
+
+    // Index the task rows migration 256 left out, in batches. Task search
+    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    void startTaskSearchBackfill();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

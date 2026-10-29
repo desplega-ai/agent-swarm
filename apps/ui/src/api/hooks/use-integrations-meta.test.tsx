@@ -8,12 +8,17 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { createRoot } = await import("react-dom/client");
 mock.module("@/api/client", () => ({ api: {} }));
 mock.module("@/api/hooks/status-query", () => ({ invalidateStatusQuery: async () => {} }));
+// Keep every export: in one `bun test` process the first mock of a specifier fixes its exports.
 mock.module("@/lib/config", () => ({
+  ...require("../../lib/config"),
   getConfig: () => ({ apiUrl: "https://swarm.example", apiKey: "" }),
 }));
 mock.module("@/lib/env-presence-batch", () => require("../../lib/env-presence-batch"));
 mock.module("sonner", () => ({ toast: { error: () => {} } }));
-const { useEnvPresence } = await import("./use-integrations-meta");
+const { useEnvPresence, useSlackAppIcon } = await import("./use-integrations-meta");
+const { api } = (await import("@/api/client")) as unknown as {
+  api: { fetchSlackAppIcon?: () => Promise<{ imageUrl: string | null }> };
+};
 
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -57,5 +62,44 @@ test("a fresh tab asks the server even when the restored presence is still fresh
     await act(async () => root.unmount());
     client.clear();
     globalThis.fetch = realFetch;
+  }
+});
+
+test("a null Slack app avatar is asked for again on the next mount; a real one is kept", async () => {
+  const answers: (string | null)[] = [null, "https://slack.example/app-72.png"];
+  let calls = 0;
+  api.fetchSlackAppIcon = async () => ({
+    imageUrl: answers[Math.min(calls++, answers.length - 1)] ?? null,
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let seen: string | null | undefined;
+  function Probe() {
+    seen = useSlackAppIcon(true).data?.imageUrl;
+    return null;
+  }
+  const mountOnce = async () => {
+    const root = createRoot(document.createElement("div"));
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => root.unmount());
+  };
+  try {
+    await mountOnce();
+    expect(seen).toBeNull();
+    await mountOnce();
+    expect(seen).toBe("https://slack.example/app-72.png");
+    await mountOnce();
+    expect(calls).toBe(2);
+  } finally {
+    client.clear();
+    delete api.fetchSlackAppIcon;
   }
 });

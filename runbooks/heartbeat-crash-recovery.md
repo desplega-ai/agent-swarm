@@ -770,7 +770,7 @@ escalateStarvedPoolTasks():
 
 ## 5. Worker completion follow-ups
 
-`createWorkerTaskFollowUp` skips workflow tasks, Lead-owned tasks, disabled follow-ups, and tasks without a Lead. It renders the completion or failure summary before task creation.
+`createWorkerTaskFollowUp` skips workflow tasks, Lead-owned tasks, disabled follow-ups, and tasks without a Lead. Completed worker tasks with `deferredAt` also skip the follow-up, even with `followUpConfig.onCompleted`, and log `task_follow_up_suppressed` with reason `worker_deferred`. The deferred wake-up inherits the completion instructions and triggers them when the work actually finishes. It renders the completion or failure summary before task creation.
 
 The function dispatches `pre.task.followUp` before it creates the follow-up task. An extension can block creation or modify the description, assignee, priority, and `followUpConfig`.
 

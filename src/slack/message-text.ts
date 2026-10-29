@@ -15,6 +15,8 @@ interface SlackAttachment {
   pretext?: string;
   fields?: Array<{ title?: string; value?: string }>;
   actions?: Array<{ text?: string; url?: string }>;
+  /** A shared/forwarded message (`is_share`) carries its files here, not at top level. */
+  files?: unknown[];
 }
 
 // Internal shape used only inside the helper; callers pass `blocks?: unknown[]`
@@ -24,6 +26,10 @@ interface SlackBlockInternal {
   /** section blocks may use fields[] instead of (or alongside) a top-level text object */
   fields?: Array<{ type?: string; text?: string }>;
   elements?: unknown[];
+  /** table / data_table blocks: one array of cells per row, header row first */
+  rows?: unknown[];
+  /** data_table blocks */
+  caption?: string;
 }
 
 export interface SlackMessageLike {
@@ -50,6 +56,99 @@ function collectRichTextParts(node: unknown, parts: string[]): void {
       collectRichTextParts(child, parts);
     }
   }
+}
+
+/**
+ * Render one inline rich_text element tree as a single line. Unlike
+ * collectRichTextParts this keeps links, mentions and emoji, since a table
+ * cell has no `msg.text` twin to recover them from.
+ */
+function renderRichTextInline(node: unknown): string {
+  if (node == null || typeof node !== "object") return "";
+  const n = node as {
+    type?: string;
+    text?: string;
+    url?: string;
+    user_id?: string;
+    channel_id?: string;
+    usergroup_id?: string;
+    range?: string;
+    name?: string;
+    fallback?: string;
+    elements?: unknown[];
+  };
+  switch (n.type) {
+    case "text":
+      return n.text ?? "";
+    case "link":
+      if (!n.url) return n.text ?? "";
+      return n.text && n.text !== n.url ? `[${n.text}](${n.url})` : n.url;
+    case "user":
+      return n.user_id ? `<@${n.user_id}>` : "";
+    case "channel":
+      return n.channel_id ? `<#${n.channel_id}>` : "";
+    case "usergroup":
+      return n.usergroup_id ? `<!subteam^${n.usergroup_id}>` : "";
+    case "broadcast":
+      return n.range ? `<!${n.range}>` : "";
+    case "emoji":
+      return n.name ? `:${n.name}:` : "";
+    case "date":
+      return n.fallback ?? n.text ?? "";
+  }
+  if (!Array.isArray(n.elements)) return n.text ?? "";
+  // Containers: inline runs concatenate; sections, list items and quotes are
+  // separate blocks, so keep a space between them.
+  const inline = n.type === "rich_text_section" || n.type === "rich_text_preformatted";
+  return n.elements
+    .map(renderRichTextInline)
+    .filter(Boolean)
+    .join(inline ? "" : " ");
+}
+
+/** Plain text of a table cell: raw_text, raw_number or rich_text. */
+function renderTableCell(cell: unknown): string {
+  if (cell == null || typeof cell !== "object") return "";
+  const c = cell as { type?: string; text?: string; value?: number };
+  let text: string;
+  if (c.type === "rich_text") text = renderRichTextInline(cell);
+  else if (typeof c.text === "string") text = c.text;
+  else if (typeof c.value === "number") text = String(c.value);
+  else text = "";
+  // One row per line, one column per pipe.
+  return text
+    .replace(/\s*\n\s*/g, " ")
+    .replace(/\|/g, "\\|")
+    .trim();
+}
+
+/**
+ * Render a table / data_table block as a markdown table: header row first,
+ * then one line per row, in order. Returns "" for a table with no cell text.
+ */
+function renderTableBlock(block: SlackBlockInternal): string {
+  const rows = (block.rows ?? []).filter(Array.isArray).map((row) => row.map(renderTableCell));
+  if (!rows.some((cells) => cells.some(Boolean))) return "";
+  // Pad every row, header included, to the widest row so the header separator
+  // and each line have the same column count.
+  const width = Math.max(...rows.map((cells) => cells.length));
+  const lines: string[] = [];
+  for (const cells of rows) {
+    const padded = [...cells, ...Array<string>(width - cells.length).fill("")];
+    lines.push(`| ${padded.join(" | ")} |`);
+    // Markdown header separator after the first (header) row.
+    if (lines.length === 1) lines.push(`|${" --- |".repeat(width)}`);
+  }
+  const caption = block.caption?.trim();
+  return caption ? `${caption}\n${lines.join("\n")}` : lines.join("\n");
+}
+
+function isTableBlock(block: unknown): boolean {
+  if (block == null || typeof block !== "object") return false;
+  const type = (block as { type?: string }).type;
+  return (
+    (type === "table" || type === "data_table") && Array.isArray((block as SlackBlockInternal).rows)
+  );
 }
 
 /**
@@ -96,7 +195,9 @@ function normalizeForDedupe(text: string): string {
  * normalization is omitted instead (see below).
  *
  * Block types extracted: section (text + fields), rich_text, header, context,
- * actions (button label + url as mrkdwn link).
+ * actions (button label + url as mrkdwn link), table and data_table (as a
+ * markdown table, header row first). A table never takes part in the
+ * text-vs-rich_text dedupe: `msg.text` does not carry its cells.
  * Attachment extras extracted: fields[] (title/value), title_link, actions[].url.
  */
 export function extractSlackMessageText(msg: SlackMessageLike): string {
@@ -174,6 +275,9 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
           collectRichTextParts(el, blockParts);
         }
         if (blockParts.length > start) richTextRanges.push([start, blockParts.length]);
+      } else if (isTableBlock(block)) {
+        const table = renderTableBlock(block);
+        if (table) blockParts.push(table);
       } else if (block.type === "header") {
         if (block.text?.text) blockParts.push(block.text.text);
       } else if (block.type === "context" && Array.isArray(block.elements)) {
@@ -231,6 +335,46 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
     return bodyText ? `${topText}\n${bodyText}` : topText;
   }
   return bodyText || topText;
+}
+
+/**
+ * Text for an inbound Slack message (task creation, thread buffer). Inbound
+ * has always used `msg.text`, which for a human message mirrors its rich_text
+ * block. A table block is the exception: `msg.text` stops before it, so when
+ * one is present use the full extraction, which renders the table.
+ */
+export function slackInboundMessageText(msg: SlackMessageLike): string {
+  if (Array.isArray(msg.blocks) && msg.blocks.some(isTableBlock)) {
+    return extractSlackMessageText(msg);
+  }
+  return msg.text ?? "";
+}
+
+/**
+ * Every file on a Slack message: top-level `files`, then the files of any
+ * shared/forwarded message in `attachments[].files`, deduped by file id.
+ * Sharing a message with an image into a thread leaves top-level `files`
+ * empty and puts the image on the attachment.
+ */
+export function collectSlackMessageFiles<F extends { id: string }>(msg: {
+  files?: F[] | null;
+  attachments?: Array<{ files?: unknown[] | null }> | null;
+}): F[] {
+  const seen = new Set<string>();
+  const out: F[] = [];
+  const add = (file: unknown) => {
+    if (file == null || typeof file !== "object") return;
+    const id = (file as { id?: unknown }).id;
+    if (typeof id !== "string" || !id || seen.has(id)) return;
+    seen.add(id);
+    out.push(file as F);
+  };
+  for (const file of msg.files ?? []) add(file);
+  for (const attachment of msg.attachments ?? []) {
+    if (attachment == null || typeof attachment !== "object") continue;
+    for (const file of attachment.files ?? []) add(file);
+  }
+  return out;
 }
 
 /**

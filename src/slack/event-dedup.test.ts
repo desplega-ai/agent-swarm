@@ -45,6 +45,17 @@ describe("wasEventSeen (production cache)", () => {
 });
 
 describe("isolated test cache (TTL behavior)", () => {
+  test("default TTL still drops a redelivery after Slack's 24h delayed-retry window", () => {
+    const cache = _createTestCache();
+    try {
+      expect(cache.wasEventSeen("Ev_late")).toBe(false);
+      cache.advance(24 * 60 * 60 * 1000); // last delayed-events retry
+      expect(cache.wasEventSeen("Ev_late")).toBe(true);
+    } finally {
+      cache.destroy();
+    }
+  });
+
   test("entry expires after TTL elapses", () => {
     const cache = _createTestCache(1000); // 1s TTL
     try {

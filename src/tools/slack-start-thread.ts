@@ -7,7 +7,7 @@ import { buildMrkdwnSectionBlocks } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
-import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
+import { getAgentDisplayName, getAgentSlackIcon, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackStartThreadTool = (server: McpServer) => {
@@ -88,7 +88,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
             unfurl_links: false,
             unfurl_media: false,
             username: getAgentDisplayName(agent),
-            icon_emoji: getAgentEmoji(agent),
+            ...getAgentSlackIcon(agent),
             // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
             blocks: messageBlocks as any,
           }),

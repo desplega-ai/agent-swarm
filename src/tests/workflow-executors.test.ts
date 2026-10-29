@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import * as db from "../be/db";
 import { closeDb, initDb } from "../be/db";
 
 // Mock slack/app to avoid dynamic import issues in parallel test execution
@@ -8,6 +9,8 @@ mock.module("../slack/app", () => ({
 }));
 
 import type { ExecutorMeta } from "../types";
+import { startWorkflowExecution } from "../workflows/engine";
+import { InProcessEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { CodeMatchExecutor, CodeMatchOutputSchema } from "../workflows/executors/code-match";
 import { NotifyExecutor } from "../workflows/executors/notify";
@@ -16,11 +19,14 @@ import {
   PropertyMatchOutputSchema,
 } from "../workflows/executors/property-match";
 import { RawLlmExecutor } from "../workflows/executors/raw-llm";
-import { createExecutorRegistry } from "../workflows/executors/registry";
+import { createExecutorRegistry, ExecutorRegistry } from "../workflows/executors/registry";
 import { ScriptExecutor, ScriptOutputSchema } from "../workflows/executors/script";
 import { ValidateExecutor, ValidateOutputSchema } from "../workflows/executors/validate";
 import { VcsExecutor, VcsOutputSchema } from "../workflows/executors/vcs";
+import { REDACTED_SECRET_VALUE } from "../workflows/input";
+import { interpolate } from "../workflows/template";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -467,6 +473,279 @@ describe("ScriptExecutor", () => {
     const result = executor.configSchema.parse({ runtime: "bash", script: "echo hi" });
     expect(result.timeout).toBe(30_000);
   });
+
+  test("config schema preserves arbitrary string environment variables", () => {
+    const config = executor.configSchema.parse({
+      runtime: "bash",
+      script: "true",
+      env: { CUSTOM_SETTING: "value", PROJECT_ID: "42", EMPTY: "" },
+    });
+    expect(config).toMatchObject({
+      env: { CUSTOM_SETTING: "value", PROJECT_ID: "42", EMPTY: "" },
+    });
+  });
+
+  test.each([
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "PWD",
+    "SHLVL",
+    "OLDPWD",
+    "EPOCHSECONDS",
+    "EPOCHREALTIME",
+    "pwd",
+    "shlvl",
+    "oldpwd",
+    "epochseconds",
+    "epochrealtime",
+  ])("config schema rejects overriding reserved env variable %s", (name) => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "true",
+        env: { [name]: "override" },
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "LD_FUTURE_HOOK",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FUTURE_HOOK",
+    "ld_preload",
+    "DyLd_Insert_Libraries",
+    "GCONV_PATH",
+    "GLIBC_TUNABLES",
+    "LOCPATH",
+    "NLSPATH",
+    "GETCONF_DIR",
+    "BASH",
+    "BASH_ENV",
+    "BASH_VERSION",
+    "BASH_FUTURE_OPTION",
+    "BASHOPTS",
+    "BASHPID",
+    "ENV",
+    "SHELLOPTS",
+    "IFS",
+    "OPTIND",
+    "OPTERR",
+    "PS0",
+    "PS1",
+    "PS2",
+    "PS3",
+    "PS4",
+    "PPID",
+    "UID",
+    "EUID",
+    "LINENO",
+    "RANDOM",
+    "SRANDOM",
+    "SECONDS",
+    "HISTCMD",
+    "COMP_WORDBREAKS",
+    "_",
+    "shellopts",
+  ])("config schema rejects loader and shell control variable %s", (name) => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "python",
+        script: "pass",
+        env: { [name]: "value" },
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    "bash",
+    "python",
+    "ts",
+  ])("%s rejects loader variables before trying to start a process", async (runtime) => {
+    const result = await executor.run(
+      input({
+        runtime,
+        script: "",
+        cwd: `${process.env.TMPDIR ?? "/tmp"}/missing-script-cwd-${crypto.randomUUID()}`,
+        env: { LD_PRELOAD: "example-reserved-secret-value" },
+      }),
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed");
+    expect(result.error).toContain("reserved script environment variable");
+    expect(result.error).not.toContain("example-reserved-secret-value");
+    expect(result.output).toBeUndefined();
+  });
+
+  test.each([
+    "",
+    "BAD=NAME",
+    "BAD NAME",
+    "BAD;NAME",
+    "BAD\u0000NAME",
+    "1BAD",
+  ])("config schema rejects invalid env name %j", (name) => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "true",
+        env: { [name]: "value" },
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    42,
+    null,
+    "before\u0000after",
+  ])("config schema rejects invalid env value %j", (value) => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "true",
+        env: { CUSTOM_SETTING: value },
+      }).success,
+    ).toBe(false);
+  });
+
+  for (const [runtime, script] of [
+    ["bash", 'printf \'[%s][%s][%s]\' "$CUSTOM_SETTING" "$EMPTY" "$0"'],
+    [
+      "python",
+      'import os, sys; print("[" + os.environ["CUSTOM_SETTING"] + "][" + os.environ["EMPTY"] + "][" + sys.argv[1] + "]")',
+    ],
+    [
+      "ts",
+      'console.log("[" + process.env.CUSTOM_SETTING + "][" + process.env.EMPTY + "][" + Bun.argv[1] + "]")',
+    ],
+  ]) {
+    skip(
+      `${runtime} receives custom env values verbatim without changing positional args`,
+      async () => {
+        const result = await executor.run(
+          input({
+            runtime,
+            script,
+            args: ["ordinary-arg"],
+            env: { CUSTOM_SETTING: "quotes'\" $HOME $(printf injected)\nsecond line", EMPTY: "" },
+          }),
+        );
+        expect(result.status).toBe("success");
+        expect(result.output).toMatchObject({
+          exitCode: 0,
+          stdout: "[quotes'\" $HOME $(printf injected)\nsecond line][][ordinary-arg]",
+        });
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS,
+    );
+  }
+
+  skip(
+    "custom env does not inherit unrelated server secrets",
+    async () => {
+      const saved = process.env.WORKFLOW_ENV_UNRELATED_SECRET;
+      process.env.WORKFLOW_ENV_UNRELATED_SECRET = "example-server-only-value";
+      try {
+        const result = await executor.run(
+          input({
+            runtime: "bash",
+            script: 'printf \'[%s][%s]\' "$CUSTOM_SETTING" "$WORKFLOW_ENV_UNRELATED_SECRET"',
+            env: { CUSTOM_SETTING: "explicit-value" },
+          }),
+        );
+        expect(result.status).toBe("success");
+        expect(result.output).toMatchObject({ stdout: "[explicit-value][]" });
+      } finally {
+        if (saved === undefined) delete process.env.WORKFLOW_ENV_UNRELATED_SECRET;
+        else process.env.WORKFLOW_ENV_UNRELATED_SECRET = saved;
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  skip(
+    "workflow env interpolation delivers secrets while persisted step input stays redacted",
+    async () => {
+      const secretValue = "example-workflow-env-secret-value";
+      const envSecretValue = "example-workflow-env-second-secret";
+      const saved = process.env.WORKFLOW_ENV_TEST_TOKEN;
+      process.env.WORKFLOW_ENV_TEST_TOKEN = envSecretValue;
+      let workflowId: string | undefined;
+      try {
+        await db.upsertSwarmConfig({
+          scope: "global",
+          key: "WORKFLOW_ENV_TEST_SECRET",
+          value: secretValue,
+          isSecret: true,
+        });
+        const workflow = await db.createWorkflow({
+          name: `script-env-${crypto.randomUUID()}`,
+          input: {
+            apiKey: "secret.WORKFLOW_ENV_TEST_SECRET",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: workflow env reference
+            gitlabToken: "${WORKFLOW_ENV_TEST_TOKEN}",
+            projectId: "42",
+          },
+          definition: {
+            nodes: [
+              {
+                id: "check-env",
+                type: "script",
+                config: {
+                  runtime: "python",
+                  env: {
+                    CUSTOM_CREDENTIAL: "{{input.apiKey}}",
+                    GITLAB_TOKEN: "{{input.gitlabToken}}",
+                    PROJECT_ID: "project-{{input.projectId}}",
+                  },
+                  script:
+                    'import hashlib, os; print(hashlib.sha256("|".join(os.environ[k] for k in ["CUSTOM_CREDENTIAL", "GITLAB_TOKEN", "PROJECT_ID"]).encode()).hexdigest())',
+                },
+              },
+            ],
+          },
+        });
+        workflowId = workflow.id;
+        const registry = new ExecutorRegistry();
+        registry.register(
+          new ScriptExecutor({
+            db,
+            eventBus: new InProcessEventBus(),
+            interpolate: (template, ctx) => interpolate(template, ctx).result,
+          }),
+        );
+
+        const runId = await startWorkflowExecution(workflow, {}, registry);
+        const steps = await db.getWorkflowRunStepsByRunId(runId);
+        expect(steps).toHaveLength(1);
+        expect(steps[0]?.status).toBe("completed");
+        const expectedDigest = new Bun.CryptoHasher("sha256")
+          .update(`${secretValue}|${envSecretValue}|project-42`)
+          .digest("hex");
+        expect(steps[0]?.output).toMatchObject({ stdout: expectedDigest });
+        expect(steps[0]?.input).toMatchObject({
+          input: {
+            apiKey: REDACTED_SECRET_VALUE,
+            gitlabToken: REDACTED_SECRET_VALUE,
+            projectId: "42",
+          },
+        });
+        expect(JSON.stringify(steps[0])).not.toContain(secretValue);
+        expect(JSON.stringify(steps[0])).not.toContain(envSecretValue);
+      } finally {
+        if (workflowId) await db.deleteWorkflow(workflowId);
+        if (saved === undefined) delete process.env.WORKFLOW_ENV_TEST_TOKEN;
+        else process.env.WORKFLOW_ENV_TEST_TOKEN = saved;
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   test("config schema accepts the 5m timeout ceiling and rejects larger values", () => {
     expect(

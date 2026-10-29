@@ -1340,6 +1340,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_THREAD_WAKE_ON_ANY_MESSAGE",
+        label: "Wake on replies to other users",
+        description:
+          "Treat a Slack thread reply as a follow-up even when it @-mentions another user and not the bot. Off means a reply like `@Alice wdyt?` is ignored.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
         label: "Block external Slack channels",
         description:
@@ -1383,9 +1392,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "COMB_ENABLED",
         label: "Files",
-        description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
+        description:
+          "Show the agent-fs review space in the dashboard. On by default, but it stays off until agent-fs is set up and browsers can reach it (AGENT_FS_PUBLIC_URL, AGENT_FS_PROXY, or a public AGENT_FS_API_URL). Saving on or off here overrides that.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/comb`,
       },
       {

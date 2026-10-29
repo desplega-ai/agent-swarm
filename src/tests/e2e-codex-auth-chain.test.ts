@@ -288,16 +288,33 @@ describe("nightly workflow codex chain", () => {
     const run = byName(all, "Run harness leg");
     const save = byName(all, "Save Codex auth chain");
     const verify = byName(all, "Verify Codex auth chain was saved");
+    const check = byName(all, "Check for a Codex auth chain to save");
     const mark = byName(all, "Fail the codex result when the chain was not saved");
     const upload = byName(all, "Upload harness results");
     expect(all.indexOf(mark)).toBeGreaterThan(all.indexOf(verify));
     expect(all.indexOf(mark)).toBeLessThan(all.indexOf(upload));
     expect(mark.if).toBe(
-      `always() && (steps.${save.id}.outcome == 'failure' || steps.${verify.id}.outcome == 'failure')`,
+      `always() && (steps.${check.id}.outcome == 'failure' || steps.${save.id}.outcome == 'failure' || steps.${verify.id}.outcome == 'failure')`,
     );
     const resultsPath = run.run?.match(/--json (\S+)/)?.[1];
     expect(resultsPath).toBeDefined();
     expect(mark.run).toBe(`bun scripts/e2e/codex-chain-lost.ts ${resultsPath}`);
+  });
+
+  // The worker image runs steps as root and the harness writes the chain mode 600. hashFiles()
+  // runs on the host as the runner user, cannot read that file, and fails the whole condition.
+  test("the save is gated by an in-container file check, never hashFiles()", async () => {
+    const all = await steps();
+    const check = byName(all, "Check for a Codex auth chain to save");
+    const save = byName(all, "Save Codex auth chain");
+    expect(all.indexOf(check)).toBeLessThan(all.indexOf(save));
+    expect(check.if).toBe(
+      "always() && matrix.provider == 'codex' && github.ref == 'refs/heads/main'",
+    );
+    expect(check.run).toContain(`[ -f ${save.with?.path} ]`);
+    expect(check.run).toContain(`echo "present=true" >> "$GITHUB_OUTPUT"`);
+    expect(save.if).toBe(`always() && steps.${check.id}.outputs.present == 'true'`);
+    for (const step of all) expect(step.if ?? "").not.toContain("hashFiles(");
   });
 
   test("the codex leg and its secret stay on main", async () => {

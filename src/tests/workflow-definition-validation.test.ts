@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkflowDefinition } from "../types";
 import { isUpstream, validateDefinition } from "../workflows/definition";
+import type { ExecutorDependencies } from "../workflows/executors/base";
+import { ExecutorRegistry } from "../workflows/executors/registry";
+import { ScriptExecutor } from "../workflows/executors/script";
 
 // ─── Helper ──────────────────────────────────────────────────
 
 function makeDef(nodes: WorkflowDefinition["nodes"]): WorkflowDefinition {
   return { nodes };
+}
+
+function scriptRegistry(): ExecutorRegistry {
+  const registry = new ExecutorRegistry();
+  registry.register(new ScriptExecutor({} as ExecutorDependencies));
+  return registry;
 }
 
 // ─── isUpstream() unit tests ─────────────────────────────────
@@ -286,6 +295,28 @@ describe("validateDefinition — input mapping validation", () => {
     const { valid, errors } = validateDefinition(def);
     expect(valid).toBe(true);
     expect(errors).toHaveLength(0);
+  });
+});
+
+describe("validateDefinition — script env validation", () => {
+  test("reserved env keys fail authoring even when their values are interpolated", () => {
+    const { valid, errors } = validateDefinition(
+      makeDef([
+        {
+          id: "script",
+          type: "script",
+          config: {
+            runtime: "bash",
+            script: "true",
+            env: { PATH: "{{input.path}}" },
+          },
+        },
+      ]),
+      scriptRegistry(),
+    );
+
+    expect(valid).toBe(false);
+    expect(errors.some((error) => error.includes("config.env.PATH"))).toBe(true);
   });
 });
 

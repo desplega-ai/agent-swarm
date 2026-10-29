@@ -1135,6 +1135,7 @@ jobs:
         run: |
           TAG="v${VERSION}"
           VERSION_SLUG="${VERSION//./-}"
+          AGENT_FS_NOTES=$(bun scripts/agent-fs-release-notes.ts "$TAG")
           cat > /tmp/release-notes.md <<EOF
           ## Install & Run
 
@@ -1172,6 +1173,8 @@ jobs:
           agent-swarm-worker-${VERSION_SLUG}
           agent-swarm-worker-latest
           \`\`\`
+
+          ${AGENT_FS_NOTES}
 
           ---
           EOF

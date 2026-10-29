@@ -27,6 +27,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { combAgentFs } from "./agent-fs";
 import { getCombConfig } from "./config";
 import { sentMarker, sentTaskId } from "./markers";
+import { batchRequester, commentAuthorUsers } from "./requester";
 // Side-effect import: registers the comb.review.* templates.
 import "./templates";
 
@@ -67,6 +68,7 @@ export interface ReviewBatchInput {
   scopePath: string;
   /** The sender's note for the lead about the whole batch. Blank means none. */
   note?: string;
+  /** The authenticated sender. Null: the author of the newest mapped comment (`./requester`). */
   requestedByUserId: string | null;
 }
 
@@ -153,6 +155,18 @@ export async function sendReviewBatch(
     if (skip) skipped.push(skip);
     else candidates.push(read);
   }
+  // Without an authenticated sender, map the comment authors to swarm users
+  // now: it may read the drive members from agent-fs. Without the service
+  // identity, a swarm-authored comment could pass for a person: no requester.
+  // The caller picks the comments, so an author requester is caller-chosen
+  // attribution: TRUST_BODY_REQUESTED_BY_USER_ID=false turns it off, like a
+  // body `requestedByUserId` on POST /api/tasks.
+  const authorUsers =
+    input.requestedByUserId ||
+    !serviceUserId ||
+    process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "false"
+      ? null
+      : await commentAuthorUsers(agentFs, drive, candidates.map(commentOf), serviceUserId);
 
   // 2. Claim in one transaction, so two sends never split one set of comments.
   const claim = crypto.randomUUID();
@@ -175,8 +189,11 @@ export async function sendReviewBatch(
   let taskId: string | null = null;
   let leadState: ReviewBatchLead = "none";
   if (won.length > 0) {
+    const requestedByUserId =
+      input.requestedByUserId ??
+      (authorUsers ? batchRequester(won.map(commentOf), authorUsers) : null);
     try {
-      const text = await renderTaskText(input, won);
+      const text = await renderTaskText({ ...input, requestedByUserId }, won);
       if (text === null) {
         throw new ReviewBatchError(503, "The Comb review template is disabled", [
           ...skipped,
@@ -194,7 +211,7 @@ export async function sendReviewBatch(
           source: "comb",
           taskType: "comb-review",
           tags: ["comb"],
-          requestedByUserId: input.requestedByUserId ?? undefined,
+          requestedByUserId: requestedByUserId ?? undefined,
         },
         { origin: "rest" },
       );
@@ -277,6 +294,11 @@ async function readComment(
   const { comment } = thread;
   const version = comment.fileVersion ?? (comment.parentId ? undefined : await versionOf(comment));
   return { id, thread, version };
+}
+
+/** The root comment of a read that `skipOf` kept. */
+function commentOf(read: CommentRead): AgentFsComment {
+  return (read.thread as AgentFsCommentThread).comment;
 }
 
 function skipOf({ id, thread }: CommentRead, serviceUserId: string | null): SkippedComment | null {

@@ -97,6 +97,12 @@ curl -fsSL https://agent-swarm.dev/install.sh | bash
 
 The raw GitHub URL (`https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh`) serves the same script. The API is public through a tunnel by default, protected by the API key. Add `bash -s -- --no-tunnel` to keep it local.
 
+No server yet? Deploy the Railway template in one click:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/agent-swarm)
+
+Or [deploy one](https://docs.agent-swarm.dev/docs/guides/one-click-deploy) on any VPS: paste [`deploy/cloud-init.yaml`](./deploy/cloud-init.yaml) as the user data of a new 4 vCPU / 8 GB Ubuntu server (Hetzner, DigitalOcean, Lightsail, Vultr). It installs Docker and Caddy, serves the API over HTTPS on `<ip>.sslip.io` or your domain, and shows the `/setup` link to root at login. To look first, [try it for an hour on E2B](https://docs.agent-swarm.dev/docs/guides/one-click-deploy#try-it-for-an-hour-on-e2b); that trial deletes its data when the sandboxes stop.
+
 Or use the examples directly:
 
 ```bash

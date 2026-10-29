@@ -738,6 +738,25 @@ export async function cancelTask(
           ),
         );
     });
+    // Deferral suppresses the original worker completion's Lead follow-up.
+    // If its wake-up is cancelled, report that outcome after the cancel commits.
+    if (row.source === "schedule" && row.taskType === "deferred" && row.parentTaskId) {
+      getDbClient().afterCommit(async () => {
+        try {
+          const { createWorkerTaskFollowUp } = await import("../../../tasks/worker-follow-up");
+          await createWorkerTaskFollowUp({
+            task: rowToAgentTask(row),
+            status: "failed",
+            failureReason: `Deferred continuation cancelled: ${cancelReason}`,
+          });
+        } catch (error) {
+          console.error(
+            "[cancelTask] deferred cancellation follow-up failed:",
+            scrubSecrets(error instanceof Error ? error.message : String(error)),
+          );
+        }
+      });
+    }
     try {
       await dependencies.promotePendingSteeringForTask(
         id,

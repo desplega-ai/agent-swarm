@@ -13,6 +13,7 @@ import type {
   AgentRuntimeInstancesResponse,
   AgentRuntimeResponse,
   AgentSkillsResponse,
+  AgentSlackIcon,
   AgentsResponse,
   AgentTask,
   AgentWithTasks,
@@ -602,6 +603,7 @@ class ApiClient {
       heartbeatMd?: string;
       /** `null` resets to the deterministic fallback; omit to leave untouched. */
       avatar?: AgentAvatar | null;
+      slackIcon?: AgentSlackIcon | null;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
@@ -1082,6 +1084,15 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/integrations/slack/manifest?name=${encodeURIComponent(name)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch Slack manifest: ${res.status}`);
+    return res.json();
+  }
+
+  /** The Slack app's own avatar (null when Slack is off or the lookup failed). */
+  async fetchSlackAppIcon(): Promise<{ imageUrl: string | null }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/integrations/slack/app-icon`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to fetch the Slack app icon: ${res.status}`);
     return res.json();
   }
 

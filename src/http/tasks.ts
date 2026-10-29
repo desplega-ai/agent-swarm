@@ -84,6 +84,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { createListTotalCache } from "./list-total-cache";
 import {
   agentFirstPrincipal,
   authUserId,
@@ -223,6 +224,8 @@ const SupersedeTaskResponseSchema = z.object({
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
+const taskTotals = createListTotalCache();
+
 const listTasks = route({
   method: "get",
   path: "/api/tasks",
@@ -240,7 +243,12 @@ const listTasks = route({
     workflowRunId: z.string().uuid().optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
-    search: z.string().optional(),
+    search: z
+      .string()
+      .optional()
+      .describe(
+        "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
+      ),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
     /** ISO 8601 — return only tasks created on/after this timestamp. */
     createdAfter: z.string().datetime().optional(),
@@ -1015,8 +1023,10 @@ export async function handleTasks(
           ? await getAllTasks(filters, { fields: "timeline" })
           : await getAllTasks(filters, { slim: true });
     // The COUNT(*) re-scans every matching row, so only pagers pay for it.
+    // Page 1 counts; later pages reuse that count for 30 s.
     if (parsed.query.includeTotal === "true") {
-      const total = await getTasksCount(filters);
+      const { limit: _limit, offset: _offset, orderBy: _orderBy, ...totalKey } = filters;
+      const total = await taskTotals.get(totalKey, filters.offset, () => getTasksCount(filters));
       listTasks.respond(res, 200, { tasks, total });
     } else {
       listTasks.respond(res, 200, { tasks });

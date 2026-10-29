@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentTask, SessionDetailResponse } from "../api/types";
+import type {
+  AgentTask,
+  SessionDetailResponse,
+  SessionSectionCounts,
+  SessionTreeResponse,
+} from "../api/types";
 import {
   closeSplit,
   closeTab,
@@ -19,6 +24,7 @@ import {
   splitTo,
   tabPath,
   tabsWithFocus,
+  treeCount,
   urlTabs,
   withGroupTab,
 } from "./sessions-v2";
@@ -247,5 +253,34 @@ describe("detailGroupKey", () => {
   test("an older server's detail falls back to the key rule", () => {
     expect(detailGroupKey(detail("shared/slack/c1/thread:1.2/"))).toBe("shared/slack/c1/");
     expect(detailGroupKey(detail(undefined))).toBeUndefined();
+  });
+});
+
+describe("treeCount", () => {
+  const counts = (n: number): SessionSectionCounts => ({
+    total: n,
+    unread: n,
+    running: n,
+    needsYou: n,
+  });
+
+  test("counts grouped sessions, which the Inbox leaves out", () => {
+    const tree = {
+      groups: [
+        { key: "shared/launch/", ...counts(2), lastActivityAt: "2026-01-01T00:00:00.000Z" },
+        { key: "shared/billing/", ...counts(1), lastActivityAt: "2026-01-01T00:00:00.000Z" },
+      ],
+      inbox: counts(3),
+      noGroup: counts(3),
+      later: counts(1),
+      done: counts(4),
+    } as SessionTreeResponse;
+    expect(treeCount(tree, "running")).toBe(11);
+    expect(treeCount(tree, "needsYou")).toBe(11);
+    expect(treeCount(tree, "unread")).toBe(11);
+  });
+
+  test("is zero before the tree loads", () => {
+    expect(treeCount(undefined, "running")).toBe(0);
   });
 });

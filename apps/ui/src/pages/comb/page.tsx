@@ -42,7 +42,7 @@ export default function CombPage() {
         <EmptyState
           icon={FolderOpen}
           title="Files is off"
-          description="Files shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Files needs agent-fs."
+          description="Files shows the swarm's agent-fs drive here. It turns on by itself once agent-fs is set up and browsers can reach it: set AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true in Settings, Configuration. COMB_ENABLED forces it either way."
           action={
             <>
               <Button asChild size="sm">

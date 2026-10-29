@@ -62,6 +62,7 @@ describe("list-endpoint slimming", () => {
       heartbeatMd: "H".repeat(500),
       setupScript: "echo hi",
       avatar: { type: "lucide", icon: "rocket", color: "#8b5cf6" },
+      slackIcon: { type: "emoji", emoji: ":owl:" },
     });
 
     const slim = (await getAllAgents({ slim: true })).find((a) => a.id === agent.id);
@@ -79,11 +80,13 @@ describe("list-endpoint slimming", () => {
     // full, or the agents list would silently show the default avatar while
     // the detail page shows the custom one.
     expect(slim?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
+    expect(slim?.slackIcon).toEqual({ type: "emoji", emoji: ":owl:" });
 
     const full = (await getAllAgents()).find((a) => a.id === agent.id);
     expect(full?.claudeMd).toBe("C".repeat(500));
     expect(full?.setupScript).toBe("echo hi");
     expect(full?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
+    expect(full?.slackIcon).toEqual({ type: "emoji", emoji: ":owl:" });
   });
 
   test("updateAgentProfile — avatar set/reset round-trip", async () => {

@@ -1,5 +1,6 @@
-import { Check, Copy, SquareTerminal } from "lucide-react";
+import { Check, Copy, ExternalLink, Server, SquareTerminal } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { SetupCard } from "@/components/shared/setup-card";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -10,6 +11,30 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
  */
 export const INSTALL_PROMPT =
   "Read https://agent-swarm.dev/skill.md and help me install and operate Agent Swarm on our infra. Ask about my setup before running anything.";
+
+export const DEPLOY_GUIDE_URL = "https://docs.agent-swarm.dev/docs/guides/one-click-deploy";
+
+/**
+ * Ways to start a server without a coding agent. Only Railway is a one-click
+ * deploy; the others open the guide section until their listing is live.
+ */
+const DEPLOY_OPTIONS = [
+  {
+    label: "Deploy on Railway",
+    href: "https://railway.com/deploy/agent-swarm",
+    icon: <BrandLogo src="/deploy-logos/railway.svg" className="size-4" />,
+  },
+  {
+    label: "DigitalOcean guide",
+    href: `${DEPLOY_GUIDE_URL}#digitalocean-1-click`,
+    icon: <BrandLogo src="/deploy-logos/digitalocean.svg" className="size-4" />,
+  },
+  {
+    label: "Any VPS guide",
+    href: `${DEPLOY_GUIDE_URL}#cloud-init-on-any-vps`,
+    icon: <Server />,
+  },
+];
 
 /**
  * Step 1 with no connection yet: the first way to get a swarm. The person
@@ -45,6 +70,19 @@ export function InstallPromptCard() {
               ? "Could not copy. Select the text and copy it."
               : "Paste it in Claude Code, Codex, or any coding agent."}
           </p>
+        </div>
+        {/* Each deploy ends with a `/setup` link that fills in the connect form. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
+          <span className="mr-1 text-xs text-muted-foreground">Or deploy a server</span>
+          {DEPLOY_OPTIONS.map((option) => (
+            <Button key={option.href} asChild variant="outline" size="sm">
+              <a href={option.href} target="_blank" rel="noopener noreferrer">
+                {option.icon}
+                {option.label}
+                <ExternalLink className="size-3 text-muted-foreground" />
+              </a>
+            </Button>
+          ))}
         </div>
       </div>
     </SetupCard>

@@ -60,6 +60,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 ## Guides
 
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
+- [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
 - [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless). When: Someone wants to run Agent Swarm under rootless Podman.
 - [Published Artifacts](https://docs.agent-swarm.dev/docs/guides/published-artifacts). Reference.
@@ -88,6 +89,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Scripts as external APIs](https://docs.agent-swarm.dev/docs/guides/scripts-external-apis). When: Someone wants a swarm script exposed as a public HTTP endpoint or webhook receiver.
 - [Scripts credential broker](https://docs.agent-swarm.dev/docs/guides/scripts-credential-broker). Reference.
 - [One-off Script Workflow Runs](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs). Reference.
+- [Dreaming](https://docs.agent-swarm.dev/docs/guides/dreaming). When: Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes.
 - [Claude Bridge](https://docs.agent-swarm.dev/docs/guides/claude-bridge-experimental). Reference.
 - [Worker Credential Recovery](https://docs.agent-swarm.dev/docs/guides/worker-credential-recovery). Reference.
 - [Model Gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways). Reference.

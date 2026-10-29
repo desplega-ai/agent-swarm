@@ -1,5 +1,6 @@
 import {
   Check,
+  ClipboardCopy,
   Copy,
   Download,
   Ellipsis,
@@ -29,8 +30,9 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
+import { useAgentFsAccess, useLoadTextToCopy } from "@/api/hooks/use-agent-fs";
 import { isCombFavorite, useCombFavorites } from "@/api/hooks/use-comb-favorites";
+import { copyContentsFromMenu } from "@/components/comb/copy-file-button";
 import { downloadDriveFile } from "@/components/comb/file-actions";
 import { DeleteDialog, NewEntryDialog, RenameDialog } from "@/components/comb/file-dialogs";
 import { ShareDialog } from "@/components/comb/share-dialog";
@@ -52,6 +54,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { CLIPBOARD_BLOCKED } from "@/lib/comb/copy-contents";
 import { drivePathToLiveUrl } from "@/lib/comb/links";
 import { baseName, combPath, type DrivePath, isFolderPath } from "@/lib/comb/paths";
 import { SHARE_LINKS_FEATURE } from "@/lib/comb/share";
@@ -109,8 +112,6 @@ export function FileDialogsProvider({
   );
 }
 
-const CLIPBOARD_BLOCKED = "Could not copy. The browser blocked the clipboard.";
-
 /** Copy from a menu item. The menu closes at once, so a toast says it worked. */
 async function copyText(text: string, done: string) {
   try {
@@ -137,6 +138,7 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
   const { client } = useAgentFsAccess();
   const favorites = useCombFavorites(target);
   const openDialog = useContext(FileDialogsContext);
+  const loadText = useLoadTextToCopy();
   const isFolder = isFolderPath(target.path);
   const href = combPath(target);
   const liveHref = liveUrl ? drivePathToLiveUrl(target, liveUrl) : null;
@@ -171,6 +173,22 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
       onSelect: () => void copyText(target.path, "Path copied"),
     },
   ];
+  if (!isFolder && client) {
+    share.push({
+      id: "copy-contents",
+      label: "Copy contents",
+      icon: ClipboardCopy,
+      // The load starts inside the select, so the clipboard write keeps the gesture.
+      onSelect: () =>
+        void copyContentsFromMenu(
+          loadText(target),
+          () =>
+            void downloadDriveFile(client, target).catch((err: unknown) =>
+              toast.error(err instanceof Error ? err.message : "Download failed"),
+            ),
+        ),
+    });
+  }
   if (!isFolder && openDialog && features.has(SHARE_LINKS_FEATURE)) {
     share.push({
       id: "share",

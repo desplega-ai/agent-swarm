@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.2",
+    "version": "2.7.4",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -1016,6 +1016,64 @@
           "reportedAt"
         ]
       },
+      "AgentSlackIcon": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "emoji"
+                ]
+              },
+              "emoji": {
+                "type": "string",
+                "maxLength": 102,
+                "pattern": "^:[a-z0-9_+'-]+:$"
+              }
+            },
+            "required": [
+              "type",
+              "emoji"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "app"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -1186,6 +1244,16 @@
                   "type",
                   "icon"
                 ]
+              }
+            ]
+          },
+          "slackIcon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentSlackIcon"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -4792,7 +4860,7 @@
           "config": {
             "type": "object",
             "additionalProperties": {},
-            "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+            "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
           },
           "next": {
             "anyOf": [
@@ -4825,7 +4893,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead."
+            "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables."
           },
           "inputSchema": {
             "type": "object",
@@ -5107,6 +5175,13 @@
               "seconds": {
                 "type": "number",
                 "minimum": 0
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "finish",
+                  "start"
+                ]
               }
             }
           },
@@ -5243,7 +5318,7 @@
                     "config": {
                       "type": "object",
                       "additionalProperties": {},
-                      "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                      "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                     },
                     "next": {
                       "anyOf": [
@@ -5276,7 +5351,7 @@
                       "additionalProperties": {
                         "type": "string"
                       },
-                      "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead."
+                      "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables."
                     },
                     "inputSchema": {
                       "type": "object",
@@ -5864,6 +5939,13 @@
               "seconds": {
                 "type": "number",
                 "minimum": 0
+              },
+              "from": {
+                "type": "string",
+                "enum": [
+                  "finish",
+                  "start"
+                ]
               }
             }
           },
@@ -5947,6 +6029,7 @@
               "static",
               "docker",
               "e2b",
+              "boxd",
               "k8s"
             ]
           },
@@ -6239,6 +6322,7 @@
               "static",
               "docker",
               "e2b",
+              "boxd",
               "k8s"
             ]
           },
@@ -11798,6 +11882,16 @@
                           "type",
                           "icon"
                         ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "slackIcon": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentSlackIcon"
                       },
                       {
                         "type": "null"
@@ -23619,6 +23713,42 @@
         }
       }
     },
+    "/api/integrations/slack/app-icon": {
+      "get": {
+        "summary": "The Slack app's own avatar, shown on posts with no icon override",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`imageUrl` is null when Slack is off or the lookup fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imageUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "imageUrl"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/chat/status": {
       "get": {
         "summary": "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",
@@ -30586,7 +30716,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -30820,6 +30950,12 @@
                             "enabled": {
                               "type": "boolean"
                             },
+                            "reason": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
                             "api_url": {
                               "type": [
                                 "string",
@@ -30850,6 +30986,7 @@
                           },
                           "required": [
                             "enabled",
+                            "reason",
                             "api_url",
                             "live_url",
                             "org_id",
@@ -33807,9 +33944,11 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards."
             },
             "required": false,
+            "description": "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
             "name": "search",
             "in": "query"
           },
@@ -54576,6 +54715,9 @@
                             "uncertain": {
                               "type": "number"
                             },
+                            "ackNotReady": {
+                              "type": "number"
+                            },
                             "lastOutcomeAt": {
                               "type": [
                                 "string",
@@ -54606,6 +54748,7 @@
                             "ignored",
                             "failed",
                             "uncertain",
+                            "ackNotReady",
                             "lastOutcomeAt",
                             "lastFailure"
                           ]
@@ -54625,6 +54768,9 @@
                             "uncertain": {
                               "type": "number"
                             },
+                            "ackNotReady": {
+                              "type": "number"
+                            },
                             "lastOutcomeAt": {
                               "type": [
                                 "string",
@@ -54655,6 +54801,7 @@
                             "ignored",
                             "failed",
                             "uncertain",
+                            "ackNotReady",
                             "lastOutcomeAt",
                             "lastFailure"
                           ]
@@ -63880,6 +64027,13 @@
                       "seconds": {
                         "type": "number",
                         "minimum": 0
+                      },
+                      "from": {
+                        "type": "string",
+                        "enum": [
+                          "finish",
+                          "start"
+                        ]
                       }
                     }
                   },
@@ -64297,6 +64451,13 @@
                       "seconds": {
                         "type": "number",
                         "minimum": 0
+                      },
+                      "from": {
+                        "type": "string",
+                        "enum": [
+                          "finish",
+                          "start"
+                        ]
                       }
                     }
                   },
@@ -64598,7 +64759,7 @@
                   "config": {
                     "type": "object",
                     "additionalProperties": {},
-                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                   },
                   "next": {
                     "anyOf": [
@@ -64631,7 +64792,7 @@
                     "additionalProperties": {
                       "type": "string"
                     },
-                    "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead."
+                    "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables."
                   },
                   "inputSchema": {
                     "type": "object",
@@ -65850,6 +66011,7 @@
                       "static",
                       "docker",
                       "e2b",
+                      "boxd",
                       "k8s"
                     ]
                   },
@@ -66139,6 +66301,7 @@
                       "static",
                       "docker",
                       "e2b",
+                      "boxd",
                       "k8s"
                     ]
                   },
@@ -66699,6 +66862,7 @@
                       "static",
                       "docker",
                       "e2b",
+                      "boxd",
                       "k8s"
                     ]
                   },
@@ -66911,6 +67075,7 @@
                       "static",
                       "docker",
                       "e2b",
+                      "boxd",
                       "k8s"
                     ]
                   },

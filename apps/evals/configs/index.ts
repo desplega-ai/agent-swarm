@@ -433,6 +433,39 @@ export const configs: HarnessConfig[] = [
     provider: "pi",
     model: "openrouter/nvidia/nemotron-3.5-lightning",
   },
+  // Helmcode direct (OpenAI-compatible, HELMCODE_API_KEY): the five registry
+  // models in packages/model-catalog, reached without OpenRouter. The prefix
+  // routes the key in credentialsForConfig.
+  {
+    id: "pi-helmcode-deepseek-v4-flash",
+    label: "pi-mono / DeepSeek V4.1 Flash (Helmcode)",
+    provider: "pi",
+    model: "helmcode/deepseek-v4-flash",
+  },
+  {
+    id: "pi-helmcode-glm5.3",
+    label: "pi-mono / GLM 5.3 (Helmcode)",
+    provider: "pi",
+    model: "helmcode/glm5.3",
+  },
+  {
+    id: "pi-helmcode-glm5.3-flash",
+    label: "pi-mono / GLM 5.3 Flash (Helmcode)",
+    provider: "pi",
+    model: "helmcode/glm5.3-flash",
+  },
+  {
+    id: "pi-helmcode-qwen3.6",
+    label: "pi-mono / Qwen3.6 (Helmcode)",
+    provider: "pi",
+    model: "helmcode/qwen3.6",
+  },
+  {
+    id: "pi-helmcode-gemma4",
+    label: "pi-mono / Gemma 4 (Helmcode)",
+    provider: "pi",
+    model: "helmcode/gemma4",
+  },
   {
     id: "opencode-gemini-flash",
     label: "opencode / Gemini 3 flash (OpenRouter)",

@@ -20,8 +20,13 @@ import {
   fetchSlackFiles,
   notifySlackFileFailures,
 } from "./inbound-files";
+import {
+  collectSlackMessageFiles,
+  type SlackMessageLike,
+  slackInboundMessageText,
+} from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
-import { hasOtherUserMention } from "./router";
+import { isAddressedToOtherUser } from "./router";
 import { markSlackSessionProcessing } from "./session-status";
 import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -46,9 +51,24 @@ async function isExternalAssistantThread(
   return true;
 }
 
-export function createAssistant(): Assistant {
+type ThreadContextStore = NonNullable<
+  ConstructorParameters<typeof Assistant>[0]["threadContextStore"]
+>;
+
+/** `threadContextStore` replaces Bolt's metadata-backed default, which calls the Slack API. */
+export function createAssistant(
+  options: { threadContextStore?: ThreadContextStore } = {},
+): Assistant {
   return new Assistant({
+    ...(options.threadContextStore ? { threadContextStore: options.threadContextStore } : {}),
     threadStarted: async ({ event, body, client, say, setSuggestedPrompts, saveThreadContext }) => {
+      // The greeting is not idempotent: a redelivery after a tolerated socket ack
+      // failure must not post it twice.
+      const eventId = body?.event_id;
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return ignoreSlackInbound("duplicate_event");
+      }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
         return ignoreSlackInbound("external_channel");
       }
@@ -75,6 +95,12 @@ export function createAssistant(): Assistant {
     },
 
     threadContextChanged: async ({ event, body, client, saveThreadContext }) => {
+      // Saves are order-dependent: a stale redelivery would overwrite newer context.
+      const eventId = body?.event_id;
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return ignoreSlackInbound("duplicate_event");
+      }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
         return ignoreSlackInbound("external_channel");
       }
@@ -140,10 +166,21 @@ export function createAssistant(): Assistant {
         const threadTs = (msg.thread_ts as string) || message.ts;
         const channelId = message.channel;
         statusThread = { channelId, threadTs };
-        const messageText = (msg.text as string) || "";
+        // Mention checks read the raw `text`; the task gets any table block too.
+        const rawText = (msg.text as string) || "";
+        const attachments = msg.attachments as SlackMessageLike["attachments"];
+        const messageText = slackInboundMessageText({
+          text: rawText,
+          blocks: msg.blocks as unknown[] | undefined,
+          attachments,
+        });
         // `file_share` messages land here too: an image sent with no caption
-        // arrives with empty `text` and everything in `files`.
-        const files = msg.files as SlackFile[] | undefined;
+        // arrives with empty `text` and everything in `files`. A shared or
+        // forwarded message keeps its files on `attachments[].files`.
+        const files = collectSlackMessageFiles({
+          files: msg.files as SlackFile[] | undefined,
+          attachments,
+        });
         const userId = (msg.user as string) || "";
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
@@ -158,10 +195,11 @@ export function createAssistant(): Assistant {
         }
 
         // If the message @-mentions someone OTHER than our bot and does NOT mention
-        // our bot, it is addressed to a different agent/user — do not spawn a task.
+        // our bot, it is addressed to a different agent/user — do not spawn a task
+        // (unless SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true).
         if (cachedBotUserId) {
-          const botMentioned = messageText.includes(`<@${cachedBotUserId}>`);
-          if (!botMentioned && hasOtherUserMention(messageText, cachedBotUserId)) {
+          const botMentioned = rawText.includes(`<@${cachedBotUserId}>`);
+          if (!botMentioned && isAddressedToOtherUser(rawText, cachedBotUserId)) {
             console.log(
               `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,
             );
@@ -175,7 +213,7 @@ export function createAssistant(): Assistant {
         const requestedByUserId = userId
           ? await resolveSlackUserId(client, userId, {
               sampleEventType: "assistant_message",
-              sampleContext: messageText,
+              sampleContext: rawText,
             })
           : undefined;
 
@@ -208,14 +246,14 @@ export function createAssistant(): Assistant {
         // Any in-body `<@U…>` mention the requester typed is rewritten via
         // the identity primitive before it reaches agent-visible task text —
         // never a raw Slack ID. Bot-mention routing checks above use the
-        // raw `messageText`, not this rendered copy.
+        // raw `rawText`, not this rendered copy.
         const renderedMessageText = await rewriteSlackMentions(
           buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
           cachedBotUserId ?? undefined,
         );
         const slack = {
           trigger: "mention" as const,
-          messages: [{ ts: message.ts, userId, text: messageText }],
+          messages: [{ ts: message.ts, userId, text: rawText }],
         };
 
         if (workingAgent && workingAgent.status !== "offline") {

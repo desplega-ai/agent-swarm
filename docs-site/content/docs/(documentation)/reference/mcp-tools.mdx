@@ -100,7 +100,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `readyOnly` | boolean | No | Only tasks with met dependencies |
 | `taskType` | string | No | Filter by type (e.g., `bug`, `feature`) |
 | `tags` | array | No | Filter by matching tags |
-| `search` | string | No | Search in task description |
+| `search` | string | No | Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: `2443` does not find `12443`, and `%` and `_` are not wildcards |
 | `scheduleId` | uuid | No | Filter by schedule ID to find tasks created by a specific schedule |
 | `workflowRunId` | string | No | Filter by workflow run ID to find the tasks of a single run |
 | `key` | string | No | Filter by exact logical asset namespace |
@@ -570,6 +570,7 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `claudeMd` | string | No | CLAUDE.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
 | `setupScript` | string | No | Startup script content |
 | `avatar` | object or null | No | Custom Lucide avatar: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`. Pass `null` to restore the deterministic default icon and color. |
+| `slackIcon` | object or null | No | Icon for the agent's Slack messages: `{ type: "emoji", emoji: ":owl:" }` or `{ type: "url", url: "https://..." }`, or `{ type: "app" }` for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass `null` to restore the default (`:crown:` for the lead). |
 
 ### context-history
 
@@ -636,7 +637,7 @@ Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
 | `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
-| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
+| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds, from? }`; `from: "start"` counts only from run starts |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
 

@@ -101,7 +101,7 @@ describe("runtime provider registration", () => {
 
   test("k8s explicitly rejects provisioning support", async () => {
     await expect(createRuntimeProvider("k8s")).rejects.toThrow(
-      'Unknown runtime provider: "k8s" (not implemented). Supported: static, docker, e2b',
+      'Unknown runtime provider: "k8s" (not implemented). Supported: static, docker, e2b, boxd',
     );
   });
 

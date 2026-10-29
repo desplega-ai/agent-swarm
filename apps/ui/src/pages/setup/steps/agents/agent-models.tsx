@@ -1,4 +1,9 @@
-import { type UseQueryResult, useQueries, useQueryClient } from "@tanstack/react-query";
+import {
+  isCancelledError,
+  type UseQueryResult,
+  useQueries,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { AlertCircle, Bot, Gauge } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
@@ -337,11 +342,16 @@ export function AgentModels({
         allowCustomModel: setting.custom,
         reasoningEffort: setting.effort,
       });
-      // The hook already invalidated the rows: wait for this agent's refetch.
-      await queryClient.invalidateQueries(
-        { queryKey: resolvedConfigsQuery({ agentId }).queryKey },
-        { cancelRefetch: false },
-      );
+      // Another agent's save can cancel this refetch. Join its replacement
+      // before marking this row saved, and let actual fetch failures surface.
+      for (;;) {
+        try {
+          await queryClient.fetchQuery({ ...resolvedConfigsQuery({ agentId }), staleTime: 0 });
+          break;
+        } catch (error) {
+          if (!isCancelledError(error)) throw error;
+        }
+      }
     },
     [updateRuntime, queryClient],
   );
