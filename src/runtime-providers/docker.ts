@@ -68,6 +68,18 @@ function isCacheMountError(error: unknown): boolean {
   return error instanceof DockerApiError && /\b(?:mount\w*|volume\w*)\b/i.test(error.message);
 }
 
+type CacheVolume = { Name: string; Labels?: Record<string, string> };
+
+function assertCacheOwner(volume: CacheVolume, cache: RuntimeCacheReference): void {
+  if (
+    volume.Name !== cache.key ||
+    volume.Labels?.[RUNTIME_LABELS.owner] !== cache.ownerId ||
+    volume.Labels?.[RUNTIME_LABELS.poolId] !== cache.poolId ||
+    volume.Labels?.["swarm.cache"] !== "true"
+  )
+    throw new Error(`Cache volume ${cache.key} is not owned by this swarm and pool`);
+}
+
 async function dockerApi<T>(
   target: RuntimeTargetConfig,
   method: string,
@@ -146,28 +158,20 @@ export class DockerRuntimeProvider implements RuntimeProvider {
       let cacheMount: { Type: "volume"; Source: string; Target: string } | undefined;
       if (req.cache) {
         try {
-          const volume = await dockerApi<{ Name: string; Labels?: Record<string, string> }>(
-            target,
-            "POST",
-            "/volumes/create",
-            {
-              Name: req.cache.key,
-              Labels: {
-                [RUNTIME_LABELS.owner]: req.ownerId,
-                [RUNTIME_LABELS.poolId]: req.poolId,
-                "swarm.cache": "true",
-              },
+          const volume = await dockerApi<CacheVolume>(target, "POST", "/volumes/create", {
+            Name: req.cache.key,
+            Labels: {
+              [RUNTIME_LABELS.owner]: req.ownerId,
+              [RUNTIME_LABELS.poolId]: req.poolId,
+              "swarm.cache": "true",
             },
-          );
+          });
           // Docker reuses an existing name without replacing its labels.
-          if (
-            volume.Name !== req.cache.key ||
-            volume.Labels?.[RUNTIME_LABELS.owner] !== req.ownerId ||
-            volume.Labels?.[RUNTIME_LABELS.poolId] !== req.poolId ||
-            volume.Labels?.["swarm.cache"] !== "true"
-          ) {
-            throw new Error(`Cache volume ${req.cache.key} is not owned by this swarm and pool`);
-          }
+          assertCacheOwner(volume, {
+            key: req.cache.key,
+            poolId: req.poolId,
+            ownerId: req.ownerId,
+          });
           cacheMount = { Type: "volume", Source: req.cache.key, Target: req.cache.mountPath };
         } catch (error) {
           cacheWarning = redactWithEnv(scrubSecrets(String(error)), req.env);
@@ -260,18 +264,8 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   async releaseCache(target: RuntimeTargetConfig, cache: RuntimeCacheReference): Promise<void> {
     const path = `/volumes/${encodeURIComponent(cache.key)}`;
     try {
-      const volume = await dockerApi<{ Name: string; Labels?: Record<string, string> }>(
-        target,
-        "GET",
-        path,
-      );
-      if (
-        volume.Name !== cache.key ||
-        volume.Labels?.[RUNTIME_LABELS.owner] !== cache.ownerId ||
-        volume.Labels?.[RUNTIME_LABELS.poolId] !== cache.poolId ||
-        volume.Labels?.["swarm.cache"] !== "true"
-      )
-        throw new Error(`Cache volume ${cache.key} is not owned by this swarm and pool`);
+      const volume = await dockerApi<CacheVolume>(target, "GET", path);
+      assertCacheOwner(volume, cache);
       // A volume still attached to any container must remain intact (Docker returns 409).
       await dockerApi(target, "DELETE", path);
     } catch (error) {

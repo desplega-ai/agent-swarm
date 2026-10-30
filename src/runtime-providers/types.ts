@@ -60,8 +60,8 @@ export interface RuntimeCacheReference {
   ownerId: string;
 }
 
-export function poolCacheKey(poolId: string): string {
-  return `swarm-cache-${poolId}`;
+export function poolCacheKey(poolId: string, generation?: string): string {
+  return `swarm-cache-${poolId}${generation ? `-${generation}` : ""}`;
 }
 
 export interface RuntimeHandle {

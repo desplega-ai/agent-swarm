@@ -216,7 +216,7 @@ If container start fails, the adapter attempts forced deletion before it returns
 
 Pools accept `cache: { mountPath: "/home/worker/.cache" }` or `null` (the default).
 `RuntimeProviderTraits.persistentCache` is optional; absent means unsupported.
-The supervisor passes `ProvisionRequest.cache: { key: "swarm-cache-<poolId>", mountPath }`
+The supervisor passes `ProvisionRequest.cache: { key, mountPath }`
 only to a controller that advertises the capability. The working disk still has
 `ephemeralDisk: true`. Docker is the first supported adapter; static, E2B, and boxd
 reject cache configuration until their adapters implement it.
@@ -224,7 +224,7 @@ reject cache configuration until their adapters implement it.
 Docker creates the named volume with authoritative `swarm.owner`, `swarm.pool-id`,
 and `swarm.cache=true` labels, verifies the returned ownership, and mounts it with
 `HostConfig.Mounts` (`Type: "volume"`). Repeated and concurrent provisions reuse
-the pool's volume. Foreign or unlabeled volumes are never adopted.
+the pool's current generation. Foreign or unlabeled volumes are never adopted.
 An older remote controller or a failed volume preparation starts the runtime
 without cache. If Docker rejects the cache mount during container creation or
 start, the adapter retries once without mounts after removing any failed-start
@@ -250,10 +250,17 @@ Setting `cache: null`, deleting a pool, or changing its placement queues a relea
 on the old controller. The supervisor waits for runtimes present at that change
 to stop, then calls the optional provider-neutral `releaseCache` method. New
 cache-free runtimes do not delay it. Disabling a pool with `enabled: false` keeps
-its configured cache for future use. Re-enabling cache cancels a pending release;
-an in-flight release returns a retryable 409 instead.
+its configured cache for future use. Each enable or placement change allocates
+`swarm-cache-<poolId>-<generation>`; ordinary edits retain the current key.
+Re-enabling uses a fresh generation while the old release continues, so a timed-out
+remote deletion can only affect the retired cache. The key is private metadata in
+the existing pool cache JSON; public API responses expose only `mountPath`.
+Existing keys without a generation remain readable until caching is re-enabled.
 
 Release jobs in `runtime_cache_releases` survive pool deletion and API restart.
+An atomic pending/expired-lease claim prevents concurrent workers from sharing
+an active five-minute lease. Completion updates match the claim timestamp, so
+an expired worker cannot delete or reset a newer claim. Abandoned leases retry.
 Docker verifies the owner, pool, and cache labels before deleting the volume,
 without force; missing volumes count as released, and in-use volumes retry later.
 Offline or older controllers also defer cleanup until available or upgraded.

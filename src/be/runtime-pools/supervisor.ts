@@ -4,7 +4,7 @@ import {
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
 import { RuntimeHandleSchema } from "../../runtime-providers/controller-protocol";
-import { poolCacheKey, RUNTIME_LABELS } from "../../runtime-providers/types";
+import { RUNTIME_LABELS } from "../../runtime-providers/types";
 import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { createWorkerTaskFollowUp } from "../../tasks/worker-follow-up";
 import {
@@ -29,7 +29,7 @@ import {
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
 import { mintRuntimeToken } from "../users";
-import { reconcileCacheReleases } from "./cache-cleanup";
+import { getPoolCache, reconcileCacheReleases } from "./cache-cleanup";
 import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
@@ -246,12 +246,12 @@ export async function provisionRuntime(
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
     const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
-    const currentPool = await getRuntimePool(pool.id);
+    const currentPoolCache = await getPoolCache(pool.id);
     const currentCache =
-      currentPool && currentPool.placements[0] === pool.placements[0] ? currentPool.cache : null;
+      currentPoolCache?.controllerId === pool.placements[0] ? currentPoolCache : null;
     const cache =
       currentCache && controller.traits.persistentCache
-        ? { key: poolCacheKey(pool.id), mountPath: currentCache.mountPath }
+        ? { key: currentCache.key, mountPath: currentCache.mountPath }
         : undefined;
     signal?.throwIfAborted();
     const handle = await controller.provision({

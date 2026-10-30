@@ -201,11 +201,14 @@ test("cache identity is stable across provisions of one pool and scoped away fro
   await provisionRuntime(pool, agent, controller, await ensureRuntimeOwnerId());
   const other = await setup({ cache: { mountPath: "/cache" } });
   await provisionRuntime(other.pool, other.agent, controller, await ensureRuntimeOwnerId());
-  expect(fake.requests.map((req) => req.cache)).toEqual([
-    { key: `swarm-cache-${pool.id}`, mountPath: "/cache" },
-    { key: `swarm-cache-${pool.id}`, mountPath: "/cache" },
-    { key: `swarm-cache-${other.pool.id}`, mountPath: "/cache" },
-  ]);
+  const [first, second, third] = fake.requests.map((req) => req.cache!);
+  expect(first).toEqual({
+    key: expect.stringContaining(`swarm-cache-${pool.id}-`),
+    mountPath: "/cache",
+  });
+  expect(second).toEqual(first);
+  expect(third.key).toStartWith(`swarm-cache-${other.pool.id}-`);
+  expect(third.key).not.toBe(first.key);
 });
 
 test("an older controller boots without cache and surfaces a warning without failing the provision", async () => {

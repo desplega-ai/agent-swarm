@@ -3809,7 +3809,7 @@
       "exempt": "JSON resource settings"
     },
     "cache": {
-      "exempt": "JSON container cache mount path; must round trip byte exact"
+      "exempt": "JSON cache mount path and server-owned generation key"
     },
     "resolved_image": {
       "exempt": "provider artifact reference"

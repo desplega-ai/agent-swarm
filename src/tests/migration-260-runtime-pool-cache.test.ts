@@ -14,6 +14,10 @@ test("migration 260 adds an optional JSON cache to a fresh database", () => {
       expect.objectContaining({ name: "cache", type: "TEXT", notnull: 0 }),
     );
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    for (const name of ["runtime_ids", "state", "created_by", "updated_by"])
+      expect(db.query("PRAGMA table_info(runtime_cache_releases)").all()).toContainEqual(
+        expect.objectContaining({ name, type: "TEXT" }),
+      );
   } finally {
     db.close();
   }
@@ -60,6 +64,7 @@ test("migration 260 preserves existing pools with caching disabled", async () =>
       cache: null,
     });
     expect(() => db.run("UPDATE runtime_pools SET cache = 'invalid json'")).toThrow();
+    expect(db.query("SELECT COUNT(*) AS n FROM runtime_cache_releases").get()).toEqual({ n: 0 });
   } finally {
     db.close();
   }

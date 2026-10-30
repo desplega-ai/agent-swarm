@@ -4,6 +4,7 @@ import {
   createRuntimeProvider,
   type RuntimeTargetConfig,
 } from "../../runtime-providers";
+import { poolCacheKey } from "../../runtime-providers/types";
 import type { Agent, DeliveryMode, RuntimeController, RuntimePool } from "../../types";
 import {
   RuntimeControllerCreateSchema,
@@ -17,7 +18,7 @@ import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
-import { queuePoolCacheRelease } from "./cache-cleanup-db";
+import { getPoolCache, queuePoolCacheRelease } from "./cache-cleanup";
 import { RuntimePoolError } from "./errors";
 import { revokeControllerTokens } from "./tokens";
 
@@ -67,12 +68,13 @@ function rowToController(row: ControllerRow): RuntimeController {
   };
 }
 function rowToPool(row: PoolRow): RuntimePool {
+  const cache = row.cache ? JSON.parse(row.cache) : null;
   return {
     ...row,
     placements: JSON.parse(row.placements),
     env: JSON.parse(row.env),
     resources: row.resources ? JSON.parse(row.resources) : null,
-    cache: row.cache ? JSON.parse(row.cache) : null,
+    cache: cache ? { mountPath: cache.mountPath } : null,
     enabled: row.enabled === 1,
   };
 }
@@ -360,7 +362,9 @@ export async function createRuntimePool(
         data.delivery,
         JSON.stringify(data.env),
         data.resources ? JSON.stringify(data.resources) : null,
-        data.cache ? JSON.stringify(data.cache) : null,
+        data.cache
+          ? JSON.stringify({ ...data.cache, key: poolCacheKey(id, crypto.randomUUID()) })
+          : null,
         data.ttlSec,
         Number(data.enabled),
         actor,
@@ -394,20 +398,15 @@ export async function updateRuntimePool(
     await validatePool(data);
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
-    // Keep the guard and cancellation under the same BEGIN IMMEDIATE write lock.
-    if (data.cache) {
-      if (
-        await tx.get(
-          "SELECT id FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ? AND state = 'deleting'",
-          [id, data.placements[0]!],
-        )
-      )
-        throw new RuntimePoolError("Cache cleanup is in progress; retry after it completes", 409);
-      await tx.run(
-        "DELETE FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ? AND state = 'pending'",
-        [id, data.placements[0]!],
-      );
-    }
+    const cache = data.cache
+      ? {
+          ...data.cache,
+          key:
+            existing.cache && data.placements[0] === existing.placements[0]
+              ? (await getPoolCache(id))!.key
+              : poolCacheKey(id, crypto.randomUUID()),
+        }
+      : null;
     if (existing.cache && (!data.cache || data.placements[0] !== existing.placements[0]))
       await queuePoolCacheRelease(existing, actor);
     await tx.run(
@@ -430,7 +429,7 @@ export async function updateRuntimePool(
         data.delivery,
         JSON.stringify(data.env),
         data.resources ? JSON.stringify(data.resources) : null,
-        data.cache ? JSON.stringify(data.cache) : null,
+        cache ? JSON.stringify(cache) : null,
         data.ttlSec,
         Number(data.enabled),
         actor,

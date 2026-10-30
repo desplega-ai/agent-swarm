@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { insertProvisioningRuntime, markRuntimeTerminated } from "../be/multi-runtime";
-import { reconcileCacheReleases } from "../be/runtime-pools/cache-cleanup";
+import { getPoolCache, reconcileCacheReleases } from "../be/runtime-pools/cache-cleanup";
 import {
   createRuntimeController,
   createRuntimePool,
@@ -102,6 +102,7 @@ afterAll(async () => {
 
 test("disable defers release for existing runtimes but not new cache-free runtimes", async () => {
   const p = await pool();
+  const key = (await getPoolCache(p.id))!.key;
   const old = await runtime(p.id);
   await updateRuntimePool(p.id, { cache: null });
   const fresh = await runtime(p.id);
@@ -110,7 +111,7 @@ test("disable defers release for existing runtimes but not new cache-free runtim
   expect((await jobs())[0]?.state).toBe("pending");
   await markRuntimeTerminated(old, "stopped");
   await drain();
-  expect(calls).toEqual([{ key: `swarm-cache-${p.id}`, poolId: p.id, ownerId }]);
+  expect(calls).toEqual([{ key, poolId: p.id, ownerId }]);
   expect(await jobs()).toEqual([]);
   expect(
     await getDbClient().get(
@@ -124,6 +125,9 @@ test("pending release survives pool deletion and keeps its controller available"
   const p = await pool();
   await deleteRuntimePool(p.id);
   expect(await getRuntimePool(p.id)).toBeNull();
+  await expect(
+    getDbClient().run("DELETE FROM runtime_controllers WHERE id = ?", [controllerId]),
+  ).rejects.toThrow();
   await expect(deleteRuntimeController(controllerId)).rejects.toThrow("pending cache cleanup");
   await expect(
     updateRuntimeController(controllerId, { config: { DOCKER_HOST: "unix:///another.sock" } }),
@@ -158,72 +162,132 @@ test("a failed release is scrubbed, persisted over restart, and retried", async 
   expect(await jobs()).toEqual([]);
 });
 
-test("re-enabling a cache cancels pending cleanup and retains the volume", async () => {
+test("concurrent cache reconciles release a cache only once", async () => {
   const p = await pool();
   await updateRuntimePool(p.id, { cache: null });
-  await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
-  await drain();
-  expect(calls).toEqual([]);
+  const entered = Promise.withResolvers<void>();
+  const duplicate = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  release = async () => {
+    entered.resolve();
+    if (calls.length > 1) duplicate.resolve();
+    await finish.promise;
+  };
+  const first = drain();
+  await entered.promise;
+  const second = drain();
+  try {
+    await Promise.race([second, duplicate.promise]);
+    expect(calls).toHaveLength(1);
+  } finally {
+    finish.resolve();
+    await Promise.all([first, second]);
+  }
   expect(await jobs()).toEqual([]);
 });
 
-test("re-enabling during an in-flight release returns a retryable conflict", async () => {
+test("re-enabling uses a new generation; edits retain the current generation", async () => {
   const p = await pool();
+  const oldKey = (await getPoolCache(p.id))!.key;
+  await updateRuntimePool(p.id, { name: "renamed", cache: { mountPath: "/cache/changed" } });
+  closeDb();
+  initDb(path);
+  expect((await getPoolCache(p.id))!.key).toBe(oldKey);
   await updateRuntimePool(p.id, { cache: null });
-  let entered!: () => void;
-  let finish!: () => void;
-  const started = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
-  const gate = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
+  await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+  const newKey = (await getPoolCache(p.id))!.key;
+  expect(newKey).not.toBe(oldKey);
+  expect((await getRuntimePool(p.id))!.cache).toEqual({ mountPath: "/cache" });
+  await drain();
+  expect(calls.map((c) => c.key)).toEqual([oldKey]);
+  expect(await jobs()).toEqual([]);
+  expect((await getPoolCache(p.id))!.key).toBe(newKey);
+});
+
+test("re-enabling during a release leaves the retired generation isolated", async () => {
+  const p = await pool();
+  const oldKey = (await getPoolCache(p.id))!.key;
+  await updateRuntimePool(p.id, { cache: null });
+  const entered = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
   release = async () => {
-    entered();
-    await gate;
+    entered.resolve();
+    await finish.promise;
   };
   const draining = drain();
-  await started;
+  await entered.promise;
   try {
-    await expect(updateRuntimePool(p.id, { cache: { mountPath: "/cache" } })).rejects.toThrow(
-      "cleanup is in progress",
-    );
+    await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+    expect((await getPoolCache(p.id))!.key).not.toBe(oldKey);
     expect((await jobs())[0]?.state).toBe("deleting");
-    expect((await getRuntimePool(p.id))?.cache).toBeNull();
   } finally {
-    finish();
+    finish.resolve();
     await draining;
   }
-  await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+  expect(calls[0]?.key).toBe(oldKey);
 });
 
-test("re-enabling cancels a scanned release before the worker claims it", async () => {
+test("legacy cache names remain readable until re-enabling rotates the key", async () => {
+  const p = await pool();
+  await getDbClient().run("UPDATE runtime_pools SET cache = ? WHERE id = ?", [
+    JSON.stringify({ mountPath: "/cache" }),
+    p.id,
+  ]);
+  expect((await getPoolCache(p.id))!.key).toBe(`swarm-cache-${p.id}`);
+  await updateRuntimePool(p.id, { cache: null });
+  await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+  expect((await getPoolCache(p.id))!.key).not.toBe(`swarm-cache-${p.id}`);
+  await drain();
+  expect(calls[0]?.key).toBe(`swarm-cache-${p.id}`);
+});
+
+test("an abandoned deleting lease is recovered after restart", async () => {
   const p = await pool();
   await updateRuntimePool(p.id, { cache: null });
-  const scanned = Promise.withResolvers<void>();
-  const proceed = Promise.withResolvers<void>();
-  const db = getDbClient();
-  const run = db.run.bind(db);
-  const claim = spyOn(db, "run").mockImplementation(async (sql, params) => {
-    if (sql.startsWith("UPDATE runtime_cache_releases SET state = 'deleting'")) {
-      scanned.resolve();
-      await proceed.promise;
-    }
-    return await run(sql, params);
-  });
-  const draining = drain();
-  try {
-    await scanned.promise;
-    await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
-  } finally {
-    proceed.resolve();
-    await draining;
-    claim.mockRestore();
-  }
-  expect(calls).toEqual([]);
+  await getDbClient().run("UPDATE runtime_cache_releases SET state = 'deleting', updated_at = ?", [
+    new Date(Date.now() - 6 * 60_000).toISOString(),
+  ]);
+  closeDb();
+  initDb(path);
+  await drain();
+  expect(calls).toHaveLength(1);
   expect(await jobs()).toEqual([]);
-  expect((await getRuntimePool(p.id))?.cache).toEqual({ mountPath: "/cache" });
 });
+
+for (const outcome of ["success", "failure"] as const) {
+  test(`an expired worker's ${outcome} cannot overwrite a newer cleanup claim`, async () => {
+    const p = await pool();
+    await updateRuntimePool(p.id, { cache: null });
+    const firstEntered = Promise.withResolvers<void>();
+    const secondEntered = Promise.withResolvers<void>();
+    const firstFinish = Promise.withResolvers<void>();
+    const secondFinish = Promise.withResolvers<void>();
+    release = async () => {
+      const first = calls.length === 1;
+      (first ? firstEntered : secondEntered).resolve();
+      await (first ? firstFinish : secondFinish).promise;
+      if (first && outcome === "failure") throw new Error("late failure");
+    };
+    const first = drain();
+    await firstEntered.promise;
+    const second = reconcileCacheReleases(
+      async () => commands,
+      new AbortController().signal,
+      new Date(Date.now() + 6 * 60_000),
+    );
+    await secondEntered.promise;
+    try {
+      firstFinish.resolve();
+      await first;
+      expect((await jobs())[0]).toMatchObject({ state: "deleting", last_error: null });
+    } finally {
+      firstFinish.resolve();
+      secondFinish.resolve();
+      await Promise.all([first, second]);
+    }
+    expect(await jobs()).toEqual([]);
+  });
+}
 
 test("an unsupported or offline controller retains cleanup for a later retry", async () => {
   const p = await pool();
