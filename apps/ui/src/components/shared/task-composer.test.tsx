@@ -180,6 +180,21 @@ function placeholderOf(container: HTMLElement): string | null {
   return container.querySelector("textarea")?.getAttribute("placeholder") ?? null;
 }
 
+/** The held-upload notice above the box. */
+const notice = (container: HTMLElement) =>
+  container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
+
+const buttonNamed = (container: HTMLElement, name: string) =>
+  [...container.querySelectorAll("button")].find((b) => b.textContent === name);
+
+/** Adds the test file through the extra action, types a message and sends it. */
+async function attachAndSend(container: HTMLElement) {
+  const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+  await act(async () => add.click());
+  await type(container, "see the screenshot");
+  await send(container);
+}
+
 describe("TaskComposer on Sessions", () => {
   test("a file added while steering is up switches to a follow-up task that carries it", async () => {
     const { container, unmount } = await mount(
@@ -279,90 +294,58 @@ describe("TaskComposer on Sessions", () => {
     await unmount();
   });
 
-  test("a failed upload still promotes the task", async () => {
+  test("a failed upload holds the task as a draft, keeps the file, and does not tell the page", async () => {
     rejectUploads = true;
-    const { container, unmount } = await mount(
-      <TaskComposer
-        rootTaskId="root-1"
-        targetTask={null}
-        canSteer={false}
-        renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
-        )}
-      />,
-    );
-    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
-    await act(async () => add.click());
-    await type(container, "see the screenshot");
-    await send(container);
-    await waitFor(() => promoted.length === 1);
-
-    expect(uploads).toEqual([]);
-    expect(promoted).toEqual(["follow-up"]);
-    await unmount();
-  });
-
-  test("a failed upload tells the page, and keeps the file and the error for a retry", async () => {
-    rejectUploads = true;
-    const outcomes: Array<{ id: string; attachmentsFailed: boolean }> = [];
+    const started: string[] = [];
     const { container, unmount } = await mount(
       <TaskComposer
         targetTask={completedWorkerTask}
         canSteer={false}
-        onCreated={(task, outcome) => outcomes.push({ id: task.id, ...outcome })}
+        onCreated={(task) => started.push(task.id)}
         renderActions={(add) => (
           <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
         )}
       />,
     );
-    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
-    await act(async () => add.click());
-    await type(container, "see the screenshot");
-    await send(container);
-    await waitFor(() => outcomes.length === 1);
+    await attachAndSend(container);
+    await waitFor(() => notice(container) !== null);
 
-    expect(outcomes).toEqual([{ id: "follow-up", attachmentsFailed: true }]);
-    expect(container.textContent).toContain("screenshot-x.png");
-    expect(container.textContent).toContain("failed to upload");
-    await unmount();
-  });
-
-  test("a failed upload retries to the task that exists, never to a new task", async () => {
-    rejectUploads = true;
-    const { container, unmount } = await mount(
-      <TaskComposer
-        targetTask={completedWorkerTask}
-        canSteer={false}
-        renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
-        )}
-      />,
-    );
-    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
-    await act(async () => add.click());
-    await type(container, "see the screenshot");
-    await send(container);
-    const notice = () =>
-      container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
-    await waitFor(() => notice() !== null);
-
+    // No promotion: no worker can start the task without its file.
+    expect(promoteCalls).toEqual([]);
+    expect(started).toEqual([]);
     // The file waits in the notice, for the created task, not in the box: a
     // new send would start a second task without it.
-    expect(notice()?.textContent).toContain("screenshot-x.png");
-    expect(notice()?.textContent).toContain("#follow-u");
+    expect(notice(container)?.textContent).toContain("screenshot-x.png");
+    expect(notice(container)?.textContent).toContain("#follow-u waits for it");
     expect(container.querySelector('button[aria-label="Remove screenshot-x.png"]')).toBeNull();
+    await unmount();
+  });
 
-    // The upload works this time: the file goes to the same task.
+  test("a retry uploads to the held task, then starts it and tells the page", async () => {
+    rejectUploads = true;
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => notice(container) !== null);
+
     rejectUploads = false;
-    const retry = [...container.querySelectorAll("button")].find(
-      (b) => b.textContent === "Retry upload",
-    ) as HTMLButtonElement;
-    await act(async () => retry.click());
-    await waitFor(() => notice() === null);
+    await act(async () => buttonNamed(container, "Retry upload")?.click());
+    await waitFor(() => notice(container) === null);
 
     expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
+    // The file is in before the task starts.
+    expect(promoted).toEqual(["follow-up"]);
+    expect(started).toEqual(["follow-up"]);
     expect(createdTasks).toHaveLength(1);
-    expect(notice()).toBeNull();
 
     // A message sent after the retry is a new follow-up with no stale file.
     await type(container, "and another thing");
@@ -373,7 +356,7 @@ describe("TaskComposer on Sessions", () => {
     await unmount();
   });
 
-  test("a retry that fails again keeps the file for the same task", async () => {
+  test("a new follow-up waits while a task is held, and keeps its text and the notice", async () => {
     rejectUploads = true;
     const { container, unmount } = await mount(
       <TaskComposer
@@ -384,26 +367,49 @@ describe("TaskComposer on Sessions", () => {
         )}
       />,
     );
-    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
-    await act(async () => add.click());
-    await type(container, "see the screenshot");
-    await send(container);
-    const notice = () =>
-      container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
-    await waitFor(() => notice() !== null);
-    const retry = () =>
-      [...container.querySelectorAll("button")].find((b) => b.textContent === "Retry upload");
-    await act(async () => retry()?.click());
-    await waitFor(() => retry() !== undefined);
+    await attachAndSend(container);
+    await waitFor(() => notice(container) !== null);
 
-    expect(notice()?.textContent).toContain("screenshot-x.png");
+    await type(container, "and another thing");
+    await act(async () => sendButton(container).click());
+    await act(async () => {});
+
     expect(createdTasks).toHaveLength(1);
-    // Discard drops the file.
-    const discard = container.querySelector(
-      'button[aria-label="Discard failed files"]',
-    ) as HTMLButtonElement;
-    await act(async () => discard.click());
-    expect(notice()).toBeNull();
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
+      "and another thing",
+    );
+    expect(notice(container)?.textContent).toContain("screenshot-x.png");
+    expect(promoteCalls).toEqual([]);
+    await unmount();
+  });
+
+  test("a retry that fails again keeps the task held; Start without it starts it", async () => {
+    rejectUploads = true;
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => notice(container) !== null);
+    await act(async () => buttonNamed(container, "Retry upload")?.click());
+    await waitFor(() => buttonNamed(container, "Retry upload") !== undefined);
+
+    expect(notice(container)?.textContent).toContain("screenshot-x.png");
+    expect(promoteCalls).toEqual([]);
+    expect(started).toEqual([]);
+
+    await act(async () => buttonNamed(container, "Start without it")?.click());
+    await waitFor(() => notice(container) === null);
+    expect(promoted).toEqual(["follow-up"]);
+    expect(started).toEqual(["follow-up"]);
+    expect(createdTasks).toHaveLength(1);
     await unmount();
   });
 });
@@ -509,7 +515,6 @@ describe("TaskComposer mode", () => {
 describe("TaskComposer on the task page", () => {
   test("a follow-up goes to the same agent, clears the page draft and reports the new task", async () => {
     const created: Array<{ id: string }> = [];
-    const outcomes: Array<{ attachmentsFailed: boolean }> = [];
     const drafts: string[] = [];
     function Page() {
       const [draft, setDraft] = useState("");
@@ -523,10 +528,7 @@ describe("TaskComposer on the task page", () => {
             drafts.push(next);
             setDraft(next);
           }}
-          onCreated={(task, outcome) => {
-            created.push(task);
-            outcomes.push(outcome);
-          }}
+          onCreated={(task) => created.push(task)}
           fullWidth
         />
       );
@@ -547,7 +549,6 @@ describe("TaskComposer on the task page", () => {
       source: "ui",
     });
     expect(created.map((task) => task.id)).toEqual(["follow-up"]);
-    expect(outcomes).toEqual([{ attachmentsFailed: false }]);
     // The page owns the draft: the composer clears it through `onValueChange`.
     expect(drafts.at(-1)).toBe("");
     expect(textarea.value).toBe("");

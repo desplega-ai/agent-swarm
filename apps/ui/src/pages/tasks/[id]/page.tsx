@@ -77,7 +77,6 @@ import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { normalizeSessionLogs, parseSessionLogs, sumItemCallUsage } from "@/logs-parser";
-import { announceFollowUpTask } from "./follow-up-navigation";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   TaskActions,
@@ -417,14 +416,14 @@ export default function TaskDetailPage() {
       setHelpOpen(true);
     },
   });
-  // A follow-up on a finished task is a new task: the page moves to it,
-  // unless some attachments failed to upload and the composer holds them.
+  // A follow-up on a finished task is a new task: the page moves to it once
+  // it starts. The composer holds a task whose files failed to upload, so the
+  // page stays on its retry notice until then.
   const announceFollowUp = useCallback(
-    (created: AgentTask, outcome: { attachmentsFailed: boolean }) =>
-      announceFollowUpTask(created, outcome, {
-        navigate: (to) => void navigate(to),
-        notify: (message, action) => toast.success(message, action ? { action } : undefined),
-      }),
+    (created: AgentTask) => {
+      toast.success("Follow-up task created.");
+      void navigate(`/tasks/${created.id}`);
+    },
     [navigate],
   );
   const agentNames = useMemo(
