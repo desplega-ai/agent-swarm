@@ -49350,6 +49350,16 @@
               }
             }
           },
+          "403": {
+            "description": "The run's agent may not create a child task under parentTaskId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
             "content": {

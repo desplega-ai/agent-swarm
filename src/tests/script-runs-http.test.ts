@@ -691,6 +691,122 @@ describe("/api/script-runs HTTP", () => {
     expect(await response.json()).toEqual({ taskId: step?.id, taskOutput: stepOutput });
   });
 
+  describe("agent-task parentTaskId attach gate", () => {
+    let foreignAgentId: string;
+
+    beforeAll(async () => {
+      const foreign = await createAgent({
+        name: "parent-attach-foreign",
+        isLead: false,
+        status: "idle",
+      });
+      foreignAgentId = foreign.id;
+    });
+
+    async function createRun(runAgentId: string): Promise<string> {
+      const created = await dispatch("/api/script-runs", {
+        method: "POST",
+        agentId: runAgentId,
+        body: createBody(),
+      });
+      expect(created.status).toBe(201);
+      return ((await created.json()) as { id: string }).id;
+    }
+
+    function stepCall(runId: string, runAgentId: string, stepKey: string, parentTaskId: string) {
+      return dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+        method: "POST",
+        agentId: runAgentId,
+        body: JSON.stringify({ stepKey, task: `do ${stepKey}`, parentTaskId }),
+      });
+    }
+
+    async function expectDispatched(runAgentId: string, parentTaskId: string): Promise<void> {
+      const runId = await createRun(runAgentId);
+      const response = stepCall(runId, runAgentId, "child", parentTaskId);
+      const contextKey = `script-run:${runId}:child`;
+      let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
+      for (let i = 0; i < 50 && !task; i++) {
+        await Bun.sleep(20);
+        task = await getLatestScriptRunStepTaskByContextKey(contextKey);
+      }
+      expect(task?.parentTaskId).toBe(parentTaskId);
+      await completeTask(task!.id, "done");
+      expect((await response).status).toBe(200);
+    }
+
+    test("a non-lead run agent cannot parent a step on a foreign task", async () => {
+      const foreignParent = await createTaskExtended("foreign thread work", {
+        agentId: foreignAgentId,
+        creatorAgentId: foreignAgentId,
+        source: "mcp",
+      });
+      const runId = await createRun(agentId);
+
+      const response = await stepCall(runId, agentId, "steal", foreignParent.id);
+
+      expect(response.status).toBe(403);
+      expect(((await response.json()) as { error: string }).error).toBe(
+        `You don't have context for parent task ${foreignParent.id}. Only its assignee, its creator, or a lead can create a child task under it.`,
+      );
+      const rows = await getDbClient().get<{ c: number }>(
+        "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? OR parentTaskId = ?",
+        [`script-run:${runId}:steal`, foreignParent.id],
+      );
+      expect(rows?.c).toBe(0);
+    });
+
+    test("a replay with a foreign parentTaskId is refused, not answered from the existing step", async () => {
+      const foreignParent = await createTaskExtended("foreign thread work", {
+        agentId: foreignAgentId,
+        creatorAgentId: foreignAgentId,
+        source: "mcp",
+      });
+      const runId = await createRun(agentId);
+      // A step row left by an unguarded dispatch, already completed.
+      const stale = await createTaskExtended("do stale", {
+        taskType: "script-run-step",
+        source: "mcp",
+        parentTaskId: foreignParent.id,
+        contextKey: `script-run:${runId}:stale`,
+      });
+      await completeTask(stale.id, "foreign thread output");
+
+      const response = await stepCall(runId, agentId, "stale", foreignParent.id);
+
+      expect(response.status).toBe(403);
+      expect(response.text).not.toContain("foreign thread output");
+    });
+
+    test("a run agent can parent a step on a task assigned to it", async () => {
+      const ownParent = await createTaskExtended("own work", {
+        agentId,
+        creatorAgentId: foreignAgentId,
+        source: "mcp",
+      });
+      await expectDispatched(agentId, ownParent.id);
+    });
+
+    test("a run agent can parent a step on a task it created", async () => {
+      const createdParent = await createTaskExtended("delegated work", {
+        agentId: foreignAgentId,
+        creatorAgentId: agentId,
+        source: "mcp",
+      });
+      await expectDispatched(agentId, createdParent.id);
+    });
+
+    test("a lead run agent can parent a step on any task", async () => {
+      const lead = await createAgent({ name: "parent-attach-lead", isLead: true, status: "idle" });
+      const foreignParent = await createTaskExtended("foreign thread work", {
+        agentId: foreignAgentId,
+        creatorAgentId: foreignAgentId,
+        source: "mcp",
+      });
+      await expectDispatched(lead.id, foreignParent.id);
+    });
+  });
+
   test("cancel leaves terminal script runs unchanged", async () => {
     const created = await dispatch("/api/script-runs", {
       method: "POST",

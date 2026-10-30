@@ -32284,6 +32284,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description The run's agent may not create a child task under parentTaskId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Script run not found */
             404: {
                 headers: {

@@ -24,6 +24,7 @@ import {
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
+import { can } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
@@ -298,6 +299,7 @@ const agentTaskRoute = route({
       description: "Agent task created or still running",
       schema: z.object({ taskId: z.string(), status: AgentTaskStatusSchema }),
     },
+    403: { description: "The run's agent may not create a child task under parentTaskId" },
     404: { description: "Script run not found" },
   },
 });
@@ -627,6 +629,37 @@ export async function handleScriptRuns(
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
+    }
+
+    // The step inherits its parent's contextKey (its Slack or chat thread) and requester, as a
+    // send-task child does, so the run's agent needs the same parent-attach right. This runs
+    // before the replay lookup: a replayed call must be allowed its parent too, so it never
+    // returns the output of a step parented on a task its run cannot attach to.
+    const parentTask = parsed.body.parentTaskId
+      ? await getTaskById(parsed.body.parentTaskId)
+      : null;
+    if (parentTask) {
+      const runAgent = await getAgentById(run.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: run.agentId, isLead: runAgent?.isLead ?? false },
+        verb: "task.parent.attach",
+        resource: {
+          kind: "task",
+          taskId: parentTask.id,
+          requestedByUserId: parentTask.requestedByUserId,
+          creatorAgentId: parentTask.creatorAgentId,
+          agentId: parentTask.agentId,
+        },
+        source: "http",
+      });
+      if (!decision.allow) {
+        jsonError(
+          res,
+          `You don't have context for parent task ${parentTask.id}. Only its assignee, its creator, or a lead can create a child task under it.`,
+          403,
+        );
+        return true;
+      }
     }
 
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
