@@ -17,7 +17,10 @@
  *    counts once however many steps it dispatched. Independent of similarity,
  *    so a loop that rewords each re-delegation still stops.
  *
- * Callers bypass both with `allowRedelegation` and log the override.
+ * Callers bypass both with `allowRedelegation` and log the override. Each
+ * caller evaluates the rules inside the write transaction that inserts the
+ * task, so two concurrent dispatches into one thread (send-task or a run's
+ * first step, in any mix) cannot both read the count below the cap.
  */
 import {
   countAgentDispatchesInThread,
@@ -43,7 +46,7 @@ export const FOLLOW_UP_DISPATCH_WINDOW_MINUTES = 360; // 6 hours
 /** Rows per page when the same-work rule scans a thread's completions. */
 export const FOLLOW_UP_SAME_WORK_PAGE_SIZE = 200;
 
-export type FollowUpThread = { channelId: string; threadTs: string };
+export type FollowUpThread = { channelId: string; threadTs: string; userId?: string };
 
 export type FollowUpRedelegationBlock = {
   rule: "same-work" | "loop-cap";
@@ -67,15 +70,18 @@ export async function followUpThreadForSourceTask(
   ) {
     return null;
   }
-  return { channelId: sourceTask.slackChannelId, threadTs: sourceTask.slackThreadTs };
+  return {
+    channelId: sourceTask.slackChannelId,
+    threadTs: sourceTask.slackThreadTs,
+    userId: sourceTask.slackUserId,
+  };
 }
 
 /**
  * The most recent completed task in the thread's same-work window whose
  * description matches this dispatch. Pages through every completion in the
  * window (an older match can sit behind any number of newer unrelated ones),
- * one bounded query per page, and stops at the first match. This runs before
- * the write transaction, so the DB lock is free between pages.
+ * one bounded query per page, and stops at the first match.
  */
 async function findMatchingCompletedWork(args: {
   channelId: string;

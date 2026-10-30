@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import * as db from "../be/db";
 import {
   closeDb,
   completeTask,
@@ -16,6 +17,7 @@ import {
   initDb,
   updateScriptRun,
 } from "../be/db";
+import * as modelValidation from "../be/model-validation";
 import { configSecretName, registerStoredSecret } from "../be/secret-registry";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -26,7 +28,9 @@ import {
   FOLLOW_UP_DISPATCH_CAP,
   FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
 } from "../tasks/follow-up-redelegation-guard";
-import type { AgentTask } from "../types";
+import { sendTaskHandler, sendTaskInputSchema } from "../tools/send-task";
+import { ownerCtx } from "../tools/task-tool-ctx";
+import type { AgentTask, CreateTaskOptions } from "../types";
 import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
@@ -943,6 +947,246 @@ describe("ctx.step.agentTask follow-up re-delegation guard", () => {
       const response = await step(runId, "refresh", "refresh the onboarding checklist copy");
       expect(response.status).toBe(200);
     }
+  });
+
+  async function backdate(taskId: string, minutesAgo: number): Promise<void> {
+    const at = new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
+    await getDbClient().run(
+      "UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?",
+      [at, at, taskId],
+    );
+  }
+
+  async function dispatchCount(channel: string, thread: string): Promise<number> {
+    return countAgentDispatchesInThread(
+      channel,
+      thread,
+      agentId,
+      FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
+    );
+  }
+
+  /** A send-task from the follow-up session to another worker. */
+  async function sendTask(sourceTaskId: string, task: string) {
+    const target = await createAgent({
+      name: `guard-target-${crypto.randomUUID()}`,
+      isLead: false,
+      status: "idle",
+      maxTasks: 100,
+    });
+    return sendTaskHandler(
+      ownerCtx({ agentId, sourceTaskId }),
+      sendTaskInputSchema.parse({
+        task,
+        agentId: target.id,
+        routingReason: "skill",
+        routingNote: "target owns this work",
+      }),
+    );
+  }
+
+  const randomText = () => Array.from({ length: 4 }, () => crypto.randomUUID()).join(" ");
+
+  test("a step with no parent is attributed to the follow-up's thread", async () => {
+    const followUp = await session("C_RUN_NOPARENT", "8.1");
+    const first = await launch(followUp.id);
+    const text = "draft the quarterly churn analysis for finance";
+    expect((await step(first, "churn", text)).status).toBe(200);
+    const stepTask = await getLatestScriptRunStepTaskByContextKey(`script-run:${first}:churn`);
+    expect(stepTask?.slackChannelId).toBe("C_RUN_NOPARENT");
+    expect(stepTask?.slackThreadTs).toBe("8.1");
+    expect(await dispatchCount("C_RUN_NOPARENT", "8.1")).toBe(1);
+
+    // Another run repeating the completed step is the same work.
+    const second = await launch(followUp.id);
+    const repeat = await step(second, "churn-again", text);
+    expect(repeat.status).toBe(422);
+    expect(((await repeat.json()) as { rule: string }).rule).toBe("same-work");
+  });
+
+  test("a step whose parent sits in another thread is attributed to the follow-up's thread", async () => {
+    const followUp = await session("C_RUN_XPARENT", "9.1");
+    const foreignParent = await createTaskExtended("earlier work in another thread", {
+      agentId,
+      slackChannelId: "C_RUN_XPARENT_OTHER",
+      slackThreadTs: "9.9",
+    });
+    const first = await launch(followUp.id);
+    const text = "audit the vendor contracts for renewal dates";
+    expect((await step(first, "audit", text, { parentTaskId: foreignParent.id })).status).toBe(200);
+    const stepTask = await getLatestScriptRunStepTaskByContextKey(`script-run:${first}:audit`);
+    expect(stepTask?.parentTaskId).toBe(foreignParent.id);
+    expect(stepTask?.slackChannelId).toBe("C_RUN_XPARENT");
+    expect(stepTask?.slackThreadTs).toBe("9.1");
+    expect(await dispatchCount("C_RUN_XPARENT", "9.1")).toBe(1);
+    expect(await dispatchCount("C_RUN_XPARENT_OTHER", "9.9")).toBe(0);
+
+    const second = await launch(followUp.id);
+    const repeat = await step(second, "audit-again", text, { parentTaskId: foreignParent.id });
+    expect(repeat.status).toBe(422);
+    expect(((await repeat.json()) as { rule: string }).rule).toBe("same-work");
+  });
+
+  /**
+   * Hold the next matching task insert for 300 ms. `started` resolves when it
+   * begins, so a test can start a competing dispatch while the first one sits
+   * between its guard decision and its insert.
+   */
+  function stallNextInsert(matches: (options: CreateTaskOptions | undefined) => boolean) {
+    const original = db.createTaskExtended;
+    let reached: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let armed = true;
+    const spy = spyOn(db, "createTaskExtended").mockImplementation(async (task, options) => {
+      if (armed && matches(options)) {
+        armed = false;
+        reached();
+        await Bun.sleep(300);
+      }
+      return original(task, options);
+    });
+    return { started, restore: () => spy.mockRestore() };
+  }
+
+  const isStep = (options: CreateTaskOptions | undefined) =>
+    options?.taskType === "script-run-step";
+
+  test("a step racing a blocked sibling of its run: the run dispatches all or none", async () => {
+    const matching = "rebuild the hiring pipeline dashboard from scratch";
+    await completedWork("C_RUN_PAR", "10.1", matching);
+    const followUp = await session("C_RUN_PAR", "10.1");
+    const runId = await launch(followUp.id);
+
+    // The distinct step decides first and is mid-insert when the matching one arrives.
+    const stall = stallNextInsert(isStep);
+    try {
+      const distinct = step(runId, "distinct", randomText());
+      await stall.started;
+      const repeat = step(runId, "repeat", matching);
+      expect([(await distinct).status, (await repeat).status]).toEqual([200, 200]);
+    } finally {
+      stall.restore();
+    }
+  }, 30_000);
+
+  test("a stepKey racing its own first dispatch replays the same task", async () => {
+    const followUp = await session("C_RUN_SAMEKEY", "15.1");
+    const runId = await launch(followUp.id);
+    const text = randomText();
+
+    // Both calls miss the replay lookup; the first then waits before its insert.
+    const original = modelValidation.explicitModelErrorForAgent;
+    let reached: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let calls = 0;
+    const spy = spyOn(modelValidation, "explicitModelErrorForAgent").mockImplementation(
+      async (input) => {
+        if (calls++ === 0) {
+          reached();
+          await Bun.sleep(300);
+        }
+        return original(input);
+      },
+    );
+    let responses: TestResponse[];
+    try {
+      const first = step(runId, "once", text);
+      await started;
+      const second = step(runId, "once", text);
+      responses = [await first, await second];
+    } finally {
+      spy.mockRestore();
+    }
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+    const ids = await Promise.all(
+      responses.map(async (r) => ((await r.json()) as { taskId: string }).taskId),
+    );
+    expect(ids[0]).toBe(ids[1]);
+    const rows = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks WHERE contextKey = ?",
+      [`script-run:${runId}:once`],
+    );
+    expect(rows?.c).toBe(1);
+  }, 30_000);
+
+  test("a blocked first step blocks the run's later steps until one overrides", async () => {
+    const matching = "migrate the billing webhooks to the new endpoint";
+    await completedWork("C_RUN_STICKY", "11.1", matching);
+    const followUp = await session("C_RUN_STICKY", "11.1");
+    const runId = await launch(followUp.id);
+
+    expect((await step(runId, "repeat", matching)).status).toBe(422);
+    const later = await step(runId, "distinct", randomText());
+    expect(later.status).toBe(422);
+    expect(((await later.json()) as { rule: string }).rule).toBe("same-work");
+
+    const overridden = await step(runId, "repeat", matching, { allowRedelegation: true });
+    expect(overridden.status).toBe(200);
+    expect((await step(runId, "after-override", randomText())).status).toBe(200);
+  });
+
+  test("two runs racing at the cap minus one: exactly one dispatches", async () => {
+    await sendTaskDispatches("C_RUN_RACE", "12.1", FOLLOW_UP_DISPATCH_CAP - 1);
+    const followUp = await session("C_RUN_RACE", "12.1");
+    const [a, b] = [await launch(followUp.id), await launch(followUp.id)];
+
+    const stall = stallNextInsert(isStep);
+    try {
+      const first = step(a, "go", randomText());
+      await stall.started;
+      const second = step(b, "go", randomText());
+      expect([(await first).status, (await second).status]).toEqual([200, 422]);
+    } finally {
+      stall.restore();
+    }
+    expect(await dispatchCount("C_RUN_RACE", "12.1")).toBe(FOLLOW_UP_DISPATCH_CAP);
+  }, 30_000);
+
+  test("a run and a send-task racing at the cap minus one: exactly one dispatches, in either order", async () => {
+    for (const [i, runFirst] of [true, false].entries()) {
+      const thread = `13.${i}`;
+      await sendTaskDispatches("C_RUN_MIX_RACE", thread, FOLLOW_UP_DISPATCH_CAP - 1);
+      const followUp = await session("C_RUN_MIX_RACE", thread);
+      const runId = await launch(followUp.id);
+      const runCall = async () => (await step(runId, "go", randomText())).status === 200;
+      const sendCall = async () => (await sendTask(followUp.id, randomText())).ok;
+
+      // Whichever dispatcher goes first is mid-insert when the other arrives.
+      const stall = stallNextInsert((options) => isStep(options) === runFirst);
+      try {
+        const first = runFirst ? runCall() : sendCall();
+        await stall.started;
+        const second = runFirst ? sendCall() : runCall();
+        expect([await first, await second]).toEqual([true, false]);
+      } finally {
+        stall.restore();
+      }
+      expect(await dispatchCount("C_RUN_MIX_RACE", thread)).toBe(FOLLOW_UP_DISPATCH_CAP);
+    }
+  }, 30_000);
+
+  test("a long run is dated by its first step, not by steps it adds later", async () => {
+    await sendTaskDispatches("C_RUN_WINDOW", "14.1", FOLLOW_UP_DISPATCH_CAP - 1);
+    const followUp = await session("C_RUN_WINDOW", "14.1");
+    const longRun = await launch(followUp.id);
+    expect((await step(longRun, "first", randomText())).status).toBe(200);
+    const firstStep = await getLatestScriptRunStepTaskByContextKey(`script-run:${longRun}:first`);
+    await backdate(firstStep!.id, FOLLOW_UP_DISPATCH_WINDOW_MINUTES + 60);
+    expect(await dispatchCount("C_RUN_WINDOW", "14.1")).toBe(FOLLOW_UP_DISPATCH_CAP - 1);
+
+    // A step created now does not move the run into the window.
+    expect((await step(longRun, "later", randomText())).status).toBe(200);
+    expect(await dispatchCount("C_RUN_WINDOW", "14.1")).toBe(FOLLOW_UP_DISPATCH_CAP - 1);
+
+    // A run whose first step is inside the window counts once.
+    const freshRun = await launch(followUp.id);
+    expect((await step(freshRun, "first", randomText())).status).toBe(200);
+    expect((await step(freshRun, "second", randomText())).status).toBe(200);
+    expect(await dispatchCount("C_RUN_WINDOW", "14.1")).toBe(FOLLOW_UP_DISPATCH_CAP);
   });
 });
 

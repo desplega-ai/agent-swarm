@@ -313,7 +313,11 @@ export {
   getContextVersionHistory,
   getLatestContextVersion,
 } from "./db/context-versions";
-export { getScriptRunExecutionArgs } from "./db/script-runs";
+export {
+  getScriptRunExecutionArgs,
+  getScriptRunFollowUpGuard,
+  setScriptRunFollowUpGuard,
+} from "./db/script-runs";
 export {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -376,7 +380,6 @@ export {
   giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
-  hasScriptRunStepTasks,
   isLinearTrackerContextKey,
   markChatRelayAttempted,
   markChatRelayDelivered,

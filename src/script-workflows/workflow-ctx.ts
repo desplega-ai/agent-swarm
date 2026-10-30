@@ -47,8 +47,9 @@ type AgentTaskConfig = {
   /**
    * Dispatch even when the follow-up re-delegation guard blocks this step.
    * The guard applies only to a run launched from a follow-up task in a Slack
-   * thread, and only at the run's first new step: it blocks a repeat of work
-   * already completed in the thread, or a run past the thread's dispatch cap.
+   * thread, and decides once for the whole run at its first new step: it
+   * blocks a repeat of work already completed in the thread, or a run past the
+   * thread's dispatch cap. A blocked run's later new steps are blocked too.
    */
   allowRedelegation?: boolean;
   /**

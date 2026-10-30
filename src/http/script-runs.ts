@@ -13,11 +13,12 @@ import {
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
+  getScriptRunFollowUpGuard,
   getScriptRunJournalStep,
   getTaskById,
-  hasScriptRunStepTasks,
   listScriptRunJournalSteps,
   listScriptRuns,
+  setScriptRunFollowUpGuard,
   updateScriptRun,
   updateScriptRunIfNotTerminal,
   updateScriptRunIfRunning,
@@ -34,9 +35,11 @@ import {
 } from "../script-workflows/supervisor";
 import {
   evaluateFollowUpRedelegation,
+  type FollowUpRedelegationBlock,
   followUpThreadForSourceTask,
 } from "../tasks/follow-up-redelegation-guard";
 import {
+  type AgentTask,
   AgentTaskStatusSchema,
   RoutingReasonSchema,
   ScriptRunJournalEntrySchema,
@@ -326,6 +329,11 @@ async function resolveRunSourceTaskId(
   const task = await getTaskById(sourceTaskId);
   return task?.agentId === agentId ? task.id : undefined;
 }
+
+/** One `ctx.step.agentTask` dispatch: the step task, or the guard rule that blocked it. */
+type StepDispatch =
+  | { task: AgentTask; blocked?: undefined; override?: FollowUpRedelegationBlock["rule"] }
+  | { task?: undefined; blocked: FollowUpRedelegationBlock; override?: undefined };
 
 async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
@@ -668,29 +676,6 @@ export async function handleScriptRuns(
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
       const taskDescription = parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey;
-      // Follow-up re-delegation guard, as in send-task. A run is one dispatch:
-      // only its first fresh step is checked, so later steps never compare
-      // against the run's own completed steps and a long run cannot use up
-      // the thread's loop cap. A replayed stepKey found a task above and is
-      // never blocked.
-      const followUpThread = await followUpThreadForSourceTask(run.sourceTaskId);
-      if (followUpThread && !(await hasScriptRunStepTasks(run.id))) {
-        const blocked = await evaluateFollowUpRedelegation({
-          ...followUpThread,
-          creatorAgentId: run.agentId,
-          taskDescription,
-          targetAgentId: parsed.body.agentId,
-        });
-        if (blocked && !parsed.body.allowRedelegation) {
-          json(res, { error: blocked.message, rule: blocked.rule }, 422);
-          return true;
-        }
-        if (blocked) {
-          console.log(
-            `[script-runs] follow-up re-delegation override: rule=${blocked.rule} runId=${run.id} creatorAgentId=${run.agentId} sourceTaskId=${run.sourceTaskId} thread=${followUpThread.channelId}/${followUpThread.threadTs}`,
-          );
-        }
-      }
       const modelError = await explicitModelErrorForAgent({
         model: parsed.body.model,
         allowCustomModel: parsed.body.allowCustomModel,
@@ -700,32 +685,85 @@ export async function handleScriptRuns(
         jsonError(res, modelError, 400);
         return true;
       }
+      const followUpThread = await followUpThreadForSourceTask(run.sourceTaskId);
+      // The replay lookup, the guard decision and the insert share one write
+      // transaction. It serializes this step against the run's other steps,
+      // other runs and send-task dispatches into the same thread.
+      let dispatched: StepDispatch;
       try {
-        task = await createTaskExtended(taskDescription, {
-          agentId: parsed.body.agentId,
-          routingReason:
-            parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
-          routingNote: parsed.body.routingNote,
-          routingSource: parsed.body.routingReason
-            ? "declared"
-            : parsed.body.agentId
-              ? "engine_default"
-              : undefined,
-          tags: parsed.body.tags,
-          priority: parsed.body.priority,
-          dependsOn: parsed.body.dependsOn,
-          offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
-          taskType: "script-run-step",
-          source: "mcp",
-          // Counts the run toward the launcher's follow-up loop cap.
-          creatorAgentId: run.agentId,
-          dir: parsed.body.dir,
-          vcsRepo: parsed.body.vcsRepo,
-          model: parsed.body.model,
-          parentTaskId: parsed.body.parentTaskId,
-          requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
-          outputSchema: parsed.body.outputSchema,
-          contextKey,
+        dispatched = await getDbClient().transaction(async (): Promise<StepDispatch> => {
+          const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
+          if (replayed) return { task: replayed };
+
+          // Follow-up re-delegation guard, as in send-task. A run is one
+          // dispatch: its first new step decides for the whole run, and every
+          // later step follows that decision. Later steps never compare against
+          // the run's own completed steps, a long run cannot use up the thread's
+          // loop cap, and parallel steps are dispatched all or none.
+          let override: FollowUpRedelegationBlock["rule"] | undefined;
+          if (followUpThread) {
+            const decision = await getScriptRunFollowUpGuard(run.id);
+            if (decision !== "passed") {
+              const blocked: FollowUpRedelegationBlock | null =
+                decision === null
+                  ? await evaluateFollowUpRedelegation({
+                      ...followUpThread,
+                      creatorAgentId: run.agentId,
+                      taskDescription,
+                      targetAgentId: parsed.body.agentId,
+                    })
+                  : {
+                      rule: decision,
+                      message: `Blocked by the follow-up re-delegation guard (${decision} rule): an earlier step of this script run was blocked, and a run counts as one dispatch. If it must run, pass allowRedelegation: true.`,
+                    };
+              if (blocked && !parsed.body.allowRedelegation) {
+                if (decision === null) await setScriptRunFollowUpGuard(run.id, blocked.rule);
+                return { blocked };
+              }
+              override = blocked?.rule;
+              await setScriptRunFollowUpGuard(run.id, "passed");
+            }
+          }
+
+          const created = await createTaskExtended(taskDescription, {
+            agentId: parsed.body.agentId,
+            routingReason:
+              parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
+            routingNote: parsed.body.routingNote,
+            routingSource: parsed.body.routingReason
+              ? "declared"
+              : parsed.body.agentId
+                ? "engine_default"
+                : undefined,
+            tags: parsed.body.tags,
+            priority: parsed.body.priority,
+            dependsOn: parsed.body.dependsOn,
+            offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
+            taskType: "script-run-step",
+            source: "mcp",
+            // Counts the run toward the launcher's follow-up loop cap.
+            creatorAgentId: run.agentId,
+            // With no parent, the step inherits the launching session's Slack
+            // thread, as a send-task from that session does.
+            sourceTaskId: run.sourceTaskId,
+            // A guarded run's steps are its dispatches into the follow-up's
+            // thread, whatever their parent, so the guard sees them there.
+            ...(followUpThread
+              ? {
+                  slackChannelId: followUpThread.channelId,
+                  slackThreadTs: followUpThread.threadTs,
+                  slackUserId: followUpThread.userId,
+                }
+              : {}),
+            dir: parsed.body.dir,
+            vcsRepo: parsed.body.vcsRepo,
+            model: parsed.body.model,
+            parentTaskId: parsed.body.parentTaskId,
+            requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+            outputSchema: parsed.body.outputSchema,
+            contextKey,
+          });
+          return { task: created, override };
         });
       } catch (error) {
         if (error instanceof ExtensionAgentAssignmentError) {
@@ -734,6 +772,16 @@ export async function handleScriptRuns(
         }
         throw error;
       }
+      if (dispatched.override) {
+        console.log(
+          `[script-runs] follow-up re-delegation override: rule=${dispatched.override} runId=${run.id} creatorAgentId=${run.agentId} sourceTaskId=${run.sourceTaskId} thread=${followUpThread?.channelId}/${followUpThread?.threadTs}`,
+        );
+      }
+      if (!dispatched.task) {
+        json(res, { error: dispatched.blocked.message, rule: dispatched.blocked.rule }, 422);
+        return true;
+      }
+      task = dispatched.task;
     }
 
     const deadline = Date.now() + 30_000;

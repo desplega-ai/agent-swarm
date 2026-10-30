@@ -371,6 +371,7 @@ value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
 value:getScriptRunExecutionArgs
+value:getScriptRunFollowUpGuard
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -447,7 +448,6 @@ value:hasFirstCompletedTask
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
 value:hasPendingSteering
-value:hasScriptRunStepTasks
 value:heartbeatActiveSession
 value:incrKv
 value:incrementEmptyPollCount
@@ -564,6 +564,7 @@ value:setApiKeyName
 value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
+value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
 value:setUserFavorite
 value:settleSupersededTaskDependents
@@ -663,7 +664,6 @@ value:getTasksCount
 value:giveUpStaleChatRelays
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
-value:hasScriptRunStepTasks
 value:isLinearTrackerContextKey
 value:markChatRelayAttempted
 value:markChatRelayDelivered
