@@ -53,7 +53,12 @@ const UI_STATE_COMPONENTS = new Set([
   "Tabs",
   "Chips",
   "Tree",
+  "SchemaForm",
 ]);
+
+// A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
+const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
+const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
  * Props that hold a plain action chain (an array of `{ action, params }`),
@@ -66,6 +71,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
+  SchemaForm: ["onChange"],
 };
 
 /**
@@ -1348,6 +1354,19 @@ export function validatePage(
         typeof rawElement.props.id === "string"
       ) {
         formIds.add(rawElement.props.id);
+      }
+      if (
+        type === "SchemaForm" &&
+        isPlainObject(rawElement.props) &&
+        typeof rawElement.props.id === "string" &&
+        (!SCHEMA_FORM_ID.test(rawElement.props.id) || RESERVED_UI_IDS.has(rawElement.props.id))
+      ) {
+        issues.push(
+          issue(
+            `${propsPath}.id`,
+            "SchemaForm id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+          ),
+        );
       }
       if (
         typeof type === "string" &&
