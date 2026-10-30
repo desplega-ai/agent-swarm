@@ -2425,6 +2425,9 @@
     },
     "apiEndpointId": {
       "exempt": "identifier"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier"
     }
   },
   "script_versions": {
