@@ -33,6 +33,7 @@
     "script-workflow-runs",
     "dreaming",
     "claude-bridge-experimental",
+    "claude-artifacts-read",
     "worker-credential-recovery",
     "provider-auth",
     "x402-payments",
