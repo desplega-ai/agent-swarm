@@ -2425,6 +2425,12 @@
     },
     "apiEndpointId": {
       "exempt": "identifier"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier"
+    },
+    "followUpGuard": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "script_versions": {

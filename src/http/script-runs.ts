@@ -13,10 +13,12 @@ import {
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
+  getScriptRunFollowUpGuard,
   getScriptRunJournalStep,
   getTaskById,
   listScriptRunJournalSteps,
   listScriptRuns,
+  setScriptRunFollowUpGuard,
   updateScriptRun,
   updateScriptRunIfNotTerminal,
   updateScriptRunIfRunning,
@@ -33,6 +35,12 @@ import {
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
 import {
+  evaluateFollowUpRedelegation,
+  type FollowUpRedelegationBlock,
+  followUpThreadForSourceTask,
+} from "../tasks/follow-up-redelegation-guard";
+import {
+  type AgentTask,
   AgentTaskStatusSchema,
   RoutingReasonSchema,
   ScriptRunJournalEntrySchema,
@@ -112,6 +120,8 @@ const agentTaskBodySchema = z.object({
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+  /** Dispatch even when the follow-up re-delegation guard blocks it (same flag as send-task). */
+  allowRedelegation: z.boolean().optional(),
 });
 
 const scriptRunCreatedSchema = z.object({
@@ -299,8 +309,13 @@ const agentTaskRoute = route({
       description: "Agent task created or still running",
       schema: z.object({ taskId: z.string(), status: AgentTaskStatusSchema }),
     },
-    403: { description: "The run's agent may not create a child task under parentTaskId" },
+    403: {
+      description:
+        "Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId",
+    },
     404: { description: "Script run not found" },
+    409: { description: "Agent task failed, was cancelled, or was superseded" },
+    422: { description: "Blocked by the follow-up re-delegation guard" },
   },
 });
 
@@ -331,6 +346,32 @@ async function stepParentRefusal(runAgentId: string, parentTaskId: string): Prom
     ? null
     : `You don't have context for parent task ${parentTaskId}. Only its assignee, its creator, or a lead can create a child task under it.`;
 }
+
+/**
+ * The launching session's task (X-Source-Task-Id), kept only when it belongs
+ * to the launching agent so a run cannot borrow another agent's session.
+ */
+async function resolveRunSourceTaskId(
+  req: IncomingMessage,
+  agentId: string,
+): Promise<string | undefined> {
+  const raw = req.headers["x-source-task-id"];
+  const sourceTaskId = Array.isArray(raw) ? raw[0] : raw;
+  if (!sourceTaskId) return undefined;
+  const task = await getTaskById(sourceTaskId);
+  return task?.agentId === agentId ? task.id : undefined;
+}
+
+/** One `ctx.step.agentTask` dispatch: the step task, or the guard rule that blocked it. */
+type StepDispatch =
+  | {
+      task: AgentTask;
+      /** True when this call inserted the step, false on a replay. */
+      created?: boolean;
+      blocked?: undefined;
+      override?: FollowUpRedelegationBlock["rule"];
+    }
+  | { task?: undefined; blocked: FollowUpRedelegationBlock; override?: undefined };
 
 async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
@@ -438,6 +479,7 @@ export async function handleScriptRuns(
     // Cap check and insert commit together: N concurrent POSTs otherwise all
     // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
+    const sourceTaskId = await resolveRunSourceTaskId(req, agent.id);
     const creation = await getDbClient().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
@@ -448,6 +490,7 @@ export async function handleScriptRuns(
         scriptName: parsed.body.scriptName,
         idempotencyKey: parsed.body.idempotencyKey,
         requestedByUserId: parsed.body.requestedByUserId,
+        sourceTaskId,
         createdBy: parsed.body.requestedByUserId,
       });
     });
@@ -659,6 +702,14 @@ export async function handleScriptRuns(
       return true;
     }
 
+    // Only the run's own harness dispatches its steps (it sends the run's
+    // agent id). Step tasks carry that agent as creator, so another agent
+    // must not create them.
+    if (agentId !== run.agentId) {
+      jsonError(res, "Script run belongs to another agent", 403);
+      return true;
+    }
+
     // The requested parent, checked before any lookup or insert so a refused
     // call creates nothing.
     if (parsed.body.parentTaskId) {
@@ -673,6 +724,7 @@ export async function handleScriptRuns(
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     let dispatchedHere = false;
     if (!task) {
+      const taskDescription = parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey;
       const modelError = await explicitModelErrorForAgent({
         model: parsed.body.model,
         allowCustomModel: parsed.body.allowCustomModel,
@@ -682,10 +734,47 @@ export async function handleScriptRuns(
         jsonError(res, modelError, 400);
         return true;
       }
+      const followUpThread = await followUpThreadForSourceTask(run.sourceTaskId);
+      // The replay lookup, the guard decision and the insert share one write
+      // transaction. It serializes this step against the run's other steps,
+      // other runs and send-task dispatches into the same thread.
+      let dispatched: StepDispatch;
       try {
-        task = await createTaskExtended(
-          parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
-          {
+        dispatched = await getDbClient().transaction(async (): Promise<StepDispatch> => {
+          const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
+          if (replayed) return { task: replayed };
+
+          // Follow-up re-delegation guard, as in send-task. A run is one
+          // dispatch: its first new step decides for the whole run, and every
+          // later step follows that decision. Later steps never compare against
+          // the run's own completed steps, a long run cannot use up the thread's
+          // loop cap, and parallel steps are dispatched all or none.
+          let override: FollowUpRedelegationBlock["rule"] | undefined;
+          if (followUpThread) {
+            const decision = await getScriptRunFollowUpGuard(run.id);
+            if (decision !== "passed") {
+              const blocked: FollowUpRedelegationBlock | null =
+                decision === null
+                  ? await evaluateFollowUpRedelegation({
+                      ...followUpThread,
+                      creatorAgentId: run.agentId,
+                      taskDescription,
+                      targetAgentId: parsed.body.agentId,
+                    })
+                  : {
+                      rule: decision,
+                      message: `Blocked by the follow-up re-delegation guard (${decision} rule): an earlier step of this script run was blocked, and a run counts as one dispatch. If it must run, pass allowRedelegation: true.`,
+                    };
+              if (blocked && !parsed.body.allowRedelegation) {
+                if (decision === null) await setScriptRunFollowUpGuard(run.id, blocked.rule);
+                return { blocked };
+              }
+              override = blocked?.rule;
+              await setScriptRunFollowUpGuard(run.id, "passed");
+            }
+          }
+
+          const created = await createTaskExtended(taskDescription, {
             agentId: parsed.body.agentId,
             routingReason:
               parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
@@ -701,6 +790,20 @@ export async function handleScriptRuns(
             offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
             taskType: "script-run-step",
             source: "mcp",
+            // Counts the run toward the launcher's follow-up loop cap.
+            creatorAgentId: run.agentId,
+            // With no parent, the step inherits the launching session's Slack
+            // thread, as a send-task from that session does.
+            sourceTaskId: run.sourceTaskId,
+            // A guarded run's steps are its dispatches into the follow-up's
+            // thread, whatever their parent, so the guard sees them there.
+            ...(followUpThread
+              ? {
+                  slackChannelId: followUpThread.channelId,
+                  slackThreadTs: followUpThread.threadTs,
+                  slackUserId: followUpThread.userId,
+                }
+              : {}),
             dir: parsed.body.dir,
             vcsRepo: parsed.body.vcsRepo,
             model: parsed.body.model,
@@ -708,9 +811,9 @@ export async function handleScriptRuns(
             requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
             outputSchema: parsed.body.outputSchema,
             contextKey,
-          },
-        );
-        dispatchedHere = true;
+          });
+          return { task: created, created: true, override };
+        });
       } catch (error) {
         if (error instanceof ExtensionAgentAssignmentError) {
           jsonError(res, error.message, 400);
@@ -718,6 +821,17 @@ export async function handleScriptRuns(
         }
         throw error;
       }
+      if (dispatched.override) {
+        console.log(
+          `[script-runs] follow-up re-delegation override: rule=${dispatched.override} runId=${run.id} creatorAgentId=${run.agentId} sourceTaskId=${run.sourceTaskId} thread=${followUpThread?.channelId}/${followUpThread?.threadTs}`,
+        );
+      }
+      if (!dispatched.task) {
+        json(res, { error: dispatched.blocked.message, rule: dispatched.blocked.rule }, 422);
+        return true;
+      }
+      task = dispatched.task;
+      dispatchedHere = dispatched.created === true;
     }
 
     // A replay answers from the selected step, whatever parent this call sent

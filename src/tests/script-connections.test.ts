@@ -676,6 +676,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "263_task_list_filter_index.sql");
       // 264 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
       markMigrationApplied(database, "264_slack_thread_cover_index.sql");
+      // 266 alters script_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "266_script_runs_source_task.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
