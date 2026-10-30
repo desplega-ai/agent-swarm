@@ -1866,19 +1866,23 @@ export async function getMostRecentTaskInThread(
 }
 
 /**
- * Completed tasks in a Slack thread, most recent first. Lead `follow-up`
- * sessions are excluded: they coordinate the work, they are not the work, so
- * they never count as "the request was already handled". The caller matches
- * descriptions in JS, so the cap sits far above a real thread's completions
- * while still bounding the work one dispatch can trigger.
+ * One page of completed tasks in a Slack thread, most recent first. Lead
+ * `follow-up` sessions are excluded: they coordinate the work, they are not the
+ * work, so they never count as "the request was already handled". The caller
+ * matches descriptions in JS, so it pages through the whole window with the
+ * `before` keyset cursor (the last row of the previous page) instead of
+ * loading every row in one query.
  */
 export async function findCompletedTasksInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
   limit = 200,
+  before?: { lastUpdatedAt: string; id: string },
 ): Promise<AgentTask[]> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const cursorSql = before ? "AND (lastUpdatedAt < ? OR (lastUpdatedAt = ? AND id < ?))" : "";
+  const cursorParams = before ? [before.lastUpdatedAt, before.lastUpdatedAt, before.id] : [];
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
@@ -1886,9 +1890,10 @@ export async function findCompletedTasksInThread(
        AND status = 'completed'
        AND COALESCE(taskType, '') != 'follow-up'
        AND lastUpdatedAt > ?
-       ORDER BY lastUpdatedAt DESC
+       ${cursorSql}
+       ORDER BY lastUpdatedAt DESC, id DESC
        LIMIT ?`,
-    [channelId, threadTs, since, limit],
+    [channelId, threadTs, since, ...cursorParams, limit],
   );
   return rows.map(rowToAgentTask);
 }

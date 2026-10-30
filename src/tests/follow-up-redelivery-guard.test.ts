@@ -12,7 +12,12 @@ import {
   getDbClient,
   initDb,
 } from "../be/db";
-import { FOLLOW_UP_DISPATCH_CAP, sendTaskHandler, sendTaskInputSchema } from "../tools/send-task";
+import {
+  FOLLOW_UP_DISPATCH_CAP,
+  FOLLOW_UP_SAME_WORK_PAGE_SIZE,
+  sendTaskHandler,
+  sendTaskInputSchema,
+} from "../tools/send-task";
 import { DEDUP_SCAN_LIMIT, findDuplicateTask } from "../tools/task-dedup";
 import { ownerCtx } from "../tools/task-tool-ctx";
 
@@ -149,6 +154,41 @@ describe("findCompletedTasksInThread", () => {
 
     const result = await findCompletedTasksInThread("C_DEDUP_5", "5000.0001", 2880, 2);
     expect(result.map((t) => t.id)).toEqual([ids[2], ids[1]]);
+  });
+
+  test("the before cursor returns the next page, including rows tied on lastUpdatedAt", async () => {
+    const agent = await createAgent({
+      name: "dedup-worker-6",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    for (let i = 0; i < 5; i++) {
+      const task = await createTaskExtended(`paged completion ${i}`, {
+        agentId: agent.id,
+        slackChannelId: "C_DEDUP_6",
+        slackThreadTs: "6000.0001",
+      });
+      await completeTask(task.id, "done");
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        at,
+        task.id,
+      ]);
+    }
+
+    const seen: string[] = [];
+    let before: { lastUpdatedAt: string; id: string } | undefined;
+    // Bounded so an ignored cursor fails the test instead of looping forever.
+    for (let i = 0; i < 10; i++) {
+      const page = await findCompletedTasksInThread("C_DEDUP_6", "6000.0001", 2880, 2, before);
+      seen.push(...page.map((t) => t.id));
+      const last = page.at(-1);
+      if (!last || page.length < 2) break;
+      before = { lastUpdatedAt: last.lastUpdatedAt, id: last.id };
+    }
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
   });
 });
 
@@ -344,6 +384,27 @@ describe("send-task follow-up re-delegation guard", () => {
     const session = await leadSession("C_DEEP", "2.5");
 
     const result = await dispatch(session.id, "migrate the audit log table to the new schema");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("same-work rule");
+    expect(result.message).toContain(done.id.slice(0, 8));
+  });
+
+  test("matching completed work stays blocked behind more than a page of newer unrelated completions", async () => {
+    const done = await completedWork(
+      "C_DEEPER",
+      "2.6",
+      "backfill the invoice totals for the march billing run",
+      600,
+    );
+    for (let i = 0; i < FOLLOW_UP_SAME_WORK_PAGE_SIZE + 50; i++) {
+      await completedWork("C_DEEPER", "2.6", `unrelated chore ${i} touching widget ${i}`, 300 - i);
+    }
+    const session = await leadSession("C_DEEPER", "2.6");
+
+    const result = await dispatch(
+      session.id,
+      "backfill the invoice totals for the march billing run",
+    );
     expect(result.ok).toBe(false);
     expect(result.message).toContain("same-work rule");
     expect(result.message).toContain(done.id.slice(0, 8));

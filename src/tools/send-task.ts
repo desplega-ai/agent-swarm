@@ -26,7 +26,7 @@ import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { can } from "@/rbac";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
-import { findDuplicateTask, matchSimilarTask } from "@/tools/task-dedup";
+import { type DedupMatch, findDuplicateTask, matchSimilarTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
@@ -288,6 +288,41 @@ const FOLLOW_UP_SAME_WORK_WINDOW_MINUTES = 2880; // 48 hours
 export const FOLLOW_UP_DISPATCH_CAP = 10;
 export const FOLLOW_UP_DISPATCH_WINDOW_MINUTES = 360; // 6 hours
 
+/** Rows per page when the same-work rule scans a thread's completions. */
+export const FOLLOW_UP_SAME_WORK_PAGE_SIZE = 200;
+
+/**
+ * The most recent completed task in the thread's same-work window whose
+ * description matches this dispatch. Pages through every completion in the
+ * window (an older match can sit behind any number of newer unrelated ones),
+ * one bounded query per page, and stops at the first match. This runs before
+ * the write transaction, so the DB lock is free between pages.
+ */
+async function findMatchingCompletedWork(args: {
+  channelId: string;
+  threadTs: string;
+  taskDescription: string;
+  targetAgentId?: string;
+}): Promise<DedupMatch | null> {
+  let before: { lastUpdatedAt: string; id: string } | undefined;
+  for (;;) {
+    const page = await findCompletedTasksInThread(
+      args.channelId,
+      args.threadTs,
+      FOLLOW_UP_SAME_WORK_WINDOW_MINUTES,
+      FOLLOW_UP_SAME_WORK_PAGE_SIZE,
+      before,
+    );
+    for (const existing of page) {
+      const match = matchSimilarTask(existing, args);
+      if (match) return match;
+    }
+    const last = page.at(-1);
+    if (!last || page.length < FOLLOW_UP_SAME_WORK_PAGE_SIZE) return null;
+    before = { lastUpdatedAt: last.lastUpdatedAt, id: last.id };
+  }
+}
+
 /**
  * The follow-up re-delegation rules (see the guard in `sendTaskHandler`).
  * Returns the rule that blocks this dispatch, or null when it may proceed.
@@ -300,14 +335,9 @@ async function evaluateFollowUpRedelegation(args: {
   targetAgentId?: string;
 }): Promise<{ rule: "same-work" | "loop-cap"; message: string } | null> {
   const { channelId, threadTs } = args;
-  const completed = await findCompletedTasksInThread(
-    channelId,
-    threadTs,
-    FOLLOW_UP_SAME_WORK_WINDOW_MINUTES,
-  );
-  for (const existing of completed) {
-    const match = matchSimilarTask(existing, args);
-    if (!match) continue;
+  const match = await findMatchingCompletedWork(args);
+  if (match) {
+    const existing = match.task;
     const [cancelled, failed] = await Promise.all([
       findRecentCancelledTaskInThread(channelId, threadTs, FOLLOW_UP_SAME_WORK_WINDOW_MINUTES),
       findRecentFailedTaskInThread(channelId, threadTs, FOLLOW_UP_SAME_WORK_WINDOW_MINUTES),
@@ -322,7 +352,6 @@ async function evaluateFollowUpRedelegation(args: {
         message: `Blocked by the follow-up re-delegation guard (same-work rule): this task matches completed task ${existing.id.slice(0, 8)} in this Slack thread (${match.reason}), so the work was already done. If it must run again, pass allowRedelegation: true.`,
       };
     }
-    break;
   }
 
   const dispatched = await countAgentDispatchesInThread(
