@@ -216,7 +216,7 @@ is present.
   option. Custom connections have no reasoning controls.
 
 Not covered: NaN (every model fails with `InconsistentFinishReason` in fx
-0.0.15: NaN's trailing usage chunk has a choice with no `finish_reason`),
+0.0.16: NaN's trailing usage chunk has a choice with no `finish_reason`),
 Anthropic keys (no Messages protocol, no custom-header auth), fx's Codex and
 Grok subscription logins, `fx ask`, Ultrafast and `auto` mode. The AI Gateway
 route has not run live.

@@ -21,7 +21,7 @@ import type {
  * Dockerfile.worker; bump the two together). Every ACP shape this adapter
  * relies on was measured against it.
  */
-export const FX_PINNED_VERSION = "0.0.15";
+export const FX_PINNED_VERSION = "0.0.16";
 
 /** OpenAI's Chat Completions prefix; fx appends `/chat/completions`. */
 export const FX_OPENAI_BASE_URL = "https://api.openai.com/v1";

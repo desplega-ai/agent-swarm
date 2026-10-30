@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.2
+ARG OPENCODE_VERSION=2.2.3
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -575,9 +575,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793332853-ge7c6c6
-ARG AMP_SHA512_AMD64=1e8bfc8f7c9be50dd4f81bfa366ca5b50fa57a889878aa6758976b0ce71c29cf3e859b53b91bd5a37327f47ec771cd57ae2824ff2747c14b5b73b9b7a59da206
-ARG AMP_SHA512_ARM64=6e8437241a51af510e439fab79b3e9969c2b0c90dc111eac7a2ab173801284ce3a5d47299eb823c0c03f7413360453c0523482af31cd1788a9e454401168de9f
+ARG AMP_VERSION=0.0.1793363705-g5c9ae5
+ARG AMP_SHA512_AMD64=825817ac7ef2c61ab1c944c87daebae5642fd311e9fe181351da2dc762aa826c9a39a45c039f353b7b6c2b5464a35f73f03b5925ec70cd000fa2ba583b8979ea
+ARG AMP_SHA512_ARM64=fbe7b998fe1c9612b7659462a8e3b33d242044189a34f4922d3074f4c8d8be8594c3b26c96e2aee8cc7ed5230520dbce156170b718ca954e68404a402f9eccfb
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -706,9 +706,9 @@ RUN case "$TARGETARCH" in \
 # auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
 # by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
 # FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
-ARG FX_VERSION=0.0.15
-ARG FX_SHA512_AMD64=078c26d5f603276d1b4f5b2a56520a798ef799ba554dabf115d7bc297687339305726f619f7331edb47f9aa7d68414203433def449a5ca92ef9a4dbd6b8744b9
-ARG FX_SHA512_ARM64=f73d802a84c1e80a888c79e9895df16f4aad1606c1520bb75744c9140410947e97076ae917ce1ca180f7a7b5db0dff0ee4a4d5f4d39986f30eaf53679381af52
+ARG FX_VERSION=0.0.16
+ARG FX_SHA512_AMD64=d5bb494d9f8fbbbf752f46db50ecb45232252dcdde30432f0b26702bed28037384f809a3facd98274a0b96501b2058cd7cea355c5b2a2a616290d84827817492
+ARG FX_SHA512_ARM64=e2fbfd4f35e979baac9a272eee6785a386df9d53990fe0722b3696adcb1c054f96a8c7771d9642c06b1b9422e2836efe5ab883f703741737cbed1900c3b7fb73
 RUN case "$TARGETARCH" in \
       amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
       arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
