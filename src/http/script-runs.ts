@@ -304,6 +304,37 @@ const agentTaskRoute = route({
   },
 });
 
+/**
+ * Send-task's task.parent.attach decision for a `ctx.step.agentTask` step: a
+ * step inherits its parent's contextKey (its Slack or chat thread) and
+ * requester, so the run's agent needs the right to hold a child under it.
+ * Returns the 403 message, or null when allowed. A parent id with no task row
+ * passes only with `allowUnknown` (a new step under it inherits nothing).
+ */
+async function stepParentRefusal(
+  runAgentId: string,
+  parentTaskId: string,
+  allowUnknown: boolean,
+): Promise<string | null> {
+  const refusal = `You don't have context for parent task ${parentTaskId}. Only its assignee, its creator, or a lead can create a child task under it.`;
+  const parentTask = await getTaskById(parentTaskId);
+  if (!parentTask) return allowUnknown ? null : refusal;
+  const runAgent = await getAgentById(runAgentId);
+  const decision = can({
+    principal: { kind: "agent", agentId: runAgentId, isLead: runAgent?.isLead ?? false },
+    verb: "task.parent.attach",
+    resource: {
+      kind: "task",
+      taskId: parentTask.id,
+      requestedByUserId: parentTask.requestedByUserId,
+      creatorAgentId: parentTask.creatorAgentId,
+      agentId: parentTask.agentId,
+    },
+    source: "http",
+  });
+  return decision.allow ? null : refusal;
+}
+
 async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
     jsonError(res, "X-Agent-ID required for script runs API", 400);
@@ -631,33 +662,12 @@ export async function handleScriptRuns(
       return true;
     }
 
-    // The step inherits its parent's contextKey (its Slack or chat thread) and requester, as a
-    // send-task child does, so the run's agent needs the same parent-attach right. This runs
-    // before the replay lookup: a replayed call must be allowed its parent too, so it never
-    // returns the output of a step parented on a task its run cannot attach to.
-    const parentTask = parsed.body.parentTaskId
-      ? await getTaskById(parsed.body.parentTaskId)
-      : null;
-    if (parentTask) {
-      const runAgent = await getAgentById(run.agentId);
-      const decision = can({
-        principal: { kind: "agent", agentId: run.agentId, isLead: runAgent?.isLead ?? false },
-        verb: "task.parent.attach",
-        resource: {
-          kind: "task",
-          taskId: parentTask.id,
-          requestedByUserId: parentTask.requestedByUserId,
-          creatorAgentId: parentTask.creatorAgentId,
-          agentId: parentTask.agentId,
-        },
-        source: "http",
-      });
-      if (!decision.allow) {
-        jsonError(
-          res,
-          `You don't have context for parent task ${parentTask.id}. Only its assignee, its creator, or a lead can create a child task under it.`,
-          403,
-        );
+    // The requested parent, checked before any lookup or insert so a refused
+    // call creates nothing.
+    if (parsed.body.parentTaskId) {
+      const refusal = await stepParentRefusal(run.agentId, parsed.body.parentTaskId, true);
+      if (refusal) {
+        jsonError(res, refusal, 403);
         return true;
       }
     }
@@ -708,6 +718,17 @@ export async function handleScriptRuns(
           return true;
         }
         throw error;
+      }
+    }
+
+    // A replay answers from the selected step, whatever parent this call sent
+    // (or omitted), so authorize the parent the step actually holds. Every
+    // replay lookup above lands here before any output is returned.
+    if (task.parentTaskId) {
+      const refusal = await stepParentRefusal(run.agentId, task.parentTaskId, false);
+      if (refusal) {
+        jsonError(res, refusal, 403);
+        return true;
       }
     }
 

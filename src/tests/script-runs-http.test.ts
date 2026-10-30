@@ -713,7 +713,7 @@ describe("/api/script-runs HTTP", () => {
       return ((await created.json()) as { id: string }).id;
     }
 
-    function stepCall(runId: string, runAgentId: string, stepKey: string, parentTaskId: string) {
+    function stepCall(runId: string, runAgentId: string, stepKey: string, parentTaskId?: string) {
       return dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
         method: "POST",
         agentId: runAgentId,
@@ -756,26 +756,90 @@ describe("/api/script-runs HTTP", () => {
       expect(rows?.c).toBe(0);
     });
 
-    test("a replay with a foreign parentTaskId is refused, not answered from the existing step", async () => {
-      const foreignParent = await createTaskExtended("foreign thread work", {
+    function foreignTask(): Promise<AgentTask> {
+      return createTaskExtended("foreign thread work", {
         agentId: foreignAgentId,
         creatorAgentId: foreignAgentId,
         source: "mcp",
       });
-      const runId = await createRun(agentId);
-      // A step row left by an unguarded dispatch, already completed.
-      const stale = await createTaskExtended("do stale", {
+    }
+
+    /** A completed step row under `parentTaskId`, left by an unguarded dispatch. */
+    async function seedCompletedStep(
+      runId: string,
+      stepKey: string,
+      parentTaskId: string,
+      output = "foreign thread output",
+    ) {
+      const step = await createTaskExtended(`do ${stepKey}`, {
         taskType: "script-run-step",
         source: "mcp",
-        parentTaskId: foreignParent.id,
-        contextKey: `script-run:${runId}:stale`,
+        parentTaskId,
+        contextKey: `script-run:${runId}:${stepKey}`,
       });
-      await completeTask(stale.id, "foreign thread output");
+      await completeTask(step.id, output);
+    }
+
+    async function expectRefusedReplay(
+      response: TestResponse,
+      storedParentId: string,
+    ): Promise<void> {
+      expect(response.status).toBe(403);
+      expect(response.text).not.toContain("foreign thread output");
+      expect(((await response.json()) as { error: string }).error).toContain(storedParentId);
+    }
+
+    test("a replay with a foreign parentTaskId is refused, not answered from the existing step", async () => {
+      const foreignParent = await foreignTask();
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "stale", foreignParent.id);
 
       const response = await stepCall(runId, agentId, "stale", foreignParent.id);
 
       expect(response.status).toBe(403);
       expect(response.text).not.toContain("foreign thread output");
+    });
+
+    test("a replay that omits parentTaskId is checked against the step's stored parent", async () => {
+      const foreignParent = await foreignTask();
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "omitted", foreignParent.id);
+
+      const response = await stepCall(runId, agentId, "omitted");
+
+      await expectRefusedReplay(response, foreignParent.id);
+    });
+
+    test("a replay with an authorized but different parentTaskId is checked against the stored parent", async () => {
+      const foreignParent = await foreignTask();
+      const ownParent = await createTaskExtended("own work", { agentId, source: "mcp" });
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "swapped", foreignParent.id);
+
+      const response = await stepCall(runId, agentId, "swapped", ownParent.id);
+
+      await expectRefusedReplay(response, foreignParent.id);
+    });
+
+    test("a replay with an unknown parentTaskId is checked against the stored parent", async () => {
+      const foreignParent = await foreignTask();
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "unknown", foreignParent.id);
+
+      const response = await stepCall(runId, agentId, "unknown", crypto.randomUUID());
+
+      await expectRefusedReplay(response, foreignParent.id);
+    });
+
+    test("a replay that omits parentTaskId still answers from a step under an attachable parent", async () => {
+      const ownParent = await createTaskExtended("own work", { agentId, source: "mcp" });
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "own", ownParent.id, "own thread output");
+
+      const response = await stepCall(runId, agentId, "own");
+
+      expect(response.status).toBe(200);
+      expect(response.text).toContain("own thread output");
     });
 
     test("a run agent can parent a step on a task assigned to it", async () => {
