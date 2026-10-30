@@ -9,6 +9,7 @@ import {
   createTaskExtended,
   createWorkflow,
   deleteSwarmConfig,
+  getKv,
   getSlackTasksInThread,
   initDb,
   updateWorkflow,
@@ -19,9 +20,14 @@ import { invokeToolInProcess, resetBridgeServerForTesting } from "../http/mcp-br
 import { handleTasks } from "../http/tasks";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { createServer as createMcpServer } from "../server";
+import { registerCommandHandler } from "../slack/commands";
 import { registerMessageHandler, resetSlackHandlerCachesForTesting } from "../slack/handlers";
-import { isSlackThreadLeft, SLACK_LEFT_THREAD_KV_NAMESPACE } from "../slack/left-threads";
-import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
+import {
+  isSlackThreadLeft,
+  SLACK_LEFT_THREAD_CONFIRMATION,
+  SLACK_LEFT_THREAD_KV_NAMESPACE,
+} from "../slack/left-threads";
+import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "../slack/thread-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { registerSlackLeaveThreadTool } from "../tools/slack-leave-thread";
 import type { Agent, AgentTask } from "../types";
@@ -45,6 +51,8 @@ const previousEnv = {
 
 type Handler = (args: Record<string, unknown>) => Promise<void>;
 const handlers = new Map<string, Handler>();
+const commands = new Map<string, Handler>();
+const ephemerals: Array<Record<string, unknown>> = [];
 
 const client = {
   auth: { test: async () => ({ user_id: BOT_USER_ID, bot_id: "B_LEAVE_BOT" }) },
@@ -52,7 +60,13 @@ const client = {
     info: async () => ({ ok: true, channel: {} }),
     replies: async () => ({ ok: true, messages: [] }),
   },
-  chat: { postMessage: async () => ({ ok: true, ts: "1.1" }) },
+  chat: {
+    postMessage: async () => ({ ok: true, ts: "1.1" }),
+    postEphemeral: async (args: Record<string, unknown>) => {
+      ephemerals.push(args);
+      return { ok: true };
+    },
+  },
   reactions: { add: async () => ({ ok: true }) },
   users: { info: async () => ({ ok: true, user: { profile: {} } }) },
 };
@@ -99,10 +113,10 @@ let lead: Agent;
 let worker: Agent;
 let otherWorker: Agent;
 
-async function seedThread(channel: string, threadTs: string) {
+async function seedThread(channel: string, threadTs: string, opts: { unassigned?: boolean } = {}) {
   // As the Slack handlers create it: only Slack ingress writes slackTriggerMessageTs.
   return createTaskExtended("original ask", {
-    agentId: worker.id,
+    agentId: opts.unassigned ? undefined : worker.id,
     source: "slack",
     slackChannelId: channel,
     slackThreadTs: threadTs,
@@ -158,6 +172,11 @@ beforeAll(async () => {
       handlers.set(type, handler);
     },
   } as never);
+  registerCommandHandler({
+    command: (name: string, handler: Handler) => {
+      commands.set(name, handler);
+    },
+  } as never);
 
   routeServer = createServer(async (req, res) => {
     setRequestAuth(req, { kind: "operator", fingerprint: "test-key" });
@@ -192,6 +211,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   resetSlackHandlerCachesForTesting();
+  ephemerals.length = 0;
 });
 
 describe("slack-leave-thread", () => {
@@ -425,6 +445,126 @@ describe("SLACK_LEAVE_THREAD_DISABLE", () => {
     } finally {
       await deleteSwarmConfig(row.id);
       __resetInjectedEnvTracking();
+      delete process.env.SLACK_LEAVE_THREAD_DISABLE;
+    }
+  });
+});
+
+describe("!leave", () => {
+  test("leaves the thread in code: no task, no workflow event, an ephemeral confirmation", async () => {
+    const emitted: unknown[] = [];
+    const listener = (payload: unknown) => emitted.push(payload);
+    workflowEventBus.on("slack.message", listener);
+    try {
+      await seedThread("C_BANG_A", "3000.0001");
+      expect(await sendThreadReply("C_BANG_A", "3000.0001", "!leave")).toHaveLength(1);
+      expect(emitted).toHaveLength(0);
+    } finally {
+      workflowEventBus.off("slack.message", listener);
+    }
+
+    expect(await isSlackThreadLeft("C_BANG_A", "3000.0001")).toBe(true);
+    const entry = await getKv(SLACK_LEFT_THREAD_KV_NAMESPACE, "C_BANG_A:3000.0001");
+    expect(entry?.value).toMatchObject({ slackUserId: HUMAN });
+    expect(entry?.value).not.toHaveProperty("agentId");
+    expect(ephemerals).toEqual([
+      {
+        channel: "C_BANG_A",
+        user: HUMAN,
+        thread_ts: "3000.0001",
+        text: SLACK_LEFT_THREAD_CONFIRMATION,
+      },
+    ]);
+
+    expect(await sendThreadReply("C_BANG_A", "3000.0001", "chatting among ourselves")).toHaveLength(
+      1,
+    );
+    expect(
+      await sendThreadReply("C_BANG_A", "3000.0001", `<@${BOT_USER_ID}> back please`),
+    ).toHaveLength(2);
+    expect(await isSlackThreadLeft("C_BANG_A", "3000.0001")).toBe(false);
+  });
+
+  test("an @mention before !leave leaves instead of rejoining, also in a left thread", async () => {
+    await seedThread("C_BANG_B", "3100.0001");
+    await sendThreadReply("C_BANG_B", "3100.0001", "!leave");
+    expect(await sendThreadReply("C_BANG_B", "3100.0001", `<@${BOT_USER_ID}> !leave`)).toHaveLength(
+      1,
+    );
+    expect(await isSlackThreadLeft("C_BANG_B", "3100.0001")).toBe(true);
+    expect(ephemerals).toHaveLength(2);
+  });
+
+  test("with ADDITIVE_SLACK the !leave message is never buffered", async () => {
+    process.env.ADDITIVE_SLACK = "true";
+    try {
+      await seedThread("C_BANG_C", "3200.0001");
+      await sendThreadReply("C_BANG_C", "3200.0001", "!leave");
+      expect(getBufferMessageCount("C_BANG_C:3200.0001")).toBe(0);
+      expect(await isSlackThreadLeft("C_BANG_C", "3200.0001")).toBe(true);
+    } finally {
+      process.env.ADDITIVE_SLACK = "false";
+    }
+  });
+
+  test.each([
+    ["!leave", "3600.0001"],
+    [`<@${BOT_USER_ID}> !leave`, "3600.0002"],
+  ])("leaves a human-rooted thread whose only task is unassigned: %s", async (text, threadTs) => {
+    const emitted: unknown[] = [];
+    const listener = (payload: unknown) => emitted.push(payload);
+    workflowEventBus.on("slack.message", listener);
+    try {
+      const seeded = await seedThread("C_BANG_G", threadTs, { unassigned: true });
+      expect(seeded.agentId).toBeNull();
+      expect(await sendThreadReply("C_BANG_G", threadTs, text)).toHaveLength(1);
+      expect(emitted).toHaveLength(0);
+    } finally {
+      workflowEventBus.off("slack.message", listener);
+    }
+    expect(await isSlackThreadLeft("C_BANG_G", threadTs)).toBe(true);
+    expect(ephemerals).toHaveLength(1);
+  });
+
+  test("a task in another thread of the channel does not make !leave a command", async () => {
+    await seedThread("C_BANG_H", "3700.0001", { unassigned: true });
+    await sendThreadReply("C_BANG_H", "3700.0002", "!leave");
+    expect(await isSlackThreadLeft("C_BANG_H", "3700.0002")).toBe(false);
+    expect(ephemerals).toHaveLength(0);
+  });
+
+  test("is not a command outside a swarm thread, when addressed elsewhere, or with extra text", async () => {
+    await sendThreadReply("C_BANG_D", "3300.0001", "!leave");
+    expect(await isSlackThreadLeft("C_BANG_D", "3300.0001")).toBe(false);
+
+    await seedThread("C_BANG_E", "3400.0001");
+    await sendThreadReply("C_BANG_E", "3400.0001", "<@U_SOMEONE_ELSE> !leave");
+    await sendThreadReply("C_BANG_E", "3400.0001", "!leave it to me");
+    expect(await isSlackThreadLeft("C_BANG_E", "3400.0001")).toBe(false);
+    expect(ephemerals).toHaveLength(0);
+  });
+
+  test("SLACK_LEAVE_THREAD_DISABLE makes !leave an ordinary message and hides it from help", async () => {
+    async function helpText(): Promise<string> {
+      let text = "";
+      await commands.get("/agent-swarm-help")!({
+        ack: async () => {},
+        respond: async (reply: { blocks: Array<{ text: { text: string } }> }) => {
+          text = reply.blocks.map((b) => b.text.text).join("\n");
+        },
+      });
+      return text;
+    }
+    expect(await helpText()).toContain("`!leave` in a thread");
+
+    process.env.SLACK_LEAVE_THREAD_DISABLE = "true";
+    try {
+      await seedThread("C_BANG_F", "3500.0001");
+      expect(await sendThreadReply("C_BANG_F", "3500.0001", "!leave")).toHaveLength(2);
+      expect(await isSlackThreadLeft("C_BANG_F", "3500.0001")).toBe(false);
+      expect(ephemerals).toHaveLength(0);
+      expect(await helpText()).not.toContain("!leave");
+    } finally {
       delete process.env.SLACK_LEAVE_THREAD_DISABLE;
     }
   });

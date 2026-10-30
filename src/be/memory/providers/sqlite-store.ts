@@ -45,14 +45,18 @@ function armFetchLimit(limit: number): number {
 // lookup against it is a full table scan per outer row. The old backfill used
 // `WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
 // which is N x N: at ~18k memories it held the main connection for minutes at
-// boot. Both statements below use a non-correlated `NOT IN (subquery)`, which
-// SQLite evaluates once into an ephemeral index, so each is one pass over each
-// table. `memory_id IS NOT NULL` keeps a stray NULL row from turning every
-// NOT IN into NULL (which would insert nothing).
-export const FTS_DELETE_EXTRA_SQL = `DELETE FROM memory_fts
-  WHERE memory_id NOT IN (SELECT id FROM agent_memory)`;
-export const FTS_MISSING_IDS_SQL = `SELECT m.id FROM agent_memory m
-  WHERE m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`;
+// boot. The diff below reads each table once, in rowid batches (FTS5 seeks a
+// rowid range), and yields the event loop between batches: one whole-table
+// statement held the loop for seconds on a large DB. A memory_fts row is an
+// orphan when its memory is gone; that check is a lookup on the agent_memory
+// primary key. A NULL memory_id is never an orphan, as with the old NOT IN.
+export const FTS_SCAN_BATCH_SQL = `SELECT rowid AS rowid, memory_id AS memoryId,
+  memory_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM agent_memory m WHERE m.id = memory_fts.memory_id) AS orphan
+  FROM memory_fts WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
+  WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
 export type AgentMemoryRow = {
@@ -251,12 +255,45 @@ export class SqliteMemoryStore implements MemoryStore {
   private async populateFtsTable(): Promise<void> {
     const client = getDbClient();
     const startedAt = performance.now();
-    const deletedExtra = await client.run(FTS_DELETE_EXTRA_SQL);
-    if (deletedExtra.changes > 0) {
-      console.warn(`[memory-fts] removed_extra_rows count=${deletedExtra.changes}`);
+    const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Drop orphan rows and collect the memory ids the index holds.
+    const indexed = new Set<string>();
+    let removed = 0;
+    for (let after = 0; ; ) {
+      const rows = await client.query<{ rowid: number; memoryId: string | null; orphan: number }>(
+        FTS_SCAN_BATCH_SQL,
+        [after, FTS_SCAN_BATCH_SIZE],
+      );
+      if (rows.length === 0) break;
+      after = rows[rows.length - 1]!.rowid;
+      const orphans = rows.filter((row) => row.orphan).map((row) => row.rowid);
+      if (orphans.length > 0) {
+        await client.run(
+          `DELETE FROM memory_fts WHERE rowid IN (${orphans.map(() => "?").join(",")})`,
+          orphans,
+        );
+        removed += orphans.length;
+      }
+      for (const row of rows) if (!row.orphan && row.memoryId) indexed.add(row.memoryId);
+      await yieldLoop();
+    }
+    if (removed > 0) {
+      console.warn(`[memory-fts] removed_extra_rows count=${removed}`);
     }
 
-    const missing = await client.query<{ id: string }>(FTS_MISSING_IDS_SQL);
+    const missing: { id: string }[] = [];
+    for (let after = 0; ; ) {
+      const rows = await client.query<{ rowid: number; id: string }>(MEMORY_ID_BATCH_SQL, [
+        after,
+        FTS_SCAN_BATCH_SIZE,
+      ]);
+      if (rows.length === 0) break;
+      after = rows[rows.length - 1]!.rowid;
+      for (const row of rows) if (!indexed.has(row.id)) missing.push(row);
+      await yieldLoop();
+    }
+
     for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
       const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
       const placeholders = ids.map(() => "?").join(",");

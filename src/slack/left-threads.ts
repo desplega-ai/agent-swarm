@@ -2,7 +2,8 @@ import { deleteKv, getKv, upsertKv } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 
 /**
- * Slack threads the swarm left via `slack-leave-thread`.
+ * Slack threads the swarm left, via the `slack-leave-thread` tool or a
+ * human's `!leave` in the thread.
  *
  * A left thread drops every inbound message that does not @mention the bot,
  * in code, before buffering, routing, or any AI call. A mention clears the
@@ -11,7 +12,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
  */
 export const SLACK_LEFT_THREAD_KV_NAMESPACE = "slack-left-thread";
 
-/** Operator flag that turns the `slack-leave-thread` tool off. */
+/** Operator flag that turns leaving threads off: the tool and `!leave`. */
 export const SLACK_LEAVE_THREAD_DISABLE = "SLACK_LEAVE_THREAD_DISABLE";
 
 /**
@@ -22,19 +23,41 @@ export function isSlackLeaveThreadDisabled(): boolean {
   return isEnvFlagEnabled(SLACK_LEAVE_THREAD_DISABLE, false);
 }
 
+/** Ephemeral reply to the human who sent `!leave`. */
+export const SLACK_LEFT_THREAD_CONFIRMATION =
+  "Left this thread. @mention the swarm to bring it back.";
+
+/**
+ * True when a thread message is the `!leave` command: exactly `!leave`,
+ * optionally after @mentions of the bot. A message that mentions anyone else
+ * is not addressed to the swarm and does not match.
+ */
+export function isSlackLeaveThreadCommand(
+  text: string | undefined,
+  botUserId: string | null,
+): boolean {
+  const withoutBotMentions = botUserId
+    ? (text ?? "").replaceAll(`<@${botUserId}>`, "")
+    : (text ?? "");
+  return withoutBotMentions.trim() === "!leave";
+}
+
 function threadKey(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
 }
 
+/** Who left the thread: an agent via the tool, or a Slack user via `!leave`. */
+export type SlackThreadLeftBy = { agentId: string } | { slackUserId: string };
+
 export async function leaveSlackThread(
   channelId: string,
   threadTs: string,
-  agentId: string,
+  leftBy: SlackThreadLeftBy,
 ): Promise<void> {
   await upsertKv({
     namespace: SLACK_LEFT_THREAD_KV_NAMESPACE,
     key: threadKey(channelId, threadTs),
-    value: { agentId, leftAt: new Date().toISOString() },
+    value: { ...leftBy, leftAt: new Date().toISOString() },
     valueType: "json",
   });
 }

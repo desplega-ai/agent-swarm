@@ -1,6 +1,7 @@
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   ProvisionRequest,
+  RuntimeCacheReference,
   RuntimeHandle,
   RuntimeProvider,
   RuntimeProviderTraits,
@@ -25,6 +26,7 @@ export interface ControllerCommands {
   terminate(handle: RuntimeHandle, reason: string): Promise<void>;
   status(handles: RuntimeHandle[]): Promise<Record<string, RuntimeStatus>>;
   list(ownerId: string): Promise<RuntimeHandle[]>;
+  releaseCache?(cache: RuntimeCacheReference): Promise<void>;
   renew?(handle: RuntimeHandle, ttlSec: number): Promise<{ endAt: string }>;
   pause?(handle: RuntimeHandle): Promise<void>;
   resume?(handle: RuntimeHandle): Promise<void>;
@@ -36,6 +38,7 @@ export class BuiltinController implements ControllerCommands {
   readonly renew?: ControllerCommands["renew"];
   readonly pause?: ControllerCommands["pause"];
   readonly resume?: ControllerCommands["resume"];
+  readonly releaseCache?: ControllerCommands["releaseCache"];
 
   constructor(
     readonly id: string,
@@ -47,6 +50,8 @@ export class BuiltinController implements ControllerCommands {
     this.workerApiUrl = workerApiUrl;
     if (provider.renew)
       this.renew = (handle, ttlSec) => this.call(() => provider.renew!(target, handle, ttlSec));
+    if (provider.releaseCache)
+      this.releaseCache = (cache) => this.call(() => provider.releaseCache!(target, cache));
     if (provider.pause) this.pause = (handle) => this.call(() => provider.pause!(target, handle));
     if (provider.resume)
       this.resume = (handle) => this.call(() => provider.resume!(target, handle));

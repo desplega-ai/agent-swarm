@@ -91,6 +91,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [One-off Script Workflow Runs](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs). Reference.
 - [Dreaming](https://docs.agent-swarm.dev/docs/guides/dreaming). When: Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes.
 - [Claude Bridge](https://docs.agent-swarm.dev/docs/guides/claude-bridge-experimental). Reference.
+- [Reading claude.ai Artifacts headless](https://docs.agent-swarm.dev/docs/guides/claude-artifacts-read). When: Someone wants an agent to read a claude.ai Artifact link, such as a design and its canvas.json, from a headless session.
 - [Worker Credential Recovery](https://docs.agent-swarm.dev/docs/guides/worker-credential-recovery). Reference.
 - [Model Gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways). Reference.
 - [Codex OAuth](https://docs.agent-swarm.dev/docs/guides/provider-auth/codex-oauth). Reference.

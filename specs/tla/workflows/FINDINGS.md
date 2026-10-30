@@ -756,3 +756,37 @@ that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts
 | `Probe-child-run-unreadable.cfg` | CX14 found | 1,300 | 19 |
 | `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 9,444 / 729 | - / 18 |
 | `Probe-orphan-sweep.cfg` | CX15 found | 4,372 | 35 |
+
+## Sync with #2560 and #2572 (`main` @ `0836a6518`)
+
+#2560 only rewords a comment and the script-body interpolation error in `engine.ts`; no
+modelled path changes. #2572 rechecks the workflow cooldown inside `createRunWithInitialState`'s
+transaction, so the losing one of two concurrent triggers commits a `skipped` run with no step
+and returns before the walk. The check reads other runs of the same workflow; the model has one
+run and one trigger, so the recheck never fires and `IStart` stays exact. The `.tla` and `.cfg`
+files are unchanged; ACTIONS.md re-pins the `engine.ts` lines shifted by #2572 (and fixes the
+`XFail` shorthand refs that pointed past `checkpoint.ts` / `db.ts` mentions).
+
+Re-run with tla2tools 2026.10.23, BFS, `-workers 4 -deadlock` (`-workers 8` for
+`Probe-child-run.cfg`). Every config gives the same verdict as on `dd3350c35`, and every config
+that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts` +
+`src/tests/workflow-sub-workflow.test.ts` + `src/tests/workflow-cascade-cancel.test.ts`:
+73 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 30,740 | 23 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 10,399 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 272 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,555 / 2,913 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,211 / 2,262 / 32,986 / 6,241 / 327 / 1,060 | 22 / 18 / 29 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 783 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 570 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 470,559 | 34 |
+| `Probe-input-await.cfg` | CX6 found | 327 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,033 / 13,164 | 18 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 3,965,730 / 212,117 | - / 34 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,447 | 18 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 9,444 / 461 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 4,585 | 35 |

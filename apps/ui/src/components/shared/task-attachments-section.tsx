@@ -832,10 +832,13 @@ function PreviewMedia({
 export function TaskAttachmentsSection({
   taskId,
   attachments,
+  variant = "card",
   className,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
+  /** `plain`: no card around the list (the task page's Files tab names it). */
+  variant?: "card" | "plain";
   className?: string;
 }) {
   const listQuery = useTaskAttachments(taskId, attachments);
@@ -868,7 +871,7 @@ export function TaskAttachmentsSection({
 
   return (
     <CollapsibleSection
-      variant="card"
+      variant={variant}
       title={`Attachments (${rows.length})`}
       icon={Paperclip}
       iconColor="text-muted-foreground"

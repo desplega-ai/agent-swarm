@@ -34,9 +34,51 @@ const HIGH_SIMILARITY_THRESHOLD = 0.8;
 /** Lower threshold used when the tasks also target the same agent */
 const SAME_AGENT_SIMILARITY_THRESHOLD = 0.6;
 
+/**
+ * Rows one duplicate check scans. The JS similarity match needs more than the
+ * query's default 50 (an older duplicate can sit behind newer unrelated tasks),
+ * but the scan must stay bounded: send-task runs it twice per call, once inside
+ * the write transaction.
+ */
+export const DEDUP_SCAN_LIMIT = 500;
+
 export interface DedupMatch {
   task: AgentTask;
   reason: string;
+}
+
+/**
+ * The description-similarity rules shared by the duplicate check and the
+ * follow-up re-delegation guard: a very similar description matches any
+ * target, a moderately similar one matches only the same target agent.
+ */
+export function matchSimilarTask(
+  existing: AgentTask,
+  opts: { taskDescription: string; targetAgentId?: string },
+): DedupMatch | null {
+  const similarity = jaccardSimilarity(existing.task, opts.taskDescription);
+
+  // Very similar task description: likely duplicate regardless of target
+  if (similarity > HIGH_SIMILARITY_THRESHOLD) {
+    return {
+      task: existing,
+      reason: `similar task description (${(similarity * 100).toFixed(0)}% match)`,
+    };
+  }
+
+  // Same target agent + moderately similar task: lower threshold
+  if (
+    opts.targetAgentId &&
+    existing.agentId === opts.targetAgentId &&
+    similarity > SAME_AGENT_SIMILARITY_THRESHOLD
+  ) {
+    return {
+      task: existing,
+      reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -54,6 +96,7 @@ export async function findDuplicateTask(opts: {
   const recentTasks = await findRecentSimilarTasks({
     creatorAgentId: opts.creatorAgentId,
     windowMinutes: opts.windowMinutes ?? 10,
+    limit: DEDUP_SCAN_LIMIT,
   });
 
   for (const existing of recentTasks) {
@@ -70,27 +113,8 @@ export async function findDuplicateTask(opts: {
       };
     }
 
-    const similarity = jaccardSimilarity(existing.task, opts.taskDescription);
-
-    // 2. Very similar task description — likely duplicate regardless of target
-    if (similarity > HIGH_SIMILARITY_THRESHOLD) {
-      return {
-        task: existing,
-        reason: `similar task description (${(similarity * 100).toFixed(0)}% match)`,
-      };
-    }
-
-    // 3. Same target agent + moderately similar task — lower threshold
-    if (
-      opts.targetAgentId &&
-      existing.agentId === opts.targetAgentId &&
-      similarity > SAME_AGENT_SIMILARITY_THRESHOLD
-    ) {
-      return {
-        task: existing,
-        reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
-      };
-    }
+    const match = matchSimilarTask(existing, opts);
+    if (match) return match;
   }
 
   return null;

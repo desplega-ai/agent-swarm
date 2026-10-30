@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.4",
+    "version": "2.7.5",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -6190,6 +6190,23 @@
               }
             },
             "default": null,
+            "additionalProperties": false
+          },
+          "cache": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "mountPath": {
+                "type": "string",
+                "minLength": 2
+              }
+            },
+            "default": null,
+            "required": [
+              "mountPath"
+            ],
             "additionalProperties": false
           },
           "ttlSec": {
@@ -66434,6 +66451,23 @@
                     "default": null,
                     "additionalProperties": false
                   },
+                  "cache": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "mountPath": {
+                        "type": "string",
+                        "minLength": 2
+                      }
+                    },
+                    "default": null,
+                    "required": [
+                      "mountPath"
+                    ],
+                    "additionalProperties": false
+                  },
                   "ttlSec": {
                     "type": [
                       "integer",
@@ -66714,6 +66748,22 @@
                         "exclusiveMinimum": 0
                       }
                     },
+                    "additionalProperties": false
+                  },
+                  "cache": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "mountPath": {
+                        "type": "string",
+                        "minLength": 2
+                      }
+                    },
+                    "required": [
+                      "mountPath"
+                    ],
                     "additionalProperties": false
                   },
                   "ttlSec": {

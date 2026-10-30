@@ -130,7 +130,7 @@ export function WorkerStep({ step, agentName }: { step: Step; agentName: string 
       <AnimatedReveal open={triesOpen} speed="fast">
         <ol
           aria-label="Earlier tries"
-          className="ml-5 flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-2"
+          className="ml-5 flex flex-col gap-2 border-l border-border-subtle pl-2.5"
         >
           {earlier.map((attempt, index) => (
             <li key={attempt.id} className="min-w-0">
@@ -157,7 +157,7 @@ export function WorkerStep({ step, agentName }: { step: Step; agentName: string 
       </AnimatedReveal>
       <div className="ml-5 flex min-w-0 flex-col gap-1.5">
         <ChainOfThought taskId={last.id} status={last.status} />
-        <TaskOutcome task={last} />
+        <TaskOutcome task={last} clamp />
       </div>
       <TaskDetailSheet
         taskId={last.id}

@@ -80,6 +80,16 @@ Google Drive export, then preserve or reconstruct the structure explicitly.
 There is no `GET_DOCUMENT_MARKDOWN` tool; markdown exists on create/update, not
 on read.
 
+## Comments
+
+Doc comments are a Drive feature, not a Docs one: there is no `GOOGLEDOCS_*`
+comment slug. List them with `GOOGLEDRIVE_LIST_COMMENTS` (replies:
+`GOOGLEDRIVE_LIST_REPLIES`) from the `googledrive` toolkit, so resolve the
+user's `googledrive` connected account instead of their `googledocs` one.
+Listing only works when the Drive read scopes are authorized on that account.
+`GOOGLEDRIVE_CREATE_COMMENT` and the update/delete tools are write actions,
+only on explicit request.
+
 ## Gotchas
 
 - Search returns Drive metadata, not document content — do a second

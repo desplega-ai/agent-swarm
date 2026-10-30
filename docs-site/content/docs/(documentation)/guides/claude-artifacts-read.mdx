@@ -1,0 +1,96 @@
+---
+title: Reading claude.ai Artifacts headless
+description: Read claude.ai Artifacts, including multi-file designs, from a headless `claude -p` session on a swarm worker
+agent:
+  offer: true
+  when: "Someone wants an agent to read a claude.ai Artifact link, such as a design and its canvas.json, from a headless session"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Claude Code can read a claude.ai Artifact from a `claude -p` session, including every file of a multi-file design (`project/*.dc.html`, `project/canvas.json`). The capability is off in `-p` mode by default and sits behind an internal env flag. This guide shows how to turn it on and how to download an artifact's files with the example script [`examples/claude-artifacts-read/claude-artifacts-read.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/claude-artifacts-read/claude-artifacts-read.sh).
+
+<Callout type="warn">
+  The flags and the tool names below are internal and undocumented. Anthropic can change or remove them in any Claude Code release. Everything here was checked on Claude Code 2.1.314.
+</Callout>
+
+## Requirements
+
+| Need | Value |
+|---|---|
+| Claude Code | `>= 2.1.309`. 2.1.306 to 2.1.308 only expose a built-in `Artifact` tool that returns the rendered shell page, not the files. |
+| Auth | First-party claude.ai OAuth: a `claude setup-token` token in `CLAUDE_CODE_OAUTH_TOKEN`, or a `/login` stored in `CLAUDE_CONFIG_DIR`. |
+| Access | The account must already be able to open the artifact on claude.ai. |
+| Script deps | `jq` and `sha256sum`. Both ship in the worker image. |
+
+## The flag
+
+```bash
+export CLAUDE_CODE_ARTIFACT=1
+```
+
+With it set, `claude -p` connects a dynamic MCP server named `claude-artifacts` with 39 tools. Two of them read files:
+
+| Tool | Input | Returns |
+|---|---|---|
+| `mcp__claude-artifacts__list_files` | `slug`: the artifact URL or its UUID | `slug` (UUID), `version`, and `files[]` with `path`, `size`, `content_type`, `sha256`, `of_type` |
+| `mcp__claude-artifacts__read_file` | `slug`, `path` | The file text inside an `<untrusted-document-…>` tag, plus its metadata |
+
+Check that it loaded from the init event:
+
+```bash
+CLAUDE_CODE_ARTIFACT=1 claude -p "reply ok" --output-format stream-json --verbose --max-turns 1 \
+  | jq -c 'select(.subtype == "init") | {version: .claude_code_version, mcp: .mcp_servers,
+      read: [.tools[] | select(test("claude-artifacts__(list|read)_file"))]}'
+```
+
+Other `CLAUDE_CODE_ARTIFACT_*` names exist in the binary. A field report set `CLAUDE_CODE_ARTIFACT_TOOLSET`, `_MULTI_FILE`, `_ASSETS` and `_TYPES` to `1` as well. On 2.1.314 they did not change the tool list, and a full read worked without them. The script sets them anyway, since they are harmless.
+
+## Auth on a swarm worker
+
+The worker's own `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` token) works for the artifacts API. No separate `/login` is needed.
+
+The agent's Bash tool does not inherit that token from the harness, so a script run from a task has no Claude auth by default. Pick one:
+
+- **Token:** export a `claude setup-token` token as `CLAUDE_CODE_OAUTH_TOKEN` in the shell that runs the script. Read it from a secret you control. Never put it in a prompt, a command line, or a file another agent reads.
+- **Login:** run `claude` once interactively with `CLAUDE_CONFIG_DIR` pointing at a dedicated directory, then `/login`. Keep that directory out of git and out of shared paths, and set the same `CLAUDE_CONFIG_DIR` when you run the script.
+
+`ANTHROPIC_API_KEY` auth was not tested. The gating code also turns the capability off for Bedrock, Vertex and gateway routes, and when `CLAUDE_CODE_ARTIFACT=0` is set explicitly.
+
+## Download an artifact
+
+```bash
+claude-artifacts-read <artifact-url> <outdir> [--all] [--max-bytes N]
+```
+
+```bash
+./examples/claude-artifacts-read/claude-artifacts-read.sh \
+  "https://claude.ai/artifact/<id>" ./design
+```
+
+```text
+ok: project/Main.dc.html
+ok: project/canvas.json
+```
+
+The script:
+
+1. Runs one `claude -p` session that calls `list_files` and saves the result as `<outdir>/manifest.json`.
+2. Picks the artifact's own text files. `--all` adds the files the artifact type owns (`of_type`), such as `SKILL.md`, `index.html` and `artifact-type/**`.
+3. Runs a second session that calls `read_file` once per path. Paths the session missed get one more session.
+4. Takes each file from the raw tool result, never from the model's reply, and checks it against the `sha256` from `list_files` before writing. A file that fails the check is not written, so an earlier copy at that path stays as it was.
+
+The script writes only inside `<outdir>`. It refuses a path whose destination or parent directory is a symlink, and it renames each file into place, so a write never follows a link.
+
+Both sessions run with `--permission-mode dontAsk` and allow only the one Artifact tool they need. Every other tool call is denied. Artifact text comes from other people, so treat it as data.
+
+Use `CLAUDE_BIN` to pick a binary, for example a newer Claude Code than the one on `PATH`. Exit code `0` means every selected file was written and matched its hash.
+
+## Limits
+
+- **URL fragments:** `#artboard-…` only exists in the browser. The script drops it, and no tool can resolve it.
+- **Text only:** on an artifact made from a type, `read_file` returns text files only. Images and other binary files are listed in the manifest and skipped.
+- **Size:** `read_file` refuses a type-owned file above 262144 bytes. The script skips those and prints them. Results too big for the model context are saved by Claude Code under `tool-results/`, and the script reads that copy back.
+- **Model in the loop:** the tools only run through a model turn, so each run costs two short sessions. The model occasionally skips the call; the script retries.
+- **Session expiry:** a `/login` session expires and needs a new `/login`. A `setup-token` token lasts longer but can be revoked.
+- **Undocumented:** the flag, the MCP server name and the result shapes can change between Claude Code versions. Re-run the init check above after a bump.

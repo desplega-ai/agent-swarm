@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RuntimeProviderKindSchema } from "../types";
+import { RuntimePoolCacheSchema, RuntimeProviderKindSchema } from "../types";
 
 export const CONTROLLER_PROTOCOL_VERSION = 1;
 export const CONTROLLER_COMMAND_TIMEOUT_MS = 60_000;
@@ -16,6 +16,7 @@ const traitsSchema = z.object({
   canProvision: z.boolean(),
   ephemeralDisk: z.boolean(),
   supportsPause: z.boolean(),
+  persistentCache: z.boolean().optional(),
   maxTtlSec: z.number().positive().optional(),
   maxContinuousSec: z.number().positive().optional(),
 });
@@ -31,9 +32,21 @@ const provisionSchema = z.object({
     .object({ cpu: z.number().positive().optional(), memoryMb: z.number().positive().optional() })
     .optional(),
   ttlSec: z.number().positive().optional(),
+  cache: RuntimePoolCacheSchema.extend({
+    key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/),
+  }).optional(),
 });
 const command = { type: z.literal("cmd"), id: z.string().min(1) };
 export const ControllerCommandSchema = z.discriminatedUnion("op", [
+  z.object({
+    ...command,
+    op: z.literal("release-cache"),
+    payload: z.object({
+      key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/),
+      poolId: z.string().min(1),
+      ownerId: z.string().min(1),
+    }),
+  }),
   z.object({ ...command, op: z.literal("provision"), payload: provisionSchema }),
   z.object({
     ...command,

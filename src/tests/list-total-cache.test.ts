@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createListTotalCache } from "../http/list-total-cache";
+import { createListTotalCache, LIST_TOTAL_TTL_MS } from "../http/list-total-cache";
 
 function counter(values: number[]) {
   let calls = 0;
@@ -10,7 +10,7 @@ function counter(values: number[]) {
 }
 
 describe("list total cache", () => {
-  test("page 1 always counts; later pages reuse its count", async () => {
+  test("page 1 always counts by default; later pages reuse its count", async () => {
     const cache = createListTotalCache();
     const count = counter([10, 11, 12]);
 
@@ -22,6 +22,31 @@ describe("list total cache", () => {
     expect(await cache.get({ q: "a" }, undefined, count.compute)).toBe(11);
     expect(await cache.get({ q: "a" }, 25, count.compute)).toBe(11);
     expect(count.calls()).toBe(2);
+  });
+
+  test("page 1 polls within the first-page TTL share one count", async () => {
+    const cache = createListTotalCache(LIST_TOTAL_TTL_MS, 50);
+    const count = counter([10, 11]);
+    expect(await cache.get({ q: "a" }, 0, count.compute)).toBe(10);
+    expect(await cache.get({ q: "a" }, 0, count.compute)).toBe(10);
+    expect(count.calls()).toBe(1);
+    await Bun.sleep(60);
+    expect(await cache.get({ q: "a" }, 0, count.compute)).toBe(11);
+    expect(count.calls()).toBe(2);
+  });
+
+  test("with a first-page TTL, concurrent page 1 requests share an in-flight count", async () => {
+    const cache = createListTotalCache(LIST_TOTAL_TTL_MS, 1000);
+    let calls = 0;
+    const compute = async () => {
+      calls++;
+      await Bun.sleep(5);
+      return 4;
+    };
+    expect(await Promise.all([cache.get({}, 0, compute), cache.get({}, 0, compute)])).toEqual([
+      4, 4,
+    ]);
+    expect(calls).toBe(1);
   });
 
   test("a cold later page counts, so total is always set", async () => {

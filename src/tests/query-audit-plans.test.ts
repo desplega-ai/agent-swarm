@@ -157,6 +157,22 @@ const CASES: Array<{
     revert: { dropIndex: "idx_session_summaries_source" },
   },
   {
+    // A user's task count hides other users' sessions. Both steps of that
+    // walk stay in an index (migration 262) instead of reading task rows.
+    name: "getTasksCount readableBy, root step",
+    match: /COUNT/,
+    run: () => getTasksCount({ status: "in_progress", readableBy: { userId: "viewer-1" } }),
+    uses: ["SEARCH r USING COVERING INDEX idx_agent_tasks_session_owner (scheduleId=?)"],
+    revert: { dropIndex: "idx_agent_tasks_session_owner" },
+  },
+  {
+    name: "getTasksCount readableBy, recursive step",
+    match: /COUNT/,
+    run: () => getTasksCount({ status: "in_progress", readableBy: { userId: "viewer-1" } }),
+    uses: ["SEARCH c USING COVERING INDEX idx_agent_tasks_parentTaskId_id (parentTaskId=?)"],
+    revert: { dropIndex: "idx_agent_tasks_parentTaskId_id" },
+  },
+  {
     // Few hits: the page reads the agent_tasks_fts candidates by rowid. The
     // control is the old `task LIKE '%q%'`, which scans every task body.
     name: "getAllTasks search",
@@ -220,6 +236,17 @@ describe("query audit plans without sqlite_stat1", () => {
       expect(missing(reverted, uses)).not.toEqual([]);
     });
   }
+
+  test("the default task count scans the filter index, not the task rows", async () => {
+    // The heartbeat filter is a NOT IN and a NOT LIKE, so the count scans.
+    // Migration 263 lets it scan the narrow index instead of every task body.
+    const count = await capturedSql(/COUNT/, () =>
+      getTasksCount({ readableBy: { userId: "viewer-1" } }),
+    );
+    const uses = ["SCAN agent_tasks USING COVERING INDEX idx_agent_tasks_list_filter"];
+    expect(missing(plan(count), uses)).toEqual([]);
+    expect(missing(planWithoutIndex(count, "idx_agent_tasks_list_filter"), uses)).not.toEqual([]);
+  });
 
   test("task search with many hits pages by lastUpdatedAt and counts from the index", async () => {
     await getDbClient().transaction(async (tx) => {

@@ -65,6 +65,12 @@ export interface SteerComposerProps {
   extraActions?: React.ReactNode;
   /** A bottom bar: one line until used, 44 px controls. See `ComposerDock`. */
   bar?: boolean;
+  /**
+   * The send button's text (`TaskComposer`: "Steer", "Follow up"). Omitted:
+   * an icon button named "Send" ("Create follow-up task" without live
+   * delivery).
+   */
+  sendLabel?: string;
   className?: string;
 }
 
@@ -102,6 +108,7 @@ export function SteerComposer({
   fullWidth,
   extraActions,
   bar,
+  sendLabel,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -200,7 +207,8 @@ export function SteerComposer({
       }
       disabled={!userId}
       routeLabel={routeLabel}
-      sendLabel={hasLiveDelivery ? "Send" : "Create follow-up task"}
+      sendLabel={sendLabel ?? (hasLiveDelivery ? "Send" : "Create follow-up task")}
+      labelledSend={sendLabel !== undefined}
       autoFocus={autoFocus}
       extraActions={extraActions}
       bar={bar}
