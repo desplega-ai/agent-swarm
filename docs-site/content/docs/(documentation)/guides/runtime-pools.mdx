@@ -78,6 +78,58 @@ Pool and controller writes require operator credentials or a user account.
 A pool selects the image that receives a runtime token, so agents cannot create, change, or delete pools.
 A Lead can list pools, create an agent in an existing pool, and bind an agent to a pool.
 
+## Persistent caches
+
+Docker pools can share one persistent cache across their runtimes. Caching is off
+by default. Configure it through the pool API:
+
+```bash
+curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"cache":{"mountPath":"/home/worker/.cache"},"env":{"BUN_INSTALL_CACHE_DIR":"/home/worker/.cache/bun","npm_config_cache":"/home/worker/.cache/npm"}}'
+```
+
+The `env` object replaces the pool's environment settings, so include any values
+you already use. Make the mount writable for your image's worker user through
+your image or root setup script. Cache configuration mounts storage; the package
+manager environment variables select where tools put their caches.
+
+The swarm chooses the volume name, `swarm-cache-<poolId>-<generation>`. Every runtime in that
+pool on the same controller target shares the current generation, while its working disk remains
+ephemeral. Only use caches that support concurrent writers. Keep working trees,
+credentials and runtime state outside the shared cache.
+Mount paths cannot overlap workspace roots (`/workspace/personal` and
+`/workspace/shared`) or credential and harness state directories: the directory
+itself, its ancestors and its descendants are rejected. Entire worker homes are
+also rejected. Use a cache directory outside these protected trees, such as
+`/home/worker/.cache`, `/root/.cache`, `/workspace/cache`, or `/cache`.
+
+Terminating a runtime preserves its cache. Set `"cache": null` to stop mounting it
+in new runtimes and schedule automatic cleanup. Existing runtimes keep their
+mounts until they stop; cleanup waits for them, without waiting for new runtimes
+that do not use the cache. Deleting a pool or moving its placement also schedules
+cleanup on the old controller. Setting `"enabled": false` retains the configured
+cache for when the pool is enabled again.
+
+Cleanup survives API restarts and retries when the controller is offline or the
+volume is still in use. Docker verifies ownership and never forces removal.
+Re-enabling cache starts a fresh generation while the retired generation is
+cleaned up. A delayed or timed-out deletion cannot remove the new cache.
+Ordinary pool edits retain its generation. Abandoned cleanup claims retry after
+five minutes following an API restart. Disable caches and wait for cleanup before changing a
+controller's target, placement or credentials, or deleting the controller.
+Deferred cleanup errors appear in the API logs and
+`runtime_cache_releases.last_error`; upgrade older controllers to complete cleanup.
+
+Static, E2B and boxd pools currently reject this setting. Controllers declare
+`persistentCache` separately from `ephemeralDisk`; an older Docker controller
+starts without the cache and reports the reason in the pool's `lastError`.
+A failed volume preparation also falls back without cache and reports a warning.
+A mount failure during container creation or start retries once without the
+cache, after removing any failed-start container. Other failures still fail the
+provision.
+The API never adopts a volume labeled for another swarm or pool.
+
 ## Push and poll delivery
 
 Push workers dial `/api/realtime`. They need no inbound port.

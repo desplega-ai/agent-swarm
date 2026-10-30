@@ -742,6 +742,26 @@ declare module "swarm-sdk" {
       label: string,
       config: { prompt: string; model?: string; schema?: Record<string, unknown> },
     ): Promise<unknown>;
+    /**
+     * Dispatch a task and journal its result under `label`.
+     *
+     * Resolves to the task's OUTPUT on success: the stored output string (JSON
+     * text under `outputSchema`, so parse it yourself), or `null` when the task
+     * stored none. It is never a task record: on a string, `result.taskId` and
+     * `result.status` are undefined; on `null`, reading them throws a TypeError.
+     * Other shapes:
+     * - `failOnTaskFailure: false` and the task ends failed/cancelled/superseded:
+     *   `{ taskId, status: "failed", error }`.
+     * - `waitForCompletion: false`: the first call still waits up to ~30s while
+     *   the server polls the task. Done in that window: the output, as on
+     *   success. Failed or cancelled in that window: throws, or
+     *   `{ taskId, status: "failed", error }` with `failOnTaskFailure: false`.
+     *   Still running: `{ taskId, status }`.
+     *
+     * To get a step's task id, query by its context key:
+     * `SELECT id, status, output FROM agent_tasks WHERE contextKey = 'script-run:<runId>:<label>'
+     * AND taskType = 'script-run-step' ORDER BY createdAt DESC, rowid DESC LIMIT 1`.
+     */
     agentTask(label: string, config: AgentTaskStepConfig): Promise<unknown>;
     swarmScript(
       label: string,

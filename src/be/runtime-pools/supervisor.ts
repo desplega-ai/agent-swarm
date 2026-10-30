@@ -29,6 +29,7 @@ import {
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
 import { mintRuntimeToken } from "../users";
+import { getPoolCache, reconcileCacheReleases } from "./cache-cleanup";
 import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
@@ -245,6 +246,13 @@ export async function provisionRuntime(
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
     const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
+    const currentPoolCache = await getPoolCache(pool.id);
+    const currentCache =
+      currentPoolCache?.controllerId === pool.placements[0] ? currentPoolCache : null;
+    const cache =
+      currentCache && controller.traits.persistentCache
+        ? { key: currentCache.key, mountPath: currentCache.mountPath }
+        : undefined;
     signal?.throwIfAborted();
     const handle = await controller.provision({
       runtimeId,
@@ -255,6 +263,7 @@ export async function provisionRuntime(
       ...(ttlSec === undefined ? {} : { ttlSec }),
       env,
       resources: pool.resources ?? undefined,
+      ...(cache ? { cache } : {}),
       labels: {
         [RUNTIME_LABELS.runtimeId]: runtimeId,
         [RUNTIME_LABELS.poolId]: pool.id,
@@ -267,6 +276,25 @@ export async function provisionRuntime(
       await markRuntimeTerminated(runtimeId, "Supervisor stopped during provision");
       return false;
     }
+    const cacheWarning = currentCache
+      ? !controller.traits.persistentCache
+        ? "Controller does not support persistent caches; runtime started without cache"
+        : handle.meta?.cacheWarning
+      : undefined;
+    // A cache is optional: surface degradation without counting a provision failure.
+    const cacheErrorPrefix = "Persistent cache: ";
+    const cacheError = cacheWarning ? cacheErrorPrefix + scrubSecrets(cacheWarning) : null;
+    await getDbClient().run(
+      `UPDATE runtime_pools SET last_error = ?, last_error_at = ?
+       WHERE id = ? AND (last_error IS NULL OR substr(last_error, 1, ?) = ?)`,
+      [
+        cacheError,
+        cacheError ? new Date().toISOString() : null,
+        pool.id,
+        cacheErrorPrefix.length,
+        cacheErrorPrefix,
+      ],
+    );
     await getDbClient().run(
       "UPDATE runtime_instances SET external_handle = ?, lease_expires_at = ?, created_at = COALESCE(?, created_at), updated_at = ? WHERE id = ?",
       [
@@ -886,11 +914,14 @@ export async function reconcileOnce(
   opts: { now?: Date; getControllerCommands?: typeof getControllerCommands } = {},
 ): Promise<void> {
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled() || inFlight) return;
-  tickAbort = new AbortController();
+  const tick = new AbortController();
+  tickAbort = tick;
   inFlight = reconcilePools(
     opts.now ?? new Date(),
     opts.getControllerCommands ?? getControllerCommands,
-    tickAbort.signal,
+    tick.signal,
+  ).then(() =>
+    reconcileCacheReleases(opts.getControllerCommands ?? getControllerCommands, tick.signal),
   );
   try {
     await inFlight;

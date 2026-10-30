@@ -19,6 +19,26 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 | fx | `fx` | `FxAdapter` | Vercel Labs' fx as an ACP server (`fx acp`) on the shared ACP client; `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` by model route. See [fx](#fx-fx) below |
 
+## Worker API readiness
+
+Before any provider restores configuration, `docker-entrypoint.sh` calls the
+standalone `src/commands/entrypoint-api-readiness.ts` step. It runs in the
+entrypoint's existing root phase. It performs an unauthenticated `GET /health`,
+writes no files and receives no API key argument.
+
+`WORKER_API_READY_TIMEOUT_SECONDS` remains a positive integer with a 90-second
+default, including when the environment value is empty. Failures retry once per
+second. Each Bun fetch, including its response body, is bounded by three seconds
+or the remaining overall deadline, whichever is shorter. Redirects count as
+success without being followed, matching the previous `curl -f` behavior.
+Timeout and invalid configuration retain the `[entrypoint] FATAL:` messages and
+nonzero exit status, so provider initialization never continues after failure.
+
+The step injects its HTTP probe, clock, sleep and logger for unit tests.
+`src/tests/entrypoint-api-readiness.test.ts` also runs the real Bash shim and Bun
+module against local HTTP servers. This is the first per-step migration from
+Bash tracked in #2047; the remaining boot stages still run in the shell.
+
 ## Tool-schema cost on harness bumps
 
 On a codex, opencode or pi bump, run `bun scripts/probe-tool-schema-tokens.ts --harness <name>` and paste its table into the PR. It reports provider-reported turn-1 input tokens with and without the swarm MCP server, and how many swarm tools the request declares. On codex, a swarm-MCP delta above 2k tokens blocks the bump; on opencode, any declared swarm tool does: the new version stopped deferring MCP tools. On pi, the deferral-on leg must declare only the core set (`CORE_TOOLS`, 26 today). A `FAIL` in "swarm tool reached" means the MCP leg never connected, so its numbers do not count.

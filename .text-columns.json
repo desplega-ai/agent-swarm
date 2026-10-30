@@ -3766,6 +3766,20 @@
       "exempt": "timestamp"
     }
   },
+  "runtime_cache_releases": {
+    "id": { "exempt": "cleanup job id" },
+    "pool_id": { "exempt": "retained pool identity" },
+    "controller_id": { "exempt": "controller foreign key" },
+    "owner_id": { "exempt": "swarm owner identity" },
+    "cache_key": { "exempt": "provider cache identity" },
+    "runtime_ids": { "exempt": "JSON array of runtimes that must stop before release" },
+    "state": { "exempt": "cleanup state enum" },
+    "last_error": "scrubbed",
+    "created_at": { "exempt": "timestamp" },
+    "updated_at": { "exempt": "timestamp" },
+    "created_by": { "exempt": "audit principal foreign key" },
+    "updated_by": { "exempt": "audit principal foreign key" }
+  },
   "runtime_pools": {
     "id": {
       "exempt": "identifier"
@@ -3793,6 +3807,9 @@
     },
     "resources": {
       "exempt": "JSON resource settings"
+    },
+    "cache": {
+      "exempt": "JSON cache mount path and server-owned generation key"
     },
     "resolved_image": {
       "exempt": "provider artifact reference"

@@ -212,6 +212,63 @@ Adapter errors pass through `scrubSecrets`. Provision errors also redact sensiti
 The adapter does not register request environment values in the process-wide secret registry.
 If container start fails, the adapter attempts forced deletion before it returns the original error.
 
+### Persistent pool cache
+
+Pools accept `cache: { mountPath: "/home/worker/.cache" }` or `null` (the default).
+`RuntimeProviderTraits.persistentCache` is optional; absent means unsupported.
+The supervisor passes `ProvisionRequest.cache: { key, mountPath }`
+only to a controller that advertises the capability. The working disk still has
+`ephemeralDisk: true`. Docker is the first supported adapter; static, E2B, and boxd
+reject cache configuration until their adapters implement it.
+
+Docker creates the named volume with authoritative `swarm.owner`, `swarm.pool-id`,
+and `swarm.cache=true` labels, verifies the returned ownership, and mounts it with
+`HostConfig.Mounts` (`Type: "volume"`). Repeated and concurrent provisions reuse
+the pool's current generation. Foreign or unlabeled volumes are never adopted.
+An older remote controller or a failed volume preparation starts the runtime
+without cache. If Docker rejects the cache mount during container creation or
+start, the adapter retries once without mounts after removing any failed-start
+container. Unrelated errors and a failed cleanup still fail provisioning.
+Fallback records a scrubbed `Persistent cache:` warning in the pool's `lastError`,
+without advancing its provision failure counter.
+Successful cache provisioning clears only cache warnings, preserving other errors.
+Protocol version 1 accepts both legacy hello messages and the new optional fields.
+
+Cache contents must tolerate concurrent writers. Do not store working trees,
+credentials, or runtime state there. The operator chooses cache environment
+variables and makes the mount writable for the image's worker user through the
+image or root setup script. A mount does not configure package managers by itself.
+The API rejects any mount that overlaps a workspace root (`/workspace/personal`,
+`/workspace/shared`) or a credential/harness state directory under `/home/worker`
+or `/root`: the directory itself, its ancestors, and its descendants. This also
+rejects either entire home. Cache siblings such as `/home/worker/.cache`,
+`/root/.cache`, `/workspace/cache`, and `/cache` remain valid.
+Container termination and failed-start cleanup remove anonymous volumes only;
+the named cache survives for the pool's next runtime.
+
+Setting `cache: null`, deleting a pool, or changing its placement queues a release
+on the old controller. The supervisor waits for runtimes present at that change
+to stop, then calls the optional provider-neutral `releaseCache` method. New
+cache-free runtimes do not delay it. Disabling a pool with `enabled: false` keeps
+its configured cache for future use. Each enable or placement change allocates
+`swarm-cache-<poolId>-<generation>`; ordinary edits retain the current key.
+Re-enabling uses a fresh generation while the old release continues, so a timed-out
+remote deletion can only affect the retired cache. The key is private metadata in
+the existing pool cache JSON; public API responses expose only `mountPath`.
+Existing keys without a generation remain readable until caching is re-enabled.
+
+Release jobs in `runtime_cache_releases` survive pool deletion and API restart.
+An atomic pending/expired-lease claim prevents concurrent workers from sharing
+an active five-minute lease. Completion updates match the claim timestamp, so
+an expired worker cannot delete or reset a newer claim. Abandoned leases retry.
+Docker verifies the owner, pool, and cache labels before deleting the volume,
+without force; missing volumes count as released, and in-use volumes retry later.
+Offline or older controllers also defer cleanup until available or upgraded.
+The remote protocol uses `release-cache` with `{ key, poolId, ownerId }`.
+Deferred errors are scrubbed in the job's `last_error` and API logs. Controller
+target, placement, and credential changes are blocked while caches or releases
+remain; controller deletion waits for its pending releases to finish.
+
 ## e2b
 
 `E2B_API_KEY` is required. `E2B_API_BASE` selects a custom endpoint.

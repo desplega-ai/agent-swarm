@@ -17,6 +17,7 @@ import {
   markRuntimeTerminated,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import { reconcileCacheReleases } from "../be/runtime-pools/cache-cleanup";
 import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
@@ -30,6 +31,7 @@ import {
   getRuntimeController,
   getRuntimePool,
   updateRuntimeController,
+  updateRuntimePool,
 } from "../be/runtime-pools/db";
 import { remoteControllerSession } from "../be/runtime-pools/remote-controller";
 import {
@@ -50,15 +52,29 @@ import type {
   RuntimeTargetConfig,
 } from "../runtime-providers";
 import { ControllerOfflineError } from "../runtime-providers/controller";
-import { RUNTIME_LABELS } from "../runtime-providers/types";
+import { RUNTIME_LABELS, type RuntimeCacheReference } from "../runtime-providers/types";
 import { listenOnFreePort } from "./test-net";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 class FakeProvider implements RuntimeProvider {
   readonly kind = "docker" as const;
-  readonly traits = { canProvision: true, ephemeralDisk: true, supportsPause: false };
+  readonly traits: RuntimeProvider["traits"] = {
+    canProvision: true,
+    ephemeralDisk: true,
+    supportsPause: false,
+  };
   requests: ProvisionRequest[] = [];
   terminated: string[] = [];
+  releasedCaches: RuntimeCacheReference[] = [];
+  caches = new Set<string>();
+  cacheReleaseGate?: Promise<void>;
+  completedReleases = 0;
+  async releaseCache(_target: RuntimeTargetConfig, cache: RuntimeCacheReference) {
+    this.releasedCaches.push(cache);
+    await this.cacheReleaseGate;
+    this.caches.delete(cache.key);
+    this.completedReleases++;
+  }
   owners: string[] = [];
   runtimes = new Map<string, { handle: RuntimeHandle; ownerId: string; status: RuntimeStatus }>();
   gate?: Promise<void>;
@@ -67,6 +83,7 @@ class FakeProvider implements RuntimeProvider {
   }
   async provision(_target: RuntimeTargetConfig, req: ProvisionRequest) {
     this.requests.push(req);
+    if (req.cache) this.caches.add(req.cache.key);
     await this.gate;
     const handle: RuntimeHandle = {
       kind: this.kind,
@@ -133,6 +150,7 @@ beforeEach(async () => {
   process.env.RUNTIME_CIRCUIT_THRESHOLD = "3";
   process.env.RUNTIME_PROVISION_MAX_ATTEMPTS = "1";
   for (const table of [
+    "runtime_cache_releases",
     "active_sessions",
     "runtime_instances",
     "session_tokens",
@@ -205,20 +223,66 @@ function request(ownerId: string): ProvisionRequest {
 }
 
 test("hello sets online and all controller commands make round trips through the CLI client", async () => {
+  fake.traits.persistentCache = true;
   await connect();
   const row = await getRuntimeController(controllerId);
   expect(row?.lastSeenAt).toBeTruthy();
   const commands = await getControllerCommands(controllerId);
   expect(commands.workerApiUrl).toBe("http://remote-worker.invalid");
   const req = request(await ensureRuntimeOwnerId());
+  expect(commands.traits.persistentCache).toBe(true);
+  req.cache = { key: `swarm-cache-${req.poolId}`, mountPath: "/cache" };
   const handle = await commands.provision(req);
+  expect(fake.requests[0]?.cache).toEqual(req.cache);
   expect(handle.controllerId).toBe(controllerId);
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "running" });
   expect(await commands.list(req.ownerId)).toEqual([handle]);
   expect(await commands.list("another-swarm")).toEqual([]);
   await commands.terminate(handle, "test complete");
+  const cache = { key: req.cache.key, poolId: req.poolId, ownerId: req.ownerId };
+  await commands.releaseCache!(cache);
+  expect(fake.releasedCaches).toEqual([cache]);
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "exited" });
   expect(JSON.stringify(logSpy.mock.calls)).not.toContain(token);
+});
+
+test("a timed-out remote cache release cannot delete a re-enabled cache", async () => {
+  fake.traits.persistentCache = true;
+  await connect();
+  const pool = await createRuntimePool({
+    name: "cache-timeout",
+    kind: "docker",
+    placements: [controllerId],
+    image: "worker:test",
+    cache: { mountPath: "/cache" },
+  });
+  const agent = await createPoolAgent(pool.id, { name: "cache-worker" });
+  const commands = await getControllerCommands(controllerId);
+  const owner = await ensureRuntimeOwnerId();
+  await provisionRuntime(pool, agent, commands, owner);
+  const oldKey = fake.requests[0]!.cache!.key;
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  await commands.terminate(runtime.externalHandle as unknown as RuntimeHandle, "test");
+  await markRuntimeTerminated(runtime.id, "stopped");
+  await updateRuntimePool(pool.id, { cache: null });
+  const finish = Promise.withResolvers<void>();
+  fake.cacheReleaseGate = finish.promise;
+  try {
+    await reconcileCacheReleases(async () => commands, new AbortController().signal);
+    expect(fake.completedReleases).toBe(0);
+    const enabled = await updateRuntimePool(pool.id, { cache: { mountPath: "/cache" } });
+    await provisionRuntime(enabled, agent, commands, owner);
+    const newKey = fake.requests.at(-1)!.cache!.key;
+    finish.resolve();
+    await until(async () => fake.completedReleases === 1);
+    expect(fake.caches.has(oldKey)).toBe(false);
+    expect(fake.caches.has(newKey)).toBe(true);
+    expect(newKey).not.toBe(oldKey);
+    await reconcileCacheReleases(async () => commands, new AbortController().signal);
+  } finally {
+    finish.resolve();
+    await until(async () => fake.completedReleases >= 1);
+  }
 });
 
 test("remote E2B provisioning, renewal, pause, and resume use the controller session", async () => {

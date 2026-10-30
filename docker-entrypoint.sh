@@ -39,36 +39,10 @@ fi
 # cleanly. Bounded so a dead API never blocks boot forever. Timeout is
 # operator-tunable via WORKER_API_READY_TIMEOUT_SECONDS — see
 # apps/ui/src/lib/configuration-catalog.ts.
-# BEGIN wait_for_api_ready (extracted verbatim by src/tests/entrypoint-api-readiness.test.ts — keep markers stable)
+# BEGIN wait_for_api_ready (shell shim exercised by src/tests/entrypoint-api-readiness.test.ts)
 wait_for_api_ready() {
-    local base_url="$1"
-    local url="${base_url%/}/health"
-    local timeout_raw="${WORKER_API_READY_TIMEOUT_SECONDS:-90}"
-
-    case "$timeout_raw" in
-        ''|*[!0-9]*)
-            echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
-            exit 1
-            ;;
-    esac
-    if [ "$timeout_raw" -le 0 ]; then
-        echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
-        exit 1
-    fi
-
-    local deadline=$(( $(date +%s) + timeout_raw ))
-    echo "[entrypoint] Waiting for API readiness at ${url} (timeout ${timeout_raw}s)..."
-    while true; do
-        if curl -sf --connect-timeout 2 --max-time 3 -o /dev/null "$url"; then
-            echo "[entrypoint] API ready at ${url}"
-            return 0
-        fi
-        if [ "$(date +%s)" -ge "$deadline" ]; then
-            echo "[entrypoint] FATAL: API readiness timed out after ${timeout_raw}s waiting for ${url}; exiting."
-            exit 1
-        fi
-        sleep 1
-    done
+    /usr/local/bin/bun --no-orphans /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts \
+        "$1" "${WORKER_API_READY_TIMEOUT_SECONDS:-90}"
 }
 # END wait_for_api_ready
 

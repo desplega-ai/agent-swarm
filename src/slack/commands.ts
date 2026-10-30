@@ -2,6 +2,7 @@ import type { App } from "@slack/bolt";
 import { getAllAgents, getAllTasks } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
+import { isSlackLeaveThreadDisabled } from "./left-threads";
 
 export function registerCommandHandler(app: App): void {
   app.command("/agent-swarm-status", async ({ ack, respond, command, client }) => {
@@ -88,9 +89,12 @@ export function registerCommandHandler(app: App): void {
 • Follow-up tasks auto-depend on the active task in the thread for natural sequencing`);
     }
 
+    const leaveLine = isSlackLeaveThreadDisabled()
+      ? ""
+      : "\n• `!leave` in a thread - Make the swarm ignore that thread until someone @mentions it";
     sections.push(`*Commands:*
 • \`/agent-swarm-status\` - Show all agents and their current status
-• \`/agent-swarm-help\` - Show this help message`);
+• \`/agent-swarm-help\` - Show this help message${leaveLine}`);
 
     const blocks = [
       {
