@@ -49356,6 +49356,16 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
             "content": {

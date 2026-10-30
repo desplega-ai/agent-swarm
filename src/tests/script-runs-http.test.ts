@@ -921,6 +921,18 @@ describe("ctx.step.agentTask follow-up re-delegation guard", () => {
     expect(replay.status).toBe(200);
   });
 
+  test("another agent cannot dispatch steps on a run it does not own", async () => {
+    const runId = await launch();
+    const intruder = await createAgent({ name: "guard-intruder", isLead: false, status: "idle" });
+    const response = await dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId: intruder.id,
+      body: JSON.stringify({ stepKey: "forged", task: "do work attributed to someone else" }),
+    });
+    expect(response.status).toBe(403);
+    expect(await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:forged`)).toBeNull();
+  });
+
   test("a run not launched from a follow-up is unaffected", async () => {
     await completedWork("C_RUN_PLAIN", "7.1", "refresh the onboarding checklist copy");
     await sendTaskDispatches("C_RUN_PLAIN", "7.1", FOLLOW_UP_DISPATCH_CAP);

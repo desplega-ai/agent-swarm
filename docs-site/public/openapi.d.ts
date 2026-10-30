@@ -32286,6 +32286,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Script run belongs to another agent */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Script run not found */
             404: {
                 headers: {

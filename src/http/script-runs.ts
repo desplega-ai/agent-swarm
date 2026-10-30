@@ -305,6 +305,7 @@ const agentTaskRoute = route({
       description: "Agent task created or still running",
       schema: z.object({ taskId: z.string(), status: AgentTaskStatusSchema }),
     },
+    403: { description: "Script run belongs to another agent" },
     404: { description: "Script run not found" },
     409: { description: "Agent task failed, was cancelled, or was superseded" },
     422: { description: "Blocked by the follow-up re-delegation guard" },
@@ -652,6 +653,14 @@ export async function handleScriptRuns(
     const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
+      return true;
+    }
+
+    // Only the run's own harness dispatches its steps (it sends the run's
+    // agent id). Step tasks carry that agent as creator, so another agent
+    // must not create them.
+    if (agentId !== run.agentId) {
+      jsonError(res, "Script run belongs to another agent", 403);
       return true;
     }
 
