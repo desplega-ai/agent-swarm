@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { SteeringMessage } from "../../../api/types";
+import type { AgentTask, SteeringMessage } from "../../../api/types";
 import type { ParsedMessage } from "../../../logs-parser";
 
 // The root-level test run cannot resolve ui's `@/` alias (same pattern as
@@ -16,9 +16,14 @@ mock.module("@/components/shared/session-log-viewer", () => ({
   }),
 }));
 
-const { buildTranscriptRows, foldedTurnRows, summarizeWork, workedForLabel } = await import(
-  "./transcript-rows"
-);
+const {
+  buildTranscriptRows,
+  foldedTurnRows,
+  pagedRows,
+  summarizeWork,
+  TRANSCRIPT_PAGE_ROWS,
+  workedForLabel,
+} = await import("./transcript-rows");
 type WorkEntry = import("./transcript-rows").WorkEntry;
 
 let seq = 0;
@@ -256,5 +261,64 @@ describe("workedForLabel", () => {
       "Worked for 4m 12s",
     );
     expect(workedForLabel("2026-10-30T10:00:00Z", undefined)).toBe("Activity");
+  });
+});
+
+describe("a long session with delegations", () => {
+  const start = Date.parse("2026-10-30T09:00:00Z");
+  const at = (i: number) => new Date(start + i * 1000).toISOString();
+  // 600 turns of prose plus a tool call: 1,200 rows, 600 tool calls.
+  const messages: ParsedMessage[] = [];
+  for (let i = 0; i < 600; i++) {
+    messages.push({
+      id: `a${i}`,
+      role: "assistant",
+      content: [{ type: "text", text: `Step ${i}.` }],
+      iteration: 1,
+      timestamp: at(2 * i),
+    });
+    messages.push({
+      id: `t${i}`,
+      role: "assistant",
+      content: [{ type: "tool_use", id: `tu${i}`, name: "Bash", input: { command: `step ${i}` } }],
+      iteration: 1,
+      timestamp: at(2 * i + 1),
+    });
+  }
+  const child = (id: string, second: number) =>
+    ({ id, task: `Child ${id}`, status: "completed", createdAt: at(second) }) as AgentTask;
+  const children = [child("c1", 100.5), child("c2", 600.5), child("c3", 1100.5)].map((task) => ({
+    task,
+    agentName: "Worker",
+  }));
+  const rows = buildTranscriptRows({ messages, children });
+
+  test("a delegated task is a row at the time it was created", () => {
+    expect(rows.length).toBe(1203);
+    const delegations = rows.filter((row) => row.kind === "delegation");
+    expect(delegations.map((row) => row.id)).toEqual(["child-c1", "child-c2", "child-c3"]);
+    const c2 = rows.findIndex((row) => row.id === "child-c2");
+    expect(rows[c2 - 1]).toMatchObject({ kind: "assistant", text: "Step 300." });
+    expect(rows[c2 + 1]).toMatchObject({ kind: "work" });
+  });
+
+  test("shows the newest page, and each page reaches further back", () => {
+    const first = pagedRows(rows, TRANSCRIPT_PAGE_ROWS);
+    expect(first.shown).toHaveLength(TRANSCRIPT_PAGE_ROWS);
+    expect(first.hidden).toBe(1003);
+    expect(first.shown.at(-1)).toBe(rows.at(-1));
+    const all = pagedRows(rows, TRANSCRIPT_PAGE_ROWS * 7);
+    expect(all.hidden).toBe(0);
+    expect(all.shown).toBe(rows);
+  });
+
+  test("the closed fold keeps the delegations and the last message", () => {
+    const folded = foldedTurnRows(rows, false);
+    expect(folded.map((row) => row.kind)).toEqual([
+      "delegation",
+      "delegation",
+      "delegation",
+      "assistant",
+    ]);
   });
 });

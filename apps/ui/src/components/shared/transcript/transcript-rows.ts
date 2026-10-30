@@ -9,9 +9,12 @@
  * "work" row with a one-line summary ("Read 3 files and ran 2 commands"), and
  * a finished turn folds behind a "Worked for 4m 12s" line that keeps only the
  * agent's last message in view.
+ *
+ * A task this one delegated is a row of its own at the time it was created:
+ * a child-task card that links to the child's own transcript.
  */
 
-import type { AgentLog, SteeringMessage } from "@/api/types";
+import type { AgentLog, AgentTask, SteeringMessage } from "@/api/types";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { classifyTool } from "@/components/shared/session-log-viewer";
 import { formatDuration, parseUTCDate } from "@/lib/utils";
@@ -36,6 +39,7 @@ export type WorkEntry =
 export type TranscriptRow =
   | { kind: "assistant"; id: string; at: string; text: string }
   | { kind: "steer"; id: string; at: string; message: SteeringMessage }
+  | { kind: "delegation"; id: string; at: string; task: AgentTask; agentName: string | null }
   | { kind: "work"; id: string; at: string; entries: WorkEntry[] };
 
 /** `t` is the sort time in ms: when the item entered the run. */
@@ -150,6 +154,8 @@ export interface TranscriptSources {
   /** The task's activity events (`task.logs`). */
   logs?: AgentLog[];
   steering?: SteeringMessage[];
+  /** The tasks this one delegated (`directChildren`), each with its agent's name. */
+  children?: { task: AgentTask; agentName: string | null }[];
   /** Keep the agent's prose as rows. Off: work and steering only (an inline activity feed). */
   withMessages?: boolean;
 }
@@ -163,9 +169,16 @@ export function buildTranscriptRows({
   messages,
   logs = [],
   steering = [],
+  children = [],
   withMessages = true,
 }: TranscriptSources): TranscriptRow[] {
   const items = messageItems(messages, withMessages);
+  for (const { task, agentName } of children) {
+    items.push({
+      t: timeOf(task.createdAt),
+      row: { kind: "delegation", id: `child-${task.id}`, at: task.createdAt, task, agentName },
+    });
+  }
   for (const log of logs) {
     const text = summarizeAgentLog(log);
     if (text)
@@ -207,8 +220,9 @@ export function buildTranscriptRows({
 
 /**
  * The rows a finished turn shows. Closed, the fold keeps only the agent's last
- * message in view, plus any steering message still waiting for the agent.
- * Open, every row shows in run order: work after the last message stays after it.
+ * message in view, the delegated tasks (each its own transcript), and any
+ * steering message still waiting for the agent. Open, every row shows in run
+ * order: work after the last message stays after it.
  */
 export function foldedTurnRows(rows: TranscriptRow[], open: boolean): TranscriptRow[] {
   if (open) return rows;
@@ -220,8 +234,23 @@ export function foldedTurnRows(rows: TranscriptRow[], open: boolean): Transcript
     }
   }
   return rows.filter(
-    (row, i) => i === lastAssistant || (row.kind === "steer" && row.message.status === "pending"),
+    (row, i) =>
+      i === lastAssistant ||
+      row.kind === "delegation" ||
+      (row.kind === "steer" && row.message.status === "pending"),
   );
+}
+
+/** A long transcript shows its newest rows first, this many per page. */
+export const TRANSCRIPT_PAGE_ROWS = 200;
+
+/** The newest `limit` rows, and how many older ones stay hidden. */
+export function pagedRows(
+  rows: TranscriptRow[],
+  limit: number,
+): { shown: TranscriptRow[]; hidden: number } {
+  const hidden = Math.max(0, rows.length - limit);
+  return { shown: hidden > 0 ? rows.slice(hidden) : rows, hidden };
 }
 
 /** The fold line: "Worked for 4m 12s", or "Activity" when the run has no end time. */

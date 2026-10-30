@@ -9,6 +9,10 @@
  * line that opens to compact 24 px lines, a live run shows its newest step
  * with a "Working for" timer, and a finished run folds behind "Worked for".
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
+ *
+ * A delegated task is a card (agent, status, duration) that links to its own
+ * transcript. A long run shows its newest `TRANSCRIPT_PAGE_ROWS` rows, with
+ * "Show older" above them, so a 1,000-row run mounts a page at a time.
  */
 
 import {
@@ -28,8 +32,11 @@ import {
   Wrench,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import type { AgentTask } from "@/api/types";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import type { ToolKind } from "@/components/shared/session-log-messages";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { SteeringLine } from "@/components/steering/steering-message-chips";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,11 +49,15 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import { statusLabel } from "@/lib/status-labels";
+import { taskListTitle } from "@/lib/task-title";
 import { cn, formatDuration, formatRelativeTime, parseUTCDate } from "@/lib/utils";
 import {
   entrySummary,
   foldedTurnRows,
+  pagedRows,
   summarizeWork,
+  TRANSCRIPT_PAGE_ROWS,
   type TranscriptRow,
   type WorkEntry,
 } from "./transcript-rows";
@@ -84,7 +95,7 @@ export interface TranscriptProps {
   workingSince?: string;
   /** Shown while a live run has no rows yet ("Thinking…"). */
   waitingLabel?: string;
-  /** The page's scroller: a live run follows its bottom, with a "Scroll to end" button. */
+  /** The page's scroller: a live run follows its bottom, with a "Jump to latest" button. */
   scroller?: HTMLElement | null;
   className?: string;
 }
@@ -100,7 +111,11 @@ export function Transcript({
   className,
 }: TranscriptProps) {
   const activeFold = running ? null : (fold ?? null);
-  const shown = activeFold ? foldedTurnRows(rows, activeFold.open) : rows;
+  const [limit, setLimit] = useState(TRANSCRIPT_PAGE_ROWS);
+  const { shown, hidden } = pagedRows(
+    activeFold ? foldedTurnRows(rows, activeFold.open) : rows,
+    limit,
+  );
   const liveRowId = running ? rows[rows.length - 1]?.id : undefined;
   const contentRef = useFollowEnd(scroller ?? null, running);
 
@@ -112,6 +127,18 @@ export function Transcript({
     >
       {prompt}
       {activeFold ? <TurnFoldRow fold={activeFold} /> : null}
+      {hidden > 0 ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-slot="transcript-show-older"
+          className="self-center text-muted-foreground"
+          onClick={() => setLimit(limit + TRANSCRIPT_PAGE_ROWS)}
+        >
+          Show {Math.min(hidden, TRANSCRIPT_PAGE_ROWS)} older ({hidden.toLocaleString()} hidden)
+        </Button>
+      ) : null}
       {shown.map((row) => (
         <TranscriptRowView key={row.id} row={row} live={row.id === liveRowId} />
       ))}
@@ -154,9 +181,35 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
           />
         </div>
       );
+    case "delegation":
+      return <DelegationCard task={row.task} agentName={row.agentName} />;
     case "work":
       return <WorkRow entries={row.entries} live={live} />;
   }
+}
+
+/** A delegated task: agent, status and duration, linking to its own transcript. */
+function DelegationCard({ task, agentName }: { task: AgentTask; agentName: string | null }) {
+  const start = parseUTCDate(task.acceptedAt ?? task.createdAt).getTime();
+  const end = task.finishedAt ? parseUTCDate(task.finishedAt).getTime() : Number.NaN;
+  const ran = Number.isFinite(end - start) ? formatDuration(Math.max(0, end - start)) : null;
+  return (
+    <Link
+      to={`/tasks/${task.id}`}
+      data-slot="transcript-delegation"
+      className="flex min-w-0 items-center gap-2.5 rounded-lg border border-border px-3 py-2 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <TaskStatusIcon status={task.status} label={statusLabel(task.status)} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{taskListTitle(task)}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          Delegated to {agentName ?? "an agent"} · {statusLabel(task.status)}
+          {ran ? ` · ${ran}` : ""}
+        </span>
+      </span>
+      <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+    </Link>
+  );
 }
 
 /**
@@ -391,7 +444,7 @@ function useFollowEnd(
   return setContent;
 }
 
-/** "Scroll to end": shows 150 ms after the reader leaves the bottom of a long transcript. */
+/** "Jump to latest": shows 150 ms after the reader leaves the bottom of a long transcript. */
 function ScrollToEndButton({ scroller }: { scroller: HTMLElement }) {
   const [away, setAway] = useState(false);
   useEffect(() => {
@@ -420,7 +473,7 @@ function ScrollToEndButton({ scroller }: { scroller: HTMLElement }) {
         onClick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}
       >
         <ArrowDown />
-        Scroll to end
+        Jump to latest
       </Button>
     </div>
   );

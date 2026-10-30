@@ -102,14 +102,24 @@ import {
 } from "./task-sticky-bar";
 import { useElementHeight } from "./use-element-height";
 
-/** The narrow layout's tabs. The `?tab=` values predate the labels: Transcript is `logs`. */
-const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
+/**
+ * The narrow layout's tabs: the transcript, then the side panel's tabs. The
+ * `?tab=` values predate the labels: Transcript is `logs`.
+ */
+const TASK_DETAIL_TABS = new Set(["logs", "details", "tree", "files"]);
+
+/** The wide layout's side panel tabs, modelled on T3 Code's right panel. `?panel=` keeps the pick. */
+const SIDE_PANEL_TABS = new Set(["details", "tree", "files"]);
 
 /** The focus ring of a narrow tab panel (the panel itself is a Tab stop). */
 const PANEL_FOCUS_RING = "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60";
 
 function coerceTaskDetailTab(value: string, fallback: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : fallback;
+}
+
+function coerceSidePanelTab(value: string): string {
+  return SIDE_PANEL_TABS.has(value) ? value : "details";
 }
 
 /**
@@ -266,20 +276,13 @@ function StructuredOutputContent({
 }
 
 /**
- * Focuses the message box that shows. The wide layout's box is in the column,
- * so it scrolls into view first. The narrow layout's box is in the bottom
- * bar, which is always in view.
+ * Focuses the message box that shows. Both layouts pin it under their
+ * scroller, so it is always in view.
  */
 function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElement | null) {
   const shown = (element: HTMLElement | null) => !!element && element.getClientRects().length > 0;
   const box = shown(wideBox) ? wideBox : shown(narrowBar) ? narrowBar : null;
-  const textarea = box?.querySelector("textarea");
-  if (!box || !textarea) return;
-  if (box === wideBox) {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    box.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
-  }
-  textarea.focus({ preventScroll: true });
+  box?.querySelector("textarea")?.focus({ preventScroll: true });
 }
 
 export default function TaskDetailPage() {
@@ -371,10 +374,15 @@ export default function TaskDetailPage() {
     (mode: LogMode) => setParam("log", mode, { defaultValue: "transcript" }),
     [setParam],
   );
-  // The details panel next to the column folds away, as the app sidebar does.
+  // The side panel next to the column folds away, as the app sidebar does.
   const [detailsCollapsed, setDetailsCollapsed] = useLocalToggle(
     "tasks:details-panel-collapsed",
     false,
+  );
+  const sidePanelTab = coerceSidePanelTab(readStringParam(searchParams, "panel", "details"));
+  const setSidePanelTab = useCallback(
+    (tab: string) => setParam("panel", coerceSidePanelTab(tab), { defaultValue: "details" }),
+    [setParam],
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. The column is the page's one scroller: the log flows in it.
@@ -384,16 +392,13 @@ export default function TaskDetailPage() {
     scrollerRef: centerScrollerRef,
     sentinelRef: heroEndRef,
   } = useHeroScrolledPast();
-  // The wide layout's live message box sticks to the bottom of the column. Its
-  // height goes to the log as `--log-sticky-bottom`.
-  const [composerHeight, composerRef] = useElementHeight();
-  // The narrow layout scrolls as one: the hero scrolls away, and the tabs
-  // and the bottom bar stick. Their heights go to the log as
-  // `--log-sticky-top` and `--log-sticky-bottom`.
+  // The narrow layout scrolls as one above the pinned message box: the hero
+  // scrolls away and the tabs stick. Their height goes to the log as
+  // `--log-sticky-top`.
   const [narrowScroller, setNarrowScroller] = useState<HTMLElement | null>(null);
   const [narrowHeroHeight, narrowHeroRef] = useElementHeight();
   const [narrowTabsHeight, narrowTabsRef] = useElementHeight();
-  const [narrowBarHeight, narrowBarRef, narrowBar] = useElementHeight();
+  const [narrowBar, narrowBarRef] = useState<HTMLElement | null>(null);
   // A tab switch while the tabs are stuck shows the new tab from its top,
   // right under the tabs. With the hero still in view, nothing moves.
   const shownTabRef = useRef(activeTab);
@@ -404,8 +409,8 @@ export default function TaskDetailPage() {
       narrowScroller.scrollTop = narrowHeroHeight;
     }
   }, [activeTab, narrowScroller, narrowHeroHeight]);
-  // "Follow up" focuses the message box: the wide layout's box under the
-  // outcome, or the narrow layout's bottom bar, which every tab shows.
+  // "Follow up" focuses the message box: the wide layout's or the narrow
+  // layout's, each pinned under its scroller.
   const wideFollowUpBoxRef = useRef<HTMLDivElement | null>(null);
   const requestFollowUp = useCallback(
     () => focusVisibleComposer(wideFollowUpBoxRef.current, narrowBar),
@@ -447,16 +452,25 @@ export default function TaskDetailPage() {
     [sessionLogs, usageDetails],
   );
   const callUsage = useMemo(() => (usageItems ? sumItemCallUsage(usageItems) : null), [usageItems]);
-  // The transcript's rows: the agent's prose, tool runs and steering in time
-  // order. Activity events stay in the details panel.
+  // The transcript's rows: the agent's prose, tool runs, steering and the
+  // tasks it delegated, in time order. Activity events stay in Details.
   const transcriptSteering = steerGate.supported && steeringEnabled ? steeringMessages : undefined;
+  const delegated = useMemo(
+    () =>
+      directChildren(id!, session?.chain ?? []).map((child) => ({
+        task: child,
+        agentName: child.agentId ? (agentNames.get(child.agentId) ?? null) : null,
+      })),
+    [id, session, agentNames],
+  );
   const transcriptRows = useMemo(
     () =>
       buildTranscriptRows({
         messages: parseSessionLogs(sessionLogs ?? []),
         steering: transcriptSteering,
+        children: delegated,
       }),
-    [sessionLogs, transcriptSteering],
+    [sessionLogs, transcriptSteering, delegated],
   );
   // The request composition: the rail's panel and each cache chip's bar.
   // Also only with usage details on.
@@ -585,45 +599,64 @@ export default function TaskDetailPage() {
         }
       : null;
 
-  // Narrow: the Outcome tab. The bottom bar holds the message box, so the
-  // tab has none.
-  const outcomeContent = (
-    <div className="space-y-2">
-      {failureCallout}
+  // The answer, under the transcript in both layouts, as in a chat. The column
+  // scrolls, so it has no height cap.
+  const outputSection = hasOutput ? (
+    <CollapsibleSection
+      variant="card"
+      title="Output"
+      icon={isCompleted ? CheckCircle2 : Terminal}
+      iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
+      borderColor={isCompleted ? "border-status-success/30" : "border-border"}
+      bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+      headerClassName="min-h-11"
+      heading="h2"
+      // A finished task is opened for its result; keep it collapsed while the
+      // task runs so the live log stays in view.
+      defaultOpen={isTerminal}
+    >
+      <StructuredOutputContent
+        citations={task.citations}
+        raw={task.output ?? ""}
+        maxH=""
+        taskIds={knownTaskIds}
+      />
+    </CollapsibleSection>
+  ) : null;
 
-      {hasOutput && (
-        <CollapsibleSection
-          variant="card"
-          title="Output"
-          icon={isCompleted ? CheckCircle2 : Terminal}
-          iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
-          borderColor={isCompleted ? "border-status-success/30" : "border-border"}
-          bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
-          headerClassName="min-h-11"
-          heading="h2"
-          defaultOpen
+  // THE SIDE PANEL's tabs (the narrow layout's tabs after Transcript).
+  // Tree: where the task came from and what it delegated, with live status.
+  const treeContent = (
+    <div className="flex flex-col gap-3">
+      {task.parentTaskId ? (
+        <Link
+          to={`/tasks/${task.parentTaskId}`}
+          className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
-          <StructuredOutputContent
-            citations={task.citations}
-            raw={task.output ?? ""}
-            maxH="max-h-[60vh]"
-            taskIds={knownTaskIds}
-          />
-        </CollapsibleSection>
-      )}
-
-      <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
-      <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
-
-      {!isFailed && !hasOutput && !hasAttachments && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <p className="text-xs">No output available</p>
-        </div>
-      )}
-
+          <ArrowLeft className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Started by{" "}
+            <span className="font-mono text-primary">#{task.parentTaskId.slice(0, 8)}</span>
+          </span>
+        </Link>
+      ) : null}
       {spawnedTasks}
+      {!task.parentTaskId && spawned.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No parent task and no delegated tasks.</p>
+      ) : null}
     </div>
   );
+  // Files: what the task attached.
+  const filesContent = hasAttachments ? (
+    <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+  ) : (
+    <p className="text-xs text-muted-foreground">No files.</p>
+  );
+  const sidePanelTabs = [
+    { value: "details", label: "Details", content: detailsRail },
+    { value: "tree", label: "Tree", content: treeContent },
+    { value: "files", label: "Files", content: filesContent },
+  ] as const;
 
   // STEERING, no longer its own box above the logs. Delivered/handled rows
   // interleave into the SESSION LOGS stream at `deliveredAt`, promoted/
@@ -827,7 +860,7 @@ export default function TaskDetailPage() {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={detailsCollapsed ? "Show details panel" : "Hide details panel"}
+          aria-label={detailsCollapsed ? "Show side panel" : "Hide side panel"}
           aria-pressed={!detailsCollapsed}
           onClick={() => setDetailsCollapsed(!detailsCollapsed)}
           className="text-muted-foreground hover:text-foreground"
@@ -836,10 +869,13 @@ export default function TaskDetailPage() {
         </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        {detailsCollapsed ? "Show details" : "Hide details"}
+        {detailsCollapsed ? "Show side panel" : "Hide side panel"}
       </TooltipContent>
     </Tooltip>
   );
+
+  // With the side panel folded, the column keeps a reading width.
+  const readingWidth = detailsCollapsed ? "mx-auto w-full max-w-5xl" : undefined;
 
   // WIDE HERO: the title, where the task came from, and the chips, with the
   // actions and the details fold right of the title.
@@ -908,68 +944,66 @@ export default function TaskDetailPage() {
       ) : null}
 
       {/* Narrow (under 60rem of page width): one scroller from under the app
-          header to the window bottom (it bleeds into <main>'s padding). The
-          hero scrolls away. The tabs stick to the top and the message box to
-          the bottom, on every tab. The log flows in this scroller: the tabs
-          and bar heights go to it as CSS variables, so its toolbar sticks
-          under the tabs. */}
-      <div
-        ref={setNarrowScroller}
-        style={
-          {
-            "--log-sticky-top": `${narrowTabsHeight}px`,
-            "--log-sticky-bottom": `${narrowBarHeight}px`,
-          } as CSSProperties
-        }
-        className={cn(
-          "@min-[60rem]:hidden flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]",
-          MAIN_BLEED,
-        )}
-      >
-        <div ref={narrowHeroRef} className={MAIN_GUTTER_X}>
-          {narrowHero}
-        </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 gap-0">
-          <div
-            ref={narrowTabsRef}
-            className={cn(
-              "sticky top-0 z-20 border-b border-border-subtle bg-background py-2",
-              MAIN_GUTTER_X,
-            )}
-          >
-            <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
-              <TabsTrigger value="logs" className="h-11">
-                Transcript
-              </TabsTrigger>
-              <TabsTrigger value="outcome" className="h-11">
-                Outcome
-              </TabsTrigger>
-              <TabsTrigger value="details" className="h-11">
-                Details
-              </TabsTrigger>
-            </TabsList>
+          header down to the message box, which is pinned under it (it bleeds
+          into <main>'s padding). The hero scrolls away and the tabs stick to
+          the top. The log flows in this scroller: the tabs' height goes to it
+          as a CSS variable, so its toolbar sticks under the tabs. */}
+      <div className={cn("@min-[60rem]:hidden flex min-h-0 flex-1 flex-col", MAIN_BLEED)}>
+        <div
+          ref={setNarrowScroller}
+          style={{ "--log-sticky-top": `${narrowTabsHeight}px` } as CSSProperties}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]"
+        >
+          <div ref={narrowHeroRef} className={MAIN_GUTTER_X}>
+            {narrowHero}
           </div>
-          {/* Each panel is a Tab stop (Radix), so it shows the focus ring. */}
-          <TabsContent value="outcome" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
-            {outcomeContent}
-          </TabsContent>
-          <TabsContent
-            value="logs"
-            className={cn("flex flex-col py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
-          >
-            {renderSessionLogs(narrowScroller, true)}
-          </TabsContent>
-          <TabsContent value="details" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
-            {detailsRail}
-          </TabsContent>
-        </Tabs>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 gap-0">
+            <div
+              ref={narrowTabsRef}
+              className={cn(
+                "sticky top-0 z-20 border-b border-border-subtle bg-background py-2",
+                MAIN_GUTTER_X,
+              )}
+            >
+              <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
+                <TabsTrigger value="logs" className="h-11">
+                  Transcript
+                </TabsTrigger>
+                {sidePanelTabs.map((tab) => (
+                  <TabsTrigger key={tab.value} value={tab.value} className="h-11">
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+            {/* Each panel is a Tab stop (Radix), so it shows the focus ring. */}
+            <TabsContent
+              value="logs"
+              className={cn("flex flex-col gap-3 py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
+            >
+              {failureCallout}
+              {renderSessionLogs(narrowScroller, true)}
+              {outputSection}
+              <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
+            </TabsContent>
+            {sidePanelTabs.map((tab) => (
+              <TabsContent
+                key={tab.value}
+                value={tab.value}
+                className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
+              >
+                {tab.content}
+              </TabsContent>
+            ))}
+          </Tabs>
+        </div>
         {composerProps ? (
-          // `env(safe-area-inset-bottom)` keeps the box above the home
-          // indicator when the page runs edge to edge.
+          // Pinned under the scroller, on every tab. `env(safe-area-inset-bottom)`
+          // keeps the box above the home indicator when the page runs edge to edge.
           <div
             ref={narrowBarRef}
             className={cn(
-              "sticky bottom-0 z-20 border-t border-border bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+              "shrink-0 border-t border-border bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
               MAIN_GUTTER_X,
             )}
           >
@@ -978,107 +1012,91 @@ export default function TaskDetailPage() {
         ) : null}
       </div>
 
-      {/* Wide: a scrolling center column and the details rail. The grid
-          bleeds into <main>'s vertical padding, so the column scrolls from
-          under the app header down to the window edge and the log gets those
-          pixels. */}
+      {/* Wide: a center column and the tabbed side panel. The grid bleeds
+          into <main>'s vertical padding, so the column runs from under the app
+          header down to the window edge. */}
       <div
         className={cn(
           "hidden @min-[60rem]:grid flex-1 min-h-0",
-          detailsCollapsed ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_300px]",
+          detailsCollapsed ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_320px]",
           MAIN_BLEED_Y,
         )}
       >
-        {/* The column is the only scroller. The log flows in it, and its
-            toolbar, minimap and live footer stick under the bar and above the
-            message box: both heights go to the log as CSS variables. */}
-        <section
-          ref={centerScrollerRef}
-          style={
-            {
-              "--log-sticky-top": STICKY_BAR_HEIGHT,
-              "--log-sticky-bottom": `${composerHeight}px`,
-            } as CSSProperties
-          }
-          className="relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]"
-        >
-          <TaskStickyBar
-            visible={heroScrolledPast}
-            title={headerTitle}
-            status={task.status}
-            model={displayModel}
-            effort={displayEffort}
-            action={<TaskPrimaryAction model={actions} />}
-            onTitleClick={() => scrollToTop(centerScroller)}
-          />
+        <section className="flex min-h-0 flex-col">
+          {/* Only the transcript scrolls. Its toolbar sticks under the bar. */}
           <div
-            className={cn(
-              "flex flex-col gap-3 pt-6 pr-6 pb-3",
-              // With the details panel folded, the column keeps a reading width.
-              detailsCollapsed && "mx-auto w-full max-w-5xl",
-            )}
+            ref={centerScrollerRef}
+            style={{ "--log-sticky-top": STICKY_BAR_HEIGHT } as CSSProperties}
+            className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
           >
-            <div className="pb-2">
-              {wideHero}
-              <div ref={heroEndRef} aria-hidden className="h-px" />
-            </div>
-            <Separator />
-            {failureCallout}
-
-            {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
-                outcome under it, as in a chat. */}
-            {renderSessionLogs(centerScroller)}
-
-            {hasOutput && (
-              <CollapsibleSection
-                variant="card"
-                title="Output"
-                icon={isCompleted ? CheckCircle2 : Terminal}
-                iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
-                borderColor={isCompleted ? "border-status-success/30" : "border-border"}
-                bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
-                heading="h2"
-                // A finished task is opened for its result; keep it collapsed
-                // while the task runs so the live log stays in view.
-                defaultOpen={isTerminal}
-              >
-                {/* No height cap: the column scrolls. */}
-                <StructuredOutputContent
-                  citations={task.citations}
-                  raw={task.output ?? ""}
-                  maxH=""
-                  taskIds={knownTaskIds}
-                />
-              </CollapsibleSection>
-            )}
-
-            <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
-            <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
-            {spawnedTasks}
-            {composerProps ? (
-              // THE MESSAGE BOX sticks to the bottom of the column: it steers
-              // a live task and follows up a finished one. `-my-3 py-3` moves
-              // the column gap and the bottom padding into the sticky box: the
-              // stuck box keeps both, and the scroll height does not change.
-              <div ref={composerRef} className="sticky bottom-0 z-10 -my-3 bg-background py-3">
-                {isTerminal ? (
-                  <div ref={wideFollowUpBoxRef}>
-                    <TaskComposer {...composerProps} />
-                  </div>
-                ) : (
-                  steerComposer
-                )}
+            <TaskStickyBar
+              visible={heroScrolledPast}
+              title={headerTitle}
+              status={task.status}
+              model={displayModel}
+              effort={displayEffort}
+              action={<TaskPrimaryAction model={actions} />}
+              onTitleClick={() => scrollToTop(centerScroller)}
+            />
+            <div className={cn("flex flex-col gap-3 pt-6 pr-6 pb-3", readingWidth)}>
+              <div className="pb-2">
+                {wideHero}
+                <div ref={heroEndRef} aria-hidden className="h-px" />
               </div>
-            ) : null}
+              <Separator />
+              {failureCallout}
+
+              {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
+                  outcome under it, as in a chat. */}
+              {renderSessionLogs(centerScroller)}
+              {outputSection}
+              <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
+            </div>
           </div>
+          {composerProps ? (
+            // THE MESSAGE BOX, pinned under the scroller: it steers a live
+            // task and follows up a finished one.
+            <div className={cn("shrink-0 bg-background pt-2 pr-6 pb-3", readingWidth)}>
+              {isTerminal ? (
+                <div ref={wideFollowUpBoxRef}>
+                  <TaskComposer {...composerProps} />
+                </div>
+              ) : (
+                steerComposer
+              )}
+            </div>
+          ) : null}
         </section>
 
         {detailsCollapsed ? null : (
           <aside
-            aria-label="Task details"
-            className="min-h-0 overflow-y-auto border-l border-border py-6 pl-5"
+            aria-label="Task side panel"
+            className="flex min-h-0 flex-col border-l border-border"
           >
-            {detailsRail}
+            <Tabs
+              value={sidePanelTab}
+              onValueChange={setSidePanelTab}
+              className="flex min-h-0 flex-1 flex-col gap-0"
+            >
+              <div className="shrink-0 border-b border-border-subtle px-4 py-2">
+                <TabsList className="w-full">
+                  {sidePanelTabs.map((tab) => (
+                    <TabsTrigger key={tab.value} value={tab.value}>
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+              {sidePanelTabs.map((tab) => (
+                <TabsContent
+                  key={tab.value}
+                  value={tab.value}
+                  className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-4", PANEL_FOCUS_RING)}
+                >
+                  {tab.content}
+                </TabsContent>
+              ))}
+            </Tabs>
           </aside>
         )}
       </div>

@@ -163,6 +163,11 @@ export interface ComposerDockProps {
    * whose action row holds "Start in").
    */
   touch?: boolean;
+  /**
+   * One line above the box naming what a send does ("Steer", "Follow up")
+   * and, where it helps, the task it goes to. See `TaskComposer`.
+   */
+  modeLabel?: React.ReactNode;
   className?: string;
 }
 
@@ -219,6 +224,7 @@ export function ComposerDock({
   decoration,
   bar = false,
   touch = false,
+  modeLabel,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -321,6 +327,9 @@ export function ComposerDock({
       }}
       {...engageHandlers}
     >
+      {modeLabel ? (
+        <div className={cn("mb-1.5 px-1", !fullWidth && "max-w-3xl mx-auto")}>{modeLabel}</div>
+      ) : null}
       <div
         className={cn(
           "relative",

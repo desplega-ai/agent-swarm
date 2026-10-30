@@ -65,6 +65,8 @@ export interface SteerComposerProps {
   extraActions?: React.ReactNode;
   /** A bottom bar: one line until used, 44 px controls. See `ComposerDock`. */
   bar?: boolean;
+  /** The line above the box naming the mode and target. See `ComposerDock`. */
+  modeLabel?: React.ReactNode;
   className?: string;
 }
 
@@ -102,6 +104,7 @@ export function SteerComposer({
   fullWidth,
   extraActions,
   bar,
+  modeLabel,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -204,6 +207,7 @@ export function SteerComposer({
       autoFocus={autoFocus}
       extraActions={extraActions}
       bar={bar}
+      modeLabel={modeLabel}
       modeControl={
         hasLiveDelivery ? (
           <SteerModeToggle

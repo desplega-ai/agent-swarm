@@ -22,3 +22,16 @@ export function canSteerSessionTask(
 ): boolean {
   return !!task?.isLeadTask && (task.status === "in_progress" || task.status === "pending");
 }
+
+/**
+ * The task the Sessions composer talks to. The newest live lead task, so a
+ * message steers the turn that is running even while a delegated worker
+ * task is the newest in the chain. With none live, the newest task: the
+ * message follows up on it, and the new task joins the same session.
+ */
+export function sessionComposerTarget<
+  T extends Pick<AgentTask, "status" | "isLeadTask" | "createdAt">,
+>(chain: readonly T[]): T | null {
+  const newestFirst = [...chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return newestFirst.find((task) => canSteerSessionTask(task)) ?? newestFirst[0] ?? null;
+}

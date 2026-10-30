@@ -15,6 +15,7 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 // The real grants hooks: outside a provider they answer "operator tab", so every control shows.
 mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
@@ -34,11 +35,13 @@ const promoteCalls: string[] = [];
 // "lose-first-response": the first request commits, then its response is lost.
 let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
 let rejectUploads = false;
+let nextTaskId = 0;
 mock.module("@/api/client", () => ({
   api: {
     createTask: async (input: Record<string, unknown>) => {
       createdTasks.push(input);
-      return { id: "follow-up", ...input };
+      nextTaskId += 1;
+      return { id: nextTaskId === 1 ? "follow-up" : `follow-up-${nextTaskId}`, ...input };
     },
     promoteDraftTask: async (id: string) => {
       promoteCalls.push(id);
@@ -64,8 +67,17 @@ mock.module("@/contexts/current-user-context", () => ({
 // Steering is its own surface; the stub shows which composer is up and
 // renders the extra actions it was handed.
 mock.module("@/components/steering/steer-composer", () => ({
-  SteerComposer: ({ extraActions }: { extraActions?: React.ReactNode }) => (
-    <div data-testid="steer-composer">{extraActions}</div>
+  SteerComposer: ({
+    extraActions,
+    modeLabel,
+  }: {
+    extraActions?: React.ReactNode;
+    modeLabel?: React.ReactNode;
+  }) => (
+    <div data-testid="steer-composer">
+      {modeLabel}
+      {extraActions}
+    </div>
   ),
 }));
 
@@ -149,7 +161,11 @@ beforeEach(() => {
   promoteCalls.length = 0;
   promoteMode = "ok";
   rejectUploads = false;
+  nextTaskId = 0;
 });
+
+const modeLine = (container: HTMLElement) =>
+  container.querySelector('[data-slot="composer-mode"]') as HTMLElement | null;
 
 describe("TaskComposer on Sessions", () => {
   test("a file added while steering is up switches to a follow-up task that carries it", async () => {
@@ -295,6 +311,147 @@ describe("TaskComposer on Sessions", () => {
     expect(outcomes).toEqual([{ id: "follow-up", attachmentsFailed: true }]);
     expect(container.textContent).toContain("screenshot-x.png");
     expect(container.textContent).toContain("failed to upload");
+    await unmount();
+  });
+
+  test("a failed upload retries to the task that exists, never to a new task", async () => {
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "see the screenshot");
+    await send(container);
+    const notice = () =>
+      container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
+    await waitFor(() => notice() !== null);
+
+    // The file waits in the notice, for the created task, not in the box: a
+    // new send would start a second task without it.
+    expect(notice()?.textContent).toContain("screenshot-x.png");
+    expect(notice()?.textContent).toContain("#follow-u");
+    expect(container.querySelector('button[aria-label="Remove screenshot-x.png"]')).toBeNull();
+
+    // The upload works this time: the file goes to the same task.
+    rejectUploads = false;
+    const retry = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Retry upload",
+    ) as HTMLButtonElement;
+    await act(async () => retry.click());
+    await waitFor(() => notice() === null);
+
+    expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
+    expect(createdTasks).toHaveLength(1);
+    expect(notice()).toBeNull();
+
+    // A message sent after the retry is a new follow-up with no stale file.
+    await type(container, "and another thing");
+    await send(container);
+    await waitFor(() => createdTasks.length === 2);
+    expect(createdTasks[1]).toMatchObject({ task: "and another thing", draft: false });
+    expect(uploads).toHaveLength(1);
+    await unmount();
+  });
+
+  test("a retry that fails again keeps the file for the same task", async () => {
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "see the screenshot");
+    await send(container);
+    const notice = () =>
+      container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
+    await waitFor(() => notice() !== null);
+    const retry = () =>
+      [...container.querySelectorAll("button")].find((b) => b.textContent === "Retry upload");
+    await act(async () => retry()?.click());
+    await waitFor(() => retry() !== undefined);
+
+    expect(notice()?.textContent).toContain("screenshot-x.png");
+    expect(createdTasks).toHaveLength(1);
+    // Discard drops the file.
+    const discard = container.querySelector(
+      'button[aria-label="Discard failed files"]',
+    ) as HTMLButtonElement;
+    await act(async () => discard.click());
+    expect(notice()).toBeNull();
+    await unmount();
+  });
+});
+
+describe("TaskComposer mode line", () => {
+  test("a steerable task reads Steer, and names the target with showTarget", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(runningLeadTask as object), task: "Fix the parser" } as never}
+        canSteer
+        showTarget
+      />,
+    );
+    expect(modeLine(container)?.dataset.mode).toBe("steer");
+    expect(modeLine(container)?.textContent).toContain("Steer");
+    expect(modeLine(container)?.textContent).toContain("#lead-1");
+    expect(modeLine(container)?.textContent).toContain("Fix the parser");
+    await unmount();
+  });
+
+  test("an ended task reads Follow up", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer targetTask={completedWorkerTask} canSteer={false} />,
+    );
+    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
+    expect(modeLine(container)?.textContent).toBe("Follow up");
+    await unmount();
+  });
+
+  test("a file switches a steer box to Follow up, and removing it switches back", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    expect(modeLine(container)?.dataset.mode).toBe("steer");
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
+    const remove = container.querySelector(
+      'button[aria-label="Remove screenshot-x.png"]',
+    ) as HTMLButtonElement;
+    await act(async () => remove.click());
+    expect(modeLine(container)?.dataset.mode).toBe("steer");
+    await unmount();
+  });
+
+  test("a harness with no live delivery reads Follow up in the steer box", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={{ ...(runningLeadTask as object), supportedSteerModes: [] } as never}
+        canSteer
+      />,
+    );
+    expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
     await unmount();
   });
 });

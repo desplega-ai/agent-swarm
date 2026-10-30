@@ -65,7 +65,7 @@ for (const width of [900, 1200]) {
         const tab = page.getByRole("tab", { name: "Transcript", exact: true });
         await expect(tab).toBeVisible();
         await expect(tab).toHaveAttribute("aria-selected", "true");
-        await expect(page.getByRole("tab", { name: "Outcome", exact: true })).toHaveAttribute(
+        await expect(page.getByRole("tab", { name: "Details", exact: true })).toHaveAttribute(
           "aria-selected",
           "false",
         );

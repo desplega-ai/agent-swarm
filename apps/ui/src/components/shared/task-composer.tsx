@@ -20,6 +20,14 @@
  * `pending → in_progress` is enough). A draft owned by the outgoing child
  * would die with its unmount.
  *
+ * The line above the box names the mode, "Steer" or "Follow up", and with
+ * `showTarget` the task the message goes to (Sessions, where the target is
+ * not the page's own task).
+ *
+ * A follow-up whose files partly failed to upload keeps only the failed
+ * files, under a notice above the box: "Retry upload" sends them to the task
+ * that already exists, so a retry never creates a second task.
+ *
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap. A file added through `renderActions` (the session
  * panel's "Add screenshot") while steering is up switches to the follow-up
@@ -29,6 +37,7 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { RotateCw, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -40,8 +49,11 @@ import {
 } from "@/components/sessions/compose-attachment-upload";
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
+import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
+import { cn } from "@/lib/utils";
 
 export interface TaskComposerProps {
   /**
@@ -63,6 +75,8 @@ export interface TaskComposerProps {
   followUpAgentId?: string;
   /** Follow-up placeholder. The steer box keeps its own. */
   placeholder?: string;
+  /** Name the target task in the mode line ("Steer · Fix the parser"). */
+  showTarget?: boolean;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
   /**
@@ -87,6 +101,50 @@ export interface TaskComposerProps {
    */
   bar?: boolean;
   className?: string;
+}
+
+/** What a send does: steer the target, or start a follow-up task from it. */
+export type ComposerMode = "steer" | "follow-up";
+
+/**
+ * The mode the composer is in. Files force a follow-up (steering carries
+ * text), and so does a harness with no live delivery: its steer box creates
+ * a follow-up task.
+ */
+export function composerMode(
+  steerTarget: Pick<AgentTask, "supportedSteerModes"> | null,
+): ComposerMode {
+  if (!steerTarget) return "follow-up";
+  return steerTarget.supportedSteerModes && steerTarget.supportedSteerModes.length === 0
+    ? "follow-up"
+    : "steer";
+}
+
+function ComposerModeLabel({ mode, target }: { mode: ComposerMode; target: AgentTask | null }) {
+  return (
+    <p
+      data-slot="composer-mode"
+      data-mode={mode}
+      className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+    >
+      <span className="shrink-0 font-medium text-foreground">
+        {mode === "steer" ? "Steer" : "Follow up"}
+      </span>
+      {target ? (
+        <span className="min-w-0 truncate" title={taskListTitle(target)}>
+          <span aria-hidden>· </span>
+          <span className="font-mono">#{target.id.slice(0, 8)}</span> {taskListTitle(target)}
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/** Files that did not upload to a follow-up task that exists. */
+interface FailedUpload {
+  task: AgentTask;
+  files: File[];
+  error: string;
 }
 
 const PROMOTE_ATTEMPTS = 3;
@@ -117,6 +175,7 @@ export function TaskComposer({
   rootTaskId,
   followUpAgentId,
   placeholder = "Follow up on this task…",
+  showTarget = false,
   routeLabel,
   onCreated,
   value,
@@ -135,6 +194,7 @@ export function TaskComposer({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [failedUpload, setFailedUpload] = useState<FailedUpload | null>(null);
 
   // Controlled when the caller passes `value`: the internal draft is then
   // never read, so there is no second source of truth.
@@ -185,7 +245,14 @@ export function TaskComposer({
     },
     onSuccess: ({ created, uploadResult, promoted }, input) => {
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
-      setAttachmentError(uploadError);
+      // The task exists, so the failed files leave the box: a new send would
+      // start a second task. They wait in the notice for a retry to this task.
+      setAttachments([]);
+      setFailedUpload(
+        uploadError
+          ? { task: created, files: uploadResult.failed.map((f) => f.file), error: uploadError }
+          : null,
+      );
       if (uploadError) toast.error(uploadError);
       if (!promoted) {
         toast.warning("Task created, but it could not start yet. It starts within 5 minutes.");
@@ -201,10 +268,68 @@ export function TaskComposer({
         queryClient.invalidateQueries({ queryKey: ["session", input.parentTaskId] });
       }
       setDraft("");
-      if (!uploadError) setAttachments([]);
       onCreated?.(created, { attachmentsFailed: uploadError !== null });
     },
   });
+
+  // Sends the failed files to the task they belong to. Files that fail again
+  // stay in the notice.
+  const retryUpload = useMutation({
+    mutationFn: async (pending: FailedUpload) => ({
+      pending,
+      result: await uploadComposeAttachments({ taskId: pending.task.id, files: pending.files }),
+    }),
+    onSuccess: ({ pending, result }) => {
+      const error = formatComposeAttachmentUploadError(result.failed);
+      setFailedUpload(
+        error ? { ...pending, files: result.failed.map((f) => f.file), error } : null,
+      );
+      queryClient.invalidateQueries({ queryKey: ["task", pending.task.id] });
+      queryClient.invalidateQueries({ queryKey: ["task", pending.task.id, "attachments"] });
+      if (error) toast.error(error);
+      else toast.success(`Uploaded to #${pending.task.id.slice(0, 8)}`);
+    },
+  });
+
+  const failedUploadNotice = failedUpload ? (
+    <div className={cn("shrink-0", !fullWidth && "px-4 pt-2")}>
+      <div
+        role="alert"
+        data-slot="composer-failed-upload"
+        className="mx-auto mb-1.5 flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs"
+      >
+        <p className="min-w-0 flex-1">
+          {failedUpload.error}{" "}
+          <span className="text-muted-foreground">
+            ({failedUpload.files.map((file) => file.name).join(", ")}, for #
+            {failedUpload.task.id.slice(0, 8)})
+          </span>
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7"
+          disabled={retryUpload.isPending}
+          onClick={() => retryUpload.mutate(failedUpload)}
+        >
+          <RotateCw className={retryUpload.isPending ? "animate-spin" : undefined} />
+          {retryUpload.isPending ? "Retrying…" : "Retry upload"}
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-7"
+          aria-label="Discard failed files"
+          disabled={retryUpload.isPending}
+          onClick={() => setFailedUpload(null)}
+        >
+          <X />
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   const submit = () => {
     const trimmed = draft.trim();
@@ -249,47 +374,62 @@ export function TaskComposer({
     </>
   );
 
+  const mode = composerMode(steerTarget);
+  const modeLabel = (
+    <ComposerModeLabel mode={mode} target={showTarget ? (steerTarget ?? targetTask) : null} />
+  );
+
   if (steerTarget) {
     return (
-      <SteerComposer
-        taskId={steerTarget.id}
-        supportedSteerModes={steerTarget.supportedSteerModes}
-        providerLabel={steerTarget.provider}
-        taskStatus={steerTarget.status}
-        value={draft}
-        onValueChange={setDraft}
-        extraActions={extraActions}
-        fullWidth={fullWidth}
-        bar={bar}
-        className={className}
-      />
+      <>
+        {failedUploadNotice}
+        <SteerComposer
+          taskId={steerTarget.id}
+          supportedSteerModes={steerTarget.supportedSteerModes}
+          providerLabel={steerTarget.provider}
+          taskStatus={steerTarget.status}
+          value={draft}
+          onValueChange={setDraft}
+          extraActions={extraActions}
+          fullWidth={fullWidth}
+          bar={bar}
+          modeLabel={modeLabel}
+          className={className}
+        />
+      </>
     );
   }
 
   if (!mayCreate) return null;
   return (
-    <ComposerDock
-      value={draft}
-      onChange={setDraft}
-      onSubmit={submit}
-      isPending={createTask.isPending}
-      isError={createTask.isError}
-      errorMessage={createTask.error instanceof Error ? createTask.error.message : "Failed to send"}
-      pendingLabel={pendingLabel}
-      placeholder={userId ? placeholder : "Pick an identity above to send messages."}
-      disabled={!userId}
-      routeLabel={routeLabel}
-      sendLabel="Send"
-      attachments={attachments}
-      onAttachmentsChange={(files) => {
-        setAttachments(files);
-        setAttachmentError(null);
-      }}
-      attachmentErrorMessage={attachmentError}
-      extraActions={extraActions}
-      fullWidth={fullWidth}
-      bar={bar}
-      className={className}
-    />
+    <>
+      {failedUploadNotice}
+      <ComposerDock
+        value={draft}
+        onChange={setDraft}
+        onSubmit={submit}
+        isPending={createTask.isPending}
+        isError={createTask.isError}
+        errorMessage={
+          createTask.error instanceof Error ? createTask.error.message : "Failed to send"
+        }
+        pendingLabel={pendingLabel}
+        placeholder={userId ? placeholder : "Pick an identity above to send messages."}
+        disabled={!userId}
+        routeLabel={routeLabel}
+        sendLabel="Send"
+        attachments={attachments}
+        onAttachmentsChange={(files) => {
+          setAttachments(files);
+          setAttachmentError(null);
+        }}
+        attachmentErrorMessage={attachmentError}
+        extraActions={extraActions}
+        fullWidth={fullWidth}
+        bar={bar}
+        modeLabel={modeLabel}
+        className={className}
+      />
+    </>
   );
 }
