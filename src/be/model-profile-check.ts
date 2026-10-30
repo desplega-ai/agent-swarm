@@ -20,7 +20,7 @@ import { getModelAwareCredentialVars, keySuffix, splitCredentialPool } from "../
 import { runtimeHarnessSections } from "../utils/runtime-model-catalog";
 import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
 import { getAgentById, getDbClient, getResolvedConfig } from "./db";
-import { getModelProfileByName } from "./db/model-profiles";
+import { getModelProfileByName, hasUnreadableCredentialAllowlist } from "./db/model-profiles";
 import { isKnownCatalogModel } from "./model-validation";
 
 /** Harnesses whose credential var depends on the model prefix (`getModelAwareCredentialVars`). */
@@ -256,7 +256,14 @@ export async function checkProfileForAgent(
     modelRow(profile, harness),
     harnessCredentialsRow(agent, profile, harness, agentHarness, pools),
   ];
-  if (profile.credentials) {
+  if (hasUnreadableCredentialAllowlist(profile)) {
+    // Null credentials here would read as the whole pool; fail closed instead.
+    checks.push({
+      check: "credential-allowlist",
+      state: "fail",
+      detail: "the stored credential allowlist is unreadable; set the profile's credentials again",
+    });
+  } else if (profile.credentials) {
     checks.push(await credentialAllowlistRow(agentId, profile.credentials, pools));
   }
   const ok = !checks.some((row) => row.state === "fail");

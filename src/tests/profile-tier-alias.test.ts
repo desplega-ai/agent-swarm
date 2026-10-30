@@ -201,6 +201,22 @@ describe("overrides and edits", () => {
     }
   });
 
+  // Null credentials mean the whole pool, so a corrupt allowlist must not fall
+  // through to the tier result: that run would get every pooled key.
+  test("a seed with an unreadable allowlist stops the claim, with no allowlist on the trigger", async () => {
+    await getDbClient().run(
+      "UPDATE model_profiles SET credentialAllowlist = '{not json' WHERE name = 'claude-smart'",
+    );
+    try {
+      const { fields } = await claimTier("claude", "smart");
+      expect(fields.modelUnsupported).toContain("[model-profile-allowlist-unreadable]");
+      expect(fields.credentialAllowlist).toBeUndefined();
+      expect(fields.resolvedModel).toBeUndefined();
+    } finally {
+      await updateModelProfile("claude-smart", { credentials: null });
+    }
+  });
+
   test("a seed with effort hands it over only when the task set none", async () => {
     await updateModelProfile("claude-regular", { effort: "high" });
     try {

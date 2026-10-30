@@ -57,6 +57,7 @@ import { getDbClient } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
+  hasUnreadableCredentialAllowlist,
   repoModelOverrideKeys,
 } from "./db/model-profiles";
 import {
@@ -546,7 +547,7 @@ type ClaimProfile = {
  * Resolve a model profile for a claim. Null when the profile does not apply:
  * an agent default or tier alias that is missing, on another harness, or
  * unresolved falls through to the tier chain. For a task's own `profile` each
- * is a hard stop.
+ * is a hard stop. An unreadable credential allowlist is a hard stop for all.
  */
 async function resolveClaimProfile(
   name: string,
@@ -585,6 +586,13 @@ async function resolveClaimProfile(
       modelAlias: profile.model.trim().toLowerCase(),
     };
   }
+  // Null credentials would hand the worker the whole pool, so an unreadable
+  // allowlist is a hard stop for every source, never a fall-through.
+  if (hasUnreadableCredentialAllowlist(profile)) {
+    return {
+      modelUnsupported: `[model-profile-allowlist-unreadable] Model profile "${name}" has an unreadable credential allowlist. Set its credentials again.`,
+    };
+  }
   return {
     profile: { name: profile.name, effort: profile.effort, credentials: profile.credentials },
     resolution,
@@ -596,12 +604,13 @@ async function resolveClaimProfile(
  * only where the tier chain landed on `tier-default`: a worker-env or
  * tier-config override keeps winning, with a deprecation line. Null keeps the
  * tier result (no tier, no such profile, or a profile that does not apply).
+ * A profile with an unreadable credential allowlist returns `modelUnsupported`.
  */
 async function resolveTierAlias(
   resolved: TaskModelResolution | TaskModelHarnessMismatch | null,
   task: { modelTier?: string | null },
   harness: ProviderName | null,
-): Promise<ClaimProfile | null> {
+): Promise<ClaimProfile | { modelUnsupported: string } | null> {
   const tier = parseModelTier(task.modelTier);
   if (!resolved || "harnessMismatch" in resolved || !tier || !harness) return null;
   const name = `${harness}-${tier}`;
@@ -613,7 +622,7 @@ async function resolveTierAlias(
   }
   if (resolved.modelSource !== "tier-default") return null;
   const picked = await resolveClaimProfile(name, "profile:tier-alias", harness);
-  if (!picked || !("profile" in picked)) return null;
+  if (!picked || !("profile" in picked)) return picked;
   // A seed copied from a stale MODEL_TIER_* row can name another harness's model.
   // The tier chain skipped that value, so the alias skips it too.
   if (
@@ -718,6 +727,7 @@ export async function recordClaimModelResolution(
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
   const alias = await resolveTierAlias(resolvedTier, task, harnessProvider);
+  if (alias && "modelUnsupported" in alias) return { modelUnsupported: alias.modelUnsupported };
   if (alias) {
     const checked = await applyCliSupport(
       alias.resolution,

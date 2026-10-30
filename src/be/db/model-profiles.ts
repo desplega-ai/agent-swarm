@@ -38,15 +38,32 @@ type ModelProfileRow = {
   lastUpdatedAt: string;
 };
 
-/** The stored allowlist JSON as a map, or null when unset or unreadable. */
-function parseCredentialAllowlist(value: string | null): ModelProfileCredentials | null {
-  if (!value) return null;
+/**
+ * Profiles whose stored allowlist is set but unreadable (bad JSON or schema).
+ * They read back with `credentials: null`, so list and get endpoints still
+ * render them, but null means the whole pool: every dispatch path must check
+ * `hasUnreadableCredentialAllowlist` and refuse the profile instead.
+ */
+const unreadableAllowlists = new WeakSet<ModelProfile>();
+
+/** Whether `profile`'s stored credential allowlist is set but unreadable. */
+export function hasUnreadableCredentialAllowlist(profile: ModelProfile): boolean {
+  return unreadableAllowlists.has(profile);
+}
+
+/** The stored allowlist JSON as a map; `unreadable` when set but not a valid allowlist. */
+function parseCredentialAllowlist(value: string | null): {
+  credentials: ModelProfileCredentials | null;
+  unreadable: boolean;
+} {
+  if (!value) return { credentials: null, unreadable: false };
   try {
     const parsed = ModelProfileCredentialsSchema.safeParse(JSON.parse(value));
-    return parsed.success ? parsed.data : null;
+    if (parsed.success) return { credentials: parsed.data, unreadable: false };
   } catch {
-    return null;
+    // Falls through to unreadable.
   }
+  return { credentials: null, unreadable: true };
 }
 
 function serializeCredentialAllowlist(
@@ -56,7 +73,8 @@ function serializeCredentialAllowlist(
 }
 
 function rowToModelProfile(row: ModelProfileRow): ModelProfile {
-  return {
+  const allowlist = parseCredentialAllowlist(row.credentialAllowlist);
+  const profile: ModelProfile = {
     id: row.id,
     name: row.name,
     harness: ProviderNameSchema.parse(row.harness),
@@ -67,10 +85,12 @@ function rowToModelProfile(row: ModelProfileRow): ModelProfile {
     allowCustomModel: row.allowCustomModel === 1,
     description: row.description,
     seededFrom: row.seededFrom,
-    credentials: parseCredentialAllowlist(row.credentialAllowlist),
+    credentials: allowlist.credentials,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
+  if (allowlist.unreadable) unreadableAllowlists.add(profile);
+  return profile;
 }
 
 export async function listModelProfiles(

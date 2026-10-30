@@ -227,10 +227,17 @@ describe("HTTP update and patch", () => {
     expect(model.status).toBe(200);
     expect(model.body.profile).toBeUndefined();
 
-    await api("PATCH", `/api/schedules/${id}`, { model: null, profile: "sp-claude-opus" });
+    const reset = await api("PATCH", `/api/schedules/${id}`, {
+      model: null,
+      profile: "sp-claude-opus",
+    });
+    expect(reset.body.profile).toBe("sp-claude-opus");
+    expect((await getScheduledTaskById(id))?.profile).toBe("sp-claude-opus");
     const cleared = await api("PATCH", `/api/schedules/${id}`, { profile: null });
     expect(cleared.status).toBe(200);
     expect(cleared.body.profile).toBeUndefined();
+    // The stored row, not just the response: PATCH null clears the column.
+    expect((await getScheduledTaskById(id))?.profile ?? null).toBeNull();
   });
 
   test("profile and model in one body is a 400", async () => {

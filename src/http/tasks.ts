@@ -40,6 +40,7 @@ import {
 } from "../be/db";
 import {
   getModelProfileByName,
+  hasUnreadableCredentialAllowlist,
   modelProfileRefError,
   taskProfileError,
 } from "../be/db/model-profiles";
@@ -1907,6 +1908,14 @@ export async function handleTasks(
         const profile = task.resolvedProfile
           ? await getModelProfileByName(task.resolvedProfile)
           : null;
+        // Without an allowlist the recovery spawn picks from the whole pool, so
+        // the task stays paused until the profile's credentials are set again.
+        if (profile && hasUnreadableCredentialAllowlist(profile)) {
+          console.warn(
+            `[paused-tasks] holding task ${task.id}: profile "${profile.name}" has an unreadable credential allowlist`,
+          );
+          return null;
+        }
         return {
           ...task,
           attachments: await getTaskAttachments(task.id),
@@ -1915,7 +1924,7 @@ export async function handleTasks(
         };
       }),
     );
-    listPausedTasks.respond(res, 200, { tasks });
+    listPausedTasks.respond(res, 200, { tasks: tasks.filter((task) => task !== null) });
     return true;
   }
 

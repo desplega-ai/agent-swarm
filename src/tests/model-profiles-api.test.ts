@@ -22,6 +22,7 @@ import {
 } from "../be/db";
 import * as profilesDb from "../be/db/model-profiles";
 import { createModelProfile, taskProfileError } from "../be/db/model-profiles";
+import { recordClaimModelResolution } from "../be/model-tier-resolution";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
 import { handleAgentsRest } from "../http/agents";
 import { handleModelProfiles } from "../http/model-profiles";
@@ -440,6 +441,99 @@ describe("profile credential allowlist", () => {
       ).status,
     ).toBe(201);
   });
+
+  // A stored allowlist reads back as null when unreadable, and null means the
+  // whole pool. Every dispatch path must refuse the profile instead.
+  for (const [label, stored] of [
+    ["malformed JSON", "{not json"],
+    ["schema-invalid JSON", '{"CLAUDE_CODE_OAUTH_TOKEN":[]}'],
+  ]) {
+    test(`an unreadable stored allowlist (${label}) fails closed; list endpoints still render it`, async () => {
+      await createModelProfile({
+        name: "claude-corrupt",
+        harness: "claude",
+        model: "opus",
+        credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["aaaaa"] },
+      });
+      await getDbClient().run(
+        "UPDATE model_profiles SET credentialAllowlist = ? WHERE name = 'claude-corrupt'",
+        [stored],
+      );
+
+      const list = await call("GET", "/api/model-profiles", undefined);
+      expect(list.status).toBe(200);
+      const { profiles } = (await list.json()) as {
+        profiles: { name: string; credentials: unknown }[];
+      };
+      expect(profiles.find((p) => p.name === "claude-corrupt")?.credentials).toBeNull();
+      expect((await call("GET", "/api/model-profiles/claude-corrupt", undefined)).status).toBe(200);
+
+      // Creation gate: the check fails the allowlist row.
+      expect(await taskProfileError({ profile: "claude-corrupt", agentId: CLAUDE_ID })).toContain(
+        "unreadable",
+      );
+
+      // Claim: a task's own profile and an agent default both stop, with no allowlist.
+      const own = await createTaskExtended("own", { agentId: CLAUDE_ID });
+      const ownFields = await recordClaimModelResolution(
+        { id: own.id, profile: "claude-corrupt" },
+        { id: CLAUDE_ID, harnessProvider: "claude" },
+      );
+      expect(ownFields.modelUnsupported).toContain("[model-profile-allowlist-unreadable]");
+      expect(ownFields.credentialAllowlist).toBeUndefined();
+      await upsertSwarmConfig({
+        scope: "agent",
+        scopeId: CLAUDE_ID,
+        key: "MODEL_PROFILE",
+        value: "claude-corrupt",
+        exportToEnv: false,
+      });
+      const byDefault = await createTaskExtended("default", { agentId: CLAUDE_ID });
+      const defaultFields = await recordClaimModelResolution(
+        { id: byDefault.id },
+        { id: CLAUDE_ID, harnessProvider: "claude" },
+      );
+      expect(defaultFields.modelUnsupported).toContain("[model-profile-allowlist-unreadable]");
+      expect(defaultFields.credentialAllowlist).toBeUndefined();
+
+      // Resume: a paused task holding the profile stays paused.
+      await startTask(byDefault.id);
+      await getDbClient().run("UPDATE agent_tasks SET resolvedProfile = ? WHERE id = ?", [
+        "claude-corrupt",
+        byDefault.id,
+      ]);
+      expect(await pauseTask(byDefault.id)).not.toBeNull();
+      const pausedIds = async () => {
+        const res = await call("GET", "/api/paused-tasks", undefined, { "x-agent-id": CLAUDE_ID });
+        const body = (await res.json()) as {
+          tasks: { id: string; credentialAllowlist?: Record<string, string[]> }[];
+        };
+        return body.tasks;
+      };
+      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        expect((await pausedIds()).map((t) => t.id)).not.toContain(byDefault.id);
+      } finally {
+        warnSpy.mockRestore();
+      }
+
+      // Control: setting the credentials again restores every path.
+      const fixed = await call("PATCH", "/api/model-profiles/claude-corrupt", {
+        credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["aaaaa"] },
+      });
+      expect(fixed.status).toBe(200);
+      expect((await pausedIds()).find((t) => t.id === byDefault.id)?.credentialAllowlist).toEqual({
+        CLAUDE_CODE_OAUTH_TOKEN: ["aaaaa"],
+      });
+      const again = await createTaskExtended("again", { agentId: CLAUDE_ID });
+      const againFields = await recordClaimModelResolution(
+        { id: again.id, profile: "claude-corrupt" },
+        { id: CLAUDE_ID, harnessProvider: "claude" },
+      );
+      expect(againFields.modelUnsupported).toBeUndefined();
+      expect(againFields.credentialAllowlist).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: ["aaaaa"] });
+    });
+  }
 });
 
 describe("schedule profile references", () => {
