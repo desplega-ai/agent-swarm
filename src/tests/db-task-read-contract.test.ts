@@ -144,6 +144,7 @@ value:completeApprovalCancellationNotificationClaim
 value:completeTask
 value:computeContentHash
 value:countActiveScriptRuns
+value:countAgentDispatchesInThread
 value:countAllMetrics
 value:countAllPages
 value:countKv
@@ -218,9 +219,10 @@ value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findRecentSimilarTasks
 value:findTaskByAgentMailThread
 value:findTaskByGitHub
@@ -622,10 +624,12 @@ type:PendingChatRelay
 type:TaskFilters
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
 value:TASK_LINEAGE_LIMITS
+value:countAgentDispatchesInThread
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findTaskByGitHub
 value:findTaskByVcs
 value:getAgentCurrentTask

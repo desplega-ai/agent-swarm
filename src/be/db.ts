@@ -336,12 +336,14 @@ export {
 } from "./db/runtime";
 
 export {
+  countAgentDispatchesInThread,
   type ExistingTrackerContextWork,
   type ExistingTrackerContextWorkReason,
   findActiveTasksByVcs,
-  findCompletedTaskInThread,
+  findCompletedTasksInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
+  findRecentFailedTaskInThread,
   findTaskByGitHub,
   findTaskByVcs,
   getAgentCurrentTask,

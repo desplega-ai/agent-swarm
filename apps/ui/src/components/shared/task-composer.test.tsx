@@ -15,6 +15,8 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 // The real grants hooks: outside a provider they answer "operator tab", so every control shows.
 mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
+mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
@@ -33,12 +35,18 @@ const promoteCalls: string[] = [];
 // "reject": every request fails before the server commits it.
 // "lose-first-response": the first request commits, then its response is lost.
 let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
+// Cancels the server committed, and every cancel request sent. Same modes.
+const cancelled: string[] = [];
+const cancelCalls: string[] = [];
+let cancelMode: "ok" | "reject" | "lose-first-response" = "ok";
 let rejectUploads = false;
+let nextTaskId = 0;
 mock.module("@/api/client", () => ({
   api: {
     createTask: async (input: Record<string, unknown>) => {
       createdTasks.push(input);
-      return { id: "follow-up", ...input };
+      nextTaskId += 1;
+      return { id: nextTaskId === 1 ? "follow-up" : `follow-up-${nextTaskId}`, ...input };
     },
     promoteDraftTask: async (id: string) => {
       promoteCalls.push(id);
@@ -49,6 +57,21 @@ mock.module("@/api/client", () => ({
       }
       return { id };
     },
+    cancelTask: async (id: string) => {
+      cancelCalls.push(id);
+      if (cancelMode === "reject") throw new Error("cancel failed");
+      // A second cancel on a cancelled task is a 400, like the server.
+      if (cancelled.includes(id)) throw new Error("Cannot cancel task with status 'cancelled'");
+      cancelled.push(id);
+      if (cancelMode === "lose-first-response" && cancelCalls.length === 1) {
+        throw new Error("network error");
+      }
+      return { success: true, task: { id, status: "cancelled" } };
+    },
+    fetchTask: async (id: string) => ({
+      id,
+      status: cancelled.includes(id) ? "cancelled" : promoted.includes(id) ? "pending" : "draft",
+    }),
   },
 }));
 mock.module("@/api/fs", () => ({
@@ -61,11 +84,21 @@ mock.module("@/api/fs", () => ({
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "u1" }),
 }));
-// Steering is its own surface; the stub shows which composer is up and
-// renders the extra actions it was handed.
+// Steering is its own surface; the stub shows which composer is up, the send
+// label and placeholder it was handed, and renders its extra actions.
 mock.module("@/components/steering/steer-composer", () => ({
-  SteerComposer: ({ extraActions }: { extraActions?: React.ReactNode }) => (
-    <div data-testid="steer-composer">{extraActions}</div>
+  SteerComposer: ({
+    extraActions,
+    sendLabel,
+    placeholder,
+  }: {
+    extraActions?: React.ReactNode;
+    sendLabel?: string;
+    placeholder?: string;
+  }) => (
+    <div data-testid="steer-composer" data-send-label={sendLabel} data-placeholder={placeholder}>
+      {extraActions}
+    </div>
   ),
 }));
 
@@ -124,7 +157,7 @@ async function type(container: HTMLElement, text: string) {
 }
 
 async function send(container: HTMLElement) {
-  const button = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  const button = container.querySelector('button[type="submit"]') as HTMLButtonElement;
   await act(async () => button.click());
   for (let i = 0; i < 50 && createdTasks.length === 0; i++) {
     await act(async () => new Promise((r) => setTimeout(r, 10)));
@@ -140,7 +173,7 @@ async function waitFor(done: () => boolean) {
 }
 
 const sendButton = (container: HTMLElement) =>
-  container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  container.querySelector('button[type="submit"]') as HTMLButtonElement;
 
 beforeEach(() => {
   createdTasks.length = 0;
@@ -148,8 +181,40 @@ beforeEach(() => {
   promoted.length = 0;
   promoteCalls.length = 0;
   promoteMode = "ok";
+  cancelled.length = 0;
+  cancelCalls.length = 0;
+  cancelMode = "ok";
   rejectUploads = false;
+  nextTaskId = 0;
 });
+
+/** The send button's label: the steer stub's, or the follow-up dock's submit button. */
+function sendLabelOf(container: HTMLElement): string | null {
+  const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+  if (steer) return steer.dataset.sendLabel ?? null;
+  return container.querySelector('button[type="submit"]')?.getAttribute("aria-label") ?? null;
+}
+
+/** The placeholder: the steer stub's, or the follow-up dock's textarea. */
+function placeholderOf(container: HTMLElement): string | null {
+  const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+  if (steer) return steer.dataset.placeholder ?? null;
+  return container.querySelector("textarea")?.getAttribute("placeholder") ?? null;
+}
+
+const textOf = (container: HTMLElement) =>
+  (container.querySelector("textarea") as HTMLTextAreaElement).value;
+
+const fileInBox = (container: HTMLElement) =>
+  container.querySelector('button[aria-label="Remove screenshot-x.png"]') !== null;
+
+/** Adds the test file through the extra action, types a message and sends it. */
+async function attachAndSend(container: HTMLElement) {
+  const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+  await act(async () => add.click());
+  await type(container, "see the screenshot");
+  await send(container);
+}
 
 describe("TaskComposer on Sessions", () => {
   test("a file added while steering is up switches to a follow-up task that carries it", async () => {
@@ -250,26 +315,217 @@ describe("TaskComposer on Sessions", () => {
     await unmount();
   });
 
-  test("a failed upload still promotes the task", async () => {
+  test("a failed upload cancels the draft and keeps the text and the file in the box", async () => {
     rejectUploads = true;
+    const started: string[] = [];
     const { container, unmount } = await mount(
       <TaskComposer
-        rootTaskId="root-1"
-        targetTask={null}
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+
+    // Nothing is left in draft for the heartbeat sweep to start without the file.
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(promoteCalls).toEqual([]);
+    expect(started).toEqual([]);
+    expect(container.textContent).toContain(
+      "screenshot-x.png failed to upload, so nothing was sent. Send again to retry.",
+    );
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("Send again after a failed upload starts one new task with the file", async () => {
+    rejectUploads = true;
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => cancelled.length === 1);
+    await act(async () => {});
+
+    rejectUploads = false;
+    await act(async () => sendButton(container).click());
+    await waitFor(() => started.length === 1);
+
+    expect(createdTasks).toHaveLength(2);
+    expect(createdTasks[1]).toMatchObject({ task: "see the screenshot", draft: true });
+    expect(uploads).toEqual([{ taskId: "follow-up-2", file: screenshot, intent: "user-upload" }]);
+    // Only the new task runs: the first one stays cancelled.
+    expect(promoted).toEqual(["follow-up-2"]);
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(started).toEqual(["follow-up-2"]);
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(false);
+    expect(container.textContent).not.toContain("nothing was sent");
+    await unmount();
+  });
+
+  test("a cancel response lost after the server committed it still counts as withdrawn", async () => {
+    rejectUploads = true;
+    cancelMode = "lose-first-response";
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
         canSteer={false}
         renderActions={(add) => (
           <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
         )}
       />,
     );
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+
+    expect(cancelCalls).toEqual(["follow-up"]);
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(promoteCalls).toEqual([]);
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a draft that cannot be cancelled starts now; its file stays for a new follow-up", async () => {
+    rejectUploads = true;
+    cancelMode = "reject";
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => promoted.length === 1);
+    await act(async () => {});
+
+    expect(cancelCalls).toHaveLength(3);
+    expect(promoted).toEqual(["follow-up"]);
+    // The text is gone, so it cannot run twice; the file waits in the box and
+    // the page stays put so it is not dropped.
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(true);
+    expect(container.textContent).toContain(
+      "#follow-u started without screenshot-x.png: it could not be withdrawn.",
+    );
+    expect(started).toEqual([]);
+    await unmount();
+  });
+});
+
+describe("TaskComposer mode", () => {
+  test("a steerable task sends with Steer, and names the target in the placeholder with showTarget", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(runningLeadTask as object), task: "Fix the parser" } as never}
+        canSteer
+        showTarget
+      />,
+    );
+    expect(sendLabelOf(container)).toBe("Steer");
+    expect(placeholderOf(container)).toBe("Steer #lead-1 Fix the parser…");
+    await unmount();
+  });
+
+  test("a long target title is cut so the placeholder stays one line", async () => {
+    const title = `Migrate the billing service from the legacy cron runner to the workflow engine.`;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(runningLeadTask as object), task: title } as never}
+        canSteer
+        showTarget
+      />,
+    );
+    expect(placeholderOf(container)).toBe(
+      "Steer #lead-1 Migrate the billing service from the legacy cron runner to…",
+    );
+    await unmount();
+  });
+
+  test("without showTarget the placeholder names no task", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer targetTask={runningLeadTask} canSteer />,
+    );
+    expect(sendLabelOf(container)).toBe("Steer");
+    expect(placeholderOf(container)).toBeNull();
+    await unmount();
+  });
+
+  test("an ended task sends with Follow up, shown on the button", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer targetTask={completedWorkerTask} canSteer={false} />,
+    );
+    expect(sendLabelOf(container)).toBe("Follow up");
+    expect(container.querySelector('button[type="submit"]')?.textContent).toBe("Follow up");
+    expect(placeholderOf(container)).toBe("Follow up on this task…");
+    await unmount();
+  });
+
+  test("on Sessions an ended target is named in the follow-up placeholder", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(completedWorkerTask as object), task: "Ship the docs" } as never}
+        canSteer={false}
+        showTarget
+      />,
+    );
+    expect(placeholderOf(container)).toBe("Follow up #done-1 Ship the docs…");
+    await unmount();
+  });
+
+  test("a file switches a steer box to Follow up, and removing it switches back", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    expect(sendLabelOf(container)).toBe("Steer");
     const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
     await act(async () => add.click());
-    await type(container, "see the screenshot");
-    await send(container);
-    await waitFor(() => promoted.length === 1);
+    expect(sendLabelOf(container)).toBe("Follow up");
+    const remove = container.querySelector(
+      'button[aria-label="Remove screenshot-x.png"]',
+    ) as HTMLButtonElement;
+    await act(async () => remove.click());
+    expect(sendLabelOf(container)).toBe("Steer");
+    await unmount();
+  });
 
-    expect(uploads).toEqual([]);
-    expect(promoted).toEqual(["follow-up"]);
+  test("a harness with no live delivery sends with Follow up in the steer box", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={{ ...(runningLeadTask as object), supportedSteerModes: [] } as never}
+        canSteer
+      />,
+    );
+    expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+    expect(sendLabelOf(container)).toBe("Follow up");
     await unmount();
   });
 });

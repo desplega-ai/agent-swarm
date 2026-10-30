@@ -17,9 +17,10 @@ import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-c
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { typingLabel } from "@/lib/session-presence";
 import { isReadOnlyAccess } from "@/lib/session-sharing";
-import { canSteerSessionTask } from "@/lib/task-steer";
+import { canSteerSessionTask, sessionComposerTarget } from "@/lib/task-steer";
 import { cn } from "@/lib/utils";
 import { ComposerReadOnlyNotice } from "./composer-dock";
 import { useSessionPresenceContext } from "./session-presence";
@@ -82,13 +83,13 @@ export function SessionConversation({
     setTyping(false);
   }, [canType, setTyping]);
 
-  // The whole leaf task, not just its id: the composer needs `status`,
+  // The whole task, not just its id: the composer needs `status`,
   // `isLeadTask`, `provider`, and `supportedSteerModes` to decide between
-  // steering the running task and chaining a new one (decision 6).
+  // steering the running task and chaining a new one (decision 6). The live
+  // lead turn wins over a newer delegated worker task.
   const latestLeafTask = useMemo(() => {
-    if (!detail || detail.chain.length === 0) return null;
-    const sorted = [...detail.chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return sorted[0] ?? detail.root;
+    if (!detail) return null;
+    return sessionComposerTarget(detail.chain) ?? detail.root;
   }, [detail]);
 
   // Signature changes whenever the chain shape changes (new task) or any
@@ -143,7 +144,7 @@ export function SessionConversation({
           style={turns && !isFollowing ? SCROLLED_UP_FADE : undefined}
         >
           {isLoading ? (
-            <div className="flex flex-col gap-3 max-w-3xl mx-auto w-full">
+            <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
               <Skeleton className="h-20 w-full" />
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
@@ -206,7 +207,7 @@ export function SessionConversation({
       ) : typing ? (
         <p
           aria-live="polite"
-          className="shrink-0 px-6 pt-2 text-xs text-muted-foreground max-w-3xl mx-auto w-full"
+          className={cn("shrink-0 px-6 pt-2 text-xs text-muted-foreground", CHAT_COLUMN)}
         >
           {typing}
         </p>
@@ -235,6 +236,7 @@ export function SessionConversation({
             rootTaskId={rootTaskId}
             targetTask={latestLeafTask}
             canSteer={canSteer}
+            showTarget
             placeholder="Continue the session…"
             renderActions={renderComposerActions}
             bar={composerLayout?.bar}

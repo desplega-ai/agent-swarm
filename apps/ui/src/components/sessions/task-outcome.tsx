@@ -13,6 +13,7 @@ import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
+import { ShowMore } from "@/components/shared/show-more";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -33,11 +34,14 @@ export function TaskOutcome({
   task,
   fallbackLines,
   hideCopy = false,
+  clamp = false,
 }: {
   task: AgentTask;
   fallbackLines?: string[];
   /** Leave out the hover Copy of a completed output: the caller puts Copy elsewhere. */
   hideCopy?: boolean;
+  /** Clamp a long output behind "Show more" (a worker's outcome inside a turn). */
+  clamp?: boolean;
 }) {
   fallbackLines = fallbackLines ?? [];
   if (
@@ -56,12 +60,13 @@ export function TaskOutcome({
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     const json = parseJsonOutput(task.output);
     if (json) return <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />;
-    return (
+    const prose = (
       <OutcomeProse
         text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
         hideCopy={hideCopy}
       />
     );
+    return clamp ? <ShowMore>{prose}</ShowMore> : prose;
   }
   // The chain-of-thought above already covers active states — only fall
   // through to the cached summaryLines as a final fallback when nothing

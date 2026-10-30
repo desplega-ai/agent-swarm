@@ -20,6 +20,18 @@
  * `pending → in_progress` is enough). A draft owned by the outgoing child
  * would die with its unmount.
  *
+ * The send button names the mode, "Steer" or "Follow up". With `showTarget`
+ * the placeholder names the task the message goes to (Sessions, where the
+ * target is not the page's own task): "Steer #<id> Fix the parser…".
+ *
+ * A follow-up with files is all or nothing. It is created as a draft, which
+ * no worker claims. If any file fails to upload, the composer cancels the
+ * draft and the send fails: the text and every file stay in the box, and
+ * Send again starts over with a new task. Nothing is left in `draft`, so the
+ * heartbeat's abandoned-draft sweep has nothing to promote. Only if the
+ * cancel itself keeps failing does the task start without the failed files,
+ * which then stay in the box for a new follow-up.
+ *
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap. A file added through `renderActions` (the session
  * panel's "Add screenshot") while steering is up switches to the follow-up
@@ -35,12 +47,13 @@ import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
 import { RecordAudioButton, useAudioRecorder } from "@/components/sessions/audio-recorder";
 import {
-  formatComposeAttachmentUploadError,
+  type ComposeAttachmentUploadResult,
   uploadComposeAttachments,
 } from "@/components/sessions/compose-attachment-upload";
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
 
 export interface TaskComposerProps {
@@ -63,9 +76,14 @@ export interface TaskComposerProps {
   followUpAgentId?: string;
   /** Follow-up placeholder. The steer box keeps its own. */
   placeholder?: string;
+  /** Name the target task in the placeholder ("Steer #<id> Fix the parser…"). */
+  showTarget?: boolean;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
-  /** Called once the follow-up task exists and its uploads are done. */
+  /**
+   * Called once the follow-up task exists with all its files. Not called
+   * when a failed file stays in the box.
+   */
   onCreated?: (task: AgentTask) => void;
   /** Controlled draft. Omit both to keep the draft internal. */
   value?: string;
@@ -85,26 +103,110 @@ export interface TaskComposerProps {
   className?: string;
 }
 
-const PROMOTE_ATTEMPTS = 3;
-const PROMOTE_RETRY_DELAY_MS = 200;
+/** What a send does: steer the target, or start a follow-up task from it. */
+export type ComposerMode = "steer" | "follow-up";
+
+/**
+ * The mode the composer is in. Files force a follow-up (steering carries
+ * text), and so does a harness with no live delivery: its steer box creates
+ * a follow-up task.
+ */
+export function composerMode(
+  steerTarget: Pick<AgentTask, "supportedSteerModes"> | null,
+): ComposerMode {
+  if (!steerTarget) return "follow-up";
+  return steerTarget.supportedSteerModes && steerTarget.supportedSteerModes.length === 0
+    ? "follow-up"
+    : "steer";
+}
+
+/** The send button's label: what a send does. */
+export const COMPOSER_SEND_LABEL: Record<ComposerMode, string> = {
+  steer: "Steer",
+  "follow-up": "Follow up",
+};
+
+/** A target title longer than this is cut, so the placeholder stays one line. */
+const PLACEHOLDER_TITLE_CHARS = 60;
+
+/** The placeholder that names the target: "Steer #<id> Fix the parser…". */
+export function composerTargetPlaceholder(mode: ComposerMode, target: AgentTask): string {
+  const full = taskListTitle(target);
+  // A cut title ends on a whole word.
+  const cut =
+    full.length > PLACEHOLDER_TITLE_CHARS
+      ? full.slice(0, full.lastIndexOf(" ", PLACEHOLDER_TITLE_CHARS)) ||
+        full.slice(0, PLACEHOLDER_TITLE_CHARS)
+      : full;
+  const title = cut.trimEnd().replace(/[.…:;,!?]+$/, "");
+  return `${COMPOSER_SEND_LABEL[mode]} #${target.id.slice(0, 8)} ${title}…`;
+}
+
+const DRAFT_CALL_ATTEMPTS = 3;
+const DRAFT_CALL_RETRY_DELAY_MS = 200;
+
+/** Runs `call` up to 3 times with backoff. False when every attempt failed. */
+async function retried(call: () => Promise<boolean>): Promise<boolean> {
+  for (let attempt = 1; attempt <= DRAFT_CALL_ATTEMPTS; attempt++) {
+    try {
+      if (await call()) return true;
+    } catch {
+      // Retried below.
+    }
+    if (attempt < DRAFT_CALL_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, DRAFT_CALL_RETRY_DELAY_MS * attempt));
+    }
+  }
+  return false;
+}
 
 /**
  * Promotion is idempotent, so a retry also covers a response lost after the
  * server committed it. False when every attempt failed: the heartbeat then
  * promotes the abandoned draft within 5 minutes.
  */
-async function promoteDraft(taskId: string): Promise<boolean> {
-  for (let attempt = 1; attempt <= PROMOTE_ATTEMPTS; attempt++) {
+function promoteDraft(taskId: string): Promise<boolean> {
+  return retried(async () => {
+    await api.promoteDraftTask(taskId);
+    return true;
+  });
+}
+
+/**
+ * Cancels a draft whose files did not all upload, so no worker ever runs it.
+ * Cancel is not idempotent (a second one on a cancelled task is a 400), so a
+ * failed attempt reads the task: a response lost after the server committed
+ * the cancel counts as done.
+ */
+function withdrawDraft(taskId: string): Promise<boolean> {
+  return retried(async () => {
     try {
-      await api.promoteDraftTask(taskId);
+      await api.cancelTask(taskId, "Attachment upload failed; the message stays in the composer.");
       return true;
     } catch {
-      if (attempt < PROMOTE_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS * attempt));
-      }
+      const task = await api.fetchTask(taskId);
+      return task.status === "cancelled";
     }
+  });
+}
+
+/** "screenshot.png" or "2 attachments": what failed to upload. */
+function failedFilesLabel(failed: ComposeAttachmentUploadResult["failed"]): string {
+  return failed.length === 1 ? failed[0].file.name : `${failed.length} attachments`;
+}
+
+/** A send whose draft was cancelled after a failed upload: nothing runs. */
+class WithdrawnSendError extends Error {
+  readonly taskId: string;
+
+  constructor(taskId: string, message: string) {
+    super(message);
+    this.taskId = taskId;
   }
-  return false;
+}
+
+function warnNotStarted() {
+  toast.warning("Task created, but it could not start yet. It starts within 5 minutes.");
 }
 
 export function TaskComposer({
@@ -113,6 +215,7 @@ export function TaskComposer({
   rootTaskId,
   followUpAgentId,
   placeholder = "Follow up on this task…",
+  showTarget = false,
   routeLabel,
   onCreated,
   value,
@@ -144,6 +247,19 @@ export function TaskComposer({
     [isControlled, onValueChange],
   );
 
+  const invalidateSent = (taskId: string, parentTaskId: string | undefined) => {
+    if (rootTaskId) queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+    queryClient.invalidateQueries({ queryKey: ["task", taskId, "attachments"] });
+    if (parentTaskId) {
+      // `exact`: the parent's log, context and steering reads stay as they are.
+      queryClient.invalidateQueries({ queryKey: ["task", parentTaskId], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["session", parentTaskId] });
+    }
+  };
+
   const createTask = useMutation({
     mutationFn: async (input: {
       task: string;
@@ -173,32 +289,50 @@ export function TaskComposer({
         files: input.attachments,
         onUploaded: setUploadedCount,
       });
-      // Always promote, even after an upload failure. A promotion failure
-      // never fails the send: the task exists, and a failed send keeps the
-      // text, so Send again would create a second task.
+      if (uploadResult.failed.length > 0) {
+        const label = failedFilesLabel(uploadResult.failed);
+        // All or nothing: cancel the draft and fail the send, so the text and
+        // every file stay in the box and Send again starts over.
+        if (await withdrawDraft(created.id)) {
+          throw new WithdrawnSendError(
+            created.id,
+            `${label} failed to upload, so nothing was sent. Send again to retry.`,
+          );
+        }
+        // The draft could not be cancelled, so the sweep would start it within
+        // 5 minutes anyway. Start it now and keep the failed files for a new
+        // follow-up; the text is gone, so it cannot run twice.
+        await promoteDraft(created.id);
+        return {
+          created,
+          promoted: true,
+          failed: uploadResult.failed.map((f) => f.file),
+          startedWithout: `#${created.id.slice(0, 8)} started without ${label}: it could not be withdrawn. Send the file in a new follow-up.`,
+        };
+      }
+      // A promotion failure never fails the send: the task exists, and a
+      // failed send keeps the text, so Send again would create a second task.
       const promoted = isDraft ? await promoteDraft(created.id) : true;
-      return { created, uploadResult, promoted };
+      return { created, promoted, failed: [] as File[], startedWithout: null };
     },
-    onSuccess: ({ created, uploadResult, promoted }, input) => {
-      const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
-      setAttachmentError(uploadError);
-      if (uploadError) toast.error(uploadError);
-      if (!promoted) {
-        toast.warning("Task created, but it could not start yet. It starts within 5 minutes.");
+    onSuccess: ({ created, promoted, failed, startedWithout }, input) => {
+      if (startedWithout) {
+        toast.error(startedWithout);
+      } else if (!promoted) {
+        warnNotStarted();
       }
-      if (rootTaskId) queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["task", created.id] });
-      queryClient.invalidateQueries({ queryKey: ["task", created.id, "attachments"] });
-      if (input.parentTaskId) {
-        // `exact`: the parent's log, context and steering reads stay as they are.
-        queryClient.invalidateQueries({ queryKey: ["task", input.parentTaskId], exact: true });
-        queryClient.invalidateQueries({ queryKey: ["session", input.parentTaskId] });
-      }
+      invalidateSent(created.id, input.parentTaskId);
       setDraft("");
-      if (!uploadError) setAttachments([]);
-      onCreated?.(created);
+      setAttachments(failed);
+      setAttachmentError(startedWithout);
+      // Stay put while files wait in the box: navigating would drop them.
+      if (!startedWithout) onCreated?.(created);
+    },
+    onError: (error, input) => {
+      if (!(error instanceof WithdrawnSendError)) return;
+      toast.error(error.message);
+      // The cancelled draft shows in the session.
+      invalidateSent(error.taskId, input.parentTaskId);
     },
   });
 
@@ -245,6 +379,12 @@ export function TaskComposer({
     </>
   );
 
+  const mode = composerMode(steerTarget);
+  const sendLabel = COMPOSER_SEND_LABEL[mode];
+  const shownTarget = showTarget ? (steerTarget ?? targetTask) : null;
+  const targetPlaceholder =
+    userId && shownTarget ? composerTargetPlaceholder(mode, shownTarget) : undefined;
+
   if (steerTarget) {
     return (
       <SteerComposer
@@ -257,6 +397,8 @@ export function TaskComposer({
         extraActions={extraActions}
         fullWidth={fullWidth}
         bar={bar}
+        sendLabel={sendLabel}
+        placeholder={targetPlaceholder}
         className={className}
       />
     );
@@ -272,10 +414,13 @@ export function TaskComposer({
       isError={createTask.isError}
       errorMessage={createTask.error instanceof Error ? createTask.error.message : "Failed to send"}
       pendingLabel={pendingLabel}
-      placeholder={userId ? placeholder : "Pick an identity above to send messages."}
+      placeholder={
+        userId ? (targetPlaceholder ?? placeholder) : "Pick an identity above to send messages."
+      }
       disabled={!userId}
       routeLabel={routeLabel}
-      sendLabel="Send"
+      sendLabel={sendLabel}
+      labelledSend
       attachments={attachments}
       onAttachmentsChange={(files) => {
         setAttachments(files);
