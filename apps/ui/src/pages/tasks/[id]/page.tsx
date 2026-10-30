@@ -63,6 +63,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
@@ -1184,21 +1185,27 @@ export default function TaskDetailPage() {
               <Separator />
 
               {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
-                  outcome as its last message, as in a chat. */}
-              {renderSessionLogs(centerScroller)}
+                  outcome as its last message, as in a chat. It keeps T3 Code's
+                  reading width; the header above spans the column. The raw log
+                  is wide event rows, so it takes the full column. */}
+              <div className={logMode === "raw" ? undefined : CHAT_COLUMN}>
+                {renderSessionLogs(centerScroller)}
+              </div>
             </div>
           </div>
           {composerProps ? (
             // THE MESSAGE BOX, pinned under the scroller: it steers a live
             // task and follows up a finished one.
             <div className="shrink-0 bg-background pt-2 pr-6 pb-3">
-              {isTerminal ? (
-                <div ref={wideFollowUpBoxRef}>
-                  <TaskComposer {...composerProps} />
-                </div>
-              ) : (
-                steerComposer
-              )}
+              <div className={CHAT_COLUMN}>
+                {isTerminal ? (
+                  <div ref={wideFollowUpBoxRef}>
+                    <TaskComposer {...composerProps} />
+                  </div>
+                ) : (
+                  steerComposer
+                )}
+              </div>
             </div>
           ) : null}
         </section>
