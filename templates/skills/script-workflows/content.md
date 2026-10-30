@@ -45,6 +45,16 @@ export default async function main(args, ctx) {
 
 `ctx.step.agentTask` blocks until the dispatched task reaches a terminal status (default `waitForCompletion: true`, default `timeoutMs` 2h) and journals its real output — a sequential `plan → implement → review` chain will not fan out. Pass `waitForCompletion: false` for the legacy fire-and-poll-yourself shape, or `failOnTaskFailure: false` to receive `{taskId, status: "failed", error}` instead of a throw when the task fails/is cancelled.
 
+On success, `ctx.step.agentTask` resolves to the worker's output string (JSON text under `outputSchema`, so parse it yourself; `null` when the task stored none), not a task record. `step.taskId` and `step.status` are undefined there, so a guard such as `step.status !== "completed"` or `step?.taskId ?? "unknown"` silently misfires. Only `failOnTaskFailure: false` with a failed or cancelled task returns `{taskId, status: "failed", error}`, and only `waitForCompletion: false` returns `{taskId, status}`. To get a step's task id, query by its context key (the label is the step label you passed):
+
+```sql
+SELECT id, status, output FROM agent_tasks
+WHERE contextKey = 'script-run:<runId>:<label>' AND taskType = 'script-run-step'
+ORDER BY createdAt DESC LIMIT 1
+```
+
+Inside the run, `<runId>` is `ctx.run.id`.
+
 ## Label Rules
 
 Step labels are durability keys. They must be stable and unique for each logical step. Do not reuse the same literal label inside a loop; launch will fail with `label_lint_violation`.
