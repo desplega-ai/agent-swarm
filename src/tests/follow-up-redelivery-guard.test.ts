@@ -13,7 +13,7 @@ import {
   initDb,
 } from "../be/db";
 import { FOLLOW_UP_DISPATCH_CAP, sendTaskHandler, sendTaskInputSchema } from "../tools/send-task";
-import { findDuplicateTask } from "../tools/task-dedup";
+import { DEDUP_SCAN_LIMIT, findDuplicateTask } from "../tools/task-dedup";
 import { ownerCtx } from "../tools/task-tool-ctx";
 
 const TEST_DB_PATH = "./test-follow-up-redelivery-guard.sqlite";
@@ -123,6 +123,32 @@ describe("findCompletedTasksInThread", () => {
     // Search in a different thread — should not find
     const result = await findCompletedTasksInThread("C_DEDUP_4", "4000.9999", 2880);
     expect(result).toEqual([]);
+  });
+
+  test("caps the rows it returns at the limit, newest first", async () => {
+    const agent = await createAgent({
+      name: "dedup-worker-5",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const task = await createTaskExtended(`capped completion ${i}`, {
+        agentId: agent.id,
+        slackChannelId: "C_DEDUP_5",
+        slackThreadTs: "5000.0001",
+      });
+      await completeTask(task.id, "done");
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - (3 - i) * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+      ids.push(task.id);
+    }
+
+    const result = await findCompletedTasksInThread("C_DEDUP_5", "5000.0001", 2880, 2);
+    expect(result.map((t) => t.id)).toEqual([ids[2], ids[1]]);
   });
 });
 
@@ -484,5 +510,32 @@ describe("findDuplicateTask", () => {
       creatorAgentId: creator.id,
     });
     expect(match?.task.id).toBe(original.id);
+  });
+
+  test("scans at most DEDUP_SCAN_LIMIT rows, so a large backlog keeps one dispatch bounded", async () => {
+    const creator = await createAgent({
+      name: "dedup-backlog-creator",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const original = await createTaskExtended("reconcile the ledger exports for november", {
+      creatorAgentId: creator.id,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+      new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      original.id,
+    ]);
+    for (let i = 0; i < DEDUP_SCAN_LIMIT; i++) {
+      await createTaskExtended(`backlog chore ${i} touching gadget ${i}`, {
+        creatorAgentId: creator.id,
+      });
+    }
+
+    const match = await findDuplicateTask({
+      taskDescription: "reconcile the ledger exports for november",
+      creatorAgentId: creator.id,
+    });
+    expect(match).toBeNull();
   });
 });

@@ -1868,14 +1868,15 @@ export async function getMostRecentTaskInThread(
 /**
  * Completed tasks in a Slack thread, most recent first. Lead `follow-up`
  * sessions are excluded: they coordinate the work, they are not the work, so
- * they never count as "the request was already handled". Returns every row in
- * the window, with no row cap: the caller matches descriptions in JS, so a cap
- * would hide an older matching completion behind newer unrelated ones.
+ * they never count as "the request was already handled". The caller matches
+ * descriptions in JS, so the cap sits far above a real thread's completions
+ * while still bounding the work one dispatch can trigger.
  */
 export async function findCompletedTasksInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
+  limit = 200,
 ): Promise<AgentTask[]> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -1885,8 +1886,9 @@ export async function findCompletedTasksInThread(
        AND status = 'completed'
        AND COALESCE(taskType, '') != 'follow-up'
        AND lastUpdatedAt > ?
-       ORDER BY lastUpdatedAt DESC`,
-    [channelId, threadTs, since],
+       ORDER BY lastUpdatedAt DESC
+       LIMIT ?`,
+    [channelId, threadTs, since, limit],
   );
   return rows.map(rowToAgentTask);
 }

@@ -34,6 +34,14 @@ const HIGH_SIMILARITY_THRESHOLD = 0.8;
 /** Lower threshold used when the tasks also target the same agent */
 const SAME_AGENT_SIMILARITY_THRESHOLD = 0.6;
 
+/**
+ * Rows one duplicate check scans. The JS similarity match needs more than the
+ * query's default 50 (an older duplicate can sit behind newer unrelated tasks),
+ * but the scan must stay bounded: send-task runs it twice per call, once inside
+ * the write transaction.
+ */
+export const DEDUP_SCAN_LIMIT = 500;
+
 export interface DedupMatch {
   task: AgentTask;
   reason: string;
@@ -88,6 +96,7 @@ export async function findDuplicateTask(opts: {
   const recentTasks = await findRecentSimilarTasks({
     creatorAgentId: opts.creatorAgentId,
     windowMinutes: opts.windowMinutes ?? 10,
+    limit: DEDUP_SCAN_LIMIT,
   });
 
   for (const existing of recentTasks) {

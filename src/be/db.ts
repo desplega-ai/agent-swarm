@@ -2386,10 +2386,8 @@ export async function findRecentSimilarTasks(opts: {
     params.push(opts.agentId);
   }
 
-  // No default row cap: findDuplicateTask matches descriptions in JS, so a cap
-  // would hide an older duplicate behind newer unrelated tasks in the window.
-  const limitSql = opts.limit === undefined ? "" : ` LIMIT ${opts.limit}`;
-  const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC${limitSql}`;
+  const limit = opts.limit ?? 50;
+  const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
 
   const rows = await getDbClient().query<AgentTaskRow>(query, params);
   return rows.map(rowToAgentTask);
