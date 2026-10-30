@@ -28,9 +28,11 @@
  * no worker claims. If any file fails to upload, the composer cancels the
  * draft and the send fails: the text and every file stay in the box, and
  * Send again starts over with a new task. Nothing is left in `draft`, so the
- * heartbeat's abandoned-draft sweep has nothing to promote. Only if the
- * cancel itself keeps failing does the task start without the failed files,
- * which then stay in the box for a new follow-up.
+ * heartbeat's abandoned-draft sweep has nothing to promote. If no cancel is
+ * confirmed, the composer promotes the draft and goes by the task it gets
+ * back: `cancelled` is the same failed send; started means the task runs
+ * without the failed files, which stay in the box for a new follow-up. With
+ * no answer at all, the send fails and names the task to check.
  *
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap. A file added through `renderActions` (the session
@@ -145,11 +147,12 @@ export function composerTargetPlaceholder(mode: ComposerMode, target: AgentTask)
 const DRAFT_CALL_ATTEMPTS = 3;
 const DRAFT_CALL_RETRY_DELAY_MS = 200;
 
-/** Runs `call` up to 3 times with backoff. False when every attempt failed. */
-async function retried(call: () => Promise<boolean>): Promise<boolean> {
+/** Runs `call` up to 3 times with backoff. Null when every attempt failed. */
+async function retried<T>(call: () => Promise<T | null>): Promise<T | null> {
   for (let attempt = 1; attempt <= DRAFT_CALL_ATTEMPTS; attempt++) {
     try {
-      if (await call()) return true;
+      const result = await call();
+      if (result !== null) return result;
     } catch {
       // Retried below.
     }
@@ -157,37 +160,37 @@ async function retried(call: () => Promise<boolean>): Promise<boolean> {
       await new Promise((resolve) => setTimeout(resolve, DRAFT_CALL_RETRY_DELAY_MS * attempt));
     }
   }
-  return false;
+  return null;
 }
 
 /**
- * Promotion is idempotent, so a retry also covers a response lost after the
- * server committed it. False when every attempt failed: the heartbeat then
- * promotes the abandoned draft within 5 minutes.
+ * Promotion is idempotent and returns the task as it stands, so a retry also
+ * covers a response lost after the server committed it. A task already out
+ * of `draft` comes back unchanged: a cancelled draft stays `cancelled`. Null
+ * when every attempt failed: the heartbeat then promotes the abandoned draft
+ * within 5 minutes.
  */
-function promoteDraft(taskId: string): Promise<boolean> {
-  return retried(async () => {
-    await api.promoteDraftTask(taskId);
-    return true;
-  });
+function promoteDraft(taskId: string) {
+  return retried(() => api.promoteDraftTask(taskId));
 }
 
 /**
  * Cancels a draft whose files did not all upload, so no worker ever runs it.
  * Cancel is not idempotent (a second one on a cancelled task is a 400), so a
  * failed attempt reads the task: a response lost after the server committed
- * the cancel counts as done.
+ * the cancel counts as done. False when no attempt confirmed the cancel.
  */
-function withdrawDraft(taskId: string): Promise<boolean> {
-  return retried(async () => {
+async function withdrawDraft(taskId: string): Promise<boolean> {
+  const confirmed = await retried(async () => {
     try {
       await api.cancelTask(taskId, "Attachment upload failed; the message stays in the composer.");
       return true;
     } catch {
       const task = await api.fetchTask(taskId);
-      return task.status === "cancelled";
+      return task.status === "cancelled" ? true : null;
     }
   });
+  return confirmed === true;
 }
 
 /** "screenshot.png" or "2 attachments": what failed to upload. */
@@ -195,8 +198,12 @@ function failedFilesLabel(failed: ComposeAttachmentUploadResult["failed"]): stri
   return failed.length === 1 ? failed[0].file.name : `${failed.length} attachments`;
 }
 
-/** A send whose draft was cancelled after a failed upload: nothing runs. */
-class WithdrawnSendError extends Error {
+/**
+ * A follow-up whose files failed to upload and that did not start: its draft
+ * was cancelled, or its state could not be read. The text and every file stay
+ * in the box.
+ */
+class UnsentFollowUpError extends Error {
   readonly taskId: string;
 
   constructor(taskId: string, message: string) {
@@ -291,28 +298,41 @@ export function TaskComposer({
       });
       if (uploadResult.failed.length > 0) {
         const label = failedFilesLabel(uploadResult.failed);
+        const shortId = `#${created.id.slice(0, 8)}`;
+        const unsent = `${label} failed to upload, so nothing was sent. Send again to retry.`;
         // All or nothing: cancel the draft and fail the send, so the text and
         // every file stay in the box and Send again starts over.
         if (await withdrawDraft(created.id)) {
-          throw new WithdrawnSendError(
+          throw new UnsentFollowUpError(created.id, unsent);
+        }
+        // The cancel is unconfirmed: it may have committed with every response
+        // and read lost. Otherwise the draft stays, and the sweep starts it
+        // within 5 minutes anyway. Promotion settles both, and its response is
+        // the status read: a committed cancel comes back `cancelled`.
+        const settled = await promoteDraft(created.id);
+        if (settled?.status === "cancelled") {
+          throw new UnsentFollowUpError(created.id, unsent);
+        }
+        if (!settled) {
+          // Neither withdrawn nor started, as far as the server said. Claim
+          // neither: keep everything in the box and point at the task.
+          throw new UnsentFollowUpError(
             created.id,
-            `${label} failed to upload, so nothing was sent. Send again to retry.`,
+            `${label} failed to upload, and ${shortId} could not be withdrawn or checked. Open ${shortId} before sending again: it may start within 5 minutes without the file.`,
           );
         }
-        // The draft could not be cancelled, so the sweep would start it within
-        // 5 minutes anyway. Start it now and keep the failed files for a new
-        // follow-up; the text is gone, so it cannot run twice.
-        await promoteDraft(created.id);
+        // It started without the failed files. The text is gone, so it cannot
+        // run twice; the files stay in the box for a new follow-up.
         return {
           created,
           promoted: true,
           failed: uploadResult.failed.map((f) => f.file),
-          startedWithout: `#${created.id.slice(0, 8)} started without ${label}: it could not be withdrawn. Send the file in a new follow-up.`,
+          startedWithout: `${shortId} started without ${label}: it could not be withdrawn. Send the file in a new follow-up.`,
         };
       }
       // A promotion failure never fails the send: the task exists, and a
       // failed send keeps the text, so Send again would create a second task.
-      const promoted = isDraft ? await promoteDraft(created.id) : true;
+      const promoted = isDraft ? (await promoteDraft(created.id)) !== null : true;
       return { created, promoted, failed: [] as File[], startedWithout: null };
     },
     onSuccess: ({ created, promoted, failed, startedWithout }, input) => {
@@ -329,9 +349,9 @@ export function TaskComposer({
       if (!startedWithout) onCreated?.(created);
     },
     onError: (error, input) => {
-      if (!(error instanceof WithdrawnSendError)) return;
+      if (!(error instanceof UnsentFollowUpError)) return;
       toast.error(error.message);
-      // The cancelled draft shows in the session.
+      // The draft shows in the session.
       invalidateSent(error.taskId, input.parentTaskId);
     },
   });

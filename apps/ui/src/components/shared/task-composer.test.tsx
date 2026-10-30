@@ -35,10 +35,14 @@ const promoteCalls: string[] = [];
 // "reject": every request fails before the server commits it.
 // "lose-first-response": the first request commits, then its response is lost.
 let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
-// Cancels the server committed, and every cancel request sent. Same modes.
+// Cancels the server committed, and every cancel request sent. Same modes,
+// plus "lose-every-response": the first request commits and every response,
+// that one and the 400s after it, is lost.
 const cancelled: string[] = [];
 const cancelCalls: string[] = [];
-let cancelMode: "ok" | "reject" | "lose-first-response" = "ok";
+let cancelMode: "ok" | "reject" | "lose-first-response" | "lose-every-response" = "ok";
+// Every status read fails.
+let rejectReads = false;
 let rejectUploads = false;
 let nextTaskId = 0;
 mock.module("@/api/client", () => ({
@@ -51,15 +55,21 @@ mock.module("@/api/client", () => ({
     promoteDraftTask: async (id: string) => {
       promoteCalls.push(id);
       if (promoteMode === "reject") throw new Error("promotion failed");
+      // Like the server: a task already out of draft comes back unchanged.
+      if (cancelled.includes(id)) return { id, status: "cancelled" };
       if (!promoted.includes(id)) promoted.push(id);
       if (promoteMode === "lose-first-response" && promoteCalls.length === 1) {
         throw new Error("network error");
       }
-      return { id };
+      return { id, status: "pending" };
     },
     cancelTask: async (id: string) => {
       cancelCalls.push(id);
       if (cancelMode === "reject") throw new Error("cancel failed");
+      if (cancelMode === "lose-every-response") {
+        if (!cancelled.includes(id)) cancelled.push(id);
+        throw new Error("network error");
+      }
       // A second cancel on a cancelled task is a 400, like the server.
       if (cancelled.includes(id)) throw new Error("Cannot cancel task with status 'cancelled'");
       cancelled.push(id);
@@ -68,10 +78,13 @@ mock.module("@/api/client", () => ({
       }
       return { success: true, task: { id, status: "cancelled" } };
     },
-    fetchTask: async (id: string) => ({
-      id,
-      status: cancelled.includes(id) ? "cancelled" : promoted.includes(id) ? "pending" : "draft",
-    }),
+    fetchTask: async (id: string) => {
+      if (rejectReads) throw new Error("network error");
+      return {
+        id,
+        status: cancelled.includes(id) ? "cancelled" : promoted.includes(id) ? "pending" : "draft",
+      };
+    },
   },
 }));
 mock.module("@/api/fs", () => ({
@@ -184,6 +197,7 @@ beforeEach(() => {
   cancelled.length = 0;
   cancelCalls.length = 0;
   cancelMode = "ok";
+  rejectReads = false;
   rejectUploads = false;
   nextTaskId = 0;
 });
@@ -395,6 +409,67 @@ describe("TaskComposer on Sessions", () => {
     expect(cancelCalls).toEqual(["follow-up"]);
     expect(cancelled).toEqual(["follow-up"]);
     expect(promoteCalls).toEqual([]);
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a cancel that commits with every response and read lost is not reported as started", async () => {
+    rejectUploads = true;
+    cancelMode = "lose-every-response";
+    rejectReads = true;
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+
+    // Promotion comes back `cancelled`: the send failed, and nothing runs.
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(promoteCalls).toEqual(["follow-up"]);
+    expect(promoted).toEqual([]);
+    expect(started).toEqual([]);
+    expect(container.textContent).not.toContain("started without");
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a draft whose cancel and promotion both go unanswered claims neither", async () => {
+    rejectUploads = true;
+    cancelMode = "reject";
+    rejectReads = true;
+    promoteMode = "reject";
+    const started: string[] = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task) => started.push(task.id)}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(
+      () => container.textContent?.includes("could not be withdrawn or checked") ?? false,
+    );
+
+    expect(promoteCalls).toHaveLength(3);
+    expect(started).toEqual([]);
+    expect(container.textContent).toContain(
+      "screenshot-x.png failed to upload, and #follow-u could not be withdrawn or checked. Open #follow-u before sending again",
+    );
+    expect(container.textContent).not.toContain("started without");
     expect(textOf(container)).toBe("see the screenshot");
     expect(fileInBox(container)).toBe(true);
     await unmount();
