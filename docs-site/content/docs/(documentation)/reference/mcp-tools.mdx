@@ -416,6 +416,16 @@ Download a file from Slack by file ID or URL.
 | `url` | string | No | Direct download URL |
 | `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
 
+### slack-leave-thread
+
+Stop following a Slack thread until someone @mentions the bot there again. Posts nothing to Slack.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | No | Slack-originated task assigned to you (any task for a lead) whose thread to leave |
+| `channelId` | string | No | Slack channel ID (with `threadTs`; lead only) |
+| `threadTs` | string | No | Thread root timestamp (with `channelId`) |
+
 ### register-agentmail-inbox
 
 Register an AgentMail inbox ID to route incoming emails to this agent.
@@ -637,7 +647,7 @@ Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
 | `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
-| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
+| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds, from? }`; `from: "start"` counts only from run starts |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
 

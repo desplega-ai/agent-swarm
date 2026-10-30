@@ -1,6 +1,6 @@
 # Dreaming
 
-Nightly self-improvement loop. The `dreaming-daily` schedule triggers it once a day. A manual trigger with `{"dryRun": true}` (optionally `"agentIds": [...]`) runs it read-only and skips Slack.
+Nightly self-improvement loop. The `dreaming-daily` workflow schedule starts it once a day, as the lead. A 20-hour cooldown keeps it to one run a day: a trigger within 20 hours of the last run start (any status, manual and dry runs included) is recorded as a skipped run. It counts from starts only, so a long run never pushes out the next night, and two simultaneous triggers start one run. A manual trigger with `{"dryRun": true}` (optionally `"agentIds": [...]`) runs it read-only and skips Slack.
 
 How a night runs:
 
@@ -27,6 +27,10 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
 {
   "name": "dreaming",
   "description": "Nightly self-improvement loop. gather -> per-agent self-reports (foreach) -> Lead synthesis -> apply, trim, heartbeat, skills, scriptify and memory lanes -> verify -> learn -> publish -> optional Slack receipt. Writes that need Lead authority run as Lead agent-tasks. Manual trigger {dryRun:true, agentIds?:[...]} runs read-only and skips Slack.",
+  "cooldown": {
+    "hours": 20,
+    "from": "start"
+  },
   "input": {
     "v3Writes": "off",
     "leadAgentId": "",

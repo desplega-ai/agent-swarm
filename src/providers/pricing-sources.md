@@ -78,6 +78,14 @@ rate by hand should also update this file.
     what xAI billed (`_meta.usage.costUsdTicks`), which wins over these rows
     as for amp. OpenRouter models also project under `provider='grok'` for
     `openrouter/<id>` models, which report no USD.
+  - fx (`provider='fx'`) reports tokens and no USD, so every fx row is
+    priced from the table (`costSource: "pricing-table"`). The lookup strips
+    the routing prefix (`src/be/pricing-normalize.ts`): an
+    `openrouter/<vendor>/<id>` model prices at OpenRouter's `<vendor>/<id>`
+    rate, a `vercel/<vendor>/<id>` model at the AI Gateway `<vendor>/<id>`
+    rate, a bare id at OpenAI's rate. fx reports no cache split, so every
+    input token prices at the uncached rate, and its counts exclude
+    sub-agent and helper-model calls: the figure is an estimate.
   - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
     `provider='cursor'`. Cursor bills the vendor's API rates and reports the
     vendor's own id. The adapter subtracts cache reads and writes from SDK

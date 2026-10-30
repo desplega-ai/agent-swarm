@@ -350,6 +350,12 @@ Limitations:
 - With thread steering enabled, a lead follow-up that includes files creates a follow-up task instead of steering the running session, because steering only carries text.
 - When the bot reads earlier messages of a thread for context, messages that contain only a file are skipped.
 
+## Leaving a thread
+
+An agent calls `slack-leave-thread` when a thread no longer needs the swarm: people are talking among themselves, someone tells the bot to stop, or the work is done. The swarm then ignores every message in that thread that does not @mention the bot. The check runs in code before the `slack.message` workflow event, buffering, routing, or any model call, so no workflow starts, no task is created and nothing is posted. Replies already buffered when the thread is left are dropped too. The next message that @mentions the bot clears the state and is handled as usual. Other threads are unaffected, and leaving posts nothing to Slack.
+
+Set `SLACK_LEAVE_THREAD_DISABLE=true` to turn the tool off. New agent sessions do not get the tool, and a session that already has it gets an error naming the flag when it calls it. Scripts always see the tool and get the same error while the flag is set. A global config change applies without a restart. Threads left before the flag was set stay left until someone @mentions the bot.
+
 ## File Handling
 
 Agents can upload and download files via Slack:

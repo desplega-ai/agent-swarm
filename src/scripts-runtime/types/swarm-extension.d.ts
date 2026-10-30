@@ -98,6 +98,7 @@ declare module "swarm-extension" {
             | "amp"
             | "cursor"
             | "grok"
+            | "fx"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -233,6 +234,7 @@ declare module "swarm-extension" {
       | "amp"
       | "cursor"
       | "grok"
+      | "fx"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -255,6 +257,7 @@ declare module "swarm-extension" {
             | "amp"
             | "cursor"
             | "grok"
+            | "fx"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -275,6 +278,10 @@ declare module "swarm-extension" {
     lastHeartbeatAt: string;
     runtimeInstanceId?: string | null | undefined;
   };
+
+  export type SteerMode = "steer" | "queue";
+
+  export type SteeringSource = "script" | "slack" | "mcp" | "api" | "ui" | "chat";
 
   export type RequestInfo = {
     sessionId: string | undefined;
@@ -485,6 +492,27 @@ declare module "swarm-extension" {
     workerAgentId: string;
     leadAgentId: string;
     summary: string;
+  }
+  export interface TaskSteerEvent {
+    task: AgentTask;
+    message: string;
+    mode: SteerMode;
+    source: SteeringSource;
+    sender: {
+      kind: "user" | "agent" | "system";
+      userId?: string;
+      agentId?: string;
+    };
+    messageTimestamps?: string[];
+    /** Slack ingress metadata; not persisted or writable through modify. */
+    slack?: {
+      channelId: string;
+      threadTs: string;
+      userId?: string;
+    };
+  }
+  export interface TaskSteerModify {
+    message: string;
   }
   export type TaskFollowUpModify = Partial<
     Pick<CreateTaskOptions, "agentId" | "priority" | "followUpConfig">
@@ -717,6 +745,11 @@ declare module "swarm-extension" {
       event: TaskFollowUpEvent;
       modify: TaskFollowUpModify;
       result: PreResult<TaskFollowUpModify>;
+    };
+    "pre.task.steer": {
+      event: TaskSteerEvent;
+      modify: TaskSteerModify;
+      result: PreResult<TaskSteerModify>;
     };
     "pre.slack.route": {
       event: SlackRouteEvent;

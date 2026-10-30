@@ -62,9 +62,9 @@ beforeEach(async () => {
 
 describe("tier seeds", () => {
   test("one profile per harness and tier, copied from the tier map; none for acp", async () => {
-    expect(await seedModelProfiles()).toBe(40);
+    expect(await seedModelProfiles()).toBe(44);
     const profiles = await listModelProfiles();
-    expect(profiles).toHaveLength(40);
+    expect(profiles).toHaveLength(44);
     expect(profiles.some((p) => p.harness === "acp")).toBe(false);
     for (const profile of profiles) {
       const tier = profile.seededFrom?.replace("tier:", "") as (typeof MODEL_TIERS)[number];

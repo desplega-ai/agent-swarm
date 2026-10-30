@@ -184,6 +184,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [slack-download-file](#slack-download-file)
   - [slack-delete](#slack-delete)
   - [slack-update](#slack-update)
+  - [slack-leave-thread](#slack-leave-thread)
 - [Prompt Templates Tools](#prompt-templates-tools)
   - [list-prompt-templates](#list-prompt-templates)
   - [get-prompt-template](#get-prompt-template)
@@ -332,7 +333,7 @@ List model profiles: named harness + model + effort combinations. Pass a profile
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok \| fx` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
 
 ### get-task-details
 
@@ -458,7 +459,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex and cursor; claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex, cursor and fx (fx supports steer only); claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2267,6 +2268,18 @@ Edits (in place) the text of a Slack message that THIS bot authored — use it t
 | `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
 | `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
 | `message` | `string` | Yes | - | The new message content. |
+
+### slack-leave-thread
+
+**Leave a Slack thread**
+
+Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the thread of your Slack-originated task, or (lead only) channelId and threadTs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | No | - | A task whose Slack thread to leave. |
+| `channelId` | `string` | No | - | The Slack channel ID of the thread. |
+| `threadTs` | `string` | No | - | Timestamp of the thread root (dotted, 'p' deep-link, or full permalink URL). |
 
 ## Prompt Templates Tools
 

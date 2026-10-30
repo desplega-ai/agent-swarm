@@ -9,6 +9,7 @@ export interface SlackThreadSteeringRequest {
   message: string;
   messageTimestamps?: string[];
   requestedByUserId?: string;
+  slackUserId?: string;
 }
 
 export interface SlackThreadSteeringResult {
@@ -52,6 +53,8 @@ export async function requestSlackThreadSteering(
     source: "slack",
     createdByKind: "user",
     createdByUserId: args.requestedByUserId,
+    messageTimestamps: args.messageTimestamps,
+    slack: { channelId: args.channelId, threadTs: args.threadTs, userId: args.slackUserId },
   });
   for (const messageTs of args.messageTimestamps ?? []) {
     await createLogEntry({

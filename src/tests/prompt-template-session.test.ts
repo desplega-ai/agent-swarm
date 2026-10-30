@@ -24,6 +24,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.compaction.goal_reminder",
   "system.agent.context.bound_note",
   "system.agent.cursor.first_message",
+  "system.agent.fx.system_prompt_file",
   "system.agent.lead",
   "system.agent.lead.docs",
   "system.agent.memory",
@@ -42,6 +43,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.tool_discovery.search",
   "system.agent.tool_discovery.amp",
   "system.agent.tool_discovery.codex",
+  "system.agent.tool_discovery.fx",
   "system.agent.tool_discovery.opencode",
   "system.agent.tool_discovery.direct",
   "system.agent.tools_skills",
@@ -121,11 +123,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 35 system and session templates in total", () => {
+  test("registers 37 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 30 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(35);
+    // 32 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(37);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {
