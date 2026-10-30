@@ -1382,6 +1382,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "slack-list-channels": "💬 Listing Slack channels",
   "slack-download-file": "📥 Downloading from Slack",
   "slack-upload-file": "📤 Uploading to Slack",
+  "slack-leave-thread": "💬 Leaving Slack thread",
   // Tracker
   "tracker-status": "📊 Checking tracker status",
   "tracker-sync-status": "📊 Syncing tracker status",

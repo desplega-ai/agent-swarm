@@ -32,6 +32,10 @@ async function getBridgeServer(): Promise<McpServer> {
   return _bridgeServer;
 }
 
+export function resetBridgeServerForTesting(): void {
+  _bridgeServer = null;
+}
+
 type RegisteredTool = {
   handler: (argsOrExtra: unknown, extra?: unknown) => unknown | Promise<unknown>;
   inputSchema?: AnySchema;

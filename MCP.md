@@ -184,6 +184,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [slack-download-file](#slack-download-file)
   - [slack-delete](#slack-delete)
   - [slack-update](#slack-update)
+  - [slack-leave-thread](#slack-leave-thread)
 - [Prompt Templates Tools](#prompt-templates-tools)
   - [list-prompt-templates](#list-prompt-templates)
   - [get-prompt-template](#get-prompt-template)
@@ -2267,6 +2268,18 @@ Edits (in place) the text of a Slack message that THIS bot authored — use it t
 | `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
 | `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
 | `message` | `string` | Yes | - | The new message content. |
+
+### slack-leave-thread
+
+**Leave a Slack thread**
+
+Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the thread of your Slack-originated task, or (lead only) channelId and threadTs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | No | - | A task whose Slack thread to leave. |
+| `channelId` | `string` | No | - | The Slack channel ID of the thread. |
+| `threadTs` | `string` | No | - | Timestamp of the thread root (dotted, 'p' deep-link, or full permalink URL). |
 
 ## Prompt Templates Tools
 

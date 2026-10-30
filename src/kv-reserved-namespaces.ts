@@ -12,6 +12,8 @@ const RESERVED_FAMILIES = new Map([
   ["worker", "namespace is reserved for worker nudges"],
   // Durable dedupe for SLACK_BLOCK_EXTERNAL_CHANNELS alerts (src/slack/external-channel.ts).
   ["slack-external-alert", "namespace is reserved for Slack external channel alerts"],
+  // Threads the swarm left via slack-leave-thread (src/slack/left-threads.ts).
+  ["slack-left-thread", "namespace is reserved for left Slack threads; use slack-leave-thread"],
   // Source group labels (src/be/db/session-labels.ts). Private, see PRIVATE_FAMILIES.
   [
     "session-labels",

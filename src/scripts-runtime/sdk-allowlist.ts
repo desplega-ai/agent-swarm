@@ -104,6 +104,7 @@ export const SDK_TOOL_NAME_MAP = {
   slack_downloadFile: "slack-download-file",
   slack_delete: "slack-delete", // external: mutates Slack, destructive
   slack_update: "slack-update", // external: mutates Slack
+  slack_leaveThread: "slack-leave-thread",
 
   // ── chat sdk ──
   chat_reply: "chat-reply", // external: sends to the task's chat thread

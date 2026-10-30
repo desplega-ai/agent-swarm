@@ -20,6 +20,7 @@ import {
   fetchSlackFiles,
   notifySlackFileFailures,
 } from "./inbound-files";
+import { shouldSkipLeftSlackThread } from "./left-threads";
 import {
   collectSlackMessageFiles,
   type SlackMessageLike,
@@ -194,11 +195,26 @@ export function createAssistant(
           }
         }
 
+        const botMentioned = !!cachedBotUserId && rawText.includes(`<@${cachedBotUserId}>`);
+        // A thread the swarm left (slack-leave-thread) stays silent until someone
+        // @mentions the bot.
+        if (
+          await shouldSkipLeftSlackThread(
+            channelId,
+            msg.thread_ts as string | undefined,
+            botMentioned,
+          )
+        ) {
+          console.log(
+            `[Slack] assistant: skipping message in left thread ${channelId}/${threadTs}`,
+          );
+          return ignoreSlackInbound("thread_left");
+        }
+
         // If the message @-mentions someone OTHER than our bot and does NOT mention
         // our bot, it is addressed to a different agent/user — do not spawn a task
         // (unless SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true).
         if (cachedBotUserId) {
-          const botMentioned = rawText.includes(`<@${cachedBotUserId}>`);
           if (!botMentioned && isAddressedToOtherUser(rawText, cachedBotUserId)) {
             console.log(
               `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,

@@ -315,6 +315,7 @@ export interface SwarmSdk {
   slack_downloadFile(args: { url: string }): Promise<unknown>;
   slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
   slack_update(args: { channelId: string; messageTs: string; message: string }): Promise<unknown>;
+  slack_leaveThread(args: { taskId?: string; channelId?: string; threadTs?: string }): Promise<unknown>;
 
   // --- write: chat sdk ---
   chat_reply(args: { text: string }): Promise<unknown>;
