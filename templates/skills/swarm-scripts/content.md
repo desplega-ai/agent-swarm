@@ -18,6 +18,8 @@ Named script only when the logic will run two or more times, by you, another age
 
 Reference point: a workflow triage that took about 26 tool calls returns as one result of about 4k tokens in about 13 seconds.
 
+Pick the run mode before you author. A short inline `script-run` is for small lookups only. A job that scans a whole population or may run past the inline cap of about 30 s starts as a durable `launch-script-run` from the start: one step collects to an output, the next computes from it. Restarting a long inline run throws away the work it already did.
+
 ## Loading the tools
 
 The script tools are deferred. Load them with your harness tool search before the first call: `script-search`, `script-run`, `script-upsert`, `script-query-types`, `script-delete`, and for durable runs `launch-script-run`, `get-script-run`, `list-script-runs`.
