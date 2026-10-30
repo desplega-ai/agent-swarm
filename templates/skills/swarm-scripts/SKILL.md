@@ -23,7 +23,7 @@ Named script only when the logic will run two or more times, by you, another age
 
 Reference point: a workflow triage that took about 26 tool calls returns as one result of about 4k tokens in about 13 seconds.
 
-Pick the run mode before you author. A short inline `script-run` is for small lookups only. A job that scans a whole population or may run past the inline cap of about 30 s starts as a durable `launch-script-run` from the start: one step collects to an output, the next computes from it. Restarting a long inline run throws away the work it already did.
+Pick the run mode before you author. A short inline `script-run` is for small lookups only. A job that scans a whole population or may run past the inline cap of about 30 s starts as a durable `launch-script-run` from the start. A single `ctx.step.swarmScript` step has the same cap, so collect in bounded steps: each step takes a cursor, collects one slice in well under 30 s, and returns its rows plus the next cursor. Label each step with its slice (`collect-${page}`) so the journal checkpoints it, then compute from the collected slices in a final step. Restarting a long inline run throws away the work it already did.
 
 ## Loading the tools
 
