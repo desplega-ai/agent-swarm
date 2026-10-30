@@ -238,10 +238,11 @@ Cache contents must tolerate concurrent writers. Do not store working trees,
 credentials, or runtime state there. The operator chooses cache environment
 variables and makes the mount writable for the image's worker user through the
 image or root setup script. A mount does not configure package managers by itself.
-The API rejects worker homes (`/home/worker`, `/root`), workspace roots
-(`/workspace/personal`, `/workspace/shared`), their ancestors, and credential or
-harness state directories under those homes. Safe cache subdirectories such as
-`/home/worker/.cache`, `/workspace/personal/.cache`, and `/cache` remain valid.
+The API rejects any mount that overlaps a workspace root (`/workspace/personal`,
+`/workspace/shared`) or a credential/harness state directory under `/home/worker`
+or `/root`: the directory itself, its ancestors, and its descendants. This also
+rejects either entire home. Cache siblings such as `/home/worker/.cache`,
+`/root/.cache`, `/workspace/cache`, and `/cache` remain valid.
 Container termination and failed-start cleanup remove anonymous volumes only;
 the named cache survives for the pool's next runtime.
 

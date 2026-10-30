@@ -17,7 +17,7 @@ import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
-import { cancelPoolCacheRelease, queuePoolCacheRelease } from "./cache-cleanup-db";
+import { queuePoolCacheRelease } from "./cache-cleanup-db";
 import { RuntimePoolError } from "./errors";
 import { revokeControllerTokens } from "./tokens";
 
@@ -394,7 +394,20 @@ export async function updateRuntimePool(
     await validatePool(data);
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
-    if (data.cache) await cancelPoolCacheRelease(id, data.placements[0]!);
+    // Keep the guard and cancellation under the same BEGIN IMMEDIATE write lock.
+    if (data.cache) {
+      if (
+        await tx.get(
+          "SELECT id FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ? AND state = 'deleting'",
+          [id, data.placements[0]!],
+        )
+      )
+        throw new RuntimePoolError("Cache cleanup is in progress; retry after it completes", 409);
+      await tx.run(
+        "DELETE FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ? AND state = 'pending'",
+        [id, data.placements[0]!],
+      );
+    }
     if (existing.cache && (!data.cache || data.placements[0] !== existing.placements[0]))
       await queuePoolCacheRelease(existing, actor);
     await tx.run(

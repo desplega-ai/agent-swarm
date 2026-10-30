@@ -2220,23 +2220,25 @@ export const RuntimePoolCacheSchema = z
       .refine((path) => {
         const parts = path.split("/").filter(Boolean);
         const normalized = `/${parts.join("/")}`;
+        const protectedPaths = [
+          "/workspace/personal",
+          "/workspace/shared",
+          ...["/home/worker", "/root"].flatMap((home) =>
+            [".ssh", ".codex", ".claude", ".claude.json", ".pi", ".config", ".local"].map(
+              (directory) => `${home}/${directory}`,
+            ),
+          ),
+        ];
         return (
           path.startsWith("/") &&
           parts.length > 0 &&
           !path.includes("\0") &&
           !parts.some((part) => part === "." || part === "..") &&
-          !["/home/worker", "/root", "/workspace/personal", "/workspace/shared"].some(
-            (protectedPath) => {
-              return protectedPath === normalized || protectedPath.startsWith(`${normalized}/`);
-            },
-          ) &&
-          ![".ssh", ".codex", ".claude", ".claude.json", ".pi", ".config", ".local"].some(
-            (directory) => {
-              return ["/home/worker", "/root"].some((home) => {
-                const protectedPath = `${home}/${directory}`;
-                return normalized === protectedPath || normalized.startsWith(`${protectedPath}/`);
-              });
-            },
+          !protectedPaths.some(
+            (protectedPath) =>
+              protectedPath === normalized ||
+              protectedPath.startsWith(`${normalized}/`) ||
+              normalized.startsWith(`${protectedPath}/`),
           )
         );
       }, "Cache mountPath must be absolute, without . or .., and must not cover worker homes, workspaces or credential directories"),

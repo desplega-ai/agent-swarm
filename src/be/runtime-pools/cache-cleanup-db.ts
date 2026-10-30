@@ -1,7 +1,6 @@
 import { poolCacheKey } from "../../runtime-providers/types";
 import type { RuntimePool } from "../../types";
 import { getDbClient, getSwarmConfigs } from "../db";
-import { RuntimePoolError } from "./errors";
 
 /** Call in the pool write transaction; this schedules work without contacting infrastructure. */
 export async function queuePoolCacheRelease(
@@ -31,19 +30,5 @@ export async function queuePoolCacheRelease(
       actor,
       actor,
     ],
-  );
-}
-
-export async function cancelPoolCacheRelease(poolId: string, controllerId: string): Promise<void> {
-  if (
-    await getDbClient().get(
-      "SELECT id FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ? AND state = 'deleting'",
-      [poolId, controllerId],
-    )
-  )
-    throw new RuntimePoolError("Cache cleanup is in progress; retry after it completes", 409);
-  await getDbClient().run(
-    "DELETE FROM runtime_cache_releases WHERE pool_id = ? AND controller_id = ?",
-    [poolId, controllerId],
   );
 }

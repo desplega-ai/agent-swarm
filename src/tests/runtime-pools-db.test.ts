@@ -91,12 +91,18 @@ describe("runtime pools persistence", () => {
       "/workspace",
       "/workspace/personal",
       "/workspace/shared",
+      "/workspace/personal/cache",
+      "//workspace//personal//cache/",
+      "/workspace/shared/.cache",
+      "/workspace/shared/repo/.git",
       "/root",
       "/home/worker/.codex",
       "/home/worker/.local/share/opencode",
       "/home/worker/.claude.json",
       "/home/worker/.ssh/keys",
+      "/home/worker/.config/cache",
       "/root/.claude",
+      "/root/.local/share/opencode/cache",
     ]) {
       await expect(
         createRuntimePool({
@@ -130,7 +136,8 @@ describe("runtime pools persistence", () => {
       "/home/worker/.cache",
       "/home/worker/.cache/bun",
       "/workspace/cache",
-      "/workspace/personal/.cache",
+      "/root/.cache",
+      "/workspace/personal-cache",
     ].entries()) {
       const pool = await createRuntimePool({
         name: `safe-cache-${index}`,

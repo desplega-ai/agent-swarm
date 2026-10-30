@@ -98,9 +98,11 @@ The swarm chooses the volume name, `swarm-cache-<poolId>`. Every runtime in that
 pool on the same controller target uses it, while its working disk remains
 ephemeral. Only use caches that support concurrent writers. Keep working trees,
 credentials and runtime state outside the shared cache.
-Mount paths cannot cover worker homes, workspace roots, their ancestors, or
-credential and harness state directories. Use a cache subdirectory such as
-`/home/worker/.cache`, `/workspace/personal/.cache`, or `/cache`.
+Mount paths cannot overlap workspace roots (`/workspace/personal` and
+`/workspace/shared`) or credential and harness state directories: the directory
+itself, its ancestors and its descendants are rejected. Entire worker homes are
+also rejected. Use a cache directory outside these protected trees, such as
+`/home/worker/.cache`, `/root/.cache`, `/workspace/cache`, or `/cache`.
 
 Terminating a runtime preserves its cache. Set `"cache": null` to stop mounting it
 in new runtimes and schedule automatic cleanup. Existing runtimes keep their

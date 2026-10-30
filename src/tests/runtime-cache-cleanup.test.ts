@@ -69,6 +69,7 @@ async function runtime(poolId: string) {
 beforeAll(() => {
   savedTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
+  closeDb();
   initDb(path);
   logSpy = spyOn(console, "error").mockImplementation(() => {});
 });
@@ -187,11 +188,41 @@ test("re-enabling during an in-flight release returns a retryable conflict", asy
     await expect(updateRuntimePool(p.id, { cache: { mountPath: "/cache" } })).rejects.toThrow(
       "cleanup is in progress",
     );
+    expect((await jobs())[0]?.state).toBe("deleting");
+    expect((await getRuntimePool(p.id))?.cache).toBeNull();
   } finally {
     finish();
     await draining;
   }
   await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+});
+
+test("re-enabling cancels a scanned release before the worker claims it", async () => {
+  const p = await pool();
+  await updateRuntimePool(p.id, { cache: null });
+  const scanned = Promise.withResolvers<void>();
+  const proceed = Promise.withResolvers<void>();
+  const db = getDbClient();
+  const run = db.run.bind(db);
+  const claim = spyOn(db, "run").mockImplementation(async (sql, params) => {
+    if (sql.startsWith("UPDATE runtime_cache_releases SET state = 'deleting'")) {
+      scanned.resolve();
+      await proceed.promise;
+    }
+    return await run(sql, params);
+  });
+  const draining = drain();
+  try {
+    await scanned.promise;
+    await updateRuntimePool(p.id, { cache: { mountPath: "/cache" } });
+  } finally {
+    proceed.resolve();
+    await draining;
+    claim.mockRestore();
+  }
+  expect(calls).toEqual([]);
+  expect(await jobs()).toEqual([]);
+  expect((await getRuntimePool(p.id))?.cache).toEqual({ mountPath: "/cache" });
 });
 
 test("an unsupported or offline controller retains cleanup for a later retry", async () => {
