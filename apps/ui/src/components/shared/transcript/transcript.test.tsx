@@ -103,13 +103,14 @@ describe("Transcript outcome", () => {
   });
   const fold = { label: "Worked for 1m", open: false, onOpenChange: () => {} };
 
-  test("comes last, and folded it stands in for the agent's last message", async () => {
+  test("comes last; folded, it hides the last message that says the same", async () => {
     const { container, unmount } = await mount(
       <Transcript
         rows={rows}
         running={false}
         fold={fold}
-        outcome={<p data-testid="outcome">Opened PR #12</p>}
+        outcome={<p data-testid="outcome">Done, see the PR.</p>}
+        outcomeText="Done, see the PR."
       />,
     );
     const transcript = container.querySelector('[data-slot="transcript"]') as HTMLElement;
@@ -118,13 +119,21 @@ describe("Transcript outcome", () => {
     await unmount();
   });
 
-  test("without an outcome, the folded run keeps the agent's last message", async () => {
+  test("an outcome that says something else keeps the agent's last message", async () => {
     const { container, unmount } = await mount(
-      <Transcript rows={rows} running={false} fold={fold} />,
+      <Transcript
+        rows={rows}
+        running={false}
+        fold={fold}
+        outcome={<p data-testid="outcome">Completed by runner wrapper (no explicit output)</p>}
+        outcomeText="Completed by runner wrapper (no explicit output)"
+      />,
     );
     expect(container.querySelector('[data-testid="markdown"]')?.textContent).toBe(
       "Done, see the PR.",
     );
+    const transcript = container.querySelector('[data-slot="transcript"]') as HTMLElement;
+    expect(transcript.lastElementChild?.getAttribute("data-testid")).toBe("outcome");
     await unmount();
   });
 });

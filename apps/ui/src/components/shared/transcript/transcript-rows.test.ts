@@ -187,15 +187,20 @@ describe("foldedTurnRows", () => {
     ).toEqual(["last"]);
   });
 
-  test("closed with keepLastMessage off, the outcome stands in: no message stays", () => {
+  test("closed, the last message hides only when the outcome says the same", () => {
     const rows = buildTranscriptRows({
       messages: [
         msg("assistant", [{ type: "text", text: "first" }]),
-        msg("assistant", [{ type: "text", text: "last" }]),
+        msg("assistant", [{ type: "text", text: "Opened  PR #12.\n" }]),
       ],
     });
-    expect(foldedTurnRows(rows, false, { keepLastMessage: false })).toEqual([]);
-    expect(foldedTurnRows(rows, true, { keepLastMessage: false })).toHaveLength(2);
+    const texts = (outcomeText: string) =>
+      foldedTurnRows(rows, false, { outcomeText }).map((r) =>
+        r.kind === "assistant" ? r.text : r.kind,
+      );
+    expect(texts("Opened PR #12.")).toEqual([]);
+    expect(texts("Completed by runner wrapper (no explicit output)")).toEqual(["Opened  PR #12."]);
+    expect(foldedTurnRows(rows, true, { outcomeText: "Opened PR #12." })).toHaveLength(2);
   });
 
   test("open, keeps run order: a failed tool after the last message stays after it", () => {

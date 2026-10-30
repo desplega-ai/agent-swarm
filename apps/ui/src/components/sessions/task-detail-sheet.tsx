@@ -187,6 +187,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
                 rows={rows}
                 scroller={body}
                 outcome={rows.length > 0 ? outcome : null}
+                outcomeText={output}
               />
             ) : null}
             {rows.length > 0 ? null : logsLoading ? (

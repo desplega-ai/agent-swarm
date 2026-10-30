@@ -23,9 +23,17 @@ export interface TaskTranscriptProps {
   scroller: HTMLElement | null;
   /** The task's output or failure, after the run. */
   outcome?: ReactNode;
+  /** The output's text: see `TranscriptProps.outcomeText`. */
+  outcomeText?: string;
 }
 
-export function TaskTranscript({ task, rows, scroller, outcome }: TaskTranscriptProps) {
+export function TaskTranscript({
+  task,
+  rows,
+  scroller,
+  outcome,
+  outcomeText,
+}: TaskTranscriptProps) {
   const [runOpen, setRunOpen] = useState(false);
   const prompt = parsePromptDisplay(stripContextFooter(task.task));
   return (
@@ -33,6 +41,7 @@ export function TaskTranscript({ task, rows, scroller, outcome }: TaskTranscript
       rows={rows}
       running={taskIsRunning(task.status) === true}
       outcome={outcome}
+      outcomeText={outcomeText}
       prompt={
         <TranscriptUserMessage
           text={prompt.ask}

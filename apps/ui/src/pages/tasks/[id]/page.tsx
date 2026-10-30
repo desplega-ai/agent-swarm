@@ -700,6 +700,7 @@ export default function TaskDetailPage() {
         rows={transcriptRows}
         scroller={scrollElement}
         outcome={hasRows ? outcome : null}
+        outcomeText={task.output ?? undefined}
       />
       {hasRows ? null : (
         <>

@@ -93,6 +93,11 @@ export interface TranscriptProps {
   prompt?: ReactNode;
   /** The task's outcome, after every row: the run's final reply. */
   outcome?: ReactNode;
+  /**
+   * The outcome's text. A folded run hides the agent's last message when it
+   * says the same, so the answer shows once.
+   */
+  outcomeText?: string;
   /** A finished run folds behind this line. Without it, every row shows. */
   fold?: TranscriptFold | null;
   /** When the live run started: the "Working for" timer counts from it. */
@@ -109,6 +114,7 @@ export function Transcript({
   running,
   prompt,
   outcome,
+  outcomeText,
   fold,
   workingSince,
   waitingLabel,
@@ -117,9 +123,8 @@ export function Transcript({
 }: TranscriptProps) {
   const activeFold = running ? null : (fold ?? null);
   const [limit, setLimit] = useState(TRANSCRIPT_PAGE_ROWS);
-  // Folded, the outcome stands in for the agent's last message.
   const { shown, hidden } = pagedRows(
-    activeFold ? foldedTurnRows(rows, activeFold.open, { keepLastMessage: !outcome }) : rows,
+    activeFold ? foldedTurnRows(rows, activeFold.open, { outcomeText }) : rows,
     limit,
   );
   const liveRowId = running ? rows[rows.length - 1]?.id : undefined;

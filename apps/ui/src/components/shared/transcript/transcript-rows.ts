@@ -218,23 +218,30 @@ export function buildTranscriptRows({
   return rows;
 }
 
+/** Text compared as words: whitespace and surrounding blanks do not count. */
+function sameText(a: string, b: string): boolean {
+  const words = (text: string) => text.replace(/\s+/g, " ").trim();
+  return words(a) === words(b);
+}
+
 /**
  * The rows a finished turn shows. Closed, the fold keeps only the agent's last
- * message in view (unless `keepLastMessage` is false: the task's outcome then
- * stands in for it), the delegated tasks (each its own transcript), and any
- * steering message still waiting for the agent. Open, every row shows in run
- * order: work after the last message stays after it.
+ * message in view (unless it says the same as `outcomeText`, the task's
+ * outcome shown under the run), the delegated tasks (each its own
+ * transcript), and any steering message still waiting for the agent. Open,
+ * every row shows in run order: work after the last message stays after it.
  */
 export function foldedTurnRows(
   rows: TranscriptRow[],
   open: boolean,
-  { keepLastMessage = true }: { keepLastMessage?: boolean } = {},
+  { outcomeText }: { outcomeText?: string } = {},
 ): TranscriptRow[] {
   if (open) return rows;
   let lastAssistant = -1;
-  for (let i = rows.length - 1; keepLastMessage && i >= 0; i--) {
-    if (rows[i].kind === "assistant") {
-      lastAssistant = i;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row.kind === "assistant") {
+      if (outcomeText === undefined || !sameText(row.text, outcomeText)) lastAssistant = i;
       break;
     }
   }

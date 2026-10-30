@@ -22,7 +22,7 @@
  *
  * The send button names the mode, "Steer" or "Follow up". With `showTarget`
  * the placeholder names the task the message goes to (Sessions, where the
- * target is not the page's own task): "Steer #1a2b3c4d Fix the parser…".
+ * target is not the page's own task): "Steer #<id> Fix the parser…".
  *
  * A follow-up whose files partly failed to upload keeps only the failed
  * files, under a notice above the box: "Retry upload" sends them to the task
@@ -76,7 +76,7 @@ export interface TaskComposerProps {
   followUpAgentId?: string;
   /** Follow-up placeholder. The steer box keeps its own. */
   placeholder?: string;
-  /** Name the target task in the placeholder ("Steer #1a2b3c4d Fix the parser…"). */
+  /** Name the target task in the placeholder ("Steer #<id> Fix the parser…"). */
   showTarget?: boolean;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
@@ -130,7 +130,7 @@ export const COMPOSER_SEND_LABEL: Record<ComposerMode, string> = {
 /** A target title longer than this is cut, so the placeholder stays one line. */
 const PLACEHOLDER_TITLE_CHARS = 60;
 
-/** The placeholder that names the target: "Steer #1a2b3c4d Fix the parser…". */
+/** The placeholder that names the target: "Steer #<id> Fix the parser…". */
 export function composerTargetPlaceholder(mode: ComposerMode, target: AgentTask): string {
   const full = taskListTitle(target);
   // A cut title ends on a whole word.
