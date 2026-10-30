@@ -35,6 +35,10 @@ const promoteCalls: string[] = [];
 // "reject": every request fails before the server commits it.
 // "lose-first-response": the first request commits, then its response is lost.
 let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
+// Cancels the server committed, and every cancel request sent. Same modes.
+const cancelled: string[] = [];
+const cancelCalls: string[] = [];
+let cancelMode: "ok" | "reject" | "lose-first-response" = "ok";
 let rejectUploads = false;
 let nextTaskId = 0;
 mock.module("@/api/client", () => ({
@@ -53,6 +57,21 @@ mock.module("@/api/client", () => ({
       }
       return { id };
     },
+    cancelTask: async (id: string) => {
+      cancelCalls.push(id);
+      if (cancelMode === "reject") throw new Error("cancel failed");
+      // A second cancel on a cancelled task is a 400, like the server.
+      if (cancelled.includes(id)) throw new Error("Cannot cancel task with status 'cancelled'");
+      cancelled.push(id);
+      if (cancelMode === "lose-first-response" && cancelCalls.length === 1) {
+        throw new Error("network error");
+      }
+      return { success: true, task: { id, status: "cancelled" } };
+    },
+    fetchTask: async (id: string) => ({
+      id,
+      status: cancelled.includes(id) ? "cancelled" : promoted.includes(id) ? "pending" : "draft",
+    }),
   },
 }));
 mock.module("@/api/fs", () => ({
@@ -162,6 +181,9 @@ beforeEach(() => {
   promoted.length = 0;
   promoteCalls.length = 0;
   promoteMode = "ok";
+  cancelled.length = 0;
+  cancelCalls.length = 0;
+  cancelMode = "ok";
   rejectUploads = false;
   nextTaskId = 0;
 });
@@ -180,12 +202,11 @@ function placeholderOf(container: HTMLElement): string | null {
   return container.querySelector("textarea")?.getAttribute("placeholder") ?? null;
 }
 
-/** The held-upload notice above the box. */
-const notice = (container: HTMLElement) =>
-  container.querySelector('[data-slot="composer-failed-upload"]') as HTMLElement | null;
+const textOf = (container: HTMLElement) =>
+  (container.querySelector("textarea") as HTMLTextAreaElement).value;
 
-const buttonNamed = (container: HTMLElement, name: string) =>
-  [...container.querySelectorAll("button")].find((b) => b.textContent === name);
+const fileInBox = (container: HTMLElement) =>
+  container.querySelector('button[aria-label="Remove screenshot-x.png"]') !== null;
 
 /** Adds the test file through the extra action, types a message and sends it. */
 async function attachAndSend(container: HTMLElement) {
@@ -294,7 +315,7 @@ describe("TaskComposer on Sessions", () => {
     await unmount();
   });
 
-  test("a failed upload holds the task as a draft, keeps the file, and does not tell the page", async () => {
+  test("a failed upload cancels the draft and keeps the text and the file in the box", async () => {
     rejectUploads = true;
     const started: string[] = [];
     const { container, unmount } = await mount(
@@ -308,20 +329,21 @@ describe("TaskComposer on Sessions", () => {
       />,
     );
     await attachAndSend(container);
-    await waitFor(() => notice(container) !== null);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
 
-    // No promotion: no worker can start the task without its file.
+    // Nothing is left in draft for the heartbeat sweep to start without the file.
+    expect(cancelled).toEqual(["follow-up"]);
     expect(promoteCalls).toEqual([]);
     expect(started).toEqual([]);
-    // The file waits in the notice, for the created task, not in the box: a
-    // new send would start a second task without it.
-    expect(notice(container)?.textContent).toContain("screenshot-x.png");
-    expect(notice(container)?.textContent).toContain("#follow-u waits for it");
-    expect(container.querySelector('button[aria-label="Remove screenshot-x.png"]')).toBeNull();
+    expect(container.textContent).toContain(
+      "screenshot-x.png failed to upload, so nothing was sent. Send again to retry.",
+    );
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
     await unmount();
   });
 
-  test("a retry uploads to the held task, then starts it and tells the page", async () => {
+  test("Send again after a failed upload starts one new task with the file", async () => {
     rejectUploads = true;
     const started: string[] = [];
     const { container, unmount } = await mount(
@@ -335,56 +357,52 @@ describe("TaskComposer on Sessions", () => {
       />,
     );
     await attachAndSend(container);
-    await waitFor(() => notice(container) !== null);
-
-    rejectUploads = false;
-    await act(async () => buttonNamed(container, "Retry upload")?.click());
-    await waitFor(() => notice(container) === null);
-
-    expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
-    // The file is in before the task starts.
-    expect(promoted).toEqual(["follow-up"]);
-    expect(started).toEqual(["follow-up"]);
-    expect(createdTasks).toHaveLength(1);
-
-    // A message sent after the retry is a new follow-up with no stale file.
-    await type(container, "and another thing");
-    await send(container);
-    await waitFor(() => createdTasks.length === 2);
-    expect(createdTasks[1]).toMatchObject({ task: "and another thing", draft: false });
-    expect(uploads).toHaveLength(1);
-    await unmount();
-  });
-
-  test("a new follow-up waits while a task is held, and keeps its text and the notice", async () => {
-    rejectUploads = true;
-    const { container, unmount } = await mount(
-      <TaskComposer
-        targetTask={completedWorkerTask}
-        canSteer={false}
-        renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
-        )}
-      />,
-    );
-    await attachAndSend(container);
-    await waitFor(() => notice(container) !== null);
-
-    await type(container, "and another thing");
-    await act(async () => sendButton(container).click());
+    await waitFor(() => cancelled.length === 1);
     await act(async () => {});
 
-    expect(createdTasks).toHaveLength(1);
-    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
-      "and another thing",
-    );
-    expect(notice(container)?.textContent).toContain("screenshot-x.png");
-    expect(promoteCalls).toEqual([]);
+    rejectUploads = false;
+    await act(async () => sendButton(container).click());
+    await waitFor(() => started.length === 1);
+
+    expect(createdTasks).toHaveLength(2);
+    expect(createdTasks[1]).toMatchObject({ task: "see the screenshot", draft: true });
+    expect(uploads).toEqual([{ taskId: "follow-up-2", file: screenshot, intent: "user-upload" }]);
+    // Only the new task runs: the first one stays cancelled.
+    expect(promoted).toEqual(["follow-up-2"]);
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(started).toEqual(["follow-up-2"]);
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(false);
+    expect(container.textContent).not.toContain("nothing was sent");
     await unmount();
   });
 
-  test("a retry that fails again keeps the task held; Start without it starts it", async () => {
+  test("a cancel response lost after the server committed it still counts as withdrawn", async () => {
     rejectUploads = true;
+    cancelMode = "lose-first-response";
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+
+    expect(cancelCalls).toEqual(["follow-up"]);
+    expect(cancelled).toEqual(["follow-up"]);
+    expect(promoteCalls).toEqual([]);
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a draft that cannot be cancelled starts now; its file stays for a new follow-up", async () => {
+    rejectUploads = true;
+    cancelMode = "reject";
     const started: string[] = [];
     const { container, unmount } = await mount(
       <TaskComposer
@@ -397,19 +415,19 @@ describe("TaskComposer on Sessions", () => {
       />,
     );
     await attachAndSend(container);
-    await waitFor(() => notice(container) !== null);
-    await act(async () => buttonNamed(container, "Retry upload")?.click());
-    await waitFor(() => buttonNamed(container, "Retry upload") !== undefined);
+    await waitFor(() => promoted.length === 1);
+    await act(async () => {});
 
-    expect(notice(container)?.textContent).toContain("screenshot-x.png");
-    expect(promoteCalls).toEqual([]);
-    expect(started).toEqual([]);
-
-    await act(async () => buttonNamed(container, "Start without it")?.click());
-    await waitFor(() => notice(container) === null);
+    expect(cancelCalls).toHaveLength(3);
     expect(promoted).toEqual(["follow-up"]);
-    expect(started).toEqual(["follow-up"]);
-    expect(createdTasks).toHaveLength(1);
+    // The text is gone, so it cannot run twice; the file waits in the box and
+    // the page stays put so it is not dropped.
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(true);
+    expect(container.textContent).toContain(
+      "#follow-u started without screenshot-x.png: it could not be withdrawn.",
+    );
+    expect(started).toEqual([]);
     await unmount();
   });
 });
