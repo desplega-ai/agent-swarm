@@ -780,13 +780,25 @@ describe("/api/script-runs HTTP", () => {
       await completeTask(step.id, output);
     }
 
+    async function stepRowCount(runId: string, stepKey: string): Promise<number | undefined> {
+      const rows = await getDbClient().get<{ c: number }>(
+        "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ?",
+        [`script-run:${runId}:${stepKey}`],
+      );
+      return rows?.c;
+    }
+
+    /** A refused replay returns no output and dispatches nothing beyond the seeded step. */
     async function expectRefusedReplay(
       response: TestResponse,
       storedParentId: string,
+      runId: string,
+      stepKey: string,
     ): Promise<void> {
       expect(response.status).toBe(403);
       expect(response.text).not.toContain("foreign thread output");
       expect(((await response.json()) as { error: string }).error).toContain(storedParentId);
+      expect(await stepRowCount(runId, stepKey)).toBe(1);
     }
 
     test("a replay with a foreign parentTaskId is refused, not answered from the existing step", async () => {
@@ -796,8 +808,7 @@ describe("/api/script-runs HTTP", () => {
 
       const response = await stepCall(runId, agentId, "stale", foreignParent.id);
 
-      expect(response.status).toBe(403);
-      expect(response.text).not.toContain("foreign thread output");
+      await expectRefusedReplay(response, foreignParent.id, runId, "stale");
     });
 
     test("a replay that omits parentTaskId is checked against the step's stored parent", async () => {
@@ -807,7 +818,7 @@ describe("/api/script-runs HTTP", () => {
 
       const response = await stepCall(runId, agentId, "omitted");
 
-      await expectRefusedReplay(response, foreignParent.id);
+      await expectRefusedReplay(response, foreignParent.id, runId, "omitted");
     });
 
     test("a replay with an authorized but different parentTaskId is checked against the stored parent", async () => {
@@ -818,7 +829,7 @@ describe("/api/script-runs HTTP", () => {
 
       const response = await stepCall(runId, agentId, "swapped", ownParent.id);
 
-      await expectRefusedReplay(response, foreignParent.id);
+      await expectRefusedReplay(response, foreignParent.id, runId, "swapped");
     });
 
     test("a replay with an unknown parentTaskId is checked against the stored parent", async () => {
@@ -828,7 +839,7 @@ describe("/api/script-runs HTTP", () => {
 
       const response = await stepCall(runId, agentId, "unknown", crypto.randomUUID());
 
-      await expectRefusedReplay(response, foreignParent.id);
+      await expectRefusedReplay(response, foreignParent.id, runId, "unknown");
     });
 
     test("a replay that omits parentTaskId still answers from a step under an attachable parent", async () => {
@@ -840,6 +851,25 @@ describe("/api/script-runs HTTP", () => {
 
       expect(response.status).toBe(200);
       expect(response.text).toContain("own thread output");
+    });
+
+    test("a new step under an unknown parentTaskId is dispatched and answered", async () => {
+      await expectDispatched(agentId, crypto.randomUUID());
+    });
+
+    test("a replay of a step stored under an unknown parent still answers", async () => {
+      const unknownParentId = crypto.randomUUID();
+      const runId = await createRun(agentId);
+      await seedCompletedStep(runId, "ghost", unknownParentId, "ghost output");
+
+      const sameParent = await stepCall(runId, agentId, "ghost", unknownParentId);
+      expect(sameParent.status).toBe(200);
+      expect(sameParent.text).toContain("ghost output");
+
+      const omittedParent = await stepCall(runId, agentId, "ghost");
+      expect(omittedParent.status).toBe(200);
+      expect(omittedParent.text).toContain("ghost output");
+      expect(await stepRowCount(runId, "ghost")).toBe(1);
     });
 
     test("a run agent can parent a step on a task assigned to it", async () => {

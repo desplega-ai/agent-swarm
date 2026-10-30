@@ -309,16 +309,11 @@ const agentTaskRoute = route({
  * step inherits its parent's contextKey (its Slack or chat thread) and
  * requester, so the run's agent needs the right to hold a child under it.
  * Returns the 403 message, or null when allowed. A parent id with no task row
- * passes only with `allowUnknown` (a new step under it inherits nothing).
+ * passes: a step under it inherits nothing, as on send-task.
  */
-async function stepParentRefusal(
-  runAgentId: string,
-  parentTaskId: string,
-  allowUnknown: boolean,
-): Promise<string | null> {
-  const refusal = `You don't have context for parent task ${parentTaskId}. Only its assignee, its creator, or a lead can create a child task under it.`;
+async function stepParentRefusal(runAgentId: string, parentTaskId: string): Promise<string | null> {
   const parentTask = await getTaskById(parentTaskId);
-  if (!parentTask) return allowUnknown ? null : refusal;
+  if (!parentTask) return null;
   const runAgent = await getAgentById(runAgentId);
   const decision = can({
     principal: { kind: "agent", agentId: runAgentId, isLead: runAgent?.isLead ?? false },
@@ -332,7 +327,9 @@ async function stepParentRefusal(
     },
     source: "http",
   });
-  return decision.allow ? null : refusal;
+  return decision.allow
+    ? null
+    : `You don't have context for parent task ${parentTaskId}. Only its assignee, its creator, or a lead can create a child task under it.`;
 }
 
 async function requireAgent(res: ServerResponse, agentId: string | undefined) {
@@ -665,7 +662,7 @@ export async function handleScriptRuns(
     // The requested parent, checked before any lookup or insert so a refused
     // call creates nothing.
     if (parsed.body.parentTaskId) {
-      const refusal = await stepParentRefusal(run.agentId, parsed.body.parentTaskId, true);
+      const refusal = await stepParentRefusal(run.agentId, parsed.body.parentTaskId);
       if (refusal) {
         jsonError(res, refusal, 403);
         return true;
@@ -674,6 +671,7 @@ export async function handleScriptRuns(
 
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
+    let dispatchedHere = false;
     if (!task) {
       const modelError = await explicitModelErrorForAgent({
         model: parsed.body.model,
@@ -712,6 +710,7 @@ export async function handleScriptRuns(
             contextKey,
           },
         );
+        dispatchedHere = true;
       } catch (error) {
         if (error instanceof ExtensionAgentAssignmentError) {
           jsonError(res, error.message, 400);
@@ -723,9 +722,11 @@ export async function handleScriptRuns(
 
     // A replay answers from the selected step, whatever parent this call sent
     // (or omitted), so authorize the parent the step actually holds. Every
-    // replay lookup above lands here before any output is returned.
-    if (task.parentTaskId) {
-      const refusal = await stepParentRefusal(run.agentId, task.parentTaskId, false);
+    // replay lookup above lands here before any output is returned. A step this
+    // call just dispatched was authorized above; refusing it now would leave
+    // the work running behind a 403.
+    if (!dispatchedHere && task.parentTaskId) {
+      const refusal = await stepParentRefusal(run.agentId, task.parentTaskId);
       if (refusal) {
         jsonError(res, refusal, 403);
         return true;
