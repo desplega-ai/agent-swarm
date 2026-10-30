@@ -130,6 +130,7 @@ export function createUserServer(user: User): McpServer {
       offerMode: false,
       leadOnly: false,
       allowDuplicate: false,
+      allowRedelegation: false,
       overrideSlackContext: false,
     });
   });

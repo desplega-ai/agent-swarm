@@ -40,6 +40,40 @@ export interface DedupMatch {
 }
 
 /**
+ * The description-similarity rules shared by the duplicate check and the
+ * follow-up re-delegation guard: a very similar description matches any
+ * target, a moderately similar one matches only the same target agent.
+ */
+export function matchSimilarTask(
+  existing: AgentTask,
+  opts: { taskDescription: string; targetAgentId?: string },
+): DedupMatch | null {
+  const similarity = jaccardSimilarity(existing.task, opts.taskDescription);
+
+  // Very similar task description: likely duplicate regardless of target
+  if (similarity > HIGH_SIMILARITY_THRESHOLD) {
+    return {
+      task: existing,
+      reason: `similar task description (${(similarity * 100).toFixed(0)}% match)`,
+    };
+  }
+
+  // Same target agent + moderately similar task: lower threshold
+  if (
+    opts.targetAgentId &&
+    existing.agentId === opts.targetAgentId &&
+    similarity > SAME_AGENT_SIMILARITY_THRESHOLD
+  ) {
+    return {
+      task: existing,
+      reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Check for duplicate tasks created recently.
  * Returns the first matching duplicate, or null if none found.
  */
@@ -70,27 +104,8 @@ export async function findDuplicateTask(opts: {
       };
     }
 
-    const similarity = jaccardSimilarity(existing.task, opts.taskDescription);
-
-    // 2. Very similar task description — likely duplicate regardless of target
-    if (similarity > HIGH_SIMILARITY_THRESHOLD) {
-      return {
-        task: existing,
-        reason: `similar task description (${(similarity * 100).toFixed(0)}% match)`,
-      };
-    }
-
-    // 3. Same target agent + moderately similar task — lower threshold
-    if (
-      opts.targetAgentId &&
-      existing.agentId === opts.targetAgentId &&
-      similarity > SAME_AGENT_SIMILARITY_THRESHOLD
-    ) {
-      return {
-        task: existing,
-        reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
-      };
-    }
+    const match = matchSimilarTask(existing, opts);
+    if (match) return match;
   }
 
   return null;

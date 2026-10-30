@@ -1865,7 +1865,36 @@ export async function getMostRecentTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function findCompletedTaskInThread(
+/**
+ * Completed tasks in a Slack thread, most recent first. Lead `follow-up`
+ * sessions are excluded: they coordinate the work, they are not the work, so
+ * they never count as "the request was already handled".
+ */
+export async function findCompletedTasksInThread(
+  channelId: string,
+  threadTs: string,
+  windowMinutes: number,
+): Promise<AgentTask[]> {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND status = 'completed'
+       AND COALESCE(taskType, '') != 'follow-up'
+       AND lastUpdatedAt > ?
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 50`,
+    [channelId, threadTs, since],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
+ * Most recent FAILED task in a Slack thread. A failure more recent than a
+ * completion means the follow-up re-delegation guard must let a retry through.
+ */
+export async function findRecentFailedTaskInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
@@ -1875,13 +1904,36 @@ export async function findCompletedTaskInThread(
     `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
-       AND status = 'completed'
+       AND status = 'failed'
        AND lastUpdatedAt > ?
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
     [channelId, threadTs, since],
   );
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Count the tasks one agent created through `send-task` in a Slack thread
+ * since the window start. The follow-up re-delegation loop cap reads this.
+ */
+export async function countAgentDispatchesInThread(
+  channelId: string,
+  threadTs: string,
+  creatorAgentId: string,
+  windowMinutes: number,
+): Promise<number> {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const row = await getDbClient().get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND creatorAgentId = ?
+       AND source = 'mcp'
+       AND createdAt > ?`,
+    [channelId, threadTs, creatorAgentId, since],
+  );
+  return row?.c ?? 0;
 }
 
 /**

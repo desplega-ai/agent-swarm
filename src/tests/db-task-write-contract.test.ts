@@ -167,6 +167,7 @@ value:completeApprovalCancellationNotificationClaim
 value:completeTask
 value:computeContentHash
 value:countActiveScriptRuns
+value:countAgentDispatchesInThread
 value:countAllMetrics
 value:countAllPages
 value:countKv
@@ -241,9 +242,10 @@ value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findRecentSimilarTasks
 value:findTaskByAgentMailThread
 value:findTaskByGitHub
