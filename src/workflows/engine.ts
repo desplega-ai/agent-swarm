@@ -192,7 +192,7 @@ export async function startWorkflowExecution(
   const newRunId = crypto.randomUUID();
   const release = holdWorkflowRun(newRunId);
   try {
-    const { runId, created, preflightAlert } = await createRunWithInitialState(
+    const { runId, created, preflightAlert, status } = await createRunWithInitialState(
       workflow,
       triggerData,
       options,
@@ -204,7 +204,7 @@ export async function startWorkflowExecution(
       if (preflightAlert) await notifyAutomationPreflightFailure(preflight);
       return runId;
     }
-    if (initial.status === "skipped") return runId;
+    if (status === "skipped") return runId;
     telemetry.workflow("started", {
       workflowId: workflow.id,
       nodeCount: workflow.definition.nodes.length,
@@ -317,7 +317,12 @@ async function createRunWithInitialState(
   options: WorkflowExecutionOptions,
   initial: InitialRunState,
   runId: string,
-): Promise<{ runId: string; created: boolean; preflightAlert?: boolean }> {
+): Promise<{
+  runId: string;
+  created: boolean;
+  preflightAlert?: boolean;
+  status?: InitialRunState["status"];
+}> {
   return getDbClient().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
@@ -328,6 +333,16 @@ async function createRunWithInitialState(
       const existingId = await getChildWorkflowRunId(parentStepId, attempt);
       if (existingId) return { runId: existingId, created: false };
     }
+    // The cooldown check before this transaction is only a fast path: two
+    // triggers can both pass it before either run exists. The write lock is
+    // held from BEGIN, across processes too, so this recheck sees every run
+    // committed before it and the losing trigger records a skipped run.
+    const state: InitialRunState =
+      !initial.status &&
+      workflow.cooldown &&
+      (await shouldSkipCooldown(workflow.id, workflow.cooldown))
+        ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
+        : initial;
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -340,16 +355,16 @@ async function createRunWithInitialState(
     });
     await updateWorkflowRun(
       runId,
-      initial.status
-        ? { status: initial.status, error: initial.error, finishedAt: initial.finishedAt }
-        : { context: initial.context },
+      state.status
+        ? { status: state.status, error: state.error, finishedAt: state.finishedAt }
+        : { context: state.context },
     );
     const preflightAlert =
-      initial.status === "failed" && initial.preflight
+      state.status === "failed" && state.preflight
         ? await isFirstWorkflowPreflightFailureToday(workflow.id, runId)
         : undefined;
-    await options.accept?.({ runId, skipped: initial.status === "skipped" });
-    return { runId, created: true, preflightAlert };
+    await options.accept?.({ runId, skipped: state.status === "skipped" });
+    return { runId, created: true, preflightAlert, status: state.status };
   });
 }
 

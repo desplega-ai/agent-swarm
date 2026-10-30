@@ -433,7 +433,7 @@ Workflows support a cooldown period to prevent rapid re-triggering:
 }
 ```
 
-A second trigger within the cooldown window results in a run with `skipped` status.
+A second trigger within the cooldown window results in a run with `skipped` status. The window runs from the last run start (any status but `skipped`) and, by default, also from the last successful run's finish. Set `"from": "start"` to count from starts only, so a long run never pushes out the next trigger of a fixed-time schedule. Simultaneous triggers start at most one run.
 
 ### Safe retries (`Idempotency-Key`)
 

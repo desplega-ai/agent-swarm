@@ -15,7 +15,8 @@ function cooldownToMs(cooldown: CooldownConfig): number {
 /**
  * Check if a workflow should be skipped due to cooldown.
  * Returns true if:
- * - the last successful run finished within the cooldown window, OR
+ * - the last successful run finished within the cooldown window (skipped for
+ *   `from: "start"`), OR
  * - any run (including failed ones) started within the cooldown window.
  *
  * The second condition prevents runaway re-triggering when all runs fail
@@ -30,7 +31,7 @@ export async function shouldSkipCooldown(
   const now = Date.now();
 
   // Skip if last successful run finished within the cooldown window
-  const lastSuccess = await getLastSuccessfulRun(workflowId);
+  const lastSuccess = cooldown.from === "start" ? null : await getLastSuccessfulRun(workflowId);
   if (lastSuccess?.finishedAt) {
     const lastFinished = new Date(lastSuccess.finishedAt).getTime();
     if (now - lastFinished < cooldownMs) return true;

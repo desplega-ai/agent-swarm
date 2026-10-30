@@ -11,6 +11,7 @@ import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
+import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppActionRunTool } from "./tools/app-action-run";
 import { registerAppDiffTool } from "./tools/app-diff";
@@ -162,6 +163,7 @@ import { registerSlackCreateChannelTool } from "./tools/slack-create-channel";
 import { registerSlackDeleteTool } from "./tools/slack-delete";
 import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
 import { registerSlackInviteToChannelTool } from "./tools/slack-invite-to-channel";
+import { registerSlackLeaveThreadTool } from "./tools/slack-leave-thread";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
@@ -693,6 +695,11 @@ export async function createServer(
     registerSlackDownloadFileTool(server);
     registerSlackDeleteTool(server);
     registerSlackUpdateTool(server);
+    // The scripts bridge builds its full-surface server once and caches it, so
+    // it always registers the tool; the handler refuses while the flag is set.
+    if (opts.fullSurface === true || !isSlackLeaveThreadDisabled()) {
+      registerSlackLeaveThreadTool(server);
+    }
   }
 
   // End of default-enabled capabilities

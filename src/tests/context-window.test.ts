@@ -41,6 +41,13 @@ describe("getContextWindowSize", () => {
     expect(getContextWindowSize("gpt-5")).toBe(400_000);
   });
 
+  test("reads a ChatGPT subscription id's window from its OpenAI id, as codex does", () => {
+    expect(getContextWindowSize("openai-codex/gpt-5.6-luna")).toBe(
+      getContextWindowSize("gpt-5.6-luna"),
+    );
+    expect(getContextWindowSize("openai-codex/gpt-5.6-luna")).not.toBe(200_000);
+  });
+
   test("returns 200K default for unknown models", () => {
     expect(getContextWindowSize("unknown-model")).toBe(200_000);
     expect(getContextWindowSize("")).toBe(200_000);
