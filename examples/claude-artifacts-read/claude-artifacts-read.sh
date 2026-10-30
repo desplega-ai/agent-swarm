@@ -71,6 +71,42 @@ mkdir -p "$OUT"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Publish $1 (a file under $WORK) at $OUT/$2. Every parent below $OUT must be a
+# real directory and the destination a regular file or absent, so a symlink in
+# outdir can never redirect a write outside it. The bytes go to a temp file in
+# the destination directory first and are renamed into place: a symlink there
+# is replaced, never followed, and a failed write leaves the old file intact.
+publish() {
+  local src="$1" rel="$2" dir="$OUT" part rest tmp
+  rest="$(dirname "$rel")"
+  [ "$rest" = "." ] && rest=""
+  while [ -n "$rest" ]; do
+    part="${rest%%/*}"
+    [ "$part" = "$rest" ] && rest="" || rest="${rest#*/}"
+    [ -z "$part" ] || [ "$part" = "." ] && continue
+    dir="$dir/$part"
+    if [ -L "$dir" ]; then
+      echo "refused: $dir is a symlink" >&2
+      return 1
+    fi
+    if [ -e "$dir" ] && [ ! -d "$dir" ]; then
+      echo "refused: $dir is not a directory" >&2
+      return 1
+    fi
+    mkdir -p "$dir"
+  done
+  if [ -L "$OUT/$rel" ] || { [ -e "$OUT/$rel" ] && [ ! -f "$OUT/$rel" ]; }; then
+    echo "refused: $OUT/$rel exists and is not a regular file" >&2
+    return 1
+  fi
+  tmp="$(mktemp "$dir/.claude-artifacts-read.XXXXXX")"
+  if ! cat "$src" >"$tmp" || ! chmod "$(printf '%o' $((0666 & ~$(umask))))" "$tmp" \
+    || ! mv -f "$tmp" "$OUT/$rel"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
 # Run one headless session. Only the Artifact tool named in $1 is allowed;
 # dontAsk denies every other call. (`--tools` cannot narrow this: it also drops
 # the claude-artifacts server.)
@@ -136,7 +172,8 @@ for attempt in 1 2 3; do
   fi
 done
 [ -s "$WORK/manifest.json" ] || exit 1
-jq 'del(.note)' "$WORK/manifest.json" >"$OUT/manifest.json"
+jq 'del(.note)' "$WORK/manifest.json" >"$WORK/manifest.out.json"
+publish "$WORK/manifest.out.json" manifest.json || exit 1
 SLUG="$(jq -r '.slug' "$WORK/manifest.json")"
 
 # 2. Pick the text files to fetch. read_file only returns text, and it refuses
@@ -195,15 +232,17 @@ while IFS= read -r path; do
     status=1
     continue
   fi
-  mkdir -p "$OUT/$(dirname "$path")"
-  jq -sj --arg p "$path" 'map(select(.path == $p)) | first | .doc' "$WORK/docs.jsonl" >"$OUT/$path"
+  # Verify in $WORK first: a mismatching read never touches outdir.
+  jq -sj --arg p "$path" 'map(select(.path == $p)) | first | .doc' "$WORK/docs.jsonl" >"$WORK/staged"
   want="$(jq -r --arg p "$path" '.files[] | select(.path == $p) | .sha256 // empty' "$WORK/manifest.json")"
-  got="$(sha256sum "$OUT/$path" | cut -d' ' -f1)"
+  got="$(sha256sum "$WORK/staged" | cut -d' ' -f1)"
   if [ -n "$want" ] && [ "$want" != "$got" ]; then
-    echo "sha256 mismatch: $path (content may be truncated or re-encoded)" >&2
+    echo "sha256 mismatch: $path (content may be truncated or re-encoded; not written)" >&2
     status=1
-  else
+  elif publish "$WORK/staged" "$path"; then
     echo "ok: $path"
+  else
+    status=1
   fi
 done <"$WORK/wanted.txt"
 
