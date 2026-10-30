@@ -70,6 +70,28 @@ test("migration 260 preserves existing pools with caching disabled", async () =>
   }
 });
 
+test("cache release runtime IDs accept arrays and reject other JSON values", () => {
+  const db = new Database(":memory:");
+  try {
+    runMigrations(db);
+    db.run(
+      "INSERT INTO runtime_controllers (id, name, kind, placement) VALUES ('controller', 'controller', 'docker', 'builtin')",
+    );
+    db.run(`INSERT INTO runtime_cache_releases (id, pool_id, controller_id, owner_id, cache_key, runtime_ids)
+      VALUES ('release', 'pool', 'controller', 'owner', 'cache', '[]')`);
+    for (const invalid of ["null", "{}", "42", "true", '"runtime"', "invalid json"])
+      expect(() =>
+        db.run("UPDATE runtime_cache_releases SET runtime_ids = ?", [invalid]),
+      ).toThrow();
+    db.run("UPDATE runtime_cache_releases SET runtime_ids = ?", ['["runtime-a","runtime-b"]']);
+    expect(db.query("SELECT runtime_ids FROM runtime_cache_releases").get()).toEqual({
+      runtime_ids: '["runtime-a","runtime-b"]',
+    });
+  } finally {
+    db.close();
+  }
+});
+
 test("controller protocol accepts legacy hello messages and retains optional cache metadata", () => {
   const legacy = ControllerClientMessageSchema.parse({
     type: "hello",

@@ -9,7 +9,7 @@ CREATE TABLE runtime_cache_releases (
   controller_id TEXT NOT NULL REFERENCES runtime_controllers(id) ON DELETE RESTRICT,
   owner_id TEXT NOT NULL,
   cache_key TEXT NOT NULL,
-  runtime_ids TEXT NOT NULL CHECK (json_valid(runtime_ids)),
+  runtime_ids TEXT NOT NULL CHECK (json_valid(runtime_ids) AND json_type(runtime_ids) = 'array'),
   state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'deleting')),
   last_error TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
