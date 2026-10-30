@@ -400,6 +400,45 @@ describe("API readiness step with injected dependencies", () => {
 });
 
 describe("API readiness HTTP compatibility", () => {
+  test.each(["headers", "body"])(
+    "retries a stalled %s request after the three-second request cap",
+    async (phase) => {
+      const prefix = `/${crypto.randomUUID()}`;
+      const requestTimes: number[] = [];
+      server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch(req) {
+          if (new URL(req.url).pathname !== `${prefix}/health`)
+            return new Response("not found", { status: 404 });
+          requestTimes.push(performance.now());
+          if (requestTimes.length > 1) return new Response("ok");
+          if (phase === "headers") return new Promise<Response>(() => {});
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("partial"));
+              },
+            }),
+          );
+        },
+      });
+
+      const result = await runWaitForApiReady(`${server.url.origin}${prefix}`, {
+        WORKER_API_READY_TIMEOUT_SECONDS: "8",
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(requestTimes).toHaveLength(2);
+      // Three seconds to abort, then the existing one-second retry spacing.
+      expect(requestTimes[1]! - requestTimes[0]!).toBeGreaterThanOrEqual(3500);
+      expect(requestTimes[1]! - requestTimes[0]!).toBeLessThan(7000);
+      expect(result.stdout).toContain("API ready at");
+      expect(result.stdout).toContain("provider setup reached");
+    },
+    TEST_TIMEOUT,
+  );
+
   test(
     "uses the image's Bun even when a worker-writable PATH shadows bun",
     async () => {
