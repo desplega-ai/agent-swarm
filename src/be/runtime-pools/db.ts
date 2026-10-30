@@ -126,6 +126,17 @@ export async function getRuntimeControllerTarget(
     E2B_MAX_CONTINUOUS_SEC: env.E2B_MAX_CONTINUOUS_SEC,
     RUNTIME_WORKER_API_URL: env.RUNTIME_WORKER_API_URL,
     PUBLIC_MCP_BASE_URL: env.PUBLIC_MCP_BASE_URL,
+    ...(controller.kind === "boxd" && controller.placement === "builtin"
+      ? {
+          BOXD_ORG: env.BOXD_ORG,
+          BOXD_BASE_URL: env.BOXD_BASE_URL,
+          BOXD_SNAPSHOT: env.BOXD_SNAPSHOT,
+          BOXD_DELETE_AFTER_SEC: env.BOXD_DELETE_AFTER_SEC,
+          BOXD_START_TIMEOUT_SEC: env.BOXD_START_TIMEOUT_SEC,
+          BOXD_STATUS_TIMEOUT_SEC: env.BOXD_STATUS_TIMEOUT_SEC,
+          BOXD_TEARDOWN_TIMEOUT_SEC: env.BOXD_TEARDOWN_TIMEOUT_SEC,
+        }
+      : {}),
     ...controller.config,
     ...secrets,
   };

@@ -335,6 +335,9 @@ See [E2B dispatch](./e2b-dispatch.md) for templates and tracked process behavior
 Worker URLs must use HTTPS and use the same resolver as E2B.
 With `BOXD_API_KEY` in the API environment, seeding creates a `builtin-boxd` controller and copies that key into its encrypted configuration.
 Without the key, seeding creates no boxd controller. Other controllers require their own stored key.
+The API environment's `BOXD_ORG`, `BOXD_BASE_URL`, `BOXD_SNAPSHOT`, `BOXD_DELETE_AFTER_SEC`,
+`BOXD_START_TIMEOUT_SEC`, `BOXD_STATUS_TIMEOUT_SEC`, and `BOXD_TEARDOWN_TIMEOUT_SEC` apply only to the builtin boxd controller.
+Controller config overrides these defaults. Other boxd controllers set these values in controller config.
 
 Each runtime is one machine named `swarm-rt-<runtime-id>`. Provision creates it with `isolated: true`.
 An isolated machine has no metadata endpoint, no in-VM `boxd` CLI, and no account integrations, so worker code cannot reach the controller's boxd account.
