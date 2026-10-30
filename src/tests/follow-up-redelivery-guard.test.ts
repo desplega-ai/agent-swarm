@@ -13,6 +13,7 @@ import {
   initDb,
 } from "../be/db";
 import { FOLLOW_UP_DISPATCH_CAP, sendTaskHandler, sendTaskInputSchema } from "../tools/send-task";
+import { findDuplicateTask } from "../tools/task-dedup";
 import { ownerCtx } from "../tools/task-tool-ctx";
 
 const TEST_DB_PATH = "./test-follow-up-redelivery-guard.sqlite";
@@ -304,6 +305,24 @@ describe("send-task follow-up re-delegation guard", () => {
     expect(result.message).toContain("same-work rule");
   });
 
+  test("matching completed work stays blocked behind 50 newer unrelated completions", async () => {
+    const done = await completedWork(
+      "C_DEEP",
+      "2.5",
+      "migrate the audit log table to the new schema",
+      120,
+    );
+    for (let i = 0; i < 50; i++) {
+      await completedWork("C_DEEP", "2.5", `unrelated chore ${i} touching widget ${i}`, 60 - i);
+    }
+    const session = await leadSession("C_DEEP", "2.5");
+
+    const result = await dispatch(session.id, "migrate the audit log table to the new schema");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("same-work rule");
+    expect(result.message).toContain(done.id.slice(0, 8));
+  });
+
   test("the loop cap blocks a distinct dispatch once the thread hit the cap", async () => {
     for (let i = 0; i < FOLLOW_UP_DISPATCH_CAP; i++) {
       await createTaskExtended(`loop step number ${i} with unique words ${i * 7}`, {
@@ -436,5 +455,34 @@ describe("send-task follow-up re-delegation guard", () => {
 
     const result = await dispatch(inbox.id, "summarize the open incidents for this week");
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("findDuplicateTask", () => {
+  test("finds an older duplicate behind 50 newer unrelated tasks from the same creator", async () => {
+    const creator = await createAgent({
+      name: "dedup-deep-creator",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const original = await createTaskExtended("backfill the invoice totals for october", {
+      creatorAgentId: creator.id,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+      new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      original.id,
+    ]);
+    for (let i = 0; i < 50; i++) {
+      await createTaskExtended(`unrelated chore ${i} touching widget ${i}`, {
+        creatorAgentId: creator.id,
+      });
+    }
+
+    const match = await findDuplicateTask({
+      taskDescription: "backfill the invoice totals for october",
+      creatorAgentId: creator.id,
+    });
+    expect(match?.task.id).toBe(original.id);
   });
 });

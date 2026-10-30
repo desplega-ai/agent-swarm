@@ -1868,7 +1868,9 @@ export async function getMostRecentTaskInThread(
 /**
  * Completed tasks in a Slack thread, most recent first. Lead `follow-up`
  * sessions are excluded: they coordinate the work, they are not the work, so
- * they never count as "the request was already handled".
+ * they never count as "the request was already handled". Returns every row in
+ * the window, with no row cap: the caller matches descriptions in JS, so a cap
+ * would hide an older matching completion behind newer unrelated ones.
  */
 export async function findCompletedTasksInThread(
   channelId: string,
@@ -1883,8 +1885,7 @@ export async function findCompletedTasksInThread(
        AND status = 'completed'
        AND COALESCE(taskType, '') != 'follow-up'
        AND lastUpdatedAt > ?
-       ORDER BY lastUpdatedAt DESC
-       LIMIT 50`,
+       ORDER BY lastUpdatedAt DESC`,
     [channelId, threadTs, since],
   );
   return rows.map(rowToAgentTask);
