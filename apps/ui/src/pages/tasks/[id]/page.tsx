@@ -38,13 +38,11 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
-import { stripContextFooter } from "@/components/session-panel/model";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
-import { PromptContext } from "@/components/shared/prompt-context";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import {
   CallCompositionContext,
@@ -56,11 +54,8 @@ import { TaskAttachmentsSection } from "@/components/shared/task-attachments-sec
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
-import { Transcript, TranscriptUserMessage } from "@/components/shared/transcript/transcript";
-import {
-  buildTranscriptRows,
-  workedForLabel,
-} from "@/components/shared/transcript/transcript-rows";
+import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
+import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -74,7 +69,6 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { parsePromptDisplay } from "@/lib/prompt-display";
 import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
 import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { parseStructuredOutput } from "@/lib/structured-output";
@@ -89,6 +83,7 @@ import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { normalizeSessionLogs, parseSessionLogs, sumItemCallUsage } from "@/logs-parser";
+import { announceFollowUpTask } from "./follow-up-navigation";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   TaskActions,
@@ -97,7 +92,7 @@ import {
   TaskPrimaryAction,
   useTaskActions,
 } from "./task-actions";
-import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
+import { TaskDetailsRail, taskRunTime } from "./task-details-rail";
 import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
@@ -107,7 +102,7 @@ import {
 } from "./task-sticky-bar";
 import { useElementHeight } from "./use-element-height";
 
-/** The narrow layout's tabs. The `?tab=` values predate the labels: Log is `logs`. */
+/** The narrow layout's tabs. The `?tab=` values predate the labels: Transcript is `logs`. */
 const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
 
 /** The focus ring of a narrow tab panel (the panel itself is a Tab stop). */
@@ -118,15 +113,11 @@ function coerceTaskDetailTab(value: string, fallback: string): string {
 }
 
 /**
- * The narrow layout's first tab: a finished task opens on its outcome, a
- * running or paused one on its log, and one that has not started on its
- * details.
+ * The narrow layout's first tab, whatever the status: the transcript is the
+ * page's main view, as in the wide layout's center column. An expanded app
+ * sidebar can push a desktop window into this layout too.
  */
-function defaultTaskTab(status: AgentTaskStatus | undefined): string {
-  if (status && TERMINAL_STATUSES.has(status)) return "outcome";
-  if (status === "in_progress" || status === "paused") return "logs";
-  return "details";
-}
+const DEFAULT_TASK_TAB = "logs";
 
 /**
  * The log's views: the transcript (the shared chat renderer, also on the
@@ -294,7 +285,7 @@ function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElemen
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: task, isLoading, isFetchedAfterMount, isStale } = useTask(id!);
+  const { data: task, isLoading } = useTask(id!);
   // A finished task's log, context and steering rows are frozen history: read
   // them once, with no poll and no refetch on window focus or reconnect
   // (`staleTime: Infinity`). Until the task itself loads, hold the poll too,
@@ -362,39 +353,16 @@ export default function TaskDetailPage() {
     setHelpOpen(false);
   }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
-  // The narrow layout's first tab and the log's first view follow the status
-  // the page opened with: the first one fetched after the page mounted, or a
-  // cached one that is still fresh. The cache keeps a task for hours (it
-  // persists in localStorage), so a task that finished while the reader was
-  // away must not open on its log. Until the fresh status arrives, the
-  // defaults follow the cached one, and a pick (a tab or a view) keeps them.
-  // A status change after that (the task finishes while the page is open)
-  // does not move the reader to another tab or view.
-  const [openedWith, setOpenedWith] = useState<{ id: string; status: AgentTaskStatus } | null>(
-    null,
-  );
-  const statusFresh = isFetchedAfterMount || !isStale;
-  useEffect(() => {
-    if (task && statusFresh && openedWith?.id !== task.id) {
-      setOpenedWith({ id: task.id, status: task.status });
-    }
-  }, [task, statusFresh, openedWith]);
-  const openedStatus = task && openedWith?.id === task.id ? openedWith.status : task?.status;
-  const keepOpenedStatus = useCallback(() => {
-    if (!task) return;
-    setOpenedWith((prev) => (prev?.id === task.id ? prev : { id: task.id, status: task.status }));
-  }, [task]);
-  const defaultTab = defaultTaskTab(openedStatus);
   const activeTab = coerceTaskDetailTab(
-    readStringParam(searchParams, "tab", defaultTab),
-    defaultTab,
+    readStringParam(searchParams, "tab", DEFAULT_TASK_TAB),
+    DEFAULT_TASK_TAB,
   );
   const setActiveTab = useCallback(
-    (tab: string) => {
-      keepOpenedStatus();
-      setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab });
-    },
-    [setParam, defaultTab, keepOpenedStatus],
+    (tab: string) =>
+      setParam("tab", coerceTaskDetailTab(tab, DEFAULT_TASK_TAB), {
+        defaultValue: DEFAULT_TASK_TAB,
+      }),
+    [setParam],
   );
   // Transcript or raw log, shared by both layouts.
   const logMode: LogMode =
@@ -408,10 +376,6 @@ export default function TaskDetailPage() {
     "tasks:details-panel-collapsed",
     false,
   );
-  // A finished run folds behind "Worked for …"; a new task id folds it again.
-  const [runOpen, setRunOpen] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
-  useEffect(() => setRunOpen(false), [id]);
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. The column is the page's one scroller: the log flows in it.
   const {
@@ -454,12 +418,14 @@ export default function TaskDetailPage() {
       setHelpOpen(true);
     },
   });
-  // A follow-up on a finished task is a new task: the page moves to it.
+  // A follow-up on a finished task is a new task: the page moves to it,
+  // unless some attachments failed to upload and the composer holds them.
   const announceFollowUp = useCallback(
-    (created: AgentTask) => {
-      toast.success("Follow-up task created.");
-      void navigate(`/tasks/${created.id}`);
-    },
+    (created: AgentTask, outcome: { attachmentsFailed: boolean }) =>
+      announceFollowUpTask(created, outcome, {
+        navigate: (to) => void navigate(to),
+        notify: (message, action) => toast.success(message, action ? { action } : undefined),
+      }),
     [navigate],
   );
   const agentNames = useMemo(
@@ -473,13 +439,6 @@ export default function TaskDetailPage() {
     if (!task?.requestedByUserId || !users) return null;
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
-  // The log's end line shows the rail's cost, run time and turns, so the page
-  // has one set of numbers. With no cost rows, the end line keeps the
-  // harness result's numbers.
-  const endSummary = useMemo(
-    () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
-    [task, costs],
-  );
   // The rail's cache hit, from the session log this page already loads. Only
   // with the log's usage details on.
   const [usageDetails] = useUsageDetails();
@@ -709,9 +668,7 @@ export default function TaskDetailPage() {
           steeringMessages={steeringForViewer}
           scrollElement={scrollElement}
           touchTargets={touchTargets}
-          view="everything"
           status={task.status}
-          endSummary={endSummary}
         />
       </CallCompositionContext.Provider>
     ) : sessionLogsLoading ? (
@@ -721,36 +678,10 @@ export default function TaskDetailPage() {
       waitingLine
     );
 
-  // The transcript: the task's prompt as the person's message, then the run
-  // (the same renderer as the Sessions page). A finished run folds behind
-  // "Worked for …" and keeps the agent's last message in view; a live one
-  // follows the bottom of the scroller.
-  const prompt = parsePromptDisplay(stripContextFooter(task.task));
+  // The transcript: the same renderer as the Sessions task sheet.
   const renderTranscript = (scrollElement: HTMLElement | null) => (
     <>
-      <Transcript
-        rows={transcriptRows}
-        running={taskIsRunning(task.status) === true}
-        prompt={
-          <TranscriptUserMessage
-            text={prompt.ask}
-            header={<PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />}
-          />
-        }
-        fold={
-          isTerminal && transcriptRows.length > 0
-            ? {
-                label: workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
-                open: runOpen,
-                onOpenChange: setRunOpen,
-              }
-            : null
-        }
-        workingSince={
-          task.status === "in_progress" ? (task.acceptedAt ?? task.createdAt) : undefined
-        }
-        scroller={scrollElement}
-      />
+      <TaskTranscript key={task.id} task={task} rows={transcriptRows} scroller={scrollElement} />
       {transcriptRows.length > 0 ? null : sessionLogsLoading ? (
         <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
       ) : (
@@ -1007,11 +938,11 @@ export default function TaskDetailPage() {
             )}
           >
             <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
-              <TabsTrigger value="outcome" className="h-11">
-                Outcome
-              </TabsTrigger>
               <TabsTrigger value="logs" className="h-11">
                 Transcript
+              </TabsTrigger>
+              <TabsTrigger value="outcome" className="h-11">
+                Outcome
               </TabsTrigger>
               <TabsTrigger value="details" className="h-11">
                 Details

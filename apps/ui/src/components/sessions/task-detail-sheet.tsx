@@ -3,25 +3,26 @@ import { renderTaskCitations } from "../../../../../src/utils/task-citations";
  * Sessions surface (Phase 4 ≥1.76.0) — task-detail Sheet, opened from a
  * timeline `<TaskCard>` click.
  *
- * Wraps shadcn `<Sheet side="right">` and re-uses the existing
- * `<SessionLogViewer>` / `useTaskSessionLogs` / `useTaskContext` /
- * `useSessionCosts` hooks. No new transcript code — all formatting + rendering
- * is delegated to the existing primitives so we inherit secret-scrubbing
- * (server-side) and parsing logic.
+ * Wraps shadcn `<Sheet side="right">`. The transcript is the task page's
+ * `<TaskTranscript>`, so the sheet and the page show the same run.
  */
 
 import { ExternalLink } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useSessionCosts } from "@/api/hooks/use-costs";
-import { useTaskContext, useTaskSessionLogs } from "@/api/hooks/use-tasks";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useSteeringEnabled } from "@/api/hooks/use-stats";
+import { useTaskSessionLogs, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { JsonTree } from "@/components/shared/json-tree";
-import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
+import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -32,9 +33,9 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseJsonOutput } from "@/lib/json-output";
-import { taskIsRunning } from "@/lib/task-activity";
 import { taskListTitle } from "@/lib/task-title";
 import { normalizeNewlines } from "@/lib/utils";
+import { parseSessionLogs } from "@/logs-parser";
 
 export interface TaskDetailSheetProps {
   taskId: string;
@@ -53,7 +54,18 @@ const usdFormatter = new Intl.NumberFormat("en-US", {
 export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetailSheetProps) {
   // Only fetch once the sheet opens — keeps idle session-list pages cheap.
   const { data: logs, isLoading: logsLoading } = useTaskSessionLogs(open ? taskId : "");
-  const { data: contextData } = useTaskContext(open ? taskId : "");
+  // The same steering gate and rows as the task page.
+  const steerGate = useFeatureGate("1.122.1");
+  const { data: steeringEnabled = true } = useSteeringEnabled();
+  const { data: steering } = useTaskSteeringMessages(taskId, {
+    enabled: open && steerGate.supported && steeringEnabled,
+  });
+  const rows = useMemo(
+    () => buildTranscriptRows({ messages: parseSessionLogs(logs ?? []), steering }),
+    [logs, steering],
+  );
+  // The body is the sheet's one scroller: a live run follows its bottom.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
   const { data: costs, isLoading: costsLoading } = useSessionCosts({
     taskId,
     enabled: open,
@@ -125,7 +137,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
         {/* Body — single scroll surface containing Outcome (if any) +
             Transcript. The Sheet header / meta / section headers are
             shrink-0 above; this div is the only thing that scrolls. */}
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div ref={setBody} className="flex-1 min-h-0 overflow-auto">
           {task &&
           (task.status === "failed" || task.status === "cancelled") &&
           task.failureReason &&
@@ -169,15 +181,9 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
             <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
               Transcript
             </h4>
-            {logsLoading ? (
+            {task ? <TaskTranscript key={task.id} task={task} rows={rows} scroller={body} /> : null}
+            {rows.length > 0 ? null : logsLoading ? (
               <Skeleton className="h-32 w-full" />
-            ) : logs && logs.length > 0 ? (
-              <SessionLogViewer
-                logs={logs}
-                compactionSnapshots={contextData?.snapshots}
-                isRunning={taskIsRunning(task?.status)}
-                trace
-              />
             ) : (
               <p className="text-xs text-muted-foreground italic">No transcript yet.</p>
             )}

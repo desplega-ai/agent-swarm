@@ -16,7 +16,7 @@ mock.module("@/components/shared/session-log-viewer", () => ({
   }),
 }));
 
-const { buildTranscriptRows, foldFinishedTurn, summarizeWork, workedForLabel } = await import(
+const { buildTranscriptRows, foldedTurnRows, summarizeWork, workedForLabel } = await import(
   "./transcript-rows"
 );
 type WorkEntry = import("./transcript-rows").WorkEntry;
@@ -111,8 +111,65 @@ describe("buildTranscriptRows", () => {
   });
 });
 
-describe("foldFinishedTurn", () => {
-  test("keeps only the agent's last message out of the fold", () => {
+describe("steering order", () => {
+  function steer(id: string, extra: Partial<SteeringMessage>): SteeringMessage {
+    return { id, body: id, status: "delivered", ...extra } as SteeringMessage;
+  }
+  const kinds = (rows: ReturnType<typeof buildTranscriptRows>) =>
+    rows.map((r) => (r.kind === "steer" ? r.message.id : r.kind === "assistant" ? r.text : r.kind));
+
+  test("a queued message sits where the agent got it, after the work in between", () => {
+    const rows = buildTranscriptRows({
+      messages: [
+        msg("assistant", [{ type: "text", text: "a" }], { timestamp: "2026-10-30T10:00:10Z" }),
+        msg("assistant", [{ type: "tool_use", id: "q1", name: "Read", input: {} }], {
+          timestamp: "2026-10-30T10:00:20Z",
+        }),
+        msg("assistant", [{ type: "text", text: "b" }], { timestamp: "2026-10-30T10:00:40Z" }),
+      ],
+      steering: [
+        steer("queued", { createdAt: "2026-10-30T10:00:15Z", deliveredAt: "2026-10-30T10:00:30Z" }),
+      ],
+    });
+    expect(kinds(rows)).toEqual(["a", "work", "queued", "b"]);
+  });
+
+  test("a pending message stays at the tail, after later work", () => {
+    const rows = buildTranscriptRows({
+      messages: [
+        msg("assistant", [{ type: "text", text: "a" }], { timestamp: "2026-10-30T10:00:10Z" }),
+        msg("assistant", [{ type: "tool_use", id: "q2", name: "Read", input: {} }], {
+          timestamp: "2026-10-30T10:00:50Z",
+        }),
+      ],
+      steering: [
+        steer("waiting", { status: "pending", createdAt: "2026-10-30T10:00:05Z" }),
+        steer("also-waiting", { status: "pending", createdAt: "2026-10-30T10:00:06Z" }),
+        steer("seen", { createdAt: "2026-10-30T10:00:20Z", deliveredAt: "2026-10-30T10:00:20Z" }),
+      ],
+    });
+    expect(kinds(rows)).toEqual(["a", "seen", "work", "waiting", "also-waiting"]);
+  });
+
+  test("zoneless SQLite timestamps read as UTC, as the session log's ISO ones", () => {
+    // Off UTC, a local-time read of the zoneless stamp lands 9 h away.
+    const tz = process.env.TZ;
+    process.env.TZ = "Asia/Tokyo";
+    const rows = buildTranscriptRows({
+      messages: [
+        msg("assistant", [{ type: "text", text: "a" }], { timestamp: "2026-10-30T10:00:10Z" }),
+        msg("assistant", [{ type: "text", text: "b" }], { timestamp: "2026-10-30T10:00:30Z" }),
+      ],
+      steering: [steer("sqlite", { createdAt: "2026-10-30 10:00:20" })],
+    });
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+    expect(kinds(rows)).toEqual(["a", "sqlite", "b"]);
+  });
+});
+
+describe("foldedTurnRows", () => {
+  test("closed, keeps only the agent's last message in view", () => {
     const rows = buildTranscriptRows({
       messages: [
         msg("assistant", [{ type: "text", text: "first" }]),
@@ -120,16 +177,49 @@ describe("foldFinishedTurn", () => {
         msg("assistant", [{ type: "tool_use", id: "t3", name: "Read", input: {} }]),
       ],
     });
-    const { folded, kept } = foldFinishedTurn(rows);
-    expect(kept.map((r) => (r.kind === "assistant" ? r.text : r.kind))).toEqual(["last"]);
-    expect(folded.map((r) => r.kind)).toEqual(["assistant", "work"]);
+    expect(
+      foldedTurnRows(rows, false).map((r) => (r.kind === "assistant" ? r.text : r.kind)),
+    ).toEqual(["last"]);
   });
 
-  test("folds everything when the agent wrote no prose", () => {
+  test("open, keeps run order: a failed tool after the last message stays after it", () => {
+    const rows = buildTranscriptRows({
+      messages: [
+        msg("assistant", [{ type: "text", text: "first" }]),
+        msg("assistant", [{ type: "text", text: "last" }]),
+        msg("assistant", [{ type: "tool_use", id: "t5", name: "Bash", input: {} }]),
+        msg("user", [{ type: "tool_result", tool_use_id: "t5", content: "boom", isError: true }]),
+      ],
+    });
+    const open = foldedTurnRows(rows, true);
+    expect(open.map((r) => (r.kind === "assistant" ? r.text : r.kind))).toEqual([
+      "first",
+      "last",
+      "work",
+    ]);
+    expect(open[2]?.kind === "work" && open[2].entries[0]).toMatchObject({ status: "error" });
+  });
+
+  test("closed, a message still waiting for the agent stays in view", () => {
+    const rows = buildTranscriptRows({
+      messages: [msg("assistant", [{ type: "text", text: "last" }])],
+      steering: [
+        {
+          id: "w",
+          body: "w",
+          status: "pending",
+          createdAt: "2026-10-30T09:00:00Z",
+        } as SteeringMessage,
+      ],
+    });
+    expect(foldedTurnRows(rows, false).map((r) => r.kind)).toEqual(["assistant", "steer"]);
+  });
+
+  test("closed, a run with no prose shows nothing under the fold line", () => {
     const rows = buildTranscriptRows({
       messages: [msg("assistant", [{ type: "tool_use", id: "t4", name: "Read", input: {} }])],
     });
-    expect(foldFinishedTurn(rows)).toEqual({ folded: rows, kept: [] });
+    expect(foldedTurnRows(rows, false)).toEqual([]);
   });
 });
 

@@ -65,8 +65,12 @@ export interface TaskComposerProps {
   placeholder?: string;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
-  /** Called once the follow-up task exists and its uploads are done. */
-  onCreated?: (task: AgentTask) => void;
+  /**
+   * Called once the follow-up task exists and its uploads are done.
+   * `attachmentsFailed`: some files did not upload. The composer keeps them
+   * and the error for a retry, so the page should stay on it.
+   */
+  onCreated?: (task: AgentTask, outcome: { attachmentsFailed: boolean }) => void;
   /** Controlled draft. Omit both to keep the draft internal. */
   value?: string;
   onValueChange?: (next: string) => void;
@@ -198,7 +202,7 @@ export function TaskComposer({
       }
       setDraft("");
       if (!uploadError) setAttachments([]);
-      onCreated?.(created);
+      onCreated?.(created, { attachmentsFailed: uploadError !== null });
     },
   });
 

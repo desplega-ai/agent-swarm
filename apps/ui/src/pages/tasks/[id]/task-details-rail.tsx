@@ -16,7 +16,6 @@ import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { SessionId } from "@/components/shared/session-id";
-import type { EndSummary } from "@/components/shared/session-log-messages";
 import { taskSourceLabel } from "@/components/shared/task-source-mark";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
@@ -140,25 +139,6 @@ export function taskRunTime(task: TaskWithLogs, costs: SessionCost[] | undefined
 function turnsText(task: TaskWithLogs, stats: CostStats): string | null {
   if (task.provider === "devin" || stats.turns <= 0) return null;
   return `${stats.turns.toLocaleString()} ${stats.turns === 1 ? "turn" : "turns"}`;
-}
-
-/**
- * The cost, run time and turns of the Summary section, as text. The log's end
- * line shows the same text, so the page has one source for these numbers.
- * `null` when the task has no cost rows: the end line then shows the harness
- * result's numbers.
- */
-export function taskRunSummary(
-  task: TaskWithLogs,
-  costs: SessionCost[] | undefined,
-): EndSummary | null {
-  const stats = summarizeCosts(costs);
-  if (!stats) return null;
-  return {
-    cost: formatCost(stats.totalCost, { precision: 2 }),
-    duration: runTime(task, stats) ?? undefined,
-    turns: turnsText(task, stats) ?? undefined,
-  };
 }
 
 // RailSection and RailRow are local on purpose. `DetailPageSection` and
@@ -513,8 +493,6 @@ export function TaskDetailsRail({
   const startedAt = firstStartedAt(task.logs);
   const timeLabel = startedAt ? "Started" : "Created";
   const timeValue = startedAt ?? task.createdAt;
-  // The run time, cost and turns use the same helpers as `taskRunSummary`
-  // (the log's end line).
   const ran = runTime(task, stats);
   const turns = stats ? turnsText(task, stats) : null;
 

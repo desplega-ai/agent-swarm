@@ -38,9 +38,10 @@ export type TranscriptRow =
   | { kind: "steer"; id: string; at: string; message: SteeringMessage }
   | { kind: "work"; id: string; at: string; entries: WorkEntry[] };
 
+/** `t` is the sort time in ms: when the item entered the run. */
 type Item =
-  | { at: string; row: Exclude<TranscriptRow, { kind: "work" }> }
-  | { at: string; entry: WorkEntry };
+  | { t: number; row: Exclude<TranscriptRow, { kind: "work" }> }
+  | { t: number; entry: WorkEntry };
 
 /** An activity event as one plain line, or null when it is noise at the task level. */
 export function summarizeAgentLog(log: AgentLog): string | null {
@@ -75,9 +76,21 @@ export function summarizeAgentLog(log: AgentLog): string | null {
   }
 }
 
-function timeOf(at: string): number {
-  const t = Date.parse(at);
+/** SQLite timestamps carry no zone: `parseUTCDate` reads them as UTC, as the server writes them. */
+function timeOf(at: string | undefined): number {
+  if (!at) return 0;
+  const t = parseUTCDate(at).getTime();
   return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Where a steering message sits in the run: a delivered one when the agent
+ * got it, not when it was sent (a queued message waits for a turn boundary),
+ * and a pending one after everything, since the agent has not seen it yet.
+ */
+function steerTime(message: SteeringMessage): number {
+  if (message.status === "pending") return Number.POSITIVE_INFINITY;
+  return timeOf(message.deliveredAt ?? message.createdAt);
 }
 
 /**
@@ -99,11 +112,12 @@ function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
     m.content.forEach((block, idx) => {
       const id = `${m.id}-${idx}`;
       const at = m.timestamp;
+      const t = timeOf(at);
       if (block.type === "tool_use") {
         const tool = classifyTool(block.name, block.input);
         const result = results.get(block.id);
         out.push({
-          at,
+          t,
           entry: {
             kind: "tool",
             id,
@@ -116,14 +130,14 @@ function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
           },
         });
       } else if (block.type === "thinking" && block.thinking.trim()) {
-        out.push({ at, entry: { kind: "thinking", id, at, text: block.thinking.trim() } });
+        out.push({ t, entry: { kind: "thinking", id, at, text: block.thinking.trim() } });
       } else if (
         withMessages &&
         m.role === "assistant" &&
         block.type === "text" &&
         block.text.trim()
       ) {
-        out.push({ at, row: { kind: "assistant", id, at, text: block.text.trim() } });
+        out.push({ t, row: { kind: "assistant", id, at, text: block.text.trim() } });
       }
     });
   }
@@ -156,15 +170,19 @@ export function buildTranscriptRows({
     const text = summarizeAgentLog(log);
     if (text)
       items.push({
-        at: log.createdAt,
+        t: timeOf(log.createdAt),
         entry: { kind: "event", id: log.id, at: log.createdAt, text },
       });
   }
   for (const message of steering) {
-    const at = message.createdAt;
-    items.push({ at, row: { kind: "steer", id: `steer-${message.id}`, at, message } });
+    const at = message.deliveredAt ?? message.createdAt;
+    items.push({
+      t: steerTime(message),
+      row: { kind: "steer", id: `steer-${message.id}`, at, message },
+    });
   }
-  items.sort((a, b) => timeOf(a.at) - timeOf(b.at));
+  // Infinity - Infinity is NaN: two pending messages keep their own order.
+  items.sort((a, b) => (a.t === b.t ? 0 : a.t - b.t));
 
   const rows: TranscriptRow[] = [];
   for (const item of items) {
@@ -176,20 +194,24 @@ export function buildTranscriptRows({
     if (last?.kind === "work") {
       last.entries.push(item.entry);
     } else {
-      rows.push({ kind: "work", id: `work-${item.entry.id}`, at: item.at, entries: [item.entry] });
+      rows.push({
+        kind: "work",
+        id: `work-${item.entry.id}`,
+        at: item.entry.at,
+        entries: [item.entry],
+      });
     }
   }
   return rows;
 }
 
 /**
- * A finished turn's fold: every row but the agent's last message goes behind
- * the "Worked for" line, and that message stays in view under it.
+ * The rows a finished turn shows. Closed, the fold keeps only the agent's last
+ * message in view, plus any steering message still waiting for the agent.
+ * Open, every row shows in run order: work after the last message stays after it.
  */
-export function foldFinishedTurn(rows: TranscriptRow[]): {
-  folded: TranscriptRow[];
-  kept: TranscriptRow[];
-} {
+export function foldedTurnRows(rows: TranscriptRow[], open: boolean): TranscriptRow[] {
+  if (open) return rows;
   let lastAssistant = -1;
   for (let i = rows.length - 1; i >= 0; i--) {
     if (rows[i].kind === "assistant") {
@@ -197,11 +219,9 @@ export function foldFinishedTurn(rows: TranscriptRow[]): {
       break;
     }
   }
-  if (lastAssistant < 0) return { folded: rows, kept: [] };
-  return {
-    folded: rows.filter((_, i) => i !== lastAssistant),
-    kept: [rows[lastAssistant]],
-  };
+  return rows.filter(
+    (row, i) => i === lastAssistant || (row.kind === "steer" && row.message.status === "pending"),
+  );
 }
 
 /** The fold line: "Worked for 4m 12s", or "Activity" when the run has no end time. */

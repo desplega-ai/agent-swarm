@@ -272,11 +272,37 @@ describe("TaskComposer on Sessions", () => {
     expect(promoted).toEqual(["follow-up"]);
     await unmount();
   });
+
+  test("a failed upload tells the page, and keeps the file and the error for a retry", async () => {
+    rejectUploads = true;
+    const outcomes: Array<{ id: string; attachmentsFailed: boolean }> = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onCreated={(task, outcome) => outcomes.push({ id: task.id, ...outcome })}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "see the screenshot");
+    await send(container);
+    await waitFor(() => outcomes.length === 1);
+
+    expect(outcomes).toEqual([{ id: "follow-up", attachmentsFailed: true }]);
+    expect(container.textContent).toContain("screenshot-x.png");
+    expect(container.textContent).toContain("failed to upload");
+    await unmount();
+  });
 });
 
 describe("TaskComposer on the task page", () => {
   test("a follow-up goes to the same agent, clears the page draft and reports the new task", async () => {
     const created: Array<{ id: string }> = [];
+    const outcomes: Array<{ attachmentsFailed: boolean }> = [];
     const drafts: string[] = [];
     function Page() {
       const [draft, setDraft] = useState("");
@@ -290,7 +316,10 @@ describe("TaskComposer on the task page", () => {
             drafts.push(next);
             setDraft(next);
           }}
-          onCreated={(task) => created.push(task)}
+          onCreated={(task, outcome) => {
+            created.push(task);
+            outcomes.push(outcome);
+          }}
           fullWidth
         />
       );
@@ -311,6 +340,7 @@ describe("TaskComposer on the task page", () => {
       source: "ui",
     });
     expect(created.map((task) => task.id)).toEqual(["follow-up"]);
+    expect(outcomes).toEqual([{ attachmentsFailed: false }]);
     // The page owns the draft: the composer clears it through `onValueChange`.
     expect(drafts.at(-1)).toBe("");
     expect(textarea.value).toBe("");

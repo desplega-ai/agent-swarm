@@ -40,10 +40,38 @@ test.describe("below the 60rem page-width switch (tabs layout)", () => {
     await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
     await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
-    // A running task opens on Transcript. The click keeps the test valid if the default changes.
-    await page.getByRole("tab", { name: "Transcript", exact: true }).click();
+    // Every task opens on Transcript.
+    await expect(page.getByRole("tab", { name: "Transcript", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
     await clean.assertClean();
   });
 });
+
+// The transcript is the first tab for every status, at a narrow window and at
+// a desktop window whose expanded sidebar (16rem) leaves the page under 60rem.
+for (const width of [900, 1200]) {
+  test.describe(`a ${width}px window opens every task on its transcript`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    for (const status of ["completed", "pendingLead"] as const) {
+      test(`${status} task`, async ({ page, seed, clean }) => {
+        test.skip(!seed, "remote run without seed");
+        await page.goto(`/tasks/${seed!.tasks[status]}`);
+
+        const tab = page.getByRole("tab", { name: "Transcript", exact: true });
+        await expect(tab).toBeVisible();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        await expect(page.getByRole("tab", { name: "Outcome", exact: true })).toHaveAttribute(
+          "aria-selected",
+          "false",
+        );
+
+        await clean.assertClean();
+      });
+    }
+  });
+}

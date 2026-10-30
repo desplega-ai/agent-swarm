@@ -45,7 +45,7 @@ import {
 import { cn, formatDuration, formatRelativeTime, parseUTCDate } from "@/lib/utils";
 import {
   entrySummary,
-  foldFinishedTurn,
+  foldedTurnRows,
   summarizeWork,
   type TranscriptRow,
   type WorkEntry,
@@ -100,8 +100,7 @@ export function Transcript({
   className,
 }: TranscriptProps) {
   const activeFold = running ? null : (fold ?? null);
-  const { folded, kept } = activeFold ? foldFinishedTurn(rows) : { folded: rows, kept: [] };
-  const shown = activeFold && !activeFold.open ? [] : folded;
+  const shown = activeFold ? foldedTurnRows(rows, activeFold.open) : rows;
   const liveRowId = running ? rows[rows.length - 1]?.id : undefined;
   const contentRef = useFollowEnd(scroller ?? null, running);
 
@@ -115,9 +114,6 @@ export function Transcript({
       {activeFold ? <TurnFoldRow fold={activeFold} /> : null}
       {shown.map((row) => (
         <TranscriptRowView key={row.id} row={row} live={row.id === liveRowId} />
-      ))}
-      {kept.map((row) => (
-        <TranscriptRowView key={row.id} row={row} live={false} />
       ))}
       {running && rows.length === 0 && waitingLabel ? (
         <Trace aria-live="polite">
