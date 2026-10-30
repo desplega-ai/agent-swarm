@@ -1,5 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Tag, Terminal } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  PanelRightClose,
+  PanelRightOpen,
+  Tag,
+  Terminal,
+} from "lucide-react";
 import {
   type CSSProperties,
   useCallback,
@@ -31,27 +38,34 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
+import { stripContextFooter } from "@/components/session-panel/model";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import {
   CallCompositionContext,
   NO_CALL_COMPOSITIONS,
 } from "@/components/shared/request-composition-bar";
-import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { Transcript, TranscriptUserMessage } from "@/components/shared/transcript/transcript";
+import {
+  buildTranscriptRows,
+  workedForLabel,
+} from "@/components/shared/transcript/transcript-rows";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,6 +74,7 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
 import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { parseStructuredOutput } from "@/lib/structured-output";
@@ -73,7 +88,7 @@ import {
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { normalizeSessionLogs, sumItemCallUsage } from "@/logs-parser";
+import { normalizeSessionLogs, parseSessionLogs, sumItemCallUsage } from "@/logs-parser";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   TaskActions,
@@ -114,16 +129,15 @@ function defaultTaskTab(status: AgentTaskStatus | undefined): string {
 }
 
 /**
- * The log's first view: a finished task opens on its messages, any other on
- * every event. `?logView=` keeps the reader's pick.
+ * The log's views: the transcript (the shared chat renderer, also on the
+ * Sessions page) or the raw log with every event. `?log=raw` keeps the pick.
  */
-function defaultLogView(status: AgentTaskStatus | undefined): SessionLogView {
-  return status && TERMINAL_STATUSES.has(status) ? "messages" : "everything";
-}
+type LogMode = "transcript" | "raw";
 
-function coerceLogView(value: string, fallback: SessionLogView): SessionLogView {
-  return value === "messages" || value === "everything" ? value : fallback;
-}
+const LOG_MODE_OPTIONS = [
+  { value: "transcript", label: "Transcript" },
+  { value: "raw", label: "Raw log" },
+] as const satisfies readonly { value: LogMode; label: string }[];
 
 /**
  * Task title as the page heading, at most two lines. A clamped title shows
@@ -382,19 +396,22 @@ export default function TaskDetailPage() {
     },
     [setParam, defaultTab, keepOpenedStatus],
   );
-  // Messages or Everything, shared by both layouts' logs.
-  const logViewFallback = defaultLogView(openedStatus);
-  const logView = coerceLogView(
-    readStringParam(searchParams, "logView", logViewFallback),
-    logViewFallback,
+  // Transcript or raw log, shared by both layouts.
+  const logMode: LogMode =
+    readStringParam(searchParams, "log", "transcript") === "raw" ? "raw" : "transcript";
+  const setLogMode = useCallback(
+    (mode: LogMode) => setParam("log", mode, { defaultValue: "transcript" }),
+    [setParam],
   );
-  const setLogView = useCallback(
-    (view: SessionLogView) => {
-      keepOpenedStatus();
-      setParam("logView", view, { defaultValue: logViewFallback });
-    },
-    [setParam, logViewFallback, keepOpenedStatus],
+  // The details panel next to the column folds away, as the app sidebar does.
+  const [detailsCollapsed, setDetailsCollapsed] = useLocalToggle(
+    "tasks:details-panel-collapsed",
+    false,
   );
+  // A finished run folds behind "Worked for …"; a new task id folds it again.
+  const [runOpen, setRunOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
+  useEffect(() => setRunOpen(false), [id]);
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. The column is the page's one scroller: the log flows in it.
   const {
@@ -437,11 +454,11 @@ export default function TaskDetailPage() {
       setHelpOpen(true);
     },
   });
+  // A follow-up on a finished task is a new task: the page moves to it.
   const announceFollowUp = useCallback(
     (created: AgentTask) => {
-      toast.success("Follow-up task created.", {
-        action: { label: "Open", onClick: () => void navigate(`/tasks/${created.id}`) },
-      });
+      toast.success("Follow-up task created.");
+      void navigate(`/tasks/${created.id}`);
     },
     [navigate],
   );
@@ -471,6 +488,17 @@ export default function TaskDetailPage() {
     [sessionLogs, usageDetails],
   );
   const callUsage = useMemo(() => (usageItems ? sumItemCallUsage(usageItems) : null), [usageItems]);
+  // The transcript's rows: the agent's prose, tool runs and steering in time
+  // order. Activity events stay in the details panel.
+  const transcriptSteering = steerGate.supported && steeringEnabled ? steeringMessages : undefined;
+  const transcriptRows = useMemo(
+    () =>
+      buildTranscriptRows({
+        messages: parseSessionLogs(sessionLogs ?? []),
+        steering: transcriptSteering,
+      }),
+    [sessionLogs, transcriptSteering],
+  );
   // The request composition: the rail's panel and each cache chip's bar.
   // Also only with usage details on.
   const logSessionIds = useMemo(
@@ -652,50 +680,106 @@ export default function TaskDetailPage() {
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
 
-  // Each layout passes its scroller as `scrollElement` (the wide column, the
-  // narrow root), so the log flows in the page scroller with no scroller of
-  // its own. `null` until the scroller mounts. The narrow layout asks for
-  // 44 px toolbar controls. The log has no visible title, so its h2 is for
-  // screen readers only.
-  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
-    <>
-      <h2 className="sr-only">Session log</h2>
-      <CallCompositionContext.Provider value={compositions?.byCall ?? NO_CALL_COMPOSITIONS}>
-        {renderSessionLogBody(scrollElement, touchTargets)}
-      </CallCompositionContext.Provider>
-    </>
+  // The waiting line: what the task waits for. Only a running task keeps the
+  // full height free for logs that are coming; any other gives it to the
+  // cards around it.
+  const waitingLine = (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
+        taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
+      )}
+    >
+      <TaskStatusIcon status={task.status} />
+      <p className="text-sm text-muted-foreground">{waiting}</p>
+    </div>
   );
-  const renderSessionLogBody = (scrollElement: HTMLElement | null, touchTargets: boolean) =>
+
+  // The raw log: every event, with its own toolbar. Each layout passes its
+  // scroller as `scrollElement` (the wide column, the narrow root), so the
+  // log flows in the page scroller with no scroller of its own. `null` until
+  // the scroller mounts. The narrow layout asks for 44 px toolbar controls.
+  const renderRawLog = (scrollElement: HTMLElement | null, touchTargets: boolean) =>
     showLogViewer ? (
-      <SessionLogViewer
-        logs={sessionLogs ?? []}
-        compactionSnapshots={contextData?.snapshots}
-        isRunning={taskIsRunning(task.status)}
-        steeringMessages={steeringForViewer}
-        scrollElement={scrollElement}
-        touchTargets={touchTargets}
-        view={logView}
-        onViewChange={setLogView}
-        status={task.status}
-        endSummary={endSummary}
-      />
+      <CallCompositionContext.Provider value={compositions?.byCall ?? NO_CALL_COMPOSITIONS}>
+        <SessionLogViewer
+          logs={sessionLogs ?? []}
+          compactionSnapshots={contextData?.snapshots}
+          isRunning={taskIsRunning(task.status)}
+          steeringMessages={steeringForViewer}
+          scrollElement={scrollElement}
+          touchTargets={touchTargets}
+          view="everything"
+          status={task.status}
+          endSummary={endSummary}
+        />
+      </CallCompositionContext.Provider>
     ) : sessionLogsLoading ? (
       // Do not claim "no session log" before the read answers.
       <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
     ) : (
-      // One line that says what the task waits for. Only a running task keeps
-      // the full height free for logs that are coming; any other gives it to
-      // the cards above.
-      <div
-        className={cn(
-          "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
-          taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
-        )}
-      >
-        <TaskStatusIcon status={task.status} />
-        <p className="text-sm text-muted-foreground">{waiting}</p>
-      </div>
+      waitingLine
     );
+
+  // The transcript: the task's prompt as the person's message, then the run
+  // (the same renderer as the Sessions page). A finished run folds behind
+  // "Worked for …" and keeps the agent's last message in view; a live one
+  // follows the bottom of the scroller.
+  const prompt = parsePromptDisplay(stripContextFooter(task.task));
+  const renderTranscript = (scrollElement: HTMLElement | null) => (
+    <>
+      <Transcript
+        rows={transcriptRows}
+        running={taskIsRunning(task.status) === true}
+        prompt={
+          <TranscriptUserMessage
+            text={prompt.ask}
+            header={<PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />}
+          />
+        }
+        fold={
+          isTerminal && transcriptRows.length > 0
+            ? {
+                label: workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
+                open: runOpen,
+                onOpenChange: setRunOpen,
+              }
+            : null
+        }
+        workingSince={
+          task.status === "in_progress" ? (task.acceptedAt ?? task.createdAt) : undefined
+        }
+        scroller={scrollElement}
+      />
+      {transcriptRows.length > 0 ? null : sessionLogsLoading ? (
+        <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
+      ) : (
+        waitingLine
+      )}
+    </>
+  );
+
+  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          {logMode === "raw" ? "Raw log" : "Transcript"}
+        </h2>
+        <SegmentedControl
+          size="sm"
+          aria-label="Log view"
+          value={logMode}
+          onValueChange={setLogMode}
+          options={LOG_MODE_OPTIONS}
+          // Touch: 44 px options inside the control's border and padding.
+          className={cn(touchTargets && "h-12.5")}
+        />
+      </div>
+      {logMode === "raw"
+        ? renderRawLog(scrollElement, touchTargets)
+        : renderTranscript(scrollElement)}
+    </>
+  );
 
   // The wide layout's live message box: it steers the task, as before. It
   // sits under the log, folded or open.
@@ -803,8 +887,31 @@ export default function TaskDetailPage() {
     <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
   );
 
+  // Folds the details panel away (and back), next to the app sidebar's own
+  // fold. The pick persists per browser.
+  const detailsToggle = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={detailsCollapsed ? "Show details panel" : "Hide details panel"}
+          aria-pressed={!detailsCollapsed}
+          onClick={() => setDetailsCollapsed(!detailsCollapsed)}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          {detailsCollapsed ? <PanelRightOpen /> : <PanelRightClose />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {detailsCollapsed ? "Show details" : "Hide details"}
+      </TooltipContent>
+    </Tooltip>
+  );
+
   // WIDE HERO: the title, where the task came from, and the chips, with the
-  // actions right of the title.
+  // actions and the details fold right of the title.
   const wideHero = (
     <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
       {/* The page's one heading. The breadcrumb truncates the title (and
@@ -812,7 +919,10 @@ export default function TaskDetailPage() {
       <div className="min-w-0">
         <TaskHeading title={headerTitle} />
       </div>
-      <TaskActions model={actions} className="row-span-3 self-start justify-end" />
+      <div className="row-span-3 flex items-start justify-end gap-1">
+        <TaskActions model={actions} className="justify-end" />
+        {detailsToggle}
+      </div>
       {sourceLine}
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} size="md" />
@@ -901,7 +1011,7 @@ export default function TaskDetailPage() {
                 Outcome
               </TabsTrigger>
               <TabsTrigger value="logs" className="h-11">
-                Log
+                Transcript
               </TabsTrigger>
               <TabsTrigger value="details" className="h-11">
                 Details
@@ -943,7 +1053,8 @@ export default function TaskDetailPage() {
           pixels. */}
       <div
         className={cn(
-          "hidden @min-[60rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px]",
+          "hidden @min-[60rem]:grid flex-1 min-h-0",
+          detailsCollapsed ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_300px]",
           MAIN_BLEED_Y,
         )}
       >
@@ -969,13 +1080,23 @@ export default function TaskDetailPage() {
             action={<TaskPrimaryAction model={actions} />}
             onTitleClick={() => scrollToTop(centerScroller)}
           />
-          <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
+          <div
+            className={cn(
+              "flex flex-col gap-3 pt-6 pr-6 pb-3",
+              // With the details panel folded, the column keeps a reading width.
+              detailsCollapsed && "mx-auto w-full max-w-5xl",
+            )}
+          >
             <div className="pb-2">
               {wideHero}
               <div ref={heroEndRef} aria-hidden className="h-px" />
             </div>
             <Separator />
             {failureCallout}
+
+            {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
+                outcome under it, as in a chat. */}
+            {renderSessionLogs(centerScroller)}
 
             {hasOutput && (
               <CollapsibleSection
@@ -1003,33 +1124,32 @@ export default function TaskDetailPage() {
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
             {spawnedTasks}
-            {/* FOLLOW UP: a finished task gets the message box right under
-                its outcome. */}
-            {composerProps && isTerminal ? (
-              <div ref={wideFollowUpBoxRef} className="shrink-0">
-                <TaskComposer {...composerProps} />
-              </div>
-            ) : null}
-
-            {renderSessionLogs(centerScroller)}
-            {steerComposer ? (
-              // The message box sticks to the bottom of the column. `-my-3
-              // py-3` moves the column gap and the bottom padding into the
-              // sticky box: the stuck box keeps both, and the scroll height
-              // does not change.
+            {composerProps ? (
+              // THE MESSAGE BOX sticks to the bottom of the column: it steers
+              // a live task and follows up a finished one. `-my-3 py-3` moves
+              // the column gap and the bottom padding into the sticky box: the
+              // stuck box keeps both, and the scroll height does not change.
               <div ref={composerRef} className="sticky bottom-0 z-10 -my-3 bg-background py-3">
-                {steerComposer}
+                {isTerminal ? (
+                  <div ref={wideFollowUpBoxRef}>
+                    <TaskComposer {...composerProps} />
+                  </div>
+                ) : (
+                  steerComposer
+                )}
               </div>
             ) : null}
           </div>
         </section>
 
-        <aside
-          aria-label="Task details"
-          className="min-h-0 overflow-y-auto border-l border-border py-6 pl-5"
-        >
-          {detailsRail}
-        </aside>
+        {detailsCollapsed ? null : (
+          <aside
+            aria-label="Task details"
+            className="min-h-0 overflow-y-auto border-l border-border py-6 pl-5"
+          >
+            {detailsRail}
+          </aside>
+        )}
       </div>
     </div>
   );

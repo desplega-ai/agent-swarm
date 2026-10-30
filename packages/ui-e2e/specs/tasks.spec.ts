@@ -25,8 +25,8 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
   // The detail page renders both the narrow tab layout and the wide two-column
   // layout (switched by the page's own width), so text assertions filter to the
-  // visible copy. At 1440px the center column shows the session logs inline; the
-  // "Log" tab only shows in the narrow layout.
+  // visible copy. At 1440px the center column shows the transcript inline; the
+  // "Transcript" tab only shows in the narrow layout.
   await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
   await clean.assertClean();
@@ -35,13 +35,13 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
 test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
-  test("session logs open from the Log tab", async ({ page, seed, clean }) => {
+  test("the transcript opens from the Transcript tab", async ({ page, seed, clean }) => {
     test.skip(!seed, "remote run without seed");
     await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
     await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
-    // A running task opens on Log. The click keeps the test valid if the default changes.
-    await page.getByRole("tab", { name: "Log", exact: true }).click();
+    // A running task opens on Transcript. The click keeps the test valid if the default changes.
+    await page.getByRole("tab", { name: "Transcript", exact: true }).click();
     await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
     await clean.assertClean();

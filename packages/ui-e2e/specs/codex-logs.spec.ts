@@ -126,9 +126,10 @@ async function completeLiveMessage(
   });
 }
 
+/** The raw log: every parsed event (the transcript keeps only the agent's run). */
 async function openSessionLogs(page: Page, taskId: string, mobile = false) {
-  await page.goto(`/tasks/${taskId}`);
-  if (mobile) await page.getByRole("tab", { name: "Log", exact: true }).click();
+  await page.goto(`/tasks/${taskId}?log=raw`);
+  if (mobile) await page.getByRole("tab", { name: "Transcript", exact: true }).click();
 }
 
 async function seedContextSnapshots(
@@ -204,7 +205,7 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
   await clean.assertClean();
 });
 
-test("a finished task's log opens on Messages, with the tool call folded", async ({
+test("a finished task's transcript folds its run behind the last message", async ({
   page,
   api,
   seed,
@@ -215,24 +216,26 @@ test("a finished task's log opens on Messages, with the tool call folded", async
   await page.goto(`/tasks/${seed!.tasks.completed}`);
 
   const visible = { visible: true } as const;
-  await expect(page.getByRole("radio", { name: "Messages" }).filter(visible)).toBeChecked();
+  await expect(page.getByRole("radio", { name: "Transcript" }).filter(visible)).toBeChecked();
+  // The agent's last message stays in view; the rest of the run is folded.
   await expect(page.getByText(logs.secondMessage, { exact: true }).filter(visible)).toHaveCount(1);
-  // The MCP call is folded into one activity line until the line opens.
-  const toolButton = page.getByRole("button", { name: /e2e-mcp\.inspect/ }).filter(visible);
-  await expect(toolButton).toHaveCount(0);
+  await expect(page.getByText(logs.firstMessage, { exact: true }).filter(visible)).toHaveCount(0);
+  await expect(page.getByText(/e2e-mcp\.inspect/).filter(visible)).toHaveCount(0);
   await page
-    .getByRole("button", { name: /^Ran 1 tool/ })
+    .getByRole("button", { name: /^(Worked for|Activity)/ })
     .filter(visible)
     .click();
-  await toolButton.click();
-  await expect(page.getByText(logs.mcpResult, { exact: true }).filter(visible)).toBeVisible();
+  await expect(page.getByText(logs.firstMessage, { exact: true }).filter(visible)).toHaveCount(1);
+  await expect(page.getByText(/e2e-mcp\.inspect/).filter(visible)).toHaveCount(1);
 
-  // Everything shows every event, and the pick survives a reload.
-  await page.getByRole("radio", { name: "Everything" }).filter(visible).click();
-  await expect(page).toHaveURL(/[?&]logView=everything/);
+  // The raw log shows every event, and the pick survives a reload.
+  await page.getByRole("radio", { name: "Raw log" }).filter(visible).click();
+  await expect(page).toHaveURL(/[?&]log=raw/);
   await page.reload();
-  await expect(page.getByRole("radio", { name: "Everything" }).filter(visible)).toBeChecked();
-  await expect(toolButton).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Raw log" }).filter(visible)).toBeChecked();
+  await expect(
+    page.getByRole("button", { name: /e2e-mcp\.inspect/ }).filter(visible),
+  ).toBeVisible();
 
   await clean.assertClean();
 });
@@ -292,7 +295,7 @@ test("context usage does not combine incomplete measurements", async ({
 test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
-  test("Codex app-server messages render in the Log tab", async ({
+  test("Codex app-server messages render in the raw log", async ({
     page,
     api,
     seed,
