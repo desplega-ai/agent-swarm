@@ -667,10 +667,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "256_agent_slack_icon.sql");
       // 259 alters session_summaries, which 253 (skipped above) creates.
       markMigrationApplied(database, "259_session_summaries_open_tasks.sql");
-      // 260 alters runtime_pools, which this migration-112-only fixture does not create.
+      // 260 alters runtime_pools and creates runtime_cache_releases. This
+      // migration-112-only fixture has neither runtime_pools nor runtime_controllers.
       markMigrationApplied(database, "260_runtime_pool_cache.sql");
-      // Cache cleanup depends on runtime controllers absent from this partial fixture.
-      markMigrationApplied(database, "262_runtime_cache_releases.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

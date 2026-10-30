@@ -6,7 +6,7 @@ import {
   ControllerCommandSchema,
 } from "../runtime-providers/controller-protocol";
 
-test("migration 260 adds an optional JSON cache to a fresh database", () => {
+test("migration 260 adds an optional JSON cache and the release table to a fresh database", () => {
   const db = new Database(":memory:");
   try {
     runMigrations(db);
