@@ -416,9 +416,9 @@ function distanceToEnd(el: HTMLElement): number {
 }
 
 /**
- * Keeps a live run's newest rows in view. The scroller follows the bottom
- * while the reader is there; scrolling up lets go, and coming back to the
- * bottom follows again.
+ * Keeps a live run's newest rows in view. A live run opens at its newest
+ * row; the scroller then follows the bottom while the reader is there.
+ * Scrolling up lets go, and coming back to the bottom follows again.
  */
 function useFollowEnd(
   scroller: HTMLElement | null,
@@ -427,7 +427,8 @@ function useFollowEnd(
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!scroller || !content || !live) return;
-    let following = distanceToEnd(scroller) <= AT_END_PX;
+    scroller.scrollTop = scroller.scrollHeight;
+    let following = true;
     const onScroll = () => {
       following = distanceToEnd(scroller) <= AT_END_PX;
     };

@@ -626,8 +626,9 @@ export default function TaskDetailPage() {
 
   // THE SIDE PANEL's tabs (the narrow layout's tabs after Transcript).
   // Tree: where the task came from and what it delegated, with live status.
+  // Its own container: the 320 px panel hides the rows' agent column.
   const treeContent = (
-    <div className="flex flex-col gap-3">
+    <div className="@container flex flex-col gap-3">
       {task.parentTaskId ? (
         <Link
           to={`/tasks/${task.parentTaskId}`}
