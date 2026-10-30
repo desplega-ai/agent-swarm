@@ -428,7 +428,7 @@ export function ComposerDock({
                 "flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0",
                 modeControl ? null : "pl-1.5",
                 // A phone bar with a mode control has no room for the route; progress still shows.
-                touch && modeControl && !isPending && "hidden",
+                (bar || touch) && modeControl && !isPending && "hidden",
               )}
             >
               <span

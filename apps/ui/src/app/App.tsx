@@ -26,7 +26,7 @@ export default function App() {
           details and Sessions, so a toast never covers Send. */}
       <Toaster
         position="bottom-right"
-        offset={{ bottom: "6rem" }}
+        offset={{ bottom: "10rem" }}
         mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 8rem)" }}
       />
       <AppUpdateWatcher />

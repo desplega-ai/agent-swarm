@@ -157,7 +157,7 @@ export function WorkerStep({ step, agentName }: { step: Step; agentName: string 
       </AnimatedReveal>
       <div className="ml-5 flex min-w-0 flex-col gap-1.5">
         <ChainOfThought taskId={last.id} status={last.status} />
-        <TaskOutcome task={last} />
+        <TaskOutcome task={last} clamp />
       </div>
       <TaskDetailSheet
         taskId={last.id}
