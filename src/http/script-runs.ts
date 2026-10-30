@@ -15,6 +15,7 @@ import {
   getScriptRunByIdempotencyKey,
   getScriptRunJournalStep,
   getTaskById,
+  hasScriptRunStepTasks,
   listScriptRunJournalSteps,
   listScriptRuns,
   updateScriptRun,
@@ -31,6 +32,10 @@ import {
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
+import {
+  evaluateFollowUpRedelegation,
+  followUpThreadForSourceTask,
+} from "../tasks/follow-up-redelegation-guard";
 import {
   AgentTaskStatusSchema,
   RoutingReasonSchema,
@@ -111,6 +116,8 @@ const agentTaskBodySchema = z.object({
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+  /** Dispatch even when the follow-up re-delegation guard blocks it (same flag as send-task). */
+  allowRedelegation: z.boolean().optional(),
 });
 
 const scriptRunCreatedSchema = z.object({
@@ -299,8 +306,25 @@ const agentTaskRoute = route({
       schema: z.object({ taskId: z.string(), status: AgentTaskStatusSchema }),
     },
     404: { description: "Script run not found" },
+    409: { description: "Agent task failed, was cancelled, or was superseded" },
+    422: { description: "Blocked by the follow-up re-delegation guard" },
   },
 });
+
+/**
+ * The launching session's task (X-Source-Task-Id), kept only when it belongs
+ * to the launching agent so a run cannot borrow another agent's session.
+ */
+async function resolveRunSourceTaskId(
+  req: IncomingMessage,
+  agentId: string,
+): Promise<string | undefined> {
+  const raw = req.headers["x-source-task-id"];
+  const sourceTaskId = Array.isArray(raw) ? raw[0] : raw;
+  if (!sourceTaskId) return undefined;
+  const task = await getTaskById(sourceTaskId);
+  return task?.agentId === agentId ? task.id : undefined;
+}
 
 async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
@@ -408,6 +432,7 @@ export async function handleScriptRuns(
     // Cap check and insert commit together: N concurrent POSTs otherwise all
     // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
+    const sourceTaskId = await resolveRunSourceTaskId(req, agent.id);
     const creation = await getDbClient().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
@@ -418,6 +443,7 @@ export async function handleScriptRuns(
         scriptName: parsed.body.scriptName,
         idempotencyKey: parsed.body.idempotencyKey,
         requestedByUserId: parsed.body.requestedByUserId,
+        sourceTaskId,
         createdBy: parsed.body.requestedByUserId,
       });
     });
@@ -632,6 +658,30 @@ export async function handleScriptRuns(
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
+      const taskDescription = parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey;
+      // Follow-up re-delegation guard, as in send-task. A run is one dispatch:
+      // only its first fresh step is checked, so later steps never compare
+      // against the run's own completed steps and a long run cannot use up
+      // the thread's loop cap. A replayed stepKey found a task above and is
+      // never blocked.
+      const followUpThread = await followUpThreadForSourceTask(run.sourceTaskId);
+      if (followUpThread && !(await hasScriptRunStepTasks(run.id))) {
+        const blocked = await evaluateFollowUpRedelegation({
+          ...followUpThread,
+          creatorAgentId: run.agentId,
+          taskDescription,
+          targetAgentId: parsed.body.agentId,
+        });
+        if (blocked && !parsed.body.allowRedelegation) {
+          json(res, { error: blocked.message, rule: blocked.rule }, 422);
+          return true;
+        }
+        if (blocked) {
+          console.log(
+            `[script-runs] follow-up re-delegation override: rule=${blocked.rule} runId=${run.id} creatorAgentId=${run.agentId} sourceTaskId=${run.sourceTaskId} thread=${followUpThread.channelId}/${followUpThread.threadTs}`,
+          );
+        }
+      }
       const modelError = await explicitModelErrorForAgent({
         model: parsed.body.model,
         allowCustomModel: parsed.body.allowCustomModel,
@@ -642,33 +692,32 @@ export async function handleScriptRuns(
         return true;
       }
       try {
-        task = await createTaskExtended(
-          parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
-          {
-            agentId: parsed.body.agentId,
-            routingReason:
-              parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
-            routingNote: parsed.body.routingNote,
-            routingSource: parsed.body.routingReason
-              ? "declared"
-              : parsed.body.agentId
-                ? "engine_default"
-                : undefined,
-            tags: parsed.body.tags,
-            priority: parsed.body.priority,
-            dependsOn: parsed.body.dependsOn,
-            offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
-            taskType: "script-run-step",
-            source: "mcp",
-            dir: parsed.body.dir,
-            vcsRepo: parsed.body.vcsRepo,
-            model: parsed.body.model,
-            parentTaskId: parsed.body.parentTaskId,
-            requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
-            outputSchema: parsed.body.outputSchema,
-            contextKey,
-          },
-        );
+        task = await createTaskExtended(taskDescription, {
+          agentId: parsed.body.agentId,
+          routingReason:
+            parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
+          routingNote: parsed.body.routingNote,
+          routingSource: parsed.body.routingReason
+            ? "declared"
+            : parsed.body.agentId
+              ? "engine_default"
+              : undefined,
+          tags: parsed.body.tags,
+          priority: parsed.body.priority,
+          dependsOn: parsed.body.dependsOn,
+          offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
+          taskType: "script-run-step",
+          source: "mcp",
+          // Counts the run toward the launcher's follow-up loop cap.
+          creatorAgentId: run.agentId,
+          dir: parsed.body.dir,
+          vcsRepo: parsed.body.vcsRepo,
+          model: parsed.body.model,
+          parentTaskId: parsed.body.parentTaskId,
+          requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+          outputSchema: parsed.body.outputSchema,
+          contextKey,
+        });
       } catch (error) {
         if (error instanceof ExtensionAgentAssignmentError) {
           jsonError(res, error.message, 400);

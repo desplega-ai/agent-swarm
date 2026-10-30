@@ -447,6 +447,7 @@ value:hasFirstCompletedTask
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
 value:hasPendingSteering
+value:hasScriptRunStepTasks
 value:heartbeatActiveSession
 value:incrKv
 value:incrementEmptyPollCount
@@ -662,6 +663,7 @@ value:getTasksCount
 value:giveUpStaleChatRelays
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
+value:hasScriptRunStepTasks
 value:isLinearTrackerContextKey
 value:markChatRelayAttempted
 value:markChatRelayDelivered

@@ -1969,8 +1969,11 @@ export async function findRecentFailedTaskInThread(
 }
 
 /**
- * Count the tasks one agent created through `send-task` in a Slack thread
- * since the window start. The follow-up re-delegation loop cap reads this.
+ * Count the dispatches one agent made into a Slack thread since the window
+ * start: each `send-task` task counts once, and each durable script run counts
+ * once however many `ctx.step.agentTask` steps it created (step tasks share the
+ * `script-run:<runId>:` contextKey prefix). The follow-up re-delegation loop
+ * cap reads this.
  */
 export async function countAgentDispatchesInThread(
   channelId: string,
@@ -1980,7 +1983,11 @@ export async function countAgentDispatchesInThread(
 ): Promise<number> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
   const row = await getDbClient().get<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM agent_tasks
+    `SELECT COUNT(DISTINCT CASE
+         WHEN taskType = 'script-run-step' AND contextKey LIKE 'script-run:%:%'
+           THEN substr(contextKey, 1, instr(substr(contextKey, 12), ':') + 10)
+         ELSE id
+       END) AS c FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
        AND creatorAgentId = ?
@@ -1989,6 +1996,23 @@ export async function countAgentDispatchesInThread(
     [channelId, threadTs, creatorAgentId, since],
   );
   return row?.c ?? 0;
+}
+
+/**
+ * Whether a durable script run has already dispatched any `ctx.step.agentTask`
+ * step. Step tasks carry the contextKey `script-run:<runId>:<stepKey>`; the
+ * half-open range keeps the lookup on the contextKey index.
+ */
+export async function hasScriptRunStepTasks(runId: string): Promise<boolean> {
+  const prefix = `script-run:${runId}:`;
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found FROM agent_tasks
+       WHERE contextKey >= ? AND contextKey < ?
+       AND taskType = 'script-run-step'
+       LIMIT 1`,
+    [prefix, `script-run:${runId};`],
+  );
+  return row !== null && row !== undefined;
 }
 
 /**

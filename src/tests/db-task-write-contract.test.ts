@@ -470,6 +470,7 @@ value:hasFirstCompletedTask
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
 value:hasPendingSteering
+value:hasScriptRunStepTasks
 value:heartbeatActiveSession
 value:incrKv
 value:incrementEmptyPollCount

@@ -3149,6 +3149,8 @@ export const ScriptRunSchema = z
     lastHeartbeatAt: z.string().optional(),
     idempotencyKey: z.string().optional(),
     requestedByUserId: z.string().optional(),
+    /** Task whose session launched the run; the follow-up re-delegation guard reads it. */
+    sourceTaskId: z.string().optional(),
   })
   .openapi("ScriptRun");
 export type ScriptRun = z.infer<typeof ScriptRunSchema>;
@@ -3157,6 +3159,7 @@ export const ScriptRunListItemSchema = ScriptRunSchema.omit({
   source: true,
   args: true,
   output: true,
+  sourceTaskId: true,
 });
 export type ScriptRunListItem = z.infer<typeof ScriptRunListItemSchema>;
 

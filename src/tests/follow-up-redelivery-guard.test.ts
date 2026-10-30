@@ -4,6 +4,7 @@ import {
   cancelTask,
   closeDb,
   completeTask,
+  countAgentDispatchesInThread,
   createAgent,
   createTaskExtended,
   failTask,
@@ -14,10 +15,10 @@ import {
 } from "../be/db";
 import {
   FOLLOW_UP_DISPATCH_CAP,
+  FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
   FOLLOW_UP_SAME_WORK_PAGE_SIZE,
-  sendTaskHandler,
-  sendTaskInputSchema,
-} from "../tools/send-task";
+} from "../tasks/follow-up-redelegation-guard";
+import { sendTaskHandler, sendTaskInputSchema } from "../tools/send-task";
 import { DEDUP_SCAN_LIMIT, findDuplicateTask } from "../tools/task-dedup";
 import { ownerCtx } from "../tools/task-tool-ctx";
 
@@ -430,6 +431,65 @@ describe("send-task follow-up re-delegation guard", () => {
     expect(result.message).toContain("loop-cap rule");
     expect(result.message).toContain(`cap ${FOLLOW_UP_DISPATCH_CAP}`);
     expect(result.message).toContain("allowRedelegation: true");
+  });
+
+  /** A durable run's `ctx.step.agentTask` step tasks, created by the Lead in the thread. */
+  async function runSteps(channel: string, thread: string, steps: number) {
+    const runId = crypto.randomUUID();
+    for (let i = 0; i < steps; i++) {
+      await createTaskExtended(`deck slide ${i} for run ${runId.slice(0, 8)} words ${i * 11}`, {
+        agentId: workerAgent.id,
+        creatorAgentId: leadAgent.id,
+        source: "mcp",
+        taskType: "script-run-step",
+        contextKey: `script-run:${runId}:slide-${i}`,
+        slackChannelId: channel,
+        slackThreadTs: thread,
+      });
+    }
+    return runId;
+  }
+
+  test("a 29-step durable run plus one send-task counts as two dispatches", async () => {
+    await runSteps("C_LOOP_RUN", "4.3", 29);
+    await createTaskExtended("one plain send-task dispatch into the thread", {
+      agentId: workerAgent.id,
+      creatorAgentId: leadAgent.id,
+      source: "mcp",
+      slackChannelId: "C_LOOP_RUN",
+      slackThreadTs: "4.3",
+    });
+    expect(
+      await countAgentDispatchesInThread(
+        "C_LOOP_RUN",
+        "4.3",
+        leadAgent.id,
+        FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
+      ),
+    ).toBe(2);
+    const session = await leadSession("C_LOOP_RUN", "4.3");
+
+    const result = await dispatch(session.id, "summarize the deck review notes for the team");
+    expect(result.ok).toBe(true);
+  });
+
+  test("the loop cap counts each durable run and each send-task once", async () => {
+    for (let i = 0; i < FOLLOW_UP_DISPATCH_CAP / 2; i++) {
+      await runSteps("C_LOOP_MIX", "4.4", 3);
+      await createTaskExtended(`mixed loop send-task ${i} unique words ${i * 17}`, {
+        agentId: workerAgent.id,
+        creatorAgentId: leadAgent.id,
+        source: "mcp",
+        slackChannelId: "C_LOOP_MIX",
+        slackThreadTs: "4.4",
+      });
+    }
+    const session = await leadSession("C_LOOP_MIX", "4.4");
+
+    const result = await dispatch(session.id, "write the release announcement for the blog");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("loop-cap rule");
+    expect(result.message).toContain(`dispatched ${FOLLOW_UP_DISPATCH_CAP} times`);
   });
 
   test("dispatches older than the loop-cap window do not count", async () => {

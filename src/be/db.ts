@@ -376,6 +376,7 @@ export {
   giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
+  hasScriptRunStepTasks,
   isLinearTrackerContextKey,
   markChatRelayAttempted,
   markChatRelayDelivered,
@@ -14118,6 +14119,7 @@ type ScriptRunRow = {
   last_heartbeat_at: string | null;
   idempotencyKey: string | null;
   requestedByUserId: string | null;
+  sourceTaskId: string | null;
   created_by: string | null;
   updated_by: string | null;
 };
@@ -14162,6 +14164,7 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
+    sourceTaskId: row.sourceTaskId ?? undefined,
   };
 }
 
@@ -14190,6 +14193,7 @@ export async function createScriptRun(data: {
   scriptName?: string;
   idempotencyKey?: string;
   requestedByUserId?: string;
+  sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
@@ -14204,8 +14208,9 @@ export async function createScriptRun(data: {
 
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
-        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
+         created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14218,6 +14223,7 @@ export async function createScriptRun(data: {
       sealJson(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
+      data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
     ],

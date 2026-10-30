@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import {
   closeDb,
   completeTask,
+  countAgentDispatchesInThread,
   createAgent,
   createTaskExtended,
   failTask,
@@ -21,6 +22,10 @@ import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
+import {
+  FOLLOW_UP_DISPATCH_CAP,
+  FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
+} from "../tasks/follow-up-redelegation-guard";
 import type { AgentTask } from "../types";
 import {
   clearVolatileSecretsForTesting,
@@ -715,6 +720,217 @@ describe("/api/script-runs HTTP", () => {
     const body = (await detail.json()) as { run: { status: string; error?: string } };
     expect(body.run.status).toBe("failed");
     expect(body.run.error).toBe("original failure");
+  });
+});
+
+describe("ctx.step.agentTask follow-up re-delegation guard", () => {
+  /** A session task of the launching agent in a Slack thread (a follow-up by default). */
+  async function session(channel: string, thread: string, taskType = "follow-up") {
+    return createTaskExtended("Worker task completed — review needed.", {
+      agentId,
+      source: "system",
+      taskType,
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+  }
+
+  async function completedWork(channel: string, thread: string, text: string) {
+    const task = await createTaskExtended(text, {
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+    await completeTask(task.id, "done");
+    return task;
+  }
+
+  async function launch(sourceTaskId?: string): Promise<string> {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+      headers: sourceTaskId ? { "X-Source-Task-Id": sourceTaskId } : {},
+    });
+    expect(created.status).toBe(201);
+    return ((await created.json()) as { id: string }).id;
+  }
+
+  /**
+   * Call the step route and complete the step task it creates (as a worker
+   * would), so the route's long-poll returns 200. A blocked step returns at once.
+   */
+  async function step(
+    runId: string,
+    stepKey: string,
+    task: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<TestResponse> {
+    let settled = false;
+    const response = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey, task, ...extra }),
+    }).finally(() => {
+      settled = true;
+    });
+    const contextKey = `script-run:${runId}:${stepKey}`;
+    for (let i = 0; i < 100 && !settled; i++) {
+      const created = await getLatestScriptRunStepTaskByContextKey(contextKey);
+      if (created) {
+        if (created.status !== "completed") await completeTask(created.id, "done");
+        break;
+      }
+      await Bun.sleep(10);
+    }
+    return response;
+  }
+
+  /** Dispatches by the launching agent already in the thread, as send-task makes them. */
+  async function sendTaskDispatches(channel: string, thread: string, count: number) {
+    for (let i = 0; i < count; i++) {
+      await createTaskExtended(`earlier send-task dispatch ${i} unique words ${i * 19}`, {
+        creatorAgentId: agentId,
+        source: "mcp",
+        slackChannelId: channel,
+        slackThreadTs: thread,
+      });
+    }
+  }
+
+  test("records the launching session's task, but not another agent's", async () => {
+    const own = await session("C_RUN_SRC", "1.1");
+    const runId = await launch(own.id);
+    expect(
+      await getDbClient().get("SELECT sourceTaskId FROM script_runs WHERE id = ?", [runId]),
+    ).toEqual({ sourceTaskId: own.id });
+
+    const other = await createAgent({ name: "guard-other-agent", isLead: false, status: "idle" });
+    const foreign = await createTaskExtended("someone else's session", { agentId: other.id });
+    const foreignRun = await launch(foreign.id);
+    expect(
+      await getDbClient().get("SELECT sourceTaskId FROM script_runs WHERE id = ?", [foreignRun]),
+    ).toEqual({ sourceTaskId: null });
+  });
+
+  test("a run that repeats completed thread work is blocked unless allowRedelegation", async () => {
+    const done = await completedWork(
+      "C_RUN_SAME",
+      "2.1",
+      "rebuild the pricing deck from the new numbers",
+    );
+    const followUp = await session("C_RUN_SAME", "2.1");
+    const runId = await launch(followUp.id);
+
+    const blocked = await step(runId, "rebuild", "rebuild the pricing deck from the new numbers");
+    expect(blocked.status).toBe(422);
+    const body = (await blocked.json()) as { error: string; rule: string };
+    expect(body.rule).toBe("same-work");
+    expect(body.error).toContain(done.id.slice(0, 8));
+    expect(body.error).toContain("allowRedelegation: true");
+    expect(await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:rebuild`)).toBeNull();
+
+    const allowed = await step(runId, "rebuild", "rebuild the pricing deck from the new numbers", {
+      allowRedelegation: true,
+    });
+    expect(allowed.status).toBe(200);
+  });
+
+  test("later steps are never compared against the run's own completed steps", async () => {
+    const followUp = await session("C_RUN_STEPS", "3.1");
+    const runId = await launch(followUp.id);
+    const text = "render slide variations for the seed deck review";
+
+    const first = await step(runId, "slide-1", text, { parentTaskId: followUp.id });
+    expect(first.status).toBe(200);
+    const firstTask = await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:slide-1`);
+    expect(firstTask?.slackThreadTs).toBe("3.1");
+    expect(firstTask?.status).toBe("completed");
+    expect(firstTask?.creatorAgentId).toBe(agentId);
+
+    const second = await step(runId, "slide-2", text, { parentTaskId: followUp.id });
+    expect(second.status).toBe(200);
+  });
+
+  test("a 29-step run counts once, and its later steps never hit the loop cap", async () => {
+    await sendTaskDispatches("C_RUN_LONG", "4.1", FOLLOW_UP_DISPATCH_CAP - 1);
+    const followUp = await session("C_RUN_LONG", "4.1");
+    const runId = await launch(followUp.id);
+
+    const first = await step(runId, "slide-1", "deck slide 1 opening words", {
+      parentTaskId: followUp.id,
+    });
+    expect(first.status).toBe(200);
+    // The thread now holds 10 dispatches; a per-step cap check would block these.
+    const rest = await Promise.all(
+      Array.from({ length: 28 }, (_, i) =>
+        step(runId, `slide-${i + 2}`, `deck slide ${i + 2} words ${(i + 2) * 23}`, {
+          parentTaskId: followUp.id,
+        }),
+      ),
+    );
+    expect(rest.map((r) => r.status)).toEqual(Array(28).fill(200));
+    expect(
+      await countAgentDispatchesInThread(
+        "C_RUN_LONG",
+        "4.1",
+        agentId,
+        FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
+      ),
+    ).toBe(FOLLOW_UP_DISPATCH_CAP);
+  }, 30_000);
+
+  test("after 10 dispatches in the thread, the next run is blocked by the loop cap", async () => {
+    const followUp = await session("C_RUN_CAP", "5.1");
+    await sendTaskDispatches("C_RUN_CAP", "5.1", FOLLOW_UP_DISPATCH_CAP / 2);
+    for (let r = 0; r < FOLLOW_UP_DISPATCH_CAP / 2; r++) {
+      const earlier = await launch(followUp.id);
+      // Random words, so no earlier step matches a later run's first step.
+      const responses = await Promise.all(
+        [0, 1].map((i) =>
+          step(earlier, `s-${i}`, Array.from({ length: 4 }, () => crypto.randomUUID()).join(" "), {
+            parentTaskId: followUp.id,
+          }),
+        ),
+      );
+      expect(responses.map((r) => r.status)).toEqual([200, 200]);
+    }
+
+    const runId = await launch(followUp.id);
+    const blocked = await step(runId, "next", "publish the investor update email draft");
+    expect(blocked.status).toBe(422);
+    const body = (await blocked.json()) as { error: string; rule: string };
+    expect(body.rule).toBe("loop-cap");
+    expect(body.error).toContain(`dispatched ${FOLLOW_UP_DISPATCH_CAP} times`);
+
+    const allowed = await step(runId, "next", "publish the investor update email draft", {
+      allowRedelegation: true,
+    });
+    expect(allowed.status).toBe(200);
+  }, 30_000);
+
+  test("a replayed stepKey is never blocked, even after the thread hit the cap", async () => {
+    const followUp = await session("C_RUN_REPLAY", "6.1");
+    const runId = await launch(followUp.id);
+    const first = await step(runId, "only", "compile the weekly metrics digest");
+    expect(first.status).toBe(200);
+
+    await sendTaskDispatches("C_RUN_REPLAY", "6.1", FOLLOW_UP_DISPATCH_CAP);
+    await completedWork("C_RUN_REPLAY", "6.1", "compile the weekly metrics digest");
+
+    const replay = await step(runId, "only", "compile the weekly metrics digest");
+    expect(replay.status).toBe(200);
+  });
+
+  test("a run not launched from a follow-up is unaffected", async () => {
+    await completedWork("C_RUN_PLAIN", "7.1", "refresh the onboarding checklist copy");
+    await sendTaskDispatches("C_RUN_PLAIN", "7.1", FOLLOW_UP_DISPATCH_CAP);
+    const feature = await session("C_RUN_PLAIN", "7.1", "feature");
+
+    for (const sourceTaskId of [feature.id, undefined]) {
+      const runId = await launch(sourceTaskId);
+      const response = await step(runId, "refresh", "refresh the onboarding checklist copy");
+      expect(response.status).toBe(200);
+    }
   });
 });
 
