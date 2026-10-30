@@ -6,7 +6,8 @@
  * (https://github.com/pingdotgg/t3code, MIT License, Copyright (c) 2026 T3
  * Tools Inc.): the person's message is a right-aligned bubble, the agent's
  * prose is plain markdown with no bubble, a run of tool calls is one summary
- * line that opens to compact 24 px lines, a live run shows its newest step
+ * line that opens to compact 24 px lines (each tool line opens to its full
+ * command or input and its output), a live run shows its newest step
  * with a "Working for" timer, and a finished run folds behind "Worked for".
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
  *
@@ -34,10 +35,11 @@ import {
   Terminal,
   Wrench,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AgentTask } from "@/api/types";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { MessageCopyButton } from "@/components/shared/message-copy-button";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
@@ -54,6 +56,7 @@ import {
 import { statusLabel } from "@/lib/status-labels";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatDuration, formatRelativeTime, parseUTCDate } from "@/lib/utils";
+import { ToolDetails } from "./tool-details";
 import {
   entrySummary,
   foldedTurnRows,
@@ -176,8 +179,14 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
   switch (row.kind) {
     case "assistant":
       return (
-        <div data-slot="transcript-assistant" className="min-w-0 px-1 text-sm leading-relaxed">
-          <MarkdownView text={row.text} />
+        <div
+          data-slot="transcript-assistant"
+          className="group/transcript-message flex min-w-0 items-start gap-1 px-1 text-sm leading-relaxed"
+        >
+          <div className="min-w-0 flex-1">
+            <MarkdownView text={row.text} />
+          </div>
+          <MessageCopyButton text={row.text} hover group="transcript-message" />
         </div>
       );
     case "steer":
@@ -230,9 +239,9 @@ function DelegationCard({ task, agentName }: { task: AgentTask; agentName: strin
 }
 
 /**
- * The person's message: a right-aligned bubble. A long one shows its first
- * lines under a fade, with "Show full message". The task's prompt and every
- * steering message use it.
+ * The person's message: a right-aligned bubble with a Copy under it. A long
+ * one shows its first lines under a fade, with "Show full message". The
+ * task's prompt and every steering message use it.
  */
 export function TranscriptUserMessage({
   text,
@@ -257,7 +266,7 @@ export function TranscriptUserMessage({
     <section
       aria-label={label}
       data-slot="transcript-user"
-      className={cn("flex min-w-0 flex-col items-end gap-1", className)}
+      className={cn("group/transcript-message flex min-w-0 flex-col items-end gap-1", className)}
     >
       <div
         className={cn(
@@ -268,15 +277,18 @@ export function TranscriptUserMessage({
         {header}
         {text}
       </div>
-      {long ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="hit-area text-xs text-muted-foreground hover:text-foreground"
-        >
-          {expanded ? "Show less" : "Show full message"}
-        </button>
-      ) : null}
+      <div className="flex min-w-0 items-center gap-2">
+        {long ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="hit-area text-xs text-muted-foreground hover:text-foreground"
+          >
+            {expanded ? "Show less" : "Show full message"}
+          </button>
+        ) : null}
+        {text.trim() ? <MessageCopyButton text={text} hover group="transcript-message" /> : null}
+      </div>
       {footer}
     </section>
   );
@@ -323,35 +335,53 @@ function WorkingRow({ since }: { since: string }) {
 /**
  * A run of work. One tool call is its own line. More fold into a summary
  * line that opens to every step; a live run also shows its newest step.
+ * The open list scrolls past 18rem until a tool line in it opens: from then
+ * on, until the list closes, it shows every step, so details never scroll
+ * inside it.
  */
 function WorkRow({ entries, live }: { entries: WorkEntry[]; live: boolean }) {
   const [open, setOpen] = useState(false);
+  const [uncapped, setUncapped] = useState(false);
   const newest = entries[entries.length - 1];
   if (entries.length === 1 && newest.kind !== "thinking") {
     return (
       <Trace>
-        <WorkEntryLine entry={newest} running={live} />
+        <WorkEntryLine key={newest.id} entry={newest} running={live} />
       </Trace>
     );
   }
   const failed = entries.some((e) => e.kind === "tool" && e.status === "error");
   return (
     <Trace data-slot="transcript-work" className="gap-1">
-      <TraceCollapsible open={open} onOpenChange={setOpen}>
+      <TraceCollapsible
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setUncapped(false);
+        }}
+      >
         <TraceCollapsibleTrigger className="hit-area">
           <TraceLine status={failed ? "error" : undefined} className="text-sm">
             <TraceTitle>{summarizeWork(entries)}</TraceTitle>
           </TraceLine>
         </TraceCollapsibleTrigger>
-        <TraceCollapsibleContent className="mt-1 max-h-[min(18rem,50dvh)] overflow-y-auto">
+        <TraceCollapsibleContent
+          className={cn("mt-1", !uncapped && "max-h-[min(18rem,50dvh)] overflow-y-auto")}
+        >
           <Trace className="gap-1">
             {entries.map((entry) => (
-              <WorkEntryLine key={entry.id} entry={entry} running={false} />
+              <WorkEntryLine
+                key={entry.id}
+                entry={entry}
+                running={false}
+                onOpen={() => setUncapped(true)}
+              />
             ))}
           </Trace>
         </TraceCollapsibleContent>
       </TraceCollapsible>
-      {live && !open ? <WorkEntryLine entry={newest} running /> : null}
+      {/* Keyed: a new call gets a closed line, never the details of the call before it. */}
+      {live && !open ? <WorkEntryLine key={newest.id} entry={newest} running /> : null}
     </Trace>
   );
 }
@@ -367,31 +397,18 @@ function EntryTime({ at }: { at: string }) {
   );
 }
 
-function WorkEntryLine({ entry, running }: { entry: WorkEntry; running: boolean }) {
+function WorkEntryLine({
+  entry,
+  running,
+  onOpen,
+}: {
+  entry: WorkEntry;
+  running: boolean;
+  /** A tool line's details opened. */
+  onOpen?: () => void;
+}) {
   if (entry.kind === "thinking") return <ThinkingLine text={entry.text} running={running} />;
-  if (entry.kind === "tool") {
-    const Icon = TOOL_ICONS[entry.toolKind];
-    const status =
-      entry.status === "error"
-        ? "error"
-        : running || entry.status === "running"
-          ? "running"
-          : undefined;
-    return (
-      <div title={entrySummary(entry)}>
-        <TraceLine status={status} className="min-h-6 text-xs">
-          <TraceIcon>
-            <Icon className="size-3" />
-          </TraceIcon>
-          <TraceTitle className="font-mono">
-            {entry.title}
-            {entry.detail ? <span className="opacity-70"> {entry.detail}</span> : null}
-          </TraceTitle>
-          <EntryTime at={entry.at} />
-        </TraceLine>
-      </div>
-    );
-  }
+  if (entry.kind === "tool") return <ToolLine entry={entry} running={running} onOpen={onOpen} />;
   return (
     <div title={entry.text}>
       <TraceLine status={running ? "running" : undefined} className="min-h-6 text-xs">
@@ -406,6 +423,81 @@ function WorkEntryLine({ entry, running }: { entry: WorkEntry; running: boolean 
         <EntryTime at={entry.at} />
       </TraceLine>
     </div>
+  );
+}
+
+/**
+ * Scrolls `el`'s scroll containers, innermost first, until `el` is back at
+ * `top` on screen.
+ */
+function keepInPlace(el: HTMLElement, top: number) {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    const delta = el.getBoundingClientRect().top - top;
+    if (Math.abs(delta) < 1) return;
+    const { overflowY } = getComputedStyle(parent);
+    if (overflowY === "auto" || overflowY === "scroll") parent.scrollTop += delta;
+  }
+}
+
+/**
+ * A tool call: one quiet line that opens to its full command or input and its
+ * output. Opening it can lift the work list's height cap (`WorkRow`), so the
+ * line is scrolled back to where it was clicked.
+ */
+function ToolLine({
+  entry,
+  running,
+  onOpen,
+}: {
+  entry: Extract<WorkEntry, { kind: "tool" }>;
+  running: boolean;
+  onOpen?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const clickedTop = useRef<number | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after each toggle
+  useLayoutEffect(() => {
+    if (triggerRef.current && clickedTop.current !== null) {
+      keepInPlace(triggerRef.current, clickedTop.current);
+    }
+    clickedTop.current = null;
+  }, [open]);
+  const toggle = (next: boolean) => {
+    clickedTop.current = triggerRef.current?.getBoundingClientRect().top ?? null;
+    setOpen(next);
+    if (next) onOpen?.();
+  };
+  const Icon = TOOL_ICONS[entry.toolKind];
+  const status =
+    entry.status === "error"
+      ? "error"
+      : running || entry.status === "running"
+        ? "running"
+        : undefined;
+  return (
+    <TraceCollapsible open={open} onOpenChange={toggle}>
+      <TraceCollapsibleTrigger
+        ref={triggerRef}
+        quietChevron
+        className="hit-area"
+        title={entrySummary(entry)}
+      >
+        <TraceLine status={status} className="min-h-6 text-xs">
+          <TraceIcon>
+            <Icon className="size-3" />
+          </TraceIcon>
+          <TraceTitle className="font-mono">
+            {entry.title}
+            {entry.detail ? <span className="opacity-70"> {entry.detail}</span> : null}
+          </TraceTitle>
+          <EntryTime at={entry.at} />
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="mt-1 mb-2">
+        <ToolDetails entry={entry} />
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }
 

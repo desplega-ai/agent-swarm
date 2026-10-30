@@ -47,11 +47,11 @@ const REVEAL_MS = 200;
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
  * message, then its parts (a deferred wake-up starts a new part). A part
- * shows the swarm's reply, a folded line for its workers, the swarm's latest
- * answer, and a live line while the lead works. Handoffs On shows the
- * internal rows. Tasks that fit no turn render as plain task cards at the
- * end. A typing person shows as a bubble row in the flow, so it never covers
- * a message.
+ * shows the swarm's reply, a row per worker step (two or more fold into a
+ * group under one head), the swarm's latest answer, and a live line while the
+ * lead works. Handoffs On shows the internal rows. Tasks that fit no turn
+ * render as plain task cards at the end. A typing person shows as a bubble
+ * row in the flow, so it never covers a message.
  */
 export function TurnTimeline({
   rootTaskId,
@@ -87,9 +87,12 @@ export function TurnTimeline({
   );
   const now = useClock(openWork);
   const rootSource = turns[0]?.parts[0]?.reply.source ?? "ui";
+  const relayout = () => {
+    if (onLayoutChange) window.setTimeout(onLayoutChange, REVEAL_MS);
+  };
   const toggle = (partId: string) => {
     blocks.toggle(partId);
-    if (onLayoutChange) window.setTimeout(onLayoutChange, REVEAL_MS);
+    relayout();
   };
 
   if (turns.length === 0 && rest.length === 0) {
@@ -118,8 +121,10 @@ export function TurnTimeline({
               showHandoffs={showHandoffs}
               open={blocks.isOpen(part.id)}
               onToggle={() => toggle(part.id)}
+              onStepToggle={relayout}
               stepsId={`${idPrefix}-steps-${part.id}`}
               nameOf={nameOf}
+              now={now}
             />
           ))}
         </Fragment>
@@ -147,8 +152,10 @@ function PartView({
   showHandoffs,
   open,
   onToggle,
+  onStepToggle,
   stepsId,
   nameOf,
+  now,
 }: {
   part: TurnPart;
   card: boolean;
@@ -157,37 +164,42 @@ function PartView({
   showHandoffs: boolean;
   open: boolean;
   onToggle: () => void;
+  /** Called after a person opens or closes one step row. */
+  onStepToggle: () => void;
   stepsId: string;
   nameOf: (agentId: string | null) => string;
+  now: number;
 }) {
   const internal = showHandoffs ? part.internal : [];
+  const steps = partSteps(part);
   // Steps and handoffs in one column, oldest first.
   const rows = [
-    ...partSteps(part).map((step) => ({ at: step.tries[0].createdAt, step, task: null })),
+    ...steps.map((step) => ({ at: step.tries[0].createdAt, step, task: null })),
     ...internal.map((task) => ({ at: task.createdAt, step: null, task })),
   ].sort((a, b) => a.at.localeCompare(b.at));
-  const block = (
-    <div className="mt-1 flex min-w-0 flex-col border-l-2 border-border-subtle pl-3">
-      {rows.map((row) =>
-        row.step ? (
-          <WorkerStep
-            key={row.step.tries[0].id}
-            step={row.step}
-            agentName={nameOf(row.step.agentId)}
-          />
-        ) : row.task ? (
-          <InternalLine key={row.task.id} task={row.task} />
-        ) : null,
-      )}
-    </div>
+  const list = rows.map((row) =>
+    row.step ? (
+      <WorkerStep
+        key={row.step.tries[0].id}
+        step={row.step}
+        agentName={nameOf(row.step.agentId)}
+        now={now}
+        onToggle={onStepToggle}
+      />
+    ) : row.task ? (
+      <div key={row.task.id} className="px-1.5">
+        <InternalLine task={row.task} />
+      </div>
+    ) : null,
   );
   return (
     <div data-slot="swarm-turn" className="flex min-w-0 flex-col gap-2">
       {card ? <TaskCard task={part.reply} className="pb-0" /> : <SwarmReply task={part.reply} />}
-      {summary ? (
-        <div className="flex min-w-0 flex-col">
+      {summary && steps.length > 1 ? (
+        <div className="flex min-w-0 flex-col gap-1">
           <WorkerSummaryLine
             summary={summary}
+            steps={steps}
             nameOf={nameOf}
             open={open}
             onToggle={onToggle}
@@ -195,15 +207,18 @@ function PartView({
           />
           <div id={stepsId}>
             <AnimatedReveal open={open} speed="fast">
-              {block}
+              <div className="flex min-w-0 flex-col rounded-lg border border-border p-1">
+                {list}
+              </div>
             </AnimatedReveal>
           </div>
         </div>
       ) : rows.length > 0 ? (
-        block
+        // One step (or handoffs only): plain rows, lined up with the reply text.
+        <div className="-mx-1.5 flex min-w-0 flex-col">{list}</div>
       ) : null}
       {part.result ? (
-        <div className={summary || rows.length > 0 ? "mt-3" : undefined}>
+        <div className={rows.length > 0 ? "mt-3" : undefined}>
           <SwarmReply task={part.result} />
         </div>
       ) : null}

@@ -23,6 +23,9 @@ mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"))
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/components/shared/animated-reveal", () => require("./animated-reveal"));
 mock.module("@/components/shared/collapsible-section", () => require("./collapsible-section"));
+mock.module("@/components/shared/copy-value-button", () => require("./copy-value-button"));
+mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy-to-clipboard"));
+mock.module("@/components/ui/alert-dialog", () => require("../ui/alert-dialog"));
 mock.module("@/components/shared/in-app-or-external-link", () =>
   require("./in-app-or-external-link"),
 );

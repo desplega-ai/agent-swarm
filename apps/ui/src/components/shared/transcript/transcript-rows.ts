@@ -32,6 +32,12 @@ export type WorkEntry =
       detail: string;
       /** `running` while the call has no result yet. */
       status: "running" | "done" | "error";
+      /** The call's raw input: the details panel formats it only when it opens. */
+      input: unknown;
+      /** The result's text, once the result arrives. */
+      output?: string;
+      /** From the call to its result, from the two log timestamps. */
+      durationMs?: number;
     }
   | { kind: "thinking"; id: string; at: string; text: string }
   | { kind: "event"; id: string; at: string; text: string };
@@ -104,10 +110,12 @@ function steerTime(message: SteeringMessage): number {
  * settles its call's status.
  */
 function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
-  const results = new Map<string, ToolResultBlock>();
+  const results = new Map<string, { block: ToolResultBlock; t: number }>();
   for (const m of parsed) {
     for (const block of m.content) {
-      if (block.type === "tool_result") results.set(block.tool_use_id, block);
+      if (block.type === "tool_result") {
+        results.set(block.tool_use_id, { block, t: timeOf(m.timestamp) });
+      }
     }
   }
   const out: Item[] = [];
@@ -130,7 +138,10 @@ function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
             name: tool.name,
             title: tool.title,
             detail: tool.detail.trim(),
-            status: !result ? "running" : result.isError ? "error" : "done",
+            status: !result ? "running" : result.block.isError ? "error" : "done",
+            input: block.input,
+            output: result?.block.content,
+            durationMs: result && t > 0 && result.t >= t ? result.t - t : undefined,
           },
         });
       } else if (block.type === "thinking" && block.thinking.trim()) {

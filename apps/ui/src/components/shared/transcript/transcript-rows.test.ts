@@ -53,6 +53,7 @@ function tool(name: string, detail = "", status: "done" | "error" | "running" = 
     title: name,
     detail,
     status,
+    input: {},
   };
 }
 
@@ -79,6 +80,13 @@ describe("buildTranscriptRows", () => {
       "done",
       "error",
     ]);
+    // The details panel's data: the raw input, the result's text, and the
+    // time from the call's log line to the result's (one second apart here).
+    expect(work.entries[1]).toMatchObject({
+      input: { command: "ls" },
+      output: "boom",
+      durationMs: 1000,
+    });
   });
 
   test("leaves the harness's user turns and sub-agent messages out", () => {
@@ -95,7 +103,8 @@ describe("buildTranscriptRows", () => {
     const rows = buildTranscriptRows({
       messages: [msg("assistant", [{ type: "tool_use", id: "t9", name: "Grep", input: {} }])],
     });
-    expect(rows[0]?.kind === "work" && rows[0].entries[0]).toMatchObject({ status: "running" });
+    const entry = rows[0]?.kind === "work" ? rows[0].entries[0] : undefined;
+    expect(entry).toMatchObject({ status: "running", output: undefined, durationMs: undefined });
   });
 
   test("without messages, only work and steering remain; steering ends a run", () => {

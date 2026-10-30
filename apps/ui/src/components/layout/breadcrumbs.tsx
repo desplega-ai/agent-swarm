@@ -13,7 +13,6 @@ import { useScriptRun } from "@/api/hooks/use-script-runs";
 import { useScript } from "@/api/hooks/use-scripts";
 import { useSession } from "@/api/hooks/use-sessions";
 import { useSkill } from "@/api/hooks/use-skills";
-import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
 import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
 import {
@@ -24,7 +23,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
-import { taskListTitle } from "@/lib/task-title";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 
 const routeLabels: Record<string, string> = {
@@ -157,7 +155,6 @@ export function Breadcrumbs() {
 
   const { data: appMeta } = useApp(idFor("apps") || undefined);
   const { data: agentMeta } = useAgent(idFor("agents"));
-  const { data: taskMeta } = useTask(idFor("tasks"));
   const { data: workflowMeta } = useWorkflow(idFor("workflows"));
   // A run has no name of its own; label it by its workflow, not its id.
   const { data: workflowRunMeta } = useWorkflowRun(idFor("workflow-runs"));
@@ -199,29 +196,27 @@ export function Breadcrumbs() {
             ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
             : parent === "agents"
               ? agentMeta?.name
-              : parent === "tasks"
-                ? taskMeta && taskListTitle(taskMeta)
-                : parent === "workflows"
-                  ? workflowMeta?.name
-                  : parent === "workflow-runs"
-                    ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
-                    : parent === "schedules"
-                      ? scheduleMeta?.name
-                      : parent === "scripts"
-                        ? scriptMeta?.name
-                        : parent === "script-runs"
-                          ? scriptRunMeta?.run.scriptName
-                          : parent === "skills"
-                            ? skillMeta?.name
-                            : parent === "mcp-servers"
-                              ? mcpServerMeta?.name
-                              : parent === "repos"
-                                ? repoMeta?.name
-                                : parent === "approval-requests"
-                                  ? approvalMeta?.title
-                                  : parent === "connections"
-                                    ? connectionMeta?.slug
-                                    : undefined
+              : parent === "workflows"
+                ? workflowMeta?.name
+                : parent === "workflow-runs"
+                  ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
+                  : parent === "schedules"
+                    ? scheduleMeta?.name
+                    : parent === "scripts"
+                      ? scriptMeta?.name
+                      : parent === "script-runs"
+                        ? scriptRunMeta?.run.scriptName
+                        : parent === "skills"
+                          ? skillMeta?.name
+                          : parent === "mcp-servers"
+                            ? mcpServerMeta?.name
+                            : parent === "repos"
+                              ? repoMeta?.name
+                              : parent === "approval-requests"
+                                ? approvalMeta?.title
+                                : parent === "connections"
+                                  ? connectionMeta?.slug
+                                  : undefined
     : undefined;
 
   // `/apps/:id/p/<page>` — one app page. The literal `p` segment is not a
@@ -232,6 +227,10 @@ export function Breadcrumbs() {
   const appPageTitle = appPageName
     ? (appMeta?.app.definition.pages?.[appPageName]?.title ?? appPageName)
     : undefined;
+
+  // A task's title is the page's own heading (often long, and editable
+  // there), so its crumb is the short id instead.
+  const taskCrumb = parent === "tasks" && detailId ? `#${detailId.slice(0, 8)}` : undefined;
 
   const crumbs = segments
     .map((segment, index) => {
@@ -244,6 +243,8 @@ export function Breadcrumbs() {
       if (index === 1 && segment === detailId && contextualName) {
         label = contextualName.trim();
       }
+      const mono = index === 1 && segment === detailId && !!taskCrumb;
+      if (mono) label = taskCrumb;
       if (index === 3 && appPageTitle) {
         label = appPageTitle.trim();
       }
@@ -252,7 +253,7 @@ export function Breadcrumbs() {
       }
       const isLast = index === segments.length - 1;
 
-      return { path, label, isLast };
+      return { path, label, isLast, mono };
     })
     .filter((_, index) => !(appPageName && index === 2));
 
@@ -266,7 +267,7 @@ export function Breadcrumbs() {
       <nav className="flex min-w-0 items-center md:hidden" aria-label="Breadcrumb">
         <DropdownMenu>
           <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-foreground font-medium transition-colors hover:bg-accent">
-            <span className="truncate">{leaf.label}</span>
+            <span className={cn("truncate", leaf.mono && "font-mono")}>{leaf.label}</span>
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-w-[min(20rem,calc(100vw-2rem))]">
@@ -280,7 +281,7 @@ export function Breadcrumbs() {
               const content = (
                 <>
                   <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{crumb.label}</span>
+                  <span className={cn("truncate", crumb.mono && "font-mono")}>{crumb.label}</span>
                 </>
               );
               return (
@@ -325,9 +326,19 @@ export function Breadcrumbs() {
           >
             <ChevronRight className="size-3 shrink-0" />
             {crumb.isLast ? (
-              <span className="text-foreground font-medium truncate">{crumb.label}</span>
+              <span
+                className={cn("text-foreground font-medium truncate", crumb.mono && "font-mono")}
+              >
+                {crumb.label}
+              </span>
             ) : (
-              <Link to={crumb.path} className="hover:text-foreground transition-colors truncate">
+              <Link
+                to={crumb.path}
+                className={cn(
+                  "hover:text-foreground transition-colors truncate",
+                  crumb.mono && "font-mono",
+                )}
+              >
                 {crumb.label}
               </Link>
             )}

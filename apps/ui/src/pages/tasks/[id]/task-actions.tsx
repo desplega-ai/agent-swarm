@@ -5,11 +5,14 @@ import {
   Ellipsis,
   Hash,
   LifeBuoy,
+  MessagesSquare,
   Network,
   Pause,
+  Pencil,
   Play,
   Reply,
   RotateCcw,
+  ScrollText,
 } from "lucide-react";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -83,6 +86,11 @@ interface TaskActionModel {
   getHelp: ((opener: HTMLElement | null) => void) | null;
   /** Opens the experimental lineage view. Null when the API predates it. */
   lineage: (() => void) | null;
+  /** Opens the title's rename field. Null when the role cannot rename. */
+  rename: (() => void) | null;
+  /** The log shows the raw log, not the transcript. */
+  rawLog: boolean;
+  toggleRawLog: () => void;
   /**
    * What the caller's role allows (`useCan`). A hidden action would only
    * return 403. Follow up and Retry create a task.
@@ -96,7 +104,13 @@ const TASK_LINEAGE_MIN_VERSION = "2.4.2";
 /** Call before the page's early returns: `task` may still be loading. */
 export function useTaskActions(
   task: AgentTask | undefined,
-  handlers: { onFollowUp: () => void; onGetHelp: (opener: HTMLElement | null) => void },
+  handlers: {
+    onFollowUp: () => void;
+    onGetHelp: (opener: HTMLElement | null) => void;
+    onRename: () => void;
+    rawLog: boolean;
+    onToggleRawLog: () => void;
+  },
 ): TaskActionModel | null {
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
@@ -137,6 +151,9 @@ export function useTaskActions(
     diagnostics: failed ? buildDiagnostics(task, apiVersion) : null,
     getHelp: shouldShowTaskFailureHelp(task.status, resolved, issue) ? handlers.onGetHelp : null,
     lineage: lineageGate.supported ? () => void navigate(`/tasks/${task.id}/lineage`) : null,
+    rename: allowed.action ? handlers.onRename : null,
+    rawLog: handlers.rawLog,
+    toggleRawLog: handlers.onToggleRawLog,
     allowed,
   };
 }
@@ -253,6 +270,19 @@ function ResumeButton({ model }: { model: TaskActionModel }) {
   );
 }
 
+/**
+ * The log's view, as a toggle: the transcript is the default, the raw log
+ * shows every event.
+ */
+function RawLogMenuItem({ model, className }: { model: TaskActionModel; className?: string }) {
+  return (
+    <DropdownMenuItem className={className} onSelect={model.toggleRawLog}>
+      {model.rawLog ? <MessagesSquare /> : <ScrollText />}
+      {model.rawLog ? "Show transcript" : "Show raw log"}
+    </DropdownMenuItem>
+  );
+}
+
 /** "View lineage", tagged BETA: the experimental tree of every task this one belongs to. */
 function LineageMenuItem({ onSelect, className }: { onSelect: () => void; className?: string }) {
   return (
@@ -264,7 +294,10 @@ function LineageMenuItem({ onSelect, className }: { onSelect: () => void; classN
   );
 }
 
-/** The wide hero's "..." menu: Retry where it is not a button, Copy task id, View lineage, Get help. */
+/**
+ * The wide hero's "..." menu: Retry where it is not a button, Copy task id,
+ * the raw log toggle, View lineage, Get help.
+ */
 function MoreActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
   // Failed tasks keep Retry in the menu too, next to Get help: the hero has
@@ -291,6 +324,7 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
           <Hash />
           Copy task id
         </DropdownMenuItem>
+        <RawLogMenuItem model={model} />
         {model.lineage ? <LineageMenuItem onSelect={model.lineage} /> : null}
         {getHelp ? (
           <>
@@ -313,10 +347,18 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
  * - completed: Copy answer, Retry. Failed, cancelled, superseded: Retry.
  * - in progress: Pause. Paused: Resume.
  * - not finished: Cancel task, behind the confirm step.
- * - always: Copy task id, View lineage (beta), and Get help for a failed task.
+ * - always: Rename (with the role's action verb), Copy task id, the raw log
+ *   toggle, View lineage (beta), and Get help for a failed task.
  * The trigger and the items are 44 px tall.
  */
-export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
+export function TaskActionsMenu({
+  model,
+  triggerRef: givenTriggerRef,
+}: {
+  model: TaskActionModel;
+  /** The "..." trigger, for the page: a key that ends a rename focuses it. */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
+}) {
   const { status } = model.task;
   const terminal = TERMINAL_STATUSES.has(status);
   const { allowed } = model;
@@ -325,9 +367,15 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   // The menu item that opens the confirm step (or the help dialog) is gone
   // when it closes, so focus goes back to the "..." trigger.
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const ownTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = givenTriggerRef ?? ownTriggerRef;
+  // Rename puts a field in the heading's place. It opens once the menu has
+  // closed: the open menu holds the focus, and its close would take the
+  // focus back to the trigger.
+  const renaming = useRef(false);
   const answer = status === "completed" ? model.answer : null;
   const getHelp = model.getHelp;
+  const rename = model.rename;
   return (
     <>
       <DropdownMenu>
@@ -342,7 +390,16 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
             <Ellipsis />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent
+          align="end"
+          className="w-52"
+          onCloseAutoFocus={(event) => {
+            if (!renaming.current) return;
+            renaming.current = false;
+            event.preventDefault();
+            rename?.();
+          }}
+        >
           {answer ? (
             <DropdownMenuItem
               className="min-h-11"
@@ -384,6 +441,17 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
               Cancel task
             </DropdownMenuItem>
           ) : null}
+          {rename ? (
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={() => {
+                renaming.current = true;
+              }}
+            >
+              <Pencil />
+              Rename
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             className="min-h-11"
             onSelect={() => void copyWithToast(model.task.id, "Task id copied.")}
@@ -391,6 +459,7 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
             <Hash />
             Copy task id
           </DropdownMenuItem>
+          <RawLogMenuItem model={model} className="min-h-11" />
           {model.lineage ? <LineageMenuItem className="min-h-11" onSelect={model.lineage} /> : null}
           {getHelp ? (
             <>

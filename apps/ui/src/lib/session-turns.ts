@@ -282,8 +282,6 @@ export interface WorkerSummary {
    * `cancelled`: the last try of a step was cancelled or superseded.
    */
   state: "working" | "waiting" | "done" | "failed" | "cancelled";
-  /** The agents of the open steps (`working` and `waiting`). */
-  activeAgentIds: Array<string | null>;
   /** Wall clock: the first try's start to the last try's end, or to now while work runs. */
   durationMs: number;
   /** Earlier tries of the steps that passed. */
@@ -315,7 +313,6 @@ export function workerSummary(part: TurnPart, now: number): WorkerSummary | null
     return {
       agentIds,
       state: running.length > 0 ? "working" : "waiting",
-      activeAgentIds: [...new Set(active.map((step) => step.agentId))],
       durationMs: Math.max(0, now - since),
       retries,
       failed,
@@ -327,7 +324,6 @@ export function workerSummary(part: TurnPart, now: number): WorkerSummary | null
   return {
     agentIds,
     state: failed > 0 ? "failed" : cancelled > 0 ? "cancelled" : "done",
-    activeAgentIds: [],
     durationMs: Math.max(0, end - start),
     retries,
     failed,

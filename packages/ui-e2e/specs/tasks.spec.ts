@@ -20,7 +20,7 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await row.getByText(TASK_PROMPT).click();
   await expect(page).toHaveURL(`/tasks/${seed!.tasks.inProgress}`);
 
-  // The breadcrumb shows the same title, so match the heading role: plain text
+  // The transcript repeats the prompt, so match the heading role: plain text
   // matches two elements once both have rendered (a strict-mode violation).
   await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
   // The detail page renders both the narrow tab layout and the wide two-column

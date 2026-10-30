@@ -168,7 +168,7 @@ Eleven `action-*` tokens (violet, cyan, teal, orange, indigo, pink, purple, blue
 **Character:** One family carries the whole interface: Space Grotesk's slightly technical geometry gives the console its voice without a display font shouting over the data. Space Mono marks machine territory: session IDs, log output, code, version strings.
 
 ### Hierarchy
-- **Headline** (600, 1.25rem / `text-xl`): in-content heroes only (e.g. the sessions "What would you like the swarm to do?"). Route pages have NO in-page h1: the top-bar breadcrumb names the page. The task detail page is the one exception: its h1 is the task title, because the breadcrumb truncates it. For the same heading order, its details rail does not use `DetailPageSection` and `QuickStat` (`components/ui/detail-page-layout.tsx`): they draw an h4 at 10 px, under the Floor Rule. The rail has local section and row parts with an h2 at `text-meta`. The shared primitives keep their style on the other detail pages. Fixed rem scale: nothing fluid, nothing clamped.
+- **Headline** (600, 1.25rem / `text-xl`): in-content heroes only (e.g. the sessions "What would you like the swarm to do?"). Route pages have NO in-page h1: the top-bar breadcrumb names the page. The task detail page is the one exception: its h1 is the task title, because the breadcrumb shows only the short task id (`#3c2527d5`). For the same heading order, its details rail does not use `DetailPageSection` and `QuickStat` (`components/ui/detail-page-layout.tsx`): they draw an h4 at 10 px, under the Floor Rule. The rail has local section and row parts with an h2 at `text-meta`. The shared primitives keep their style on the other detail pages. Fixed rem scale: nothing fluid, nothing clamped.
 - **Title** (600, 1rem, leading-none): card and section titles (`CardTitle`).
 - **Body** (400, 0.875rem / `text-sm`, 1.5): the default reading size for descriptions, form text, table cells. Prose runs at 65–75ch max.
 - **Label** (500, 0.75rem / `text-xs`, uppercase + tracking-wide): `InfoRow` definition labels and quiet metadata.
@@ -237,7 +237,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Error / Disabled:** `aria-invalid` ring + destructive border; disabled at 50% opacity, cursor blocked.
 
 ### Navigation
-- **Style:** shadcn `Sidebar` shell (`app-sidebar.tsx`) on the sidebar token layer, one tonal step off the content field, amber for the active item; the borderless top bar's breadcrumb names the page (auto-humanized segments, entity names resolved; the home route shows the greeting there) while `PageHeader` carries only description/actions; global ⌘K `CommandMenu` for keyboard-first navigation.
+- **Style:** shadcn `Sidebar` shell (`app-sidebar.tsx`) on the sidebar token layer, one tonal step off the content field, amber for the active item; the borderless top bar's breadcrumb names the page (auto-humanized segments, entity names resolved, except a task, which shows its short id; the home route shows the greeting there) while `PageHeader` carries only description/actions; global ⌘K `CommandMenu` for keyboard-first navigation.
 
 ### Signature Components
 - **DataGrid** (AG Grid wrapper): the mandatory surface for every data list from `md` up, themed via `ag-grid.css` to the token system, fills remaining page height, row-click drill-down with `stopPropagation` on inline actions.

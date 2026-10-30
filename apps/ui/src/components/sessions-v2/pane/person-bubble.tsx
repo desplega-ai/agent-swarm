@@ -1,6 +1,7 @@
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
+import { MessageCopyButton } from "@/components/shared/message-copy-button";
 import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -8,7 +9,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { userName } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
-import { MessageCopyButton, MessageTime } from "./swarm-reply";
+import { MessageTime } from "./swarm-reply";
 
 /** Where a message came from, when not the dashboard (SPEC R10.1). */
 function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {

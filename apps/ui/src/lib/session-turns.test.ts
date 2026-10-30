@@ -378,10 +378,7 @@ describe("buildTurns on sB1 (dashboard, two people)", () => {
     expect(summary(turns[2].parts[0])).toMatchObject({ retries: 2, state: "done" });
     expect(span(turns[2].parts[0])).toBe("1h 36m");
     // "Writer is working · 4m"
-    expect(summary(turns[3].parts[0])).toMatchObject({
-      state: "working",
-      activeAgentIds: ["writer"],
-    });
+    expect(summary(turns[3].parts[0])).toMatchObject({ state: "working" });
     expect(span(turns[3].parts[0])).toBe("4m");
   });
 

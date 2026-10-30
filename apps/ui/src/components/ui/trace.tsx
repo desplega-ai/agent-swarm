@@ -97,8 +97,12 @@ function TraceCollapsible({
 function TraceCollapsibleTrigger({
   className,
   children,
+  quietChevron = false,
   ...props
-}: Omit<React.ComponentProps<typeof CollapsibleTrigger>, "asChild">) {
+}: Omit<React.ComponentProps<typeof CollapsibleTrigger>, "asChild"> & {
+  /** Show the chevron only on hover, on focus, and while open: for long lists of lines. */
+  quietChevron?: boolean;
+}) {
   return (
     <CollapsibleTrigger
       data-slot="trace-collapsible-trigger"
@@ -109,7 +113,13 @@ function TraceCollapsibleTrigger({
       {...props}
     >
       {children}
-      <TraceIcon className="transition-transform group-aria-expanded/trace-collapsible-trigger:rotate-90">
+      <TraceIcon
+        className={cn(
+          "transition-transform group-aria-expanded/trace-collapsible-trigger:rotate-90",
+          quietChevron &&
+            "opacity-0 group-hover/trace-collapsible-trigger:opacity-100 group-focus-visible/trace-collapsible-trigger:opacity-100 group-aria-expanded/trace-collapsible-trigger:opacity-100",
+        )}
+      >
         <ChevronRight />
       </TraceIcon>
     </CollapsibleTrigger>
