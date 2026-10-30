@@ -497,15 +497,18 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!cachedBotUserId && !!msg.text?.includes(`<@${cachedBotUserId}>`);
 
-    // `!leave` in a thread with swarm activity: a human makes the swarm leave
-    // it, in code, with no workflow event, buffering, task, or model call.
-    // Checked before the left-thread gate so `@bot !leave` leaves rather than
-    // rejoining. The confirmation is ephemeral, to the sender only.
+    // `!leave` in a thread the swarm is in: a human makes the swarm leave it,
+    // in code, with no workflow event, buffering, task, or model call.
+    // Any task bound to the thread counts, assigned or not, as does a thread
+    // the swarm started. Checked before the left-thread gate so `@bot !leave`
+    // leaves rather than rejoining. The confirmation is ephemeral, to the
+    // sender only.
     if (
       msg.thread_ts &&
       !isSlackLeaveThreadDisabled() &&
       isSlackLeaveThreadCommand(msg.text, cachedBotUserId) &&
-      (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
+      ((await getMostRecentTaskInThread(msg.channel, msg.thread_ts)) !== null ||
+        (await wasThreadStartedBySwarm(client, msg.channel, msg.thread_ts)))
     ) {
       noteSlackInboundSideEffect("thread_leave");
       await leaveSlackThread(msg.channel, msg.thread_ts, { slackUserId: msg.user });

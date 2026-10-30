@@ -113,10 +113,10 @@ let lead: Agent;
 let worker: Agent;
 let otherWorker: Agent;
 
-async function seedThread(channel: string, threadTs: string) {
+async function seedThread(channel: string, threadTs: string, opts: { unassigned?: boolean } = {}) {
   // As the Slack handlers create it: only Slack ingress writes slackTriggerMessageTs.
   return createTaskExtended("original ask", {
-    agentId: worker.id,
+    agentId: opts.unassigned ? undefined : worker.id,
     source: "slack",
     slackChannelId: channel,
     slackThreadTs: threadTs,
@@ -505,6 +505,32 @@ describe("!leave", () => {
     } finally {
       process.env.ADDITIVE_SLACK = "false";
     }
+  });
+
+  test.each([
+    ["!leave", "3600.0001"],
+    [`<@${BOT_USER_ID}> !leave`, "3600.0002"],
+  ])("leaves a human-rooted thread whose only task is unassigned: %s", async (text, threadTs) => {
+    const emitted: unknown[] = [];
+    const listener = (payload: unknown) => emitted.push(payload);
+    workflowEventBus.on("slack.message", listener);
+    try {
+      const seeded = await seedThread("C_BANG_G", threadTs, { unassigned: true });
+      expect(seeded.agentId).toBeNull();
+      expect(await sendThreadReply("C_BANG_G", threadTs, text)).toHaveLength(1);
+      expect(emitted).toHaveLength(0);
+    } finally {
+      workflowEventBus.off("slack.message", listener);
+    }
+    expect(await isSlackThreadLeft("C_BANG_G", threadTs)).toBe(true);
+    expect(ephemerals).toHaveLength(1);
+  });
+
+  test("a task in another thread of the channel does not make !leave a command", async () => {
+    await seedThread("C_BANG_H", "3700.0001", { unassigned: true });
+    await sendThreadReply("C_BANG_H", "3700.0002", "!leave");
+    expect(await isSlackThreadLeft("C_BANG_H", "3700.0002")).toBe(false);
+    expect(ephemerals).toHaveLength(0);
   });
 
   test("is not a command outside a swarm thread, when addressed elsewhere, or with extra text", async () => {
