@@ -2217,14 +2217,29 @@ export const RuntimePoolCacheSchema = z
     mountPath: z
       .string()
       .min(2)
-      .refine(
-        (path) =>
+      .refine((path) => {
+        const parts = path.split("/").filter(Boolean);
+        const normalized = `/${parts.join("/")}`;
+        return (
           path.startsWith("/") &&
-          path.split("/").some((part) => part.length > 0) &&
+          parts.length > 0 &&
           !path.includes("\0") &&
-          !path.split("/").some((part) => part === "." || part === ".."),
-        "Cache mountPath must be an absolute container path other than /, without . or .. segments",
-      ),
+          !parts.some((part) => part === "." || part === "..") &&
+          !["/home/worker", "/root", "/workspace/personal", "/workspace/shared"].some(
+            (protectedPath) => {
+              return protectedPath === normalized || protectedPath.startsWith(`${normalized}/`);
+            },
+          ) &&
+          ![".ssh", ".codex", ".claude", ".claude.json", ".pi", ".config", ".local"].some(
+            (directory) => {
+              return ["/home/worker", "/root"].some((home) => {
+                const protectedPath = `${home}/${directory}`;
+                return normalized === protectedPath || normalized.startsWith(`${protectedPath}/`);
+              });
+            },
+          )
+        );
+      }, "Cache mountPath must be absolute, without . or .., and must not cover worker homes, workspaces or credential directories"),
   })
   .strict();
 

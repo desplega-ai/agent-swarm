@@ -53,6 +53,7 @@ export class RemoteController implements ControllerCommands {
   readonly renew?: ControllerCommands["renew"];
   readonly pause?: ControllerCommands["pause"];
   readonly resume?: ControllerCommands["resume"];
+  readonly releaseCache?: ControllerCommands["releaseCache"];
 
   constructor(
     readonly id: string,
@@ -61,6 +62,10 @@ export class RemoteController implements ControllerCommands {
     readonly workerApiUrl?: string,
     private readonly timeouts: { commandTimeoutMs?: number; provisionTimeoutMs?: number } = {},
   ) {
+    if (traits.persistentCache)
+      this.releaseCache = async (cache) => {
+        await this.call({ op: "release-cache", payload: cache });
+      };
     if (traits.maxTtlSec)
       this.renew = async (handle, ttlSec) =>
         z

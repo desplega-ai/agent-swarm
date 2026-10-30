@@ -77,7 +77,27 @@ describe("runtime pools persistence", () => {
       name: "docker-cache-validation",
       kind: "docker",
     });
-    for (const mountPath of ["/", "//", "relative", "/cache/..", "/./cache", "/cache\0bad"]) {
+    for (const mountPath of [
+      "/",
+      "//",
+      "relative",
+      "/cache/..",
+      "/./cache",
+      "/cache\0bad",
+      "/home",
+      "/home/worker",
+      "/home/worker/",
+      "//home//worker//",
+      "/workspace",
+      "/workspace/personal",
+      "/workspace/shared",
+      "/root",
+      "/home/worker/.codex",
+      "/home/worker/.local/share/opencode",
+      "/home/worker/.claude.json",
+      "/home/worker/.ssh/keys",
+      "/root/.claude",
+    ]) {
       await expect(
         createRuntimePool({
           name: "invalid-path",
@@ -101,6 +121,26 @@ describe("runtime pools persistence", () => {
       ).rejects.toThrow("does not support persistent pool caches");
     }
     expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
+  });
+
+  test("cache mount validation accepts isolated cache subdirectories", async () => {
+    const controller = await createRuntimeController({ name: "safe-cache-paths", kind: "docker" });
+    for (const [index, mountPath] of [
+      "/cache",
+      "/home/worker/.cache",
+      "/home/worker/.cache/bun",
+      "/workspace/cache",
+      "/workspace/personal/.cache",
+    ].entries()) {
+      const pool = await createRuntimePool({
+        name: `safe-cache-${index}`,
+        kind: "docker",
+        placements: [controller.id],
+        image: "worker:test",
+        cache: { mountPath },
+      });
+      expect(pool.cache?.mountPath).toBe(mountPath);
+    }
   });
 
   test("maps persisted task wake and agent provisioning state without changing routing", async () => {

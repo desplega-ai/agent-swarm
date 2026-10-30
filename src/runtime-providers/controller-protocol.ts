@@ -38,6 +38,15 @@ const provisionSchema = z.object({
 });
 const command = { type: z.literal("cmd"), id: z.string().min(1) };
 export const ControllerCommandSchema = z.discriminatedUnion("op", [
+  z.object({
+    ...command,
+    op: z.literal("release-cache"),
+    payload: z.object({
+      key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/),
+      poolId: z.string().min(1),
+      ownerId: z.string().min(1),
+    }),
+  }),
   z.object({ ...command, op: z.literal("provision"), payload: provisionSchema }),
   z.object({
     ...command,

@@ -4,6 +4,7 @@ import {
   type ConfigStatus,
   type ProvisionRequest,
   RUNTIME_LABELS,
+  type RuntimeCacheReference,
   type RuntimeHandle,
   type RuntimeProvider,
   type RuntimeStatus,
@@ -61,6 +62,10 @@ class DockerApiError extends Error {
   ) {
     super(scrubSecrets(message));
   }
+}
+
+function isCacheMountError(error: unknown): boolean {
+  return error instanceof DockerApiError && /\b(?:mount\w*|volume\w*)\b/i.test(error.message);
 }
 
 async function dockerApi<T>(
@@ -193,39 +198,84 @@ export class DockerRuntimeProvider implements RuntimeProvider {
           ...(cacheMount ? { Mounts: [cacheMount] } : {}),
         },
       };
-      let created: { Id: string };
-      try {
-        created = await dockerApi(target, "POST", path, body);
-      } catch (err) {
-        if (
-          !(err instanceof DockerApiError) ||
-          err.statusCode !== 404 ||
-          !err.message.includes("No such image")
-        ) {
+      const createAndStart = async (): Promise<string> => {
+        let created: { Id: string };
+        try {
+          created = await dockerApi(target, "POST", path, body);
+        } catch (err) {
+          if (
+            !(err instanceof DockerApiError) ||
+            err.statusCode !== 404 ||
+            !err.message.includes("No such image")
+          )
+            throw err;
+          const pullParams = new URLSearchParams({ fromImage: req.image });
+          if (
+            !req.image.includes("@") &&
+            req.image.lastIndexOf(":") <= req.image.lastIndexOf("/")
+          ) {
+            pullParams.set("tag", "latest");
+          }
+          await dockerApi(target, "POST", `/images/create?${pullParams}`, undefined, true);
+          created = await dockerApi(target, "POST", path, body);
+        }
+        try {
+          await dockerApi(target, "POST", `/containers/${created.Id}/start`);
+        } catch (err) {
+          try {
+            await dockerApi(target, "DELETE", `/containers/${created.Id}?force=true&v=true`);
+          } catch (cleanupError) {
+            if (
+              cacheMount &&
+              isCacheMountError(err) &&
+              !(cleanupError instanceof DockerApiError && cleanupError.statusCode === 404)
+            )
+              throw new Error(
+                `${String(err)}; failed-start cleanup failed: ${String(cleanupError)}`,
+              );
+          }
           throw err;
         }
-        const pullParams = new URLSearchParams({ fromImage: req.image });
-        if (!req.image.includes("@") && req.image.lastIndexOf(":") <= req.image.lastIndexOf("/")) {
-          pullParams.set("tag", "latest");
-        }
-        await dockerApi(target, "POST", `/images/create?${pullParams}`, undefined, true);
-        created = await dockerApi(target, "POST", path, body);
-      }
+        return created.Id;
+      };
+      let externalId: string;
       try {
-        await dockerApi(target, "POST", `/containers/${created.Id}/start`);
+        externalId = await createAndStart();
       } catch (err) {
-        await dockerApi(target, "DELETE", `/containers/${created.Id}?force=true&v=true`).catch(
-          () => {},
-        );
-        throw err;
+        if (!cacheMount || !isCacheMountError(err)) throw err;
+        cacheWarning = redactWithEnv(scrubSecrets(String(err)), req.env);
+        delete body.HostConfig.Mounts;
+        externalId = await createAndStart();
       }
       return {
         kind: "docker",
-        externalId: created.Id,
+        externalId,
         ...(cacheWarning ? { meta: { cacheWarning } } : {}),
       };
     } catch (err) {
       throw new Error(redactWithEnv(String(err), req.env));
+    }
+  }
+
+  async releaseCache(target: RuntimeTargetConfig, cache: RuntimeCacheReference): Promise<void> {
+    const path = `/volumes/${encodeURIComponent(cache.key)}`;
+    try {
+      const volume = await dockerApi<{ Name: string; Labels?: Record<string, string> }>(
+        target,
+        "GET",
+        path,
+      );
+      if (
+        volume.Name !== cache.key ||
+        volume.Labels?.[RUNTIME_LABELS.owner] !== cache.ownerId ||
+        volume.Labels?.[RUNTIME_LABELS.poolId] !== cache.poolId ||
+        volume.Labels?.["swarm.cache"] !== "true"
+      )
+        throw new Error(`Cache volume ${cache.key} is not owned by this swarm and pool`);
+      // A volume still attached to any container must remain intact (Docker returns 409).
+      await dockerApi(target, "DELETE", path);
+    } catch (error) {
+      if (!(error instanceof DockerApiError && error.statusCode === 404)) throw error;
     }
   }
 

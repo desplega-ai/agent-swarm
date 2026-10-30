@@ -54,6 +54,16 @@ export interface ProvisionRequest {
   labels: Record<string, string>;
 }
 
+export interface RuntimeCacheReference {
+  key: string;
+  poolId: string;
+  ownerId: string;
+}
+
+export function poolCacheKey(poolId: string): string {
+  return `swarm-cache-${poolId}`;
+}
+
 export interface RuntimeHandle {
   kind: RuntimeProviderKind;
   /** Container id, sandbox id, or pod name. */
@@ -78,6 +88,8 @@ export interface RuntimeProvider {
   status(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<RuntimeStatus>;
   /** Every runtime this swarm owns on the target, found by labels. Used to reap orphans. */
   list(target: RuntimeTargetConfig, ownerId: string): Promise<RuntimeHandle[]>;
+  /** Remove an owned pool cache after its runtimes stop; never force detach. */
+  releaseCache?(target: RuntimeTargetConfig, cache: RuntimeCacheReference): Promise<void>;
   renew?(
     target: RuntimeTargetConfig,
     handle: RuntimeHandle,

@@ -226,8 +226,11 @@ and `swarm.cache=true` labels, verifies the returned ownership, and mounts it wi
 `HostConfig.Mounts` (`Type: "volume"`). Repeated and concurrent provisions reuse
 the pool's volume. Foreign or unlabeled volumes are never adopted.
 An older remote controller or a failed volume preparation starts the runtime
-without cache and records a scrubbed `Persistent cache:` warning in the pool's
-`lastError`, without advancing its provision failure counter.
+without cache. If Docker rejects the cache mount during container creation or
+start, the adapter retries once without mounts after removing any failed-start
+container. Unrelated errors and a failed cleanup still fail provisioning.
+Fallback records a scrubbed `Persistent cache:` warning in the pool's `lastError`,
+without advancing its provision failure counter.
 Successful cache provisioning clears only cache warnings, preserving other errors.
 Protocol version 1 accepts both legacy hello messages and the new optional fields.
 
@@ -235,12 +238,28 @@ Cache contents must tolerate concurrent writers. Do not store working trees,
 credentials, or runtime state there. The operator chooses cache environment
 variables and makes the mount writable for the image's worker user through the
 image or root setup script. A mount does not configure package managers by itself.
+The API rejects worker homes (`/home/worker`, `/root`), workspace roots
+(`/workspace/personal`, `/workspace/shared`), their ancestors, and credential or
+harness state directories under those homes. Safe cache subdirectories such as
+`/home/worker/.cache`, `/workspace/personal/.cache`, and `/cache` remain valid.
 Container termination and failed-start cleanup remove anonymous volumes only;
-the named cache survives. Setting `cache: null`, disabling/deleting a pool, or
-changing its placement also retains the volume. New runtimes use the updated
-configuration; running runtimes keep their existing mount until termination.
-Unused cache volumes can be inspected by their owner/pool labels and removed with
-`docker volume rm swarm-cache-<poolId>` after their runtimes have stopped.
+the named cache survives for the pool's next runtime.
+
+Setting `cache: null`, deleting a pool, or changing its placement queues a release
+on the old controller. The supervisor waits for runtimes present at that change
+to stop, then calls the optional provider-neutral `releaseCache` method. New
+cache-free runtimes do not delay it. Disabling a pool with `enabled: false` keeps
+its configured cache for future use. Re-enabling cache cancels a pending release;
+an in-flight release returns a retryable 409 instead.
+
+Release jobs in `runtime_cache_releases` survive pool deletion and API restart.
+Docker verifies the owner, pool, and cache labels before deleting the volume,
+without force; missing volumes count as released, and in-use volumes retry later.
+Offline or older controllers also defer cleanup until available or upgraded.
+The remote protocol uses `release-cache` with `{ key, poolId, ownerId }`.
+Deferred errors are scrubbed in the job's `last_error` and API logs. Controller
+target, placement, and credential changes are blocked while caches or releases
+remain; controller deletion waits for its pending releases to finish.
 
 ## e2b
 

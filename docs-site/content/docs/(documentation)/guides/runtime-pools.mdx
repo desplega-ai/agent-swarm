@@ -98,16 +98,32 @@ The swarm chooses the volume name, `swarm-cache-<poolId>`. Every runtime in that
 pool on the same controller target uses it, while its working disk remains
 ephemeral. Only use caches that support concurrent writers. Keep working trees,
 credentials and runtime state outside the shared cache.
+Mount paths cannot cover worker homes, workspace roots, their ancestors, or
+credential and harness state directories. Use a cache subdirectory such as
+`/home/worker/.cache`, `/workspace/personal/.cache`, or `/cache`.
 
 Terminating a runtime preserves its cache. Set `"cache": null` to stop mounting it
-in new runtimes. Existing runtimes keep their mounts until they stop. Disabling
-or deleting the pool also preserves the cache; remove an unused volume explicitly
-with `docker volume rm swarm-cache-<poolId>` after its runtimes have stopped.
+in new runtimes and schedule automatic cleanup. Existing runtimes keep their
+mounts until they stop; cleanup waits for them, without waiting for new runtimes
+that do not use the cache. Deleting a pool or moving its placement also schedules
+cleanup on the old controller. Setting `"enabled": false` retains the configured
+cache for when the pool is enabled again.
+
+Cleanup survives API restarts and retries when the controller is offline or the
+volume is still in use. Docker verifies ownership and never forces removal.
+Re-enabling cache cancels pending cleanup; retry a 409 response if removal is
+already in progress. Disable caches and wait for cleanup before changing a
+controller's target, placement or credentials, or deleting the controller.
+Deferred cleanup errors appear in the API logs and
+`runtime_cache_releases.last_error`; upgrade older controllers to complete cleanup.
 
 Static, E2B and boxd pools currently reject this setting. Controllers declare
 `persistentCache` separately from `ephemeralDisk`; an older Docker controller
 starts without the cache and reports the reason in the pool's `lastError`.
 A failed volume preparation also falls back without cache and reports a warning.
+A mount failure during container creation or start retries once without the
+cache, after removing any failed-start container. Other failures still fail the
+provision.
 The API never adopts a volume labeled for another swarm or pool.
 
 ## Push and poll delivery

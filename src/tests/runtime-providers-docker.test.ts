@@ -61,6 +61,139 @@ afterEach(async () => {
 });
 
 describe("Docker runtime provider", () => {
+  for (const failureAt of ["create", "start"] as const) {
+    test(`cache mount failure during container ${failureAt} retries once without cache`, async () => {
+      const bodies: Array<{ HostConfig: { Mounts?: unknown }; Env: string[] }> = [];
+      const secret = "mount-failure-private-token";
+      handler = (url, init) => {
+        if (url.pathname.endsWith("/volumes/create"))
+          return Response.json(JSON.parse(String(init.body)));
+        if (url.pathname.endsWith("/containers/create")) {
+          bodies.push(JSON.parse(String(init.body)));
+          if (bodies.length === 1 && failureAt === "create")
+            return Response.json({ message: `invalid mount config ${secret}` }, { status: 500 });
+          return Response.json({ Id: `container-${bodies.length}` });
+        }
+        if (url.pathname.endsWith("/container-1/start") && failureAt === "start")
+          return Response.json(
+            { message: `error while mounting volume ${secret}` },
+            { status: 500 },
+          );
+        return new Response(null, { status: 204 });
+      };
+      const result = await provider.provision(target, {
+        ...request,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+        env: { API_KEY: secret },
+      });
+      expect(result.externalId).toBe("container-2");
+      expect(result.meta?.cacheWarning).toContain("mount");
+      expect(result.meta?.cacheWarning).not.toContain(secret);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]?.HostConfig.Mounts).toBeDefined();
+      expect(bodies[1]?.HostConfig.Mounts).toBeUndefined();
+      expect(bodies[1]?.Env).toEqual([`API_KEY=${secret}`]);
+      const operations = calls.map(({ url, init }) => `${init.method} ${url.pathname}`);
+      if (failureAt === "start")
+        expect(operations.indexOf("DELETE /v1.47/containers/container-1")).toBeLessThan(
+          operations.lastIndexOf("POST /v1.47/containers/create"),
+        );
+      expect(operations.at(-1)).toBe("POST /v1.47/containers/container-2/start");
+    });
+  }
+
+  test("unrelated container errors never trigger a cache fallback", async () => {
+    handler = (url, init) =>
+      url.pathname.endsWith("/volumes/create")
+        ? Response.json(JSON.parse(String(init.body)))
+        : Response.json({ message: "network not found" }, { status: 500 });
+    await expect(
+      provider.provision(target, {
+        ...request,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      }),
+    ).rejects.toThrow("network not found");
+    expect(calls.filter(({ url }) => url.pathname.endsWith("/containers/create"))).toHaveLength(1);
+  });
+
+  test("a failed cleanup after a mount start error prevents a duplicate container attempt", async () => {
+    handler = (url, init) => {
+      if (url.pathname.endsWith("/volumes/create"))
+        return Response.json(JSON.parse(String(init.body)));
+      if (url.pathname.endsWith("/containers/create"))
+        return Response.json({ Id: handle.externalId });
+      return Response.json(
+        { message: init.method === "DELETE" ? "cleanup unavailable" : "volume mount failed" },
+        { status: 500 },
+      );
+    };
+    await expect(
+      provider.provision(target, {
+        ...request,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      }),
+    ).rejects.toThrow("failed-start cleanup failed");
+    expect(calls.filter(({ url }) => url.pathname.endsWith("/containers/create"))).toHaveLength(1);
+  });
+
+  test("cache-free retry errors propagate without a third attempt", async () => {
+    let creates = 0;
+    handler = (url, init) =>
+      url.pathname.endsWith("/volumes/create")
+        ? Response.json(JSON.parse(String(init.body)))
+        : Response.json(
+            { message: ++creates === 1 ? "volume mount failed" : "daemon unavailable" },
+            { status: 500 },
+          );
+    await expect(
+      provider.provision(target, {
+        ...request,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      }),
+    ).rejects.toThrow("daemon unavailable");
+    expect(creates).toBe(2);
+  });
+
+  test("cache release verifies ownership and never forces removal", async () => {
+    const cache = { key: "swarm-cache-pool-1", poolId: request.poolId, ownerId: request.ownerId };
+    handler = (_url, init) =>
+      init.method === "GET"
+        ? Response.json({
+            Name: cache.key,
+            Labels: {
+              [RUNTIME_LABELS.owner]: cache.ownerId,
+              [RUNTIME_LABELS.poolId]: cache.poolId,
+              "swarm.cache": "true",
+            },
+          })
+        : new Response(null, { status: 204 });
+    await provider.releaseCache(target, cache);
+    expect(calls.map(({ init }) => init.method)).toEqual(["GET", "DELETE"]);
+    expect(calls[1]?.url.searchParams.has("force")).toBe(false);
+    calls = [];
+    handler = () => Response.json({ Name: cache.key, Labels: {} });
+    await expect(provider.releaseCache(target, cache)).rejects.toThrow("not owned");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("cache release tolerates missing volumes and defers in-use volumes", async () => {
+    const cache = { key: "swarm-cache-pool-1", poolId: request.poolId, ownerId: request.ownerId };
+    handler = () => new Response("missing", { status: 404 });
+    await provider.releaseCache(target, cache);
+    handler = (_url, init) =>
+      init.method === "GET"
+        ? Response.json({
+            Name: cache.key,
+            Labels: {
+              [RUNTIME_LABELS.owner]: cache.ownerId,
+              [RUNTIME_LABELS.poolId]: cache.poolId,
+              "swarm.cache": "true",
+            },
+          })
+        : new Response("volume is in use", { status: 409 });
+    await expect(provider.releaseCache(target, cache)).rejects.toThrow("volume is in use");
+  });
+
   test("cache volumes are shared across runtimes and survive container termination", async () => {
     const volumes = new Map<
       string,

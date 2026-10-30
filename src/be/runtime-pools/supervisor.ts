@@ -4,7 +4,7 @@ import {
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
 import { RuntimeHandleSchema } from "../../runtime-providers/controller-protocol";
-import { RUNTIME_LABELS } from "../../runtime-providers/types";
+import { poolCacheKey, RUNTIME_LABELS } from "../../runtime-providers/types";
 import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { createWorkerTaskFollowUp } from "../../tasks/worker-follow-up";
 import {
@@ -29,6 +29,7 @@ import {
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
 import { mintRuntimeToken } from "../users";
+import { reconcileCacheReleases } from "./cache-cleanup";
 import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
@@ -245,9 +246,12 @@ export async function provisionRuntime(
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
     const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
+    const currentPool = await getRuntimePool(pool.id);
+    const currentCache =
+      currentPool && currentPool.placements[0] === pool.placements[0] ? currentPool.cache : null;
     const cache =
-      pool.cache && controller.traits.persistentCache
-        ? { key: `swarm-cache-${pool.id}`, mountPath: pool.cache.mountPath }
+      currentCache && controller.traits.persistentCache
+        ? { key: poolCacheKey(pool.id), mountPath: currentCache.mountPath }
         : undefined;
     signal?.throwIfAborted();
     const handle = await controller.provision({
@@ -272,7 +276,7 @@ export async function provisionRuntime(
       await markRuntimeTerminated(runtimeId, "Supervisor stopped during provision");
       return false;
     }
-    const cacheWarning = pool.cache
+    const cacheWarning = currentCache
       ? !controller.traits.persistentCache
         ? "Controller does not support persistent caches; runtime started without cache"
         : handle.meta?.cacheWarning
@@ -910,11 +914,14 @@ export async function reconcileOnce(
   opts: { now?: Date; getControllerCommands?: typeof getControllerCommands } = {},
 ): Promise<void> {
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled() || inFlight) return;
-  tickAbort = new AbortController();
+  const tick = new AbortController();
+  tickAbort = tick;
   inFlight = reconcilePools(
     opts.now ?? new Date(),
     opts.getControllerCommands ?? getControllerCommands,
-    tickAbort.signal,
+    tick.signal,
+  ).then(() =>
+    reconcileCacheReleases(opts.getControllerCommands ?? getControllerCommands, tick.signal),
   );
   try {
     await inFlight;

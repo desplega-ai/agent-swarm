@@ -17,6 +17,7 @@ import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
+import { cancelPoolCacheRelease, queuePoolCacheRelease } from "./cache-cleanup-db";
 import { RuntimePoolError } from "./errors";
 import { revokeControllerTokens } from "./tokens";
 
@@ -236,11 +237,32 @@ export async function updateRuntimeController(
     )
       throw new RuntimePoolError("Controller name already exists", 409);
     const pools = await listRuntimePools();
+    const oldConfig: Record<string, string> = JSON.parse(row.config);
+    const configChanged =
+      Object.keys(data.config).length !== Object.keys(oldConfig).length ||
+      Object.entries(data.config).some(([key, value]) => oldConfig[key] !== value);
+    const secrets = patch.secretConfig !== undefined ? controllerSecrets(row) : {};
+    const secretsChanged = Object.entries(patch.secretConfig ?? {}).some(([key, value]) =>
+      value === null ? key in secrets : secrets[key] !== value,
+    );
+    if (
+      (data.kind !== row.kind ||
+        data.placement !== row.placement ||
+        configChanged ||
+        secretsChanged) &&
+      (pools.some((pool) => pool.cache && pool.placements.includes(id)) ||
+        (await tx.get("SELECT id FROM runtime_cache_releases WHERE controller_id = ? LIMIT 1", [
+          id,
+        ])))
+    )
+      throw new RuntimePoolError(
+        "Disable pool caches and wait for cleanup before changing controller configuration or placement",
+        409,
+      );
     if (pools.some((pool) => pool.placements.includes(id) && pool.kind !== data.kind))
       throw new RuntimePoolError("Pool kind must equal controller kind");
     let encrypted = row.secretConfig;
     if (patch.secretConfig !== undefined) {
-      const secrets = controllerSecrets(row);
       for (const [key, value] of Object.entries(patch.secretConfig)) {
         if (value === null) delete secrets[key];
         else secrets[key] = value;
@@ -274,6 +296,8 @@ export async function deleteRuntimeController(id: string): Promise<void> {
     if (!(await getRuntimeController(id))) throw new RuntimePoolError("Controller not found", 404);
     if ((await listRuntimePools()).some((pool) => pool.placements.includes(id)))
       throw new RuntimePoolError("Controller has runtime pools", 409);
+    if (await tx.get("SELECT id FROM runtime_cache_releases WHERE controller_id = ? LIMIT 1", [id]))
+      throw new RuntimePoolError("Controller has pending cache cleanup", 409);
     await revokeControllerTokens(id);
     await tx.run("DELETE FROM runtime_controllers WHERE id = ?", [id]);
   });
@@ -370,6 +394,9 @@ export async function updateRuntimePool(
     await validatePool(data);
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
+    if (data.cache) await cancelPoolCacheRelease(id, data.placements[0]!);
+    if (existing.cache && (!data.cache || data.placements[0] !== existing.placements[0]))
+      await queuePoolCacheRelease(existing, actor);
     await tx.run(
       `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, cache = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
       [
@@ -407,7 +434,8 @@ export async function deleteRuntimePool(
   actor: string | null = null,
 ): Promise<void> {
   await getDbClient().transaction(async (tx) => {
-    if (!(await getRuntimePool(id))) throw new RuntimePoolError("Pool not found", 404);
+    const pool = await getRuntimePool(id);
+    if (!pool) throw new RuntimePoolError("Pool not found", 404);
     if (
       await tx.get(
         "SELECT id FROM runtime_instances WHERE pool_id = ? AND status != 'offline' LIMIT 1",
@@ -426,6 +454,7 @@ export async function deleteRuntimePool(
         [new Date().toISOString(), actor, id],
       );
     }
+    await queuePoolCacheRelease(pool, actor);
     await tx.run("DELETE FROM runtime_pools WHERE id = ?", [id]);
   });
 }

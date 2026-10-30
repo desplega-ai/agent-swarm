@@ -15,6 +15,10 @@ async function executeCommand(
   command: ControllerCommand,
 ): Promise<unknown> {
   switch (command.op) {
+    case "release-cache":
+      if (!controller.releaseCache) throw new Error("Controller does not support cache cleanup");
+      await controller.releaseCache(command.payload);
+      return {};
     case "provision":
       return await controller.provision(command.payload);
     case "terminate":

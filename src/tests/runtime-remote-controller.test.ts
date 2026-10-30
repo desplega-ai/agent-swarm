@@ -50,7 +50,7 @@ import type {
   RuntimeTargetConfig,
 } from "../runtime-providers";
 import { ControllerOfflineError } from "../runtime-providers/controller";
-import { RUNTIME_LABELS } from "../runtime-providers/types";
+import { RUNTIME_LABELS, type RuntimeCacheReference } from "../runtime-providers/types";
 import { listenOnFreePort } from "./test-net";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
@@ -63,6 +63,10 @@ class FakeProvider implements RuntimeProvider {
   };
   requests: ProvisionRequest[] = [];
   terminated: string[] = [];
+  releasedCaches: RuntimeCacheReference[] = [];
+  async releaseCache(_target: RuntimeTargetConfig, cache: RuntimeCacheReference) {
+    this.releasedCaches.push(cache);
+  }
   owners: string[] = [];
   runtimes = new Map<string, { handle: RuntimeHandle; ownerId: string; status: RuntimeStatus }>();
   gate?: Promise<void>;
@@ -225,6 +229,9 @@ test("hello sets online and all controller commands make round trips through the
   expect(await commands.list(req.ownerId)).toEqual([handle]);
   expect(await commands.list("another-swarm")).toEqual([]);
   await commands.terminate(handle, "test complete");
+  const cache = { key: req.cache.key, poolId: req.poolId, ownerId: req.ownerId };
+  await commands.releaseCache!(cache);
+  expect(fake.releasedCaches).toEqual([cache]);
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "exited" });
   expect(JSON.stringify(logSpy.mock.calls)).not.toContain(token);
 });
