@@ -220,14 +220,19 @@ export function buildTranscriptRows({
 
 /**
  * The rows a finished turn shows. Closed, the fold keeps only the agent's last
- * message in view, the delegated tasks (each its own transcript), and any
+ * message in view (unless `keepLastMessage` is false: the task's outcome then
+ * stands in for it), the delegated tasks (each its own transcript), and any
  * steering message still waiting for the agent. Open, every row shows in run
  * order: work after the last message stays after it.
  */
-export function foldedTurnRows(rows: TranscriptRow[], open: boolean): TranscriptRow[] {
+export function foldedTurnRows(
+  rows: TranscriptRow[],
+  open: boolean,
+  { keepLastMessage = true }: { keepLastMessage?: boolean } = {},
+): TranscriptRow[] {
   if (open) return rows;
   let lastAssistant = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
+  for (let i = rows.length - 1; keepLastMessage && i >= 0; i--) {
     if (rows[i].kind === "assistant") {
       lastAssistant = i;
       break;

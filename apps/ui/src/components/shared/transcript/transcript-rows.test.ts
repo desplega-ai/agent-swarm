@@ -187,6 +187,17 @@ describe("foldedTurnRows", () => {
     ).toEqual(["last"]);
   });
 
+  test("closed with keepLastMessage off, the outcome stands in: no message stays", () => {
+    const rows = buildTranscriptRows({
+      messages: [
+        msg("assistant", [{ type: "text", text: "first" }]),
+        msg("assistant", [{ type: "text", text: "last" }]),
+      ],
+    });
+    expect(foldedTurnRows(rows, false, { keepLastMessage: false })).toEqual([]);
+    expect(foldedTurnRows(rows, true, { keepLastMessage: false })).toHaveLength(2);
+  });
+
   test("open, keeps run order: a failed tool after the last message stays after it", () => {
     const rows = buildTranscriptRows({
       messages: [

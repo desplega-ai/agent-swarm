@@ -17,6 +17,7 @@ import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-c
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { typingLabel } from "@/lib/session-presence";
 import { isReadOnlyAccess } from "@/lib/session-sharing";
 import { canSteerSessionTask, sessionComposerTarget } from "@/lib/task-steer";
@@ -143,7 +144,7 @@ export function SessionConversation({
           style={turns && !isFollowing ? SCROLLED_UP_FADE : undefined}
         >
           {isLoading ? (
-            <div className="flex flex-col gap-3 max-w-3xl mx-auto w-full">
+            <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
               <Skeleton className="h-20 w-full" />
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
@@ -206,7 +207,7 @@ export function SessionConversation({
       ) : typing ? (
         <p
           aria-live="polite"
-          className="shrink-0 px-6 pt-2 text-xs text-muted-foreground max-w-3xl mx-auto w-full"
+          className={cn("shrink-0 px-6 pt-2 text-xs text-muted-foreground", CHAT_COLUMN)}
         >
           {typing}
         </p>

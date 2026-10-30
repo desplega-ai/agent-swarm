@@ -20,9 +20,9 @@
  * `pending → in_progress` is enough). A draft owned by the outgoing child
  * would die with its unmount.
  *
- * The line above the box names the mode, "Steer" or "Follow up", and with
- * `showTarget` the task the message goes to (Sessions, where the target is
- * not the page's own task).
+ * The send button names the mode, "Steer" or "Follow up". With `showTarget`
+ * the placeholder names the task the message goes to (Sessions, where the
+ * target is not the page's own task): "Steer #1a2b3c4d Fix the parser…".
  *
  * A follow-up whose files partly failed to upload keeps only the failed
  * files, under a notice above the box: "Retry upload" sends them to the task
@@ -51,6 +51,7 @@ import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/co
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
@@ -75,7 +76,7 @@ export interface TaskComposerProps {
   followUpAgentId?: string;
   /** Follow-up placeholder. The steer box keeps its own. */
   placeholder?: string;
-  /** Name the target task in the mode line ("Steer · Fix the parser"). */
+  /** Name the target task in the placeholder ("Steer #1a2b3c4d Fix the parser…"). */
   showTarget?: boolean;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
@@ -120,24 +121,26 @@ export function composerMode(
     : "steer";
 }
 
-function ComposerModeLabel({ mode, target }: { mode: ComposerMode; target: AgentTask | null }) {
-  return (
-    <p
-      data-slot="composer-mode"
-      data-mode={mode}
-      className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-    >
-      <span className="shrink-0 font-medium text-foreground">
-        {mode === "steer" ? "Steer" : "Follow up"}
-      </span>
-      {target ? (
-        <span className="min-w-0 truncate" title={taskListTitle(target)}>
-          <span aria-hidden>· </span>
-          <span className="font-mono">#{target.id.slice(0, 8)}</span> {taskListTitle(target)}
-        </span>
-      ) : null}
-    </p>
-  );
+/** The send button's label: what a send does. */
+export const COMPOSER_SEND_LABEL: Record<ComposerMode, string> = {
+  steer: "Steer",
+  "follow-up": "Follow up",
+};
+
+/** A target title longer than this is cut, so the placeholder stays one line. */
+const PLACEHOLDER_TITLE_CHARS = 60;
+
+/** The placeholder that names the target: "Steer #1a2b3c4d Fix the parser…". */
+export function composerTargetPlaceholder(mode: ComposerMode, target: AgentTask): string {
+  const full = taskListTitle(target);
+  // A cut title ends on a whole word.
+  const cut =
+    full.length > PLACEHOLDER_TITLE_CHARS
+      ? full.slice(0, full.lastIndexOf(" ", PLACEHOLDER_TITLE_CHARS)) ||
+        full.slice(0, PLACEHOLDER_TITLE_CHARS)
+      : full;
+  const title = cut.trimEnd().replace(/[.…:;,!?]+$/, "");
+  return `${COMPOSER_SEND_LABEL[mode]} #${target.id.slice(0, 8)} ${title}…`;
 }
 
 /** Files that did not upload to a follow-up task that exists. */
@@ -296,7 +299,10 @@ export function TaskComposer({
       <div
         role="alert"
         data-slot="composer-failed-upload"
-        className="mx-auto mb-1.5 flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs"
+        className={cn(
+          "mb-1.5 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs",
+          CHAT_COLUMN,
+        )}
       >
         <p className="min-w-0 flex-1">
           {failedUpload.error}{" "}
@@ -375,9 +381,10 @@ export function TaskComposer({
   );
 
   const mode = composerMode(steerTarget);
-  const modeLabel = (
-    <ComposerModeLabel mode={mode} target={showTarget ? (steerTarget ?? targetTask) : null} />
-  );
+  const sendLabel = COMPOSER_SEND_LABEL[mode];
+  const shownTarget = showTarget ? (steerTarget ?? targetTask) : null;
+  const targetPlaceholder =
+    userId && shownTarget ? composerTargetPlaceholder(mode, shownTarget) : undefined;
 
   if (steerTarget) {
     return (
@@ -393,7 +400,8 @@ export function TaskComposer({
           extraActions={extraActions}
           fullWidth={fullWidth}
           bar={bar}
-          modeLabel={modeLabel}
+          sendLabel={sendLabel}
+          placeholder={targetPlaceholder}
           className={className}
         />
       </>
@@ -414,10 +422,13 @@ export function TaskComposer({
           createTask.error instanceof Error ? createTask.error.message : "Failed to send"
         }
         pendingLabel={pendingLabel}
-        placeholder={userId ? placeholder : "Pick an identity above to send messages."}
+        placeholder={
+          userId ? (targetPlaceholder ?? placeholder) : "Pick an identity above to send messages."
+        }
         disabled={!userId}
         routeLabel={routeLabel}
-        sendLabel="Send"
+        sendLabel={sendLabel}
+        labelledSend
         attachments={attachments}
         onAttachmentsChange={(files) => {
           setAttachments(files);
@@ -427,7 +438,6 @@ export function TaskComposer({
         extraActions={extraActions}
         fullWidth={fullWidth}
         bar={bar}
-        modeLabel={modeLabel}
         className={className}
       />
     </>

@@ -1,12 +1,12 @@
 /**
- * One task's transcript: its prompt as the person's message, then the run.
- * The task page and the Sessions task sheet both render this, so the two
- * show the same transcript. A finished run folds behind "Worked for …" and
+ * One task's transcript: its prompt as the person's message, the run, then
+ * its outcome as the final reply. The task page and the Sessions task sheet
+ * both render this, so the two show the same transcript. A finished run folds behind "Worked for …" and
  * keeps the agent's last message in view; a live one follows the bottom of
  * the scroller. Mount it with `key={task.id}` so a new task folds again.
  */
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { AgentTask } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
 import { PromptContext } from "@/components/shared/prompt-context";
@@ -21,15 +21,18 @@ export interface TaskTranscriptProps {
   rows: TranscriptRow[];
   /** The surface's scroller (the page column, the sheet body). */
   scroller: HTMLElement | null;
+  /** The task's output or failure, after the run. */
+  outcome?: ReactNode;
 }
 
-export function TaskTranscript({ task, rows, scroller }: TaskTranscriptProps) {
+export function TaskTranscript({ task, rows, scroller, outcome }: TaskTranscriptProps) {
   const [runOpen, setRunOpen] = useState(false);
   const prompt = parsePromptDisplay(stripContextFooter(task.task));
   return (
     <Transcript
       rows={rows}
       running={taskIsRunning(task.status) === true}
+      outcome={outcome}
       prompt={
         <TranscriptUserMessage
           text={prompt.ask}

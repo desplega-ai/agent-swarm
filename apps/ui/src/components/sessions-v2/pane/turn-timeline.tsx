@@ -9,6 +9,7 @@ import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { EmptyState } from "@/components/shared/empty-state";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { agentName } from "@/lib/agent-name";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import type { SessionViewer } from "@/lib/session-presence";
 import {
   approvalsByPart,
@@ -19,6 +20,7 @@ import {
   workerSummary,
 } from "@/lib/session-turns";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
+import { cn } from "@/lib/utils";
 import { ApprovalLine } from "./approval-line";
 import { InternalLine } from "./internal-line";
 import { PersonBubble } from "./person-bubble";
@@ -101,7 +103,7 @@ export function TurnTimeline({
   }
 
   return (
-    <div className="@container/turns mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-6">
+    <div className={cn("@container/turns flex min-w-0 flex-col gap-6", CHAT_COLUMN)}>
       {turns.map((turn) => (
         <Fragment key={turn.id}>
           {turn.person ? <PersonBubble task={turn.person} rootSource={rootSource} /> : null}

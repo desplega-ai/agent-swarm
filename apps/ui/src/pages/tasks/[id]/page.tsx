@@ -1,12 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  PanelRightClose,
-  PanelRightOpen,
-  Tag,
-  Terminal,
-} from "lucide-react";
+import { ArrowLeft, PanelRightClose, PanelRightOpen, Tag } from "lucide-react";
 import {
   type CSSProperties,
   useCallback,
@@ -37,9 +30,8 @@ import {
   useTaskSteeringMessages,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
+import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
@@ -49,6 +41,7 @@ import {
   NO_CALL_COMPOSITIONS,
 } from "@/components/shared/request-composition-bar";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
+import { ShowMore } from "@/components/shared/show-more";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
@@ -67,6 +60,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
@@ -453,7 +447,7 @@ export default function TaskDetailPage() {
   );
   const callUsage = useMemo(() => (usageItems ? sumItemCallUsage(usageItems) : null), [usageItems]);
   // The transcript's rows: the agent's prose, tool runs, steering and the
-  // tasks it delegated, in time order. Activity events stay in Details.
+  // tasks it delegated, in time order. Task events stay out.
   const transcriptSteering = steerGate.supported && steeringEnabled ? steeringMessages : undefined;
   const delegated = useMemo(
     () =>
@@ -526,16 +520,9 @@ export default function TaskDetailPage() {
   const canSteer = steerGate.supported && steeringEnabled && canSteerTask(task);
 
   const isFailed = task.status === "failed";
-  const isCompleted = task.status === "completed";
   const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
   const hasOutput = !!task.output;
   const hasAttachments = !!(task.attachments && task.attachments.length > 0);
-  // The agent an Activity event is about. An offer's log row carries the
-  // creator, so the offer names its target from the task instead.
-  const eventAgentName = (log: AgentLog): string | null => {
-    const agentId = log.eventType === "task_offered" ? task.offeredTo : log.agentId;
-    return agentId ? (agentNames.get(agentId) ?? null) : null;
-  };
   const offeredToName = task.offeredTo ? (agentNames.get(task.offeredTo) ?? null) : null;
   const waiting = describeWaiting(task, { agent: agentName, offeredTo: offeredToName });
 
@@ -549,14 +536,13 @@ export default function TaskDetailPage() {
     <SpawnedTasks tasks={spawned} agentNameFor={(agentId) => agentNames.get(agentId) ?? null} />
   );
 
-  // Who, where from, when, cost, context, Activity and the technical ids. The
+  // Who, where from, when, cost, context and the technical ids. The
   // wide layout shows it as the right rail, the narrow one in its Details tab.
   const detailsRail = (
     <TaskDetailsRail
       task={task}
       agentName={agentName}
       requestedByName={requestedByUserName}
-      agentNameFor={eventAgentName}
       costs={costs}
       costsLoading={costsLoading}
       context={contextData}
@@ -599,30 +585,28 @@ export default function TaskDetailPage() {
         }
       : null;
 
-  // The answer, under the transcript in both layouts, as in a chat. The column
-  // scrolls, so it has no height cap.
-  const outputSection = hasOutput ? (
-    <CollapsibleSection
-      variant="card"
-      title="Output"
-      icon={isCompleted ? CheckCircle2 : Terminal}
-      iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
-      borderColor={isCompleted ? "border-status-success/30" : "border-border"}
-      bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
-      headerClassName="min-h-11"
-      heading="h2"
-      // A finished task is opened for its result; keep it collapsed while the
-      // task runs so the live log stays in view.
-      defaultOpen={isTerminal}
-    >
-      <StructuredOutputContent
-        citations={task.citations}
-        raw={task.output ?? ""}
-        maxH=""
-        taskIds={knownTaskIds}
-      />
-    </CollapsibleSection>
+  // THE OUTCOME, the transcript's last message, as a chat app's final reply:
+  // the answer as plain text (clamped, with "Show more"), then a failed task's
+  // error with Retry and Get help.
+  const answer = hasOutput ? (
+    <div data-slot="transcript-outcome" className="min-w-0 px-1">
+      <ShowMore>
+        <StructuredOutputContent
+          citations={task.citations}
+          raw={task.output ?? ""}
+          maxH=""
+          taskIds={knownTaskIds}
+        />
+      </ShowMore>
+    </div>
   ) : null;
+  const outcome =
+    answer || failureCallout ? (
+      <>
+        {answer}
+        {failureCallout}
+      </>
+    ) : null;
 
   // THE SIDE PANEL's tabs (the narrow layout's tabs after Transcript).
   // Tree: where the task came from and what it delegated, with live status.
@@ -649,7 +633,7 @@ export default function TaskDetailPage() {
   );
   // Files: what the task attached.
   const filesContent = hasAttachments ? (
-    <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+    <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} variant="plain" />
   ) : (
     <p className="text-xs text-muted-foreground">No files.</p>
   );
@@ -673,16 +657,9 @@ export default function TaskDetailPage() {
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
 
-  // The waiting line: what the task waits for. Only a running task keeps the
-  // full height free for logs that are coming; any other gives it to the
-  // cards around it.
+  // The waiting line: what the task waits for, as plain text.
   const waitingLine = (
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
-        taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
-      )}
-    >
+    <div className="flex shrink-0 items-center gap-2 px-1">
       <TaskStatusIcon status={task.status} />
       <p className="text-sm text-muted-foreground">{waiting}</p>
     </div>
@@ -712,14 +689,27 @@ export default function TaskDetailPage() {
       waitingLine
     );
 
-  // The transcript: the same renderer as the Sessions task sheet.
+  // The transcript: the same renderer as the Sessions task sheet, with the
+  // outcome as its last message (after the waiting line of a run with no rows).
+  const hasRows = transcriptRows.length > 0;
   const renderTranscript = (scrollElement: HTMLElement | null) => (
     <>
-      <TaskTranscript key={task.id} task={task} rows={transcriptRows} scroller={scrollElement} />
-      {transcriptRows.length > 0 ? null : sessionLogsLoading ? (
-        <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
-      ) : (
-        waitingLine
+      <TaskTranscript
+        key={task.id}
+        task={task}
+        rows={transcriptRows}
+        scroller={scrollElement}
+        outcome={hasRows ? outcome : null}
+      />
+      {hasRows ? null : (
+        <>
+          {sessionLogsLoading ? (
+            <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
+          ) : (
+            waitingLine
+          )}
+          {outcome}
+        </>
       )}
     </>
   );
@@ -740,9 +730,15 @@ export default function TaskDetailPage() {
           className={cn(touchTargets && "h-12.5")}
         />
       </div>
-      {logMode === "raw"
-        ? renderRawLog(scrollElement, touchTargets)
-        : renderTranscript(scrollElement)}
+      {logMode === "raw" ? (
+        <>
+          {renderRawLog(scrollElement, touchTargets)}
+          {outcome}
+        </>
+      ) : (
+        renderTranscript(scrollElement)
+      )}
+      <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
     </>
   );
 
@@ -875,11 +871,13 @@ export default function TaskDetailPage() {
     </Tooltip>
   );
 
-  // With the side panel folded, the column keeps a reading width.
-  const readingWidth = detailsCollapsed ? "mx-auto w-full max-w-5xl" : undefined;
+  // With the side panel folded, the column takes the chat width the Sessions
+  // page uses (T3 Code's, see `CHAT_COLUMN`).
+  const readingWidth = detailsCollapsed ? CHAT_COLUMN : undefined;
 
-  // WIDE HERO: the title, where the task came from, and the chips, with the
-  // actions and the details fold right of the title.
+  // WIDE HERO: the title, with the actions and the details fold right of it,
+  // then one row: where the task came from on the left, the chips on the
+  // right. A narrow column wraps the chips under the source line.
   const wideHero = (
     <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
       {/* The page's one heading. The breadcrumb truncates the title (and
@@ -887,24 +885,28 @@ export default function TaskDetailPage() {
       <div className="min-w-0">
         <TaskHeading title={headerTitle} />
       </div>
-      <div className="row-span-3 flex items-start justify-end gap-1">
+      <div className="flex items-start justify-end gap-1">
         <TaskActions model={actions} className="justify-end" />
         {detailsToggle}
       </div>
-      {sourceLine}
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status={task.status} size="md" />
-        {wideModelChip}
-        {agentChip}
-        {renderTagsLine()}
+      <div
+        data-slot="task-meta-row"
+        className="col-span-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
+      >
+        <div className="min-w-0">{sourceLine}</div>
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {renderTagsLine()}
+          <StatusBadge status={task.status} size="md" />
+          {wideModelChip}
+          {agentChip}
+        </div>
       </div>
     </div>
   );
 
   // NARROW HERO: compact, and it scrolls away. A back arrow and the "..."
   // menu (every action but the message box), then the title, the source
-  // line, status and model. The agent is in Details. The tags truncate on the
-  // chip row instead of wrapping to a second one.
+  // line with status and model, and the tags. The agent is in Details.
   const narrowHero = (
     <div className="flex flex-col gap-1 pb-3">
       <div className="-mx-2 flex items-center justify-between gap-2">
@@ -921,12 +923,19 @@ export default function TaskDetailPage() {
         <TaskActionsMenu model={actions} />
       </div>
       <TaskHeading title={headerTitle} />
-      {sourceLine}
-      <div className="flex min-w-0 items-center gap-2">
-        <StatusBadge status={task.status} size="md" />
-        {narrowModelChip}
-        {renderTagsLine("min-w-16 flex-1 basis-0")}
+      {/* One row: the source line left, status and model right. A phone too
+          narrow for both wraps the chips under it. */}
+      <div
+        data-slot="task-meta-row"
+        className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"
+      >
+        <div className="min-w-0 max-w-full">{sourceLine}</div>
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          <StatusBadge status={task.status} size="md" />
+          {narrowModelChip}
+        </div>
       </div>
+      {renderTagsLine("ml-0")}
     </div>
   );
 
@@ -982,10 +991,7 @@ export default function TaskDetailPage() {
               value="logs"
               className={cn("flex flex-col gap-3 py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
             >
-              {failureCallout}
               {renderSessionLogs(narrowScroller, true)}
-              {outputSection}
-              <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
             </TabsContent>
             {sidePanelTabs.map((tab) => (
               <TabsContent
@@ -1045,13 +1051,10 @@ export default function TaskDetailPage() {
                 <div ref={heroEndRef} aria-hidden className="h-px" />
               </div>
               <Separator />
-              {failureCallout}
 
               {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
-                  outcome under it, as in a chat. */}
+                  outcome as its last message, as in a chat. */}
               {renderSessionLogs(centerScroller)}
-              {outputSection}
-              <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
             </div>
           </div>
           {composerProps ? (

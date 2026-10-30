@@ -10,9 +10,12 @@
  * with a "Working for" timer, and a finished run folds behind "Worked for".
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
  *
- * A delegated task is a card (agent, status, duration) that links to its own
- * transcript. A long run shows its newest `TRANSCRIPT_PAGE_ROWS` rows, with
- * "Show older" above them, so a 1,000-row run mounts a page at a time.
+ * A steering message is the person's message too, right-aligned, with a
+ * "Queued" mark until the agent gets it. A delegated task is one line
+ * (agent, status, duration) that links to its own transcript. The task's
+ * outcome comes last, as the final reply. A long run shows its newest
+ * `TRANSCRIPT_PAGE_ROWS` rows, with "Show older" above them, so a 1,000-row
+ * run mounts a page at a time.
  */
 
 import {
@@ -22,10 +25,10 @@ import {
   Check,
   ChevronRight,
   CircleDot,
+  Clock,
   FileText,
   Globe,
   type LucideIcon,
-  MessageSquareShare,
   Plug,
   Sparkles,
   Terminal,
@@ -37,7 +40,6 @@ import type { AgentTask } from "@/api/types";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
-import { SteeringLine } from "@/components/steering/steering-message-chips";
 import { Button } from "@/components/ui/button";
 import {
   Trace,
@@ -89,6 +91,8 @@ export interface TranscriptProps {
   running: boolean;
   /** The person's message above the run (`TranscriptUserMessage`). */
   prompt?: ReactNode;
+  /** The task's outcome, after every row: the run's final reply. */
+  outcome?: ReactNode;
   /** A finished run folds behind this line. Without it, every row shows. */
   fold?: TranscriptFold | null;
   /** When the live run started: the "Working for" timer counts from it. */
@@ -104,6 +108,7 @@ export function Transcript({
   rows,
   running,
   prompt,
+  outcome,
   fold,
   workingSince,
   waitingLabel,
@@ -112,8 +117,9 @@ export function Transcript({
 }: TranscriptProps) {
   const activeFold = running ? null : (fold ?? null);
   const [limit, setLimit] = useState(TRANSCRIPT_PAGE_ROWS);
+  // Folded, the outcome stands in for the agent's last message.
   const { shown, hidden } = pagedRows(
-    activeFold ? foldedTurnRows(rows, activeFold.open) : rows,
+    activeFold ? foldedTurnRows(rows, activeFold.open, { keepLastMessage: !outcome }) : rows,
     limit,
   );
   const liveRowId = running ? rows[rows.length - 1]?.id : undefined;
@@ -142,6 +148,7 @@ export function Transcript({
       {shown.map((row) => (
         <TranscriptRowView key={row.id} row={row} live={row.id === liveRowId} />
       ))}
+      {outcome}
       {running && rows.length === 0 && waitingLabel ? (
         <Trace aria-live="polite">
           <div>
@@ -170,16 +177,21 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
       );
     case "steer":
       return (
-        <div className="min-w-0">
-          <SteeringLine
-            message={row.message}
-            className="text-xs"
-            marker={
-              <MessageSquareShare className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
-            }
-            trailing={<EntryTime at={row.at} />}
-          />
-        </div>
+        <TranscriptUserMessage
+          text={row.message.body}
+          label="Steering message"
+          footer={
+            row.message.status === "pending" ? (
+              <span
+                data-slot="transcript-queued"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              >
+                <Clock aria-hidden className="size-3" />
+                Queued
+              </span>
+            ) : null
+          }
+        />
       );
     case "delegation":
       return <DelegationCard task={row.task} agentName={row.agentName} />;
@@ -188,7 +200,7 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
   }
 }
 
-/** A delegated task: agent, status and duration, linking to its own transcript. */
+/** A delegated task, one line: agent, status and duration, linking to its own transcript. */
 function DelegationCard({ task, agentName }: { task: AgentTask; agentName: string | null }) {
   const start = parseUTCDate(task.acceptedAt ?? task.createdAt).getTime();
   const end = task.finishedAt ? parseUTCDate(task.finishedAt).getTime() : Number.NaN;
@@ -197,7 +209,7 @@ function DelegationCard({ task, agentName }: { task: AgentTask; agentName: strin
     <Link
       to={`/tasks/${task.id}`}
       data-slot="transcript-delegation"
-      className="flex min-w-0 items-center gap-2.5 rounded-lg border border-border px-3 py-2 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60"
+      className="-mx-2 flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       <TaskStatusIcon status={task.status} label={statusLabel(task.status)} />
       <span className="min-w-0 flex-1">
@@ -214,16 +226,23 @@ function DelegationCard({ task, agentName }: { task: AgentTask; agentName: strin
 
 /**
  * The person's message: a right-aligned bubble. A long one shows its first
- * lines under a fade, with "Show full message".
+ * lines under a fade, with "Show full message". The task's prompt and every
+ * steering message use it.
  */
 export function TranscriptUserMessage({
   text,
   header,
+  footer,
+  label = "Task prompt",
   className,
 }: {
   text: string;
   /** Above the text inside the bubble (a Slack thread's context). */
   header?: ReactNode;
+  /** Under the bubble, right-aligned (a steering message's "Queued"). */
+  footer?: ReactNode;
+  /** The section's accessible name. */
+  label?: string;
   className?: string;
 }) {
   const long = text.length > LONG_MESSAGE_CHARS || text.split("\n").length > LONG_MESSAGE_LINES;
@@ -231,7 +250,7 @@ export function TranscriptUserMessage({
   const clipped = long && !expanded;
   return (
     <section
-      aria-label="Task prompt"
+      aria-label={label}
       data-slot="transcript-user"
       className={cn("flex min-w-0 flex-col items-end gap-1", className)}
     >
@@ -253,6 +272,7 @@ export function TranscriptUserMessage({
           {expanded ? "Show less" : "Show full message"}
         </button>
       ) : null}
+      {footer}
     </section>
   );
 }

@@ -15,6 +15,7 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 // The real grants hooks: outside a provider they answer "operator tab", so every control shows.
 mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
@@ -64,18 +65,19 @@ mock.module("@/api/fs", () => ({
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "u1" }),
 }));
-// Steering is its own surface; the stub shows which composer is up and
-// renders the extra actions it was handed.
+// Steering is its own surface; the stub shows which composer is up, the send
+// label and placeholder it was handed, and renders its extra actions.
 mock.module("@/components/steering/steer-composer", () => ({
   SteerComposer: ({
     extraActions,
-    modeLabel,
+    sendLabel,
+    placeholder,
   }: {
     extraActions?: React.ReactNode;
-    modeLabel?: React.ReactNode;
+    sendLabel?: string;
+    placeholder?: string;
   }) => (
-    <div data-testid="steer-composer">
-      {modeLabel}
+    <div data-testid="steer-composer" data-send-label={sendLabel} data-placeholder={placeholder}>
       {extraActions}
     </div>
   ),
@@ -136,7 +138,7 @@ async function type(container: HTMLElement, text: string) {
 }
 
 async function send(container: HTMLElement) {
-  const button = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  const button = container.querySelector('button[type="submit"]') as HTMLButtonElement;
   await act(async () => button.click());
   for (let i = 0; i < 50 && createdTasks.length === 0; i++) {
     await act(async () => new Promise((r) => setTimeout(r, 10)));
@@ -152,7 +154,7 @@ async function waitFor(done: () => boolean) {
 }
 
 const sendButton = (container: HTMLElement) =>
-  container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  container.querySelector('button[type="submit"]') as HTMLButtonElement;
 
 beforeEach(() => {
   createdTasks.length = 0;
@@ -164,8 +166,19 @@ beforeEach(() => {
   nextTaskId = 0;
 });
 
-const modeLine = (container: HTMLElement) =>
-  container.querySelector('[data-slot="composer-mode"]') as HTMLElement | null;
+/** The send button's label: the steer stub's, or the follow-up dock's submit button. */
+function sendLabelOf(container: HTMLElement): string | null {
+  const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+  if (steer) return steer.dataset.sendLabel ?? null;
+  return container.querySelector('button[type="submit"]')?.getAttribute("aria-label") ?? null;
+}
+
+/** The placeholder: the steer stub's, or the follow-up dock's textarea. */
+function placeholderOf(container: HTMLElement): string | null {
+  const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+  if (steer) return steer.dataset.placeholder ?? null;
+  return container.querySelector("textarea")?.getAttribute("placeholder") ?? null;
+}
 
 describe("TaskComposer on Sessions", () => {
   test("a file added while steering is up switches to a follow-up task that carries it", async () => {
@@ -395,8 +408,8 @@ describe("TaskComposer on Sessions", () => {
   });
 });
 
-describe("TaskComposer mode line", () => {
-  test("a steerable task reads Steer, and names the target with showTarget", async () => {
+describe("TaskComposer mode", () => {
+  test("a steerable task sends with Steer, and names the target in the placeholder with showTarget", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         rootTaskId="root-1"
@@ -405,19 +418,56 @@ describe("TaskComposer mode line", () => {
         showTarget
       />,
     );
-    expect(modeLine(container)?.dataset.mode).toBe("steer");
-    expect(modeLine(container)?.textContent).toContain("Steer");
-    expect(modeLine(container)?.textContent).toContain("#lead-1");
-    expect(modeLine(container)?.textContent).toContain("Fix the parser");
+    expect(sendLabelOf(container)).toBe("Steer");
+    expect(placeholderOf(container)).toBe("Steer #lead-1 Fix the parser…");
     await unmount();
   });
 
-  test("an ended task reads Follow up", async () => {
+  test("a long target title is cut so the placeholder stays one line", async () => {
+    const title = `Migrate the billing service from the legacy cron runner to the workflow engine.`;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(runningLeadTask as object), task: title } as never}
+        canSteer
+        showTarget
+      />,
+    );
+    expect(placeholderOf(container)).toBe(
+      "Steer #lead-1 Migrate the billing service from the legacy cron runner to…",
+    );
+    await unmount();
+  });
+
+  test("without showTarget the placeholder names no task", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer targetTask={runningLeadTask} canSteer />,
+    );
+    expect(sendLabelOf(container)).toBe("Steer");
+    expect(placeholderOf(container)).toBeNull();
+    await unmount();
+  });
+
+  test("an ended task sends with Follow up, shown on the button", async () => {
     const { container, unmount } = await mount(
       <TaskComposer targetTask={completedWorkerTask} canSteer={false} />,
     );
-    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
-    expect(modeLine(container)?.textContent).toBe("Follow up");
+    expect(sendLabelOf(container)).toBe("Follow up");
+    expect(container.querySelector('button[type="submit"]')?.textContent).toBe("Follow up");
+    expect(placeholderOf(container)).toBe("Follow up on this task…");
+    await unmount();
+  });
+
+  test("on Sessions an ended target is named in the follow-up placeholder", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={{ ...(completedWorkerTask as object), task: "Ship the docs" } as never}
+        canSteer={false}
+        showTarget
+      />,
+    );
+    expect(placeholderOf(container)).toBe("Follow up #done-1 Ship the docs…");
     await unmount();
   });
 
@@ -431,19 +481,19 @@ describe("TaskComposer mode line", () => {
         )}
       />,
     );
-    expect(modeLine(container)?.dataset.mode).toBe("steer");
+    expect(sendLabelOf(container)).toBe("Steer");
     const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
     await act(async () => add.click());
-    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
+    expect(sendLabelOf(container)).toBe("Follow up");
     const remove = container.querySelector(
       'button[aria-label="Remove screenshot-x.png"]',
     ) as HTMLButtonElement;
     await act(async () => remove.click());
-    expect(modeLine(container)?.dataset.mode).toBe("steer");
+    expect(sendLabelOf(container)).toBe("Steer");
     await unmount();
   });
 
-  test("a harness with no live delivery reads Follow up in the steer box", async () => {
+  test("a harness with no live delivery sends with Follow up in the steer box", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         targetTask={{ ...(runningLeadTask as object), supportedSteerModes: [] } as never}
@@ -451,7 +501,7 @@ describe("TaskComposer mode line", () => {
       />,
     );
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
-    expect(modeLine(container)?.dataset.mode).toBe("follow-up");
+    expect(sendLabelOf(container)).toBe("Follow up");
     await unmount();
   });
 });

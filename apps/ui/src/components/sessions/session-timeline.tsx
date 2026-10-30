@@ -26,6 +26,7 @@ import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { isAutoReview } from "@/lib/auto-review";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ParallelGroup, TaskCard } from "./task-card";
@@ -370,7 +371,7 @@ export function SessionTimeline({
   const rootDefers = parentClosedAfterDirectChildren(root, tree.childrenByParent);
 
   return (
-    <div className={cn("max-w-3xl mx-auto w-full", className)}>
+    <div className={cn(CHAT_COLUMN, className)}>
       {/* Single timeline column, no spine. Each row's `pb-*` provides the
           rhythm between turns; grouping comes from indentation + the
           parallel-group caption. */}

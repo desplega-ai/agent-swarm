@@ -27,9 +27,8 @@ import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
-import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
-import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import { cn, formatElapsed, formatSmartTime, parseUTCDate } from "@/lib/utils";
 import type { CallUsageTotals } from "@/logs-parser";
 import { type RailComposition, RequestCompositionSection } from "./request-composition-section";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
@@ -212,54 +211,6 @@ function CopyableId({
         className={cn("shrink-0 text-muted-foreground hover:text-foreground", NARROW_ICON_TARGET)}
       />
     </span>
-  );
-}
-
-/**
- * Task events in words ("Started by Lead", never `pending → in_progress`).
- * `agentNameFor` names the agent an event is about.
- */
-function ActivityTimeline({
-  logs,
-  agentNameFor,
-}: {
-  logs: AgentLog[];
-  agentNameFor: (log: AgentLog) => string | null;
-}) {
-  return (
-    <ol>
-      {logs.map((log, i) => {
-        const event = describeTaskEvent(log, agentNameFor(log));
-        return (
-          <li key={log.id} className="flex gap-3">
-            {/* A 1px line joins the status-colored dots. */}
-            <div className="flex flex-col items-center">
-              <div
-                className={cn("mt-1.5 size-2 shrink-0 rounded-full", TASK_EVENT_DOT[event.tone])}
-              />
-              {i < logs.length - 1 && <div className="mt-0.5 w-px flex-1 bg-border" />}
-            </div>
-            <div className="min-w-0 pb-3">
-              <p
-                className={cn(
-                  "text-data leading-5",
-                  TASK_EVENT_TEXT[event.tone],
-                  event.tone === "muted" ? "line-clamp-2" : "font-medium",
-                )}
-              >
-                {event.label}
-              </p>
-              {event.detail ? (
-                <p className="truncate text-xs text-muted-foreground">{event.detail}</p>
-              ) : null}
-              <p className="text-xs tabular-nums text-muted-foreground">
-                {formatRelativeTime(log.createdAt)}
-              </p>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -455,8 +406,6 @@ interface TaskDetailsRailProps {
   agentName: string | null;
   /** The requesting user's name, when the users list has it. */
   requestedByName: string | null;
-  /** Names the agent an Activity event is about. */
-  agentNameFor: (log: AgentLog) => string | null;
   costs: SessionCost[] | undefined;
   costsLoading: boolean;
   context: TaskContextResponse | undefined;
@@ -469,15 +418,13 @@ interface TaskDetailsRailProps {
 
 /**
  * Everything about a task that is not its outcome or its log: who, where
- * from, when, how much, context use, the event history, and the technical
- * ids. The wide layout shows it as the right rail; the narrow layout shows it
- * in the Details tab.
+ * from, when, how much, context use, and the technical ids. The wide layout
+ * shows it as the right rail; the narrow layout shows it in the Details tab.
  */
 export function TaskDetailsRail({
   task,
   agentName,
   requestedByName,
-  agentNameFor,
   costs,
   costsLoading,
   context,
@@ -506,7 +453,6 @@ export function TaskDetailsRail({
       ? latestSnapshot.contextFormula
       : null;
   const harness = harnessLine(task);
-  const hasEvents = (task.logs?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -621,12 +567,6 @@ export function TaskDetailsRail({
       />
 
       {composition ? <RequestCompositionSection composition={composition} /> : null}
-
-      {hasEvents ? (
-        <RailSection title={`Activity (${task.logs.length})`}>
-          <ActivityTimeline logs={task.logs} agentNameFor={agentNameFor} />
-        </RailSection>
-      ) : null}
 
       {/* A rail section like the others: an h2 at the meta size. */}
       <CollapsibleSection

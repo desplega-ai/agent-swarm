@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useObjectUrl } from "@/hooks/use-object-url";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +142,7 @@ export interface ComposerDockProps {
   autoFocus?: boolean;
   /**
    * Let the card span the full available width instead of the chat-style
-   * centered `max-w-3xl` column. Used by the task-detail steering dock, where
+   * centered chat column (`CHAT_COLUMN`). Used by the task-detail steering dock, where
    * the composer sits under a full-width log viewer, and by the `/setup`
    * first task, which spans the setup column.
    */
@@ -164,10 +165,11 @@ export interface ComposerDockProps {
    */
   touch?: boolean;
   /**
-   * One line above the box naming what a send does ("Steer", "Follow up")
-   * and, where it helps, the task it goes to. See `TaskComposer`.
+   * Show `sendLabel` as text on the send button, not only as its name and
+   * tooltip. `TaskComposer` uses it to name what a send does ("Steer",
+   * "Follow up").
    */
-  modeLabel?: React.ReactNode;
+  labelledSend?: boolean;
   className?: string;
 }
 
@@ -224,7 +226,7 @@ export function ComposerDock({
   decoration,
   bar = false,
   touch = false,
-  modeLabel,
+  labelledSend = false,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -327,13 +329,10 @@ export function ComposerDock({
       }}
       {...engageHandlers}
     >
-      {modeLabel ? (
-        <div className={cn("mb-1.5 px-1", !fullWidth && "max-w-3xl mx-auto")}>{modeLabel}</div>
-      ) : null}
       <div
         className={cn(
           "relative",
-          !fullWidth && "max-w-3xl mx-auto",
+          !fullWidth && CHAT_COLUMN,
           "rounded-2xl border border-border bg-card shadow-sm transition",
           "focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15",
           disabled && "opacity-60",
@@ -472,12 +471,22 @@ export function ComposerDock({
               <TooltipTrigger asChild>
                 <Button
                   type="submit"
-                  size="icon"
+                  size={labelledSend ? "sm" : "icon"}
                   disabled={!canSubmit}
                   aria-label={sendLabel}
-                  className={cn("rounded-full shadow-sm", bar || touch ? "size-11" : "h-8 w-8")}
+                  className={cn(
+                    "rounded-full shadow-sm",
+                    labelledSend
+                      ? bar || touch
+                        ? "h-11 px-4"
+                        : "h-8 px-3"
+                      : bar || touch
+                        ? "size-11"
+                        : "h-8 w-8",
+                  )}
                 >
                   <ArrowUp className="h-4 w-4" />
+                  {labelledSend ? <span aria-hidden>{sendLabel}</span> : null}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{sendLabel}</TooltipContent>
@@ -515,7 +524,7 @@ export function ComposerReadOnlyNotice({
     <div className={cn("shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}>
       <div
         className={cn(
-          !fullWidth && "max-w-3xl mx-auto",
+          !fullWidth && CHAT_COLUMN,
           "flex items-center gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3.5",
         )}
       >
