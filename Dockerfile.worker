@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.312
+ARG CLAUDE_CODE_VERSION=2.1.314
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.165.0
+ARG CODEX_VERSION=0.166.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.1
+ARG OPENCODE_VERSION=2.2.2
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793275344-g17bf52
-ARG AMP_SHA512_AMD64=7eb4463264d9605dee66d248719d90b0596473e326bfe7ed8b17033ec942a58db805ced695862666e1a464f19e9c91060e46d841ee2b427225be3572a8db18af
-ARG AMP_SHA512_ARM64=3827544505f873959d32398dfc4e29ea2147a666c696150d8d085ef89aea045138f84027987d85a20d62bdc4b8c4cefd87a129fad2eebfcc50ef0711b9788bec
+ARG AMP_VERSION=0.0.1793332853-ge7c6c6
+ARG AMP_SHA512_AMD64=1e8bfc8f7c9be50dd4f81bfa366ca5b50fa57a889878aa6758976b0ce71c29cf3e859b53b91bd5a37327f47ec771cd57ae2824ff2747c14b5b73b9b7a59da206
+ARG AMP_SHA512_ARM64=6e8437241a51af510e439fab79b3e9969c2b0c90dc111eac7a2ab173801284ce3a5d47299eb823c0c03f7413360453c0523482af31cd1788a9e454401168de9f
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -664,9 +664,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.35.1
-ARG KIRO_CLI_SHA256_AMD64=b4ec8f61c466dbfb06b73972fa746f4f96bf19abe2d4307af3cd988bde751b56
-ARG KIRO_CLI_SHA256_ARM64=933d53ed2636c5035fb775e725f73987888e7b398a0bdb09a4b5f035b7e0bf40
+ARG KIRO_CLI_VERSION=2.36.0
+ARG KIRO_CLI_SHA256_AMD64=ede3772e2340b60758c45ba25fe0fed54aa4c3af87d038b1b70fa7ba2e139cb2
+ARG KIRO_CLI_SHA256_ARM64=7c9564c33a7423790566a953f8d5a27ca33fa6e7f4bc8bafa97ccd8c0c487502
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
