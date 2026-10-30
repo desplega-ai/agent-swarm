@@ -22,6 +22,7 @@ import {
   fetchSlackFiles,
   notifySlackFileFailures,
 } from "./inbound-files";
+import { isSlackThreadLeft } from "./left-threads";
 import { extractSlackMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
@@ -165,6 +166,12 @@ async function slackFlush(
     return;
   }
   const { channelId, threadTs } = split;
+  // The thread was left (slack-leave-thread) while these replies waited. Only
+  // non-mentions are buffered, so none of them rejoins it.
+  if (await isSlackThreadLeft(channelId, threadTs)) {
+    console.log(`[Slack] Buffer flush: dropping ${items.length} message(s) in left thread ${key}`);
+    return;
+  }
   // Buffer is guaranteed to have at least one item — the first carries the
   // original requester's userId (same semantics as the pre-refactor version).
   const originalRequesterId = items[0]!.userId;

@@ -1349,6 +1349,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_LEAVE_THREAD_DISABLE",
+        label: "Disable leaving Slack threads",
+        description:
+          "Remove the `slack-leave-thread` tool from new agent sessions. Sessions that already list it get an error when they call it.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#leaving-a-thread`,
+      },
+      {
         key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
         label: "Block external Slack channels",
         description:

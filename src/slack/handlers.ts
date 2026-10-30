@@ -52,6 +52,7 @@ import {
   leaveExternalChannel,
   shouldBlockChannel,
 } from "./external-channel";
+import { shouldSkipLeftSlackThread } from "./left-threads";
 import {
   collectSlackMessageFiles,
   extractSlackMessageText,
@@ -487,6 +488,17 @@ export function registerMessageHandler(app: App): void {
       return ignoreSlackInbound("unauthorized_user");
     }
 
+    // Check if bot was mentioned (in original text only)
+    const botMentioned = !!cachedBotUserId && !!msg.text?.includes(`<@${cachedBotUserId}>`);
+
+    // A thread the swarm left (slack-leave-thread) stays silent until someone
+    // @mentions the bot. Checked before the workflow event, buffering, routing,
+    // or any AI call.
+    if (await shouldSkipLeftSlackThread(msg.channel, msg.thread_ts, botMentioned)) {
+      console.log(`[Slack] Skipping message in left thread ${msg.channel}/${msg.thread_ts}`);
+      return ignoreSlackInbound("thread_left");
+    }
+
     // Resolve canonical user identity via the three-step cascade:
     //   fast-path alias lookup → enrich+auto-link by email → unmapped tracker.
     // Returns undefined when no email is recoverable; task creation proceeds
@@ -519,9 +531,6 @@ export function registerMessageHandler(app: App): void {
       return reportSlackInboundFailure("bot_user_unavailable");
     }
     const botUserId = cachedBotUserId;
-
-    // Check if bot was mentioned (in original text only)
-    const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
     // Detect assistant thread context. Bolt's Assistant middleware claims DM thread
     // messages with no subtype or `file_share` (`isAssistantMessage` in @slack/bolt), so

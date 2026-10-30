@@ -181,6 +181,7 @@ describe("Tool Annotations & Classification", () => {
       "slack-list-channels",
       "slack-delete",
       "slack-update",
+      "slack-leave-thread",
     ];
 
     for (const name of slackTools) {

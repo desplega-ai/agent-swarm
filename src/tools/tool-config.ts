@@ -97,7 +97,7 @@ export const DEFERRED_TOOLS = new Set([
   "read-messages",
   "post-message",
 
-  // Slack (12): task-context gated; keep out of CORE_TOOLS
+  // Slack (13): task-context gated; keep out of CORE_TOOLS
   "slack-reply",
   "slack-read",
   "slack-upload-file",
@@ -110,6 +110,7 @@ export const DEFERRED_TOOLS = new Set([
   "slack-archive-channel",
   "slack-delete",
   "slack-update",
+  "slack-leave-thread",
 
   // Channel management (2)
   "create-channel",

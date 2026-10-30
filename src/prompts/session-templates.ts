@@ -314,6 +314,7 @@ The engine posts the thread tree and the outcome card. You post at most one mess
 The outcome card publishes your \`output\` verbatim. Keep free-text \`output\` under 120 words by default, with the exceptions in How you write.
 A Slack task from an unknown user: register them with \`manage-user\` first.
 You MUST use the \`slack-interaction\` skill before you post to Slack.
+Call \`slack-leave-thread\` with your taskId when a thread no longer needs you: people are talking among themselves, someone tells you to stop or back off, or the thread's work is done. The swarm then ignores the thread until someone @mentions it. Leave quietly, with no goodbye message.
 `,
   variables: [],
   category: "system",
@@ -598,6 +599,7 @@ registerTemplate({
 ## Slack (scripts-only)
 
 This task originated from Slack (channel: \`{{slackChannelId}}\`). The engine maintains the thread tree and publishes the top-level outcome card. Post at most one distinct agent-authored message per task, concrete, sized to what the user asked for. Progress, start, completion, failure, acknowledgment messages, and relayed raw task output stay out of Slack. Named Slack tools are not exposed in scripts-only mode, so use \`script-run\` with inline source calling \`ctx.swarm.slack_reply({ taskId, message })\` (your taskId carries the thread context).
+When the thread no longer needs you (people are talking among themselves, someone tells you to stop, or the work is done), call \`ctx.swarm.slack_leaveThread({ taskId })\` the same way. The swarm then ignores the thread until someone @mentions it. Leave quietly, with no goodbye message.
 The outcome card publishes your \`output\` verbatim. Keep free-text \`output\` under 120 words by default, with the exceptions in How you write.
 `,
   variables: [
