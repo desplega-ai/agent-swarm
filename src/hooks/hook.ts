@@ -11,6 +11,7 @@ import {
 } from "../be/memory/raters/llm";
 import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session";
 import {
+  advanceIdentityBaselines,
   buildIndependentIdentityPayloads,
   contentSha256,
   fetchWithSyncTimeout,
@@ -148,7 +149,7 @@ export async function postHookProfileUpdate({
   body: ProfilePayload["body"];
   label: string;
   fetchImpl?: typeof fetch;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     const response = await fetchImpl(url, {
       method: "PUT",
@@ -166,9 +167,11 @@ export async function postHookProfileUpdate({
         ),
       );
     }
+    return response.ok;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(scrubSecrets(`[hook] ${label} profile sync errored: ${message}`));
+    return false;
   }
 }
 
@@ -676,10 +679,10 @@ export async function handleHook(): Promise<void> {
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server.
    *
-   * When `changeSource` is `"session_sync"` (the Stop-hook default), loads
-   * baseline hashes written at session start and skips any file whose content
-   * hasn't changed. This prevents the session-end sync from clobbering DB-side
-   * edits that Lead made via `update-profile` during the running session.
+   * Loads the baseline hashes and skips any file whose content hasn't changed.
+   * This prevents clobbering DB-side edits that Lead made via `update-profile`
+   * during the running session: at Stop, and on a `"self_edit"` too, where an
+   * edit to one file re-reads all four.
    */
   const syncIdentityFilesToServer = async (
     agentId: string,
@@ -687,7 +690,7 @@ export async function handleHook(): Promise<void> {
   ): Promise<void> => {
     if (!mcpConfig) return;
 
-    const baselines = changeSource === "session_sync" ? await readIdentityBaselines() : null;
+    const baselines = await readIdentityBaselines();
 
     const updates: Record<string, string> = {};
 
@@ -747,14 +750,19 @@ export async function handleHook(): Promise<void> {
 
     if (Object.keys(updates).length === 0) return;
 
-    for (const payload of buildIndependentIdentityPayloads(updates, changeSource)) {
-      await postHookProfileUpdate({
+    const synced: Record<string, string> = {};
+    for (const [field, value] of Object.entries(updates)) {
+      const [payload] = buildIndependentIdentityPayloads({ [field]: value }, changeSource);
+      if (!payload) continue;
+      const ok = await postHookProfileUpdate({
         url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
         headers: mcpConfig.headers,
         body: payload.body,
         label: payload.label,
       });
+      if (ok) synced[field] = value;
     }
+    await advanceIdentityBaselines(synced);
   };
 
   /**
@@ -792,9 +800,11 @@ export async function handleHook(): Promise<void> {
       warnProfileFileTooLarge(agentId, "setupScript", content.length, "hook");
       return;
     }
+    // Unchanged since it last matched the DB: not an edit, so don't send it.
+    if ((await readIdentityBaselines())?.setupScript === contentSha256(content)) return;
 
     try {
-      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
+      const resp = await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
         method: "PUT",
         headers: {
           ...mcpConfig.headers,
@@ -802,6 +812,7 @@ export async function handleHook(): Promise<void> {
         },
         body: JSON.stringify({ setupScript: content, changeSource }),
       });
+      if (resp.ok) await advanceIdentityBaselines({ setupScript: content });
     } catch {
       /* silently fail */
     }

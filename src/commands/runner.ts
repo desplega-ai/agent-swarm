@@ -136,6 +136,7 @@ import {
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   contentSha256,
+  extractSetupScriptContent,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
@@ -6785,6 +6786,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     if (agentToolsMd) baselines.toolsMd = contentSha256(agentToolsMd);
     if (agentHeartbeatMd) baselines.heartbeatMd = contentSha256(agentHeartbeatMd);
     if (agentClaudeMd) baselines.claudeMd = contentSha256(agentClaudeMd);
+    // start-up.sh is not rewritten here when it exists: the entrypoint composed
+    // it from the DB at container start, so its agent-managed section is the base.
+    const setupFile = Bun.file("/workspace/start-up.sh");
+    const setupContent = (await setupFile.exists())
+      ? extractSetupScriptContent(await setupFile.text(), agentId)
+      : null;
+    if (setupContent) baselines.setupScript = contentSha256(setupContent);
     await writeIdentityBaselines(baselines);
     console.log(`[${role}] Recorded identity file baselines for session-end sync`);
   } catch {

@@ -439,7 +439,7 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
       new Response("boom", { status: 500, statusText: "Server Error" })) as typeof fetch;
     try {
       // Must resolve (non-fatal), not reject.
-      await expect(postProfileUpdate({ ...opts, fetchImpl }, payload)).resolves.toBeUndefined();
+      await expect(postProfileUpdate({ ...opts, fetchImpl }, payload)).resolves.toBe(false);
       expect(warnSpy).toHaveBeenCalledTimes(1);
       const msg = String(warnSpy.mock.calls[0]?.[0]);
       expect(msg).toContain("setup sync failed");
@@ -455,7 +455,7 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
       throw new Error("network down");
     }) as typeof fetch;
     try {
-      await expect(postProfileUpdate({ ...opts, fetchImpl }, payload)).resolves.toBeUndefined();
+      await expect(postProfileUpdate({ ...opts, fetchImpl }, payload)).resolves.toBe(false);
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(String(warnSpy.mock.calls[0]?.[0])).toContain("setup sync errored");
     } finally {
@@ -634,27 +634,23 @@ describe("collectProfilePayloads (baseline integration)", () => {
     expect(payloads[0]?.body.identityMd).toBeUndefined();
   });
 
-  test("self_edit bypasses baselines (agent explicitly changed the file)", async () => {
-    const identityContent = LONG;
-
+  test("self_edit skips the identity files the agent did not edit", async () => {
+    // An edit to one file triggers a sync of all of them; the untouched ones
+    // still hold the boot-time copy, which may predate a DB-side edit.
     const files = reader({
-      [SOUL_MD_PATH]: identityContent,
-      [IDENTITY_MD_PATH]: identityContent,
-      [TOOLS_MD_PATH]: "tools",
+      [SOUL_MD_PATH]: LONG,
+      [IDENTITY_MD_PATH]: LONG,
+      [TOOLS_MD_PATH]: "edited tools",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({
-        soulMd: contentSha256(identityContent),
-        identityMd: contentSha256(identityContent),
+        soulMd: contentSha256(LONG),
+        identityMd: contentSha256(LONG),
         toolsMd: contentSha256("tools"),
       }),
     });
 
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
-    expect(payloads).toHaveLength(3);
-    // self_edit should include ALL files regardless of baselines, independently.
     expect(payloads.map((payload) => payload.body)).toEqual([
-      { soulMd: identityContent, changeSource: "self_edit" },
-      { identityMd: identityContent, changeSource: "self_edit" },
-      { toolsMd: "tools", changeSource: "self_edit" },
+      { toolsMd: "edited tools", changeSource: "self_edit" },
     ]);
   });
 

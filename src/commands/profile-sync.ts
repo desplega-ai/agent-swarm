@@ -52,10 +52,13 @@ export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 // Flow:
 //   1. Runner writes DB content → /workspace/*.md at session start.
 //   2. Runner records SHA-256 hashes of the written content (the "baselines").
-//   3. At session end, sync compares current file hash against its baseline.
+//   3. Every sync (session end AND on-edit) compares each file's hash against
+//      its baseline.
 //      - Hash matches → file untouched by the agent → skip sync (preserves
 //        any DB-side edits Lead made during the session).
 //      - Hash differs → agent modified the file → sync it back to DB.
+//   4. After the API accepts a file, its baseline advances to the synced hash,
+//      so a file edited once is not re-sent over a later DB-side edit.
 // ──────────────────────────────────────────────────────────────────────────
 export const IDENTITY_BASELINES_PATH = "/tmp/identity-baselines.json";
 
@@ -350,6 +353,28 @@ export async function readIdentityBaselines(
     return JSON.parse(raw) as IdentityBaselines;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Record the hashes of profile files the API just accepted: the DB now holds
+ * that content, so the same bytes on disk are no longer an edit. Best effort:
+ * on failure the older baselines stay, which only means a redundant re-send.
+ */
+export async function advanceIdentityBaselines(
+  synced: Record<string, string>,
+  readFile: FileReader = readFileIfExists,
+  writeFile: FileWriter = writeFileText,
+): Promise<void> {
+  if (Object.keys(synced).length === 0) return;
+  try {
+    const baselines = (await readIdentityBaselines(readFile)) ?? {};
+    for (const [field, content] of Object.entries(synced)) {
+      baselines[field] = contentSha256(content);
+    }
+    await writeFile(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
+  } catch {
+    /* keep the older baselines */
   }
 }
 
@@ -658,7 +683,7 @@ export function extractSetupScriptContent(raw: string, agentId = "unknown"): str
  *
  * When `baselines` is provided, skips any field whose content hash matches the
  * baseline (i.e. the file was not modified during the session). This prevents
- * session-end sync from clobbering DB-side edits made by Lead.
+ * a sync from clobbering DB-side edits made by Lead.
  */
 export function buildIdentityPayload(
   files: {
@@ -729,7 +754,7 @@ export function buildIdentityPayload(
 export type FileReader = (path: string) => Promise<string | undefined>;
 
 /** Default file reader — reads from the worker's local FS via Bun. */
-async function readFileIfExists(path: string): Promise<string | undefined> {
+export async function readFileIfExists(path: string): Promise<string | undefined> {
   try {
     const file = Bun.file(path);
     if (!(await file.exists())) return undefined;
@@ -737,6 +762,13 @@ async function readFileIfExists(path: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** Writes a file's text. */
+export type FileWriter = (path: string, content: string) => Promise<void>;
+
+async function writeFileText(path: string, content: string): Promise<void> {
+  await Bun.write(path, content);
 }
 
 /**
@@ -788,11 +820,11 @@ export async function auditProfileDivergences(
  * `fields` selects which groups to include. The file reader is injectable so
  * the field-selection / guard logic can be unit-tested without touching the FS.
  *
- * When `changeSource` is `"session_sync"`, loads baseline hashes written at
- * session start and skips identity fields whose content hasn't changed — this
- * prevents blind-overwriting DB-side edits made by Lead during the session.
- * On-edit syncs (`"self_edit"`) bypass baselines entirely since the agent
- * explicitly changed the file and the new content should propagate.
+ * Loads the baseline hashes and skips identity fields and the setup script
+ * whose content hasn't changed — this prevents blind-overwriting DB-side edits
+ * made by Lead during the session. That holds for on-edit syncs
+ * (`"self_edit"`) too: an edit to one file triggers a sync of every identity
+ * file, and the untouched ones still hold the boot-time copy.
  */
 export async function collectProfilePayloads(
   fields: ProfileSyncField[],
@@ -803,7 +835,7 @@ export async function collectProfilePayloads(
 ): Promise<ProfilePayload[]> {
   const payloads: ProfilePayload[] = [];
 
-  const baselines = changeSource === "session_sync" ? await readIdentityBaselines(readFile) : null;
+  const baselines = await readIdentityBaselines(readFile);
 
   if (fields.includes("identity")) {
     const updates = buildIdentityPayload(
@@ -843,7 +875,7 @@ export async function collectProfilePayloads(
     const raw = await readFile(SETUP_SCRIPT_PATH);
     if (raw !== undefined) {
       const content = extractSetupScriptContent(raw, agentId);
-      if (content !== null) {
+      if (content !== null && baselines?.setupScript !== contentSha256(content)) {
         payloads.push({ label: "setup", body: { setupScript: content, changeSource } });
       }
     }
@@ -855,12 +887,13 @@ export async function collectProfilePayloads(
 /**
  * POST a single profile update. NON-FATAL but VISIBLE: a non-2xx response or a
  * thrown error is logged (scrubbed) and swallowed so it never fails the task,
- * but — unlike the original copies — it is never silently ignored.
+ * but — unlike the original copies — it is never silently ignored. Resolves to
+ * whether the API accepted it.
  */
 export async function postProfileUpdate(
   opts: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "fetchImpl">,
   payload: ProfilePayload,
-): Promise<void> {
+): Promise<boolean> {
   const doFetch = opts.fetchImpl ?? fetch;
   try {
     const resp = await doFetch(`${opts.apiUrl}/api/agents/${opts.agentId}/profile`, {
@@ -885,10 +918,22 @@ export async function postProfileUpdate(
         ),
       );
     }
+    return resp.ok;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[profile-sync] ${payload.label} sync errored: ${msg}`));
+    return false;
   }
+}
+
+/** The baseline-tracked profile fields a payload carried (CLAUDE.md has its own lineage). */
+function baselineFieldsOf(payload: ProfilePayload): Record<string, string> {
+  if (payload.label === "claude") return {};
+  const fields: Record<string, string> = {};
+  for (const [field, value] of Object.entries(payload.body)) {
+    if (field !== "changeSource" && typeof value === "string") fields[field] = value;
+  }
+  return fields;
 }
 
 /**
@@ -919,9 +964,11 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
     claudeMdPath,
     opts.agentId,
   );
+  const synced: Record<string, string> = {};
   for (const payload of payloads) {
-    await postProfileUpdate(opts, payload);
+    if (await postProfileUpdate(opts, payload)) Object.assign(synced, baselineFieldsOf(payload));
   }
+  await advanceIdentityBaselines(synced);
 
   if (claudeUnderLock) {
     const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs = RUNNER_LOCK_WAIT_MS } =
