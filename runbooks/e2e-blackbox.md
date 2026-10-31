@@ -118,6 +118,10 @@ for that domain. The method:
 3. Delete the redundant tests, run `bun run e2e --strict` and the remaining unit tests of the
    area, and note the deleted names in the PR so a reviewer can object.
 
+`bun scripts/e2e/unit-overlap.ts` prints the current list: every unit test file that drives the
+server over HTTP or MCP, the route templates and tools it names, and a verdict (candidate,
+review, keep). It is a starting list for a human review, never a deletion script.
+
 First batch (highest overlap; every one boots the real server and drives it over HTTP or MCP,
 which is exactly what the scenarios do): `src/tests/http-api-integration.test.ts`,
 `events-http.test.ts`, `agentfs-proxy.test.ts`, `kv-page-proxy.test.ts`, `page-proxy.test.ts`,

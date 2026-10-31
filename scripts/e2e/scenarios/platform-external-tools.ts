@@ -3,7 +3,6 @@ import type { Scenario } from "../run";
 import {
   callTool,
   cleanupStack,
-  deleteConfig,
   expectToolError,
   expectToolOk,
   fakeJwt,

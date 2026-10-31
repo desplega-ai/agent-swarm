@@ -38,7 +38,23 @@ export type FlowStatus = {
  */
 export type StateSurfaceCoverage = SurfaceCoverage & { name: string; unexpected: string[] };
 
+/**
+ * A named engine: the route groups, tool-name prefixes and state surfaces that make it up,
+ * rolled into one covered/total figure. Every part is already gated on its own; the roll-up
+ * is the one number a reader asks for ("how covered is the script engine?").
+ */
+export type EngineCoverage = {
+  name: string;
+  routes: { covered: number; total: number };
+  mcpTools: { covered: number; total: number };
+  nodeTypes: { covered: number; total: number };
+  stateValues: { covered: number; total: number };
+  percent: number;
+  uncovered: string[];
+};
+
 export type Coverage = {
+  engines: EngineCoverage[];
   routes: SurfaceCoverage & {
     byGroup: Record<string, { total: number; covered: number }>;
     unknown: string[];
@@ -73,7 +89,20 @@ export type StateSurfaceSpec = {
   excluded: Array<{ value: string; reason: string }>;
 };
 
+export type EngineSpec = {
+  name: string;
+  /** Route groups (`groupFor`: the segment after /api, or the first segment). */
+  routeGroups: string[];
+  /** Tool names: exact, `prefix-*` or `*-suffix`. */
+  tools: string[];
+  /** `true` to roll the workflow node types into this engine. */
+  nodeTypes?: boolean;
+  /** State surface names from `stateSurfaces`. */
+  stateSurfaces: string[];
+};
+
 export type CoverageManifest = {
+  engines: EngineSpec[];
   routes: Array<{ operation: string; reason: string }>;
   mcpTools: Array<{ name: string; reason: string }>;
   nodeTypes: Array<{ type: string; reason: string }>;
@@ -82,6 +111,7 @@ export type CoverageManifest = {
 };
 
 export const EMPTY_MANIFEST: CoverageManifest = {
+  engines: [],
   routes: [],
   mcpTools: [],
   nodeTypes: [],
@@ -309,7 +339,67 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
   const byGroupLatency: Record<string, LatencyStats> = {};
   for (const [group, values] of latencyByGroup) byGroupLatency[group] = latencyStats(values);
 
+  // `prefix-*`, `*-suffix` or an exact name.
+  const toolMatches = (patterns: string[], name: string) =>
+    patterns.some((pattern) => {
+      if (pattern.endsWith("*")) return name.startsWith(pattern.slice(0, -1));
+      if (pattern.startsWith("*")) return name.endsWith(pattern.slice(1));
+      return name === pattern;
+    });
+  const engines: EngineCoverage[] = inputs.manifest.engines.map((spec) => {
+    const groups = new Set(spec.routeGroups);
+    const engineOps = operations.filter(
+      (operation) =>
+        groups.has(operation.group) &&
+        !excludedRoutes.has(`${operation.method} ${operation.template}`),
+    );
+    const engineRoutesCovered = engineOps.filter((operation) =>
+      coveredKeys.has(`${operation.method} ${operation.template}`),
+    );
+    const engineTools = [...inputs.toolUniverse].filter(
+      (name) => toolMatches(spec.tools, name) && !excludedTools.has(name),
+    );
+    const engineToolsCovered = engineTools.filter((name) => inputs.calledTools.has(name));
+    const engineNodeTypes = spec.nodeTypes
+      ? [...nodeTypeUniverse].filter((type) => !excludedNodeTypes.has(type))
+      : [];
+    const engineNodeTypesCovered = engineNodeTypes.filter((type) =>
+      inputs.observedNodeTypes.has(type),
+    );
+    const engineStates = stateSurfaces.filter((state) => spec.stateSurfaces.includes(state.name));
+    const stateTotal = engineStates.reduce((sum, state) => sum + state.total, 0);
+    const stateCovered = engineStates.reduce((sum, state) => sum + state.covered, 0);
+    const total = engineOps.length + engineTools.length + engineNodeTypes.length + stateTotal;
+    const covered =
+      engineRoutesCovered.length +
+      engineToolsCovered.length +
+      engineNodeTypesCovered.length +
+      stateCovered;
+    const uncovered = [
+      ...engineOps
+        .filter((operation) => !coveredKeys.has(`${operation.method} ${operation.template}`))
+        .map((operation) => `route ${operation.method} ${operation.template}`),
+      ...engineTools.filter((name) => !inputs.calledTools.has(name)).map((name) => `tool ${name}`),
+      ...engineNodeTypes
+        .filter((type) => !inputs.observedNodeTypes.has(type))
+        .map((type) => `node type ${type}`),
+      ...engineStates.flatMap((state) =>
+        state.uncovered.map((value) => `state ${state.name}: ${value}`),
+      ),
+    ].sort();
+    return {
+      name: spec.name,
+      routes: { covered: engineRoutesCovered.length, total: engineOps.length },
+      mcpTools: { covered: engineToolsCovered.length, total: engineTools.length },
+      nodeTypes: { covered: engineNodeTypesCovered.length, total: engineNodeTypes.length },
+      stateValues: { covered: stateCovered, total: stateTotal },
+      percent: percent(covered, total),
+      uncovered,
+    };
+  });
+
   return {
+    engines,
     routes: {
       ...surface(routeUniverse, coveredKeys, excludedRoutes),
       byGroup,
@@ -349,6 +439,13 @@ export function strictFailures(coverage: Coverage): string[] {
     failures.push(
       `${coverage.nodeTypes.uncovered.length} workflow node type(s) never executed:\n${list(coverage.nodeTypes.uncovered)}`,
     );
+  }
+  for (const engine of coverage.engines) {
+    if (engine.uncovered.length > 0) {
+      failures.push(
+        `engine ${engine.name} is ${engine.percent.toFixed(1)}% covered; missing:\n${list(engine.uncovered)}`,
+      );
+    }
   }
   for (const state of coverage.stateSurfaces) {
     if (state.uncovered.length > 0) {
@@ -396,6 +493,7 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
   if (!(await file.exists())) return EMPTY_MANIFEST;
   const raw = asRecord(await file.json());
   const manifest: CoverageManifest = {
+    engines: Array.isArray(raw.engines) ? raw.engines.map(asRecord).map(engineEntry) : [],
     routes: Array.isArray(raw.routes) ? raw.routes.map(asRecord).map(routeEntry) : [],
     mcpTools: Array.isArray(raw.mcpTools) ? raw.mcpTools.map(asRecord).map(toolEntry) : [],
     nodeTypes: Array.isArray(raw.nodeTypes) ? raw.nodeTypes.map(asRecord).map(nodeEntry) : [],
@@ -414,6 +512,16 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
       description: typeof flow.description === "string" ? flow.description : "",
       scenarios: scenarios as string[],
     };
+  }
+  const knownSurfaces = new Set(manifest.stateSurfaces.map((spec) => spec.name));
+  for (const engine of manifest.engines) {
+    for (const name of engine.stateSurfaces) {
+      if (!knownSurfaces.has(name)) {
+        throw new Error(
+          `coverage-manifest engine ${engine.name} names unknown state surface ${name}`,
+        );
+      }
+    }
   }
   const surfaceNames = findDuplicates(manifest.stateSurfaces.map((spec) => spec.name));
   if (surfaceNames.length > 0) {
@@ -460,6 +568,28 @@ function nodeEntry(entry: Record<string, unknown>) {
     throw new Error(`coverage-manifest nodeTypes entry needs a type: ${JSON.stringify(entry)}`);
   }
   return { type, reason: reasonOf(entry, `node type ${type}`) };
+}
+
+function engineEntry(entry: Record<string, unknown>): EngineSpec {
+  const name = entry.name;
+  if (typeof name !== "string" || !/^[a-z0-9-]+$/.test(name)) {
+    throw new Error(
+      `coverage-manifest engines entry needs a kebab-case name: ${JSON.stringify(entry)}`,
+    );
+  }
+  const strings = (value: unknown, field: string): string[] => {
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+      throw new Error(`coverage-manifest engine ${name}: ${field} must be a string array`);
+    }
+    return value as string[];
+  };
+  return {
+    name,
+    routeGroups: strings(entry.routeGroups ?? [], "routeGroups"),
+    tools: strings(entry.tools ?? [], "tools"),
+    nodeTypes: entry.nodeTypes === true,
+    stateSurfaces: strings(entry.stateSurfaces ?? [], "stateSurfaces"),
+  };
 }
 
 function stateSurfaceEntry(entry: Record<string, unknown>): StateSurfaceSpec {

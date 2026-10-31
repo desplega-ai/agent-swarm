@@ -141,6 +141,9 @@ After the scenarios, `coverage.ts`:
    list is a new engine state and fails strict until it is declared.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
+6. Rolls `engines` up: each named engine (script, workflow, task) sums its route groups, tool
+   patterns, node types and state surfaces into one covered/total figure. Strict requires
+   100% for every engine, so "how covered is the script engine?" has one answer in the report.
 
 The result JSON carries `coverage.routes.uncovered`, `coverage.mcpTools.uncovered`,
 `coverage.nodeTypes.uncovered`, `coverage.stateSurfaces[]` (uncovered and unexpected values per

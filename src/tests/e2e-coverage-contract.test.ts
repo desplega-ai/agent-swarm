@@ -15,6 +15,7 @@ const REPO_MANIFEST = join(import.meta.dir, "../../scripts/e2e/coverage-manifest
 function coverage(overrides: Partial<Coverage> = {}): Coverage {
   const empty = { total: 0, covered: 0, excluded: 0, percent: 100, uncovered: [] };
   return {
+    engines: [],
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
@@ -72,6 +73,27 @@ describe("e2e strict coverage contract", () => {
     expect(failures.join("\n")).toContain("scripts: not run: script-run");
   });
 
+  test("an engine below 100% fails with its missing items", () => {
+    const failures = strictFailures(
+      coverage({
+        engines: [
+          {
+            name: "script-engine",
+            routes: { covered: 40, total: 41 },
+            mcpTools: { covered: 16, total: 16 },
+            nodeTypes: { covered: 0, total: 0 },
+            stateValues: { covered: 15, total: 15 },
+            percent: 98.6,
+            uncovered: ["route POST /api/scripts/run"],
+          },
+        ],
+      }),
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("script-engine");
+    expect(failures[0]).toContain("POST /api/scripts/run");
+  });
+
   test("state surfaces fail on values never produced, values outside the universe, and orphan scenarios", () => {
     const failures = strictFailures(
       coverage({
@@ -109,6 +131,16 @@ describe("e2e strict coverage contract", () => {
       expect(flow.scenarios.length).toBeGreaterThan(0);
     }
     expect(manifest.stateSurfaces.length).toBeGreaterThan(0);
+    expect(manifest.engines.map((engine) => engine.name)).toEqual([
+      "script-engine",
+      "workflow-engine",
+      "task-engine",
+    ]);
+    for (const engine of manifest.engines) {
+      for (const name of engine.stateSurfaces) {
+        expect(manifest.stateSurfaces.map((surface) => surface.name)).toContain(name);
+      }
+    }
     for (const surface of manifest.stateSurfaces) {
       expect(surface.query).toMatch(/^SELECT /);
       for (const entry of surface.excluded) expect(surface.universe).toContain(entry.value);
