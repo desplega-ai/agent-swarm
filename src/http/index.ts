@@ -910,6 +910,14 @@ httpServer
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
+    // Re-extract stored script args schemas so rows saved before `.default()`
+    // fields became optional pick up the fix. Idempotent and non-fatal.
+    import("../be/scripts/boot-args-schema")
+      .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
+      .catch((err) => {
+        console.error("[boot-args-schema] startup backfill failed (non-fatal):", err);
+      });
+
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored
     // rows (logs, tasks, memory, events, workflow steps) that pre-date the
     // current scrubber rules. Idempotent and resumable, tracked via seed_state.

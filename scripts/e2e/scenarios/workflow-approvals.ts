@@ -9,6 +9,7 @@ import {
   callToolOk,
   createWorkflow,
   getRunDetail,
+  hasStep,
   outputOf,
   registerWorker,
   respondApproval,
@@ -894,15 +895,31 @@ export const workflowApprovals: Scenario = {
         (await approvalsForRun(ctx, timedRun.runId, "timeout")).length === 1,
         "the workflow card is stored as timeout",
       );
-      // Suite-speed note: the run itself routes on `timeout` at the next heartbeat sweep
-      // (HEARTBEAT_INTERVAL_MS, 90 s by default), too slow for this suite, so the run is
-      // cancelled here instead of waiting for the sweep.
-      expectStatus(
-        await ctx.api("POST", `/api/workflow-runs/${timedRun.runId}/cancel`, {
-          body: { reason: "done" },
-        }),
-        [200],
-        "cancel the timed-out card's run",
+      // The late answer stored the card as `timeout` but left the run waiting. A heartbeat sweep
+      // routes the run on its `timeout` port (recoverApprovalWaitingRuns). HEARTBEAT_INTERVAL_MS is
+      // 90 s, so trigger one on demand. A sweep that overlaps the timer's own tick is skipped by its
+      // concurrency guard, so repeat it until the run leaves `waiting`.
+      const routed = await pollUntil(
+        async () => {
+          expectStatus(
+            await ctx.api("POST", "/api/heartbeat/sweep"),
+            [200],
+            "sweep the timed-out card's run",
+          );
+          return (await getRunDetail(ctx, timedRun.runId)).run.status !== "waiting";
+        },
+        30_000,
+        500,
+      );
+      expect(routed, "a heartbeat sweep never moved the timed-out card's run off waiting");
+      const timedDetail = await waitForRun(ctx, timedRun.runId, "completed", 15_000, "timed card");
+      expect(stepOf(timedDetail, "ask").nextPort === "timeout", "the run routed on timeout");
+      expect(outputOf(timedDetail, "ask").status === "timeout", "the step output says timeout");
+      expect(outputOf(timedDetail, "slow").stdout === "slow", "the timeout branch ran");
+      expect(!hasStep(timedDetail, "yes"), "the approved branch did not run");
+      expect(
+        (await approvalsForRun(ctx, timedRun.runId, "timeout")).length === 1,
+        "the sweep leaves one request, still timeout",
       );
 
       // A run-linked request: the cancel route cancels the run with it.

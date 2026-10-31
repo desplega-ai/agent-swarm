@@ -1,6 +1,6 @@
 // Mock inference host for the black-box runner.
 //
-// One Bun.serve() speaks three contracts the API server reaches over HTTP:
+// One Bun.serve() speaks four contracts the API server reaches over HTTP:
 //   - OpenAI-compatible chat + embeddings (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`,
 //     `/v1/models`, `/v1/key`). The SUT is pointed at it through
 //     OPENROUTER_BASE_URL + OPENROUTER_API_KEY (workflow-llm, raw-llm, memory rater,
@@ -8,6 +8,8 @@
 //     (memory embeddings).
 //   - SystemOne decisions (`/v1/systemone`) + extraction (`/v1/clairic`), reached through the
 //     `laya` provider's LAYA_URL global config row.
+//   - The telemetry sink (`POST /telemetry/v1/events`, answers 202), reached through
+//     DESPLEGA_TELEMETRY_ENDPOINT once a scenario turns telemetry on.
 //
 // Every request is journaled so scenarios can assert what the server sent. Responses
 // are deterministic by default and scriptable per scenario through the responder hooks.
@@ -508,6 +510,9 @@ export async function startMockLlm() {
         if (method === "GET" && /\/(key|auth\/key)$/.test(path)) {
           return json(200, { data: { label: "e2e", usage: 0, limit: null, is_free_tier: false } });
         }
+        if (method === "POST" && path === "/telemetry/v1/events") {
+          return json(202, {});
+        }
         if (method === "POST" && /\/(systemone|clairic)$/.test(path)) {
           const record = asRecord(body) ?? {};
           const answer = systemOneResponder
@@ -537,6 +542,8 @@ export async function startMockLlm() {
       OPENROUTER_BASE_URL: `${origin}/v1`,
       EMBEDDING_API_KEY: MOCK_API_KEY,
       EMBEDDING_API_BASE_URL: `${origin}/v1`,
+      // The telemetry sink: `POST /api/telemetry/enable` must not reach the production proxy.
+      DESPLEGA_TELEMETRY_ENDPOINT: `${origin}/telemetry/v1/events`,
     } as Record<string, string>,
     requests: requests as readonly MockRequest[],
     /** Requests whose path ends with `suffix`, newest last. */

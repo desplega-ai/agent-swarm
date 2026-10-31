@@ -112,9 +112,27 @@ reviewers checked standards and spec, zero blockers. Outcome:
   with a loopback authorization server in platform-mcp; `CODEX_OAUTH_DEVICE_BASE_URL` for the
   Codex device login; skills sync-filesystem 200 path now safe under the per-run HOME.
 
+## Third pass (same PR): close the deferred items
+
+- `DESPLEGA_TELEMETRY_ENDPOINT` overrides the telemetry sink; the mock journals
+  `/telemetry/v1/events`, and `platform-telemetry` asserts `POST /api/telemetry/enable` 200 and
+  the relayed event payload end to end.
+- Approval timeouts route deterministically: `workflow-approvals` drives the existing
+  `POST /api/heartbeat/sweep` and asserts the run leaves on its `timeout` port. No change to
+  `HEARTBEAT_INTERVAL_MS`.
+- `src/be/scripts/boot-args-schema.ts` re-extracts stored script args schemas at boot and
+  rewrites the stale ones in place (unit-tested, idempotent), so pre-fix scripts stop requiring
+  defaulted fields without a re-upsert.
+- CI: the E2E Contract job benchmarks each PR against main's last green run
+  (`bun run e2e:bench`) in the job summary. The runbook explains how to read it and how to retire
+  unit tests the suite already proves.
+- Local unit failures verified as environment: under the pinned Bun 1.4.4 (via `bunx bun@1.4.4`)
+  the doubled-`changes` tests pass; only `codex-gateway-route` still fails locally, and it fails
+  on clean main too.
+
 ## Follow-ups (not in this PR)
 
-- A telemetry sink override so `POST /api/telemetry/enable` 200 can be asserted against a mock.
-- `HEARTBEAT_INTERVAL_MS` of a few seconds in the SUT so workflow approval-card timeouts route
-  inside a scenario instead of the 90 s sweep (check it does not reap simulated agents' tasks).
-- Stored scripts keep their old `required` args list until re-upserted (no backfill).
+- Retire the first batch of redundant unit tests (list in runbooks/e2e-blackbox.md), one domain
+  per PR, after the strict suite has been green on main.
+- `codex-gateway-route` "not a gateway" fails on this Mac on every branch; CI passes it. Root
+  cause not chased (local Codex config or env).

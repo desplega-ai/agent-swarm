@@ -42,7 +42,9 @@ type FamilyProps<Prefix extends string, S extends string> = PropsFor<
   Extract<SwarmEventName, `${Prefix}.${S}`>
 >;
 
-const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
+// `DESPLEGA_TELEMETRY_ENDPOINT` is a test knob (the black-box suite points it at a mock sink).
+const TELEMETRY_ENDPOINT =
+  process.env.DESPLEGA_TELEMETRY_ENDPOINT?.trim() || "https://proxy.desplega.sh/v1/events";
 const PRODUCT = "agent-swarm";
 const TIMEOUT_MS = 5_000;
 
