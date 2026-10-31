@@ -71,6 +71,7 @@ const RESERVED_KEYS = new Set([
   // relay at a host of their choosing.
   "CODEX_OAUTH_DEVICE_BASE_URL",
   "DESPLEGA_TELEMETRY_ENDPOINT",
+  "CLOUDFLARE_API_BASE_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over

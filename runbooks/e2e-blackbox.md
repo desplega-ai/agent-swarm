@@ -28,7 +28,8 @@ the mock cannot issue"), never "flaky" or "later".
 |---|---|---|
 | Chat completions, structured output (`workflow-llm`, `raw-llm`, memory rater, session summaries) | `scripts/e2e/mocks/llm.ts`, OpenAI chat + Responses API | `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` |
 | Embeddings (memory, script search) | same mock, deterministic vectors | `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_KEY` |
-| SystemOne decisions and extraction | same mock, `/v1/systemone` (decisions) and `/v1/clairic` (extraction) | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
+| SystemOne decisions | same mock, `/v1/systemone` | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
+| Cloudflare Clairic extraction | same mock, `/client/v4/accounts/<id>/ai/run/@cf/cloudflare/clairic`, with the Workers AI response envelope | deployment env `CLOUDFLARE_API_BASE_URL`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN` |
 | Slack | `@desplega.ai/slack-mock` over Socket Mode | `SLACK_*` from the mock |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | none, disabled | `*_DISABLE=true` |
 | Harness workers | none in the contract run; `--harness` legs spawn real workers with real credentials | |
@@ -37,6 +38,10 @@ Two scenarios touch the network on purpose and accept every documented outcome, 
 offline run still passes: `platformb-models` forces a models.dev catalog refresh, and
 `knowledge-skills` exercises only the validation paths of remote skill installs. Everything
 else is hermetic.
+
+`CLOUDFLARE_API_BASE_URL` works only with `NODE_ENV=test` and a loopback HTTP origin.
+The config API and MCP tools reject this reserved key.
+Production uses `https://api.cloudflare.com`.
 
 Every request the mocks receive is journaled. Scenarios assert on the journal
 (`ctx.llm.requests`, `ctx.slack.apiCalls(...)`) so a silent "the server never called the

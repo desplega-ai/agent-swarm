@@ -119,9 +119,14 @@ Rules, enforced by the registry, the boundary check, or review:
 | OpenAI-compatible chat (`workflow-llm`, `raw-llm`, memory rater, session summaries) | `OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY` | `/v1/chat/completions` and `/v1/responses`. Honors `response_format` / `text.format` JSON schemas (synthesizes a conforming object) and forced tool calls. Scenario can script the answer with `ctx.llm.setChatResponder`. |
 | Embeddings (memory, script search) | `EMBEDDING_API_BASE_URL` + `EMBEDDING_API_KEY` | `/v1/embeddings`, deterministic unit vectors; equal text gives equal vectors. |
 | Key probes | `OPENROUTER_BASE_URL` | `/v1/key`, `/v1/models` answer 200. |
-| SystemOne decisions and extraction | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` (decisions) and `/v1/clairic` (extraction) answer every question or field with a confident default. Script both with `ctx.llm.setSystemOneResponder`. |
+| SystemOne decisions | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` answers each question. Script responses with `ctx.llm.setSystemOneResponder`. |
+| Cloudflare Clairic extraction | Deployment env `CLOUDFLARE_API_BASE_URL` = `ctx.llm.origin`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN`, node `provider: "cloudflare"` | The account path ends in `/ai/run/@cf/cloudflare/clairic`. The mock returns the Workers AI `{ success, errors, result }` envelope. Script responses with `ctx.llm.setSystemOneResponder`. |
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
+
+`CLOUDFLARE_API_BASE_URL` is reserved for tests and cannot be stored in config.
+It accepts only a loopback HTTP origin when `NODE_ENV=test`.
+All other values use the production Cloudflare origin.
 
 ## Coverage and the strict contract
 

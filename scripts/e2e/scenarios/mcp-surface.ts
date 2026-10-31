@@ -23,7 +23,12 @@ export const mcpSurface: Scenario = {
     const agentId = asRecord(register.json).id;
     expect(typeof agentId === "string", "MCP agent response has no id");
 
-    const connection = await ctx.connectMcp(agentId);
+    const connection = await ctx.connectMcp(agentId, {
+      headers: {
+        authorization: "Bearer incorrect-e2e-key",
+        "x-agent-id": crypto.randomUUID(),
+      },
+    });
     try {
       const tools = await connection.listTools();
       expect(tools.length > 0, "MCP tools/list returned no tools");

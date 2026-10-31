@@ -107,8 +107,9 @@ reviewers checked standards and spec, zero blockers. Outcome:
   catalog provider list, steps journal write-once, mcp-oauth metadata 502, mcp-oauth DELETE
   idempotent, config scopeId without existence check, config write restarts Slack, Jira 503
   before 400.
-- Mock gaps closed: `laya` extraction host (`LAYA_URL` + `/v1/clairic`) so
-  system-one-extraction runs its success path; `MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true` in the SUT
+- Mock gaps closed: Cloudflare extraction uses a loopback Workers AI mock through
+  the test-only `CLOUDFLARE_API_BASE_URL`. Taras requested removal of the new Laya
+  extraction support during PR review. `MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true` in the SUT
   with a loopback authorization server in platform-mcp; `CODEX_OAUTH_DEVICE_BASE_URL` for the
   Codex device login; skills sync-filesystem 200 path now safe under the per-run HOME.
 

@@ -6,8 +6,8 @@
 //     OPENROUTER_BASE_URL + OPENROUTER_API_KEY (workflow-llm, raw-llm, memory rater,
 //     session summaries, key probes) and EMBEDDING_API_BASE_URL + EMBEDDING_API_KEY
 //     (memory embeddings).
-//   - SystemOne decisions (`/v1/systemone`) + extraction (`/v1/clairic`), reached through the
-//     `laya` provider's LAYA_URL global config row.
+//   - SystemOne decisions (`/v1/systemone`) through LAYA_URL, and Cloudflare Clairic
+//     extraction through the test-only CLOUDFLARE_API_BASE_URL.
 //   - The telemetry sink (`POST /telemetry/v1/events`, answers 202), reached through
 //     DESPLEGA_TELEMETRY_ENDPOINT once a scenario turns telemetry on.
 //
@@ -513,12 +513,20 @@ export async function startMockLlm() {
         if (method === "POST" && path === "/telemetry/v1/events") {
           return json(202, {});
         }
-        if (method === "POST" && /\/(systemone|clairic)$/.test(path)) {
+        const cloudflareExtraction =
+          /^\/client\/v4\/accounts\/[0-9a-f]{32}\/ai\/run\/@cf\/cloudflare\/clairic(?:-flash)?$/.test(
+            path,
+          );
+        if (method === "POST" && (path === "/v1/systemone" || cloudflareExtraction)) {
           const record = asRecord(body) ?? {};
           const answer = systemOneResponder
             ? await systemOneResponder(record)
             : defaultSystemOne(record);
-          return json(200, answer, { "x-request-id": `e2e-s1-${requests.length}` });
+          return json(
+            200,
+            cloudflareExtraction ? { success: true, errors: [], result: answer } : answer,
+            { "x-request-id": `e2e-s1-${requests.length}` },
+          );
         }
         return json(404, { error: { message: `mock inference: no route for ${method} ${path}` } });
       } catch (error) {
@@ -542,6 +550,7 @@ export async function startMockLlm() {
       OPENROUTER_BASE_URL: `${origin}/v1`,
       EMBEDDING_API_KEY: MOCK_API_KEY,
       EMBEDDING_API_BASE_URL: `${origin}/v1`,
+      CLOUDFLARE_API_BASE_URL: origin,
       // The telemetry sink: `POST /api/telemetry/enable` must not reach the production proxy.
       DESPLEGA_TELEMETRY_ENDPOINT: `${origin}/telemetry/v1/events`,
     } as Record<string, string>,

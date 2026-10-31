@@ -3,11 +3,8 @@
 // review band (approved with an override, rejected, out of band), and the
 // system-one-extraction node.
 //
-// The extraction node runs against the mock inference host through the `laya` provider
-// (`/v1/clairic` under LAYA_URL). Cloudflare Workers AI is a fixed host, so for it the
-// scenario proves everything up to the outbound call: the readiness gate, authoring rules,
-// and a step row that fails on its strict `{{token}}` check before any request would
-// leave the process.
+// Extraction uses the existing Cloudflare provider against a local Workers AI mock.
+// The test-only origin override preserves the account path and Cloudflare response envelope.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -163,27 +160,14 @@ export const workflowEngineSystemOne: Scenario = {
           extractionWarnings.some((warning) => String(warning).includes("CLOUDFLARE")),
         `save warns that Cloudflare is not configured: ${JSON.stringify(extractionWarnings)}`,
       );
-      const layaExtractionSaved = await ctx.api("POST", "/api/workflows", {
+      const unsupportedExtraction = await ctx.api("POST", "/api/workflows", {
         agentId: workerId,
         body: {
-          name: `wf-s1-extract-laya-warn-${ctx.nonce}`,
+          name: `wf-s1-unsupported-extraction-${ctx.nonce}`,
           definition: { nodes: [extractionNode("an order mail", { provider: "laya" })] },
         },
       });
-      expectStatus(
-        layaExtractionSaved,
-        [201],
-        "save a laya extraction workflow without a laya setup",
-      );
-      workflows.push(
-        asString(asRecord(layaExtractionSaved.json).id, "laya extraction workflow id"),
-      );
-      const layaExtractionWarnings = asRecord(layaExtractionSaved.json).warnings;
-      expect(
-        Array.isArray(layaExtractionWarnings) &&
-          layaExtractionWarnings.some((warning) => String(warning).includes("LAYA_URL")),
-        `save warns that laya extraction has no server URL: ${JSON.stringify(layaExtractionWarnings)}`,
-      );
+      expectStatus(unsupportedExtraction, [400], "Laya extraction remains unsupported");
       const gated = await triggerWorkflow(ctx, extractionId, {}, { agentId: workerId });
       const gatedRun = await waitForRun(ctx, gated.runId, "failed", 15_000, "gated extraction run");
       expect(
@@ -411,16 +395,26 @@ export const workflowEngineSystemOne: Scenario = {
       const cards = await ctx.api("GET", `/api/approval-requests?workflowRunId=${passRun.runId}`);
       expect(asRecords(cards.json, "approvalRequests").length === 0, "no approval card was raised");
 
-      // ── extraction through laya: the mock host answers /v1/clairic ──────────
-      // Not tracked for cleanup, for the reason given below the Cloudflare setup.
+      // Extraction uses Cloudflare's account path, bearer, and response envelope.
+      const reservedWrite = await ctx.api("PUT", "/api/config", {
+        body: { scope: "global", key: "CLOUDFLARE_API_BASE_URL", value: ctx.llm.origin },
+      });
+      expectStatus(reservedWrite, [400], "the Cloudflare override is deployment-only");
+      cleanups.push(
+        await setGlobalConfig(ctx, "CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef"),
+      );
+      cleanups.push(
+        await setGlobalConfig(ctx, "CLOUDFLARE_API_TOKEN", "e2e-cloudflare-token", true),
+      );
+      // Keep this workflow so coverage can read its completed step.
       ctx.llm.setSystemOneResponder(undefined);
-      const layaExtractFlow = await createWorkflow(
+      const cloudflareExtractFlow = await createWorkflow(
         ctx,
-        "wf-s1-extract-laya-run",
+        "wf-s1-extract-cloudflare-run",
         {
           nodes: [
             extractionNode(`Order ${marker} shipped to Barcelona`, {
-              provider: "laya",
+              provider: "cloudflare",
               fields: {
                 order_id: { type: "text", instructions: "Order number" },
                 parcels: { type: "number", instructions: "Parcels shipped" },
@@ -433,15 +427,20 @@ export const workflowEngineSystemOne: Scenario = {
       );
       const clairicBefore = ctx.llm.requestsTo("/clairic").length;
       const decideCallsBeforeExtract = ctx.llm.requestsTo("/systemone").length;
-      const layaRun = await triggerWorkflow(ctx, layaExtractFlow, {}, { agentId: workerId });
-      const layaDetail = await waitForRun(
+      const extractionRun = await triggerWorkflow(
         ctx,
-        layaRun.runId,
+        cloudflareExtractFlow,
+        {},
+        { agentId: workerId },
+      );
+      const extractionDetail = await waitForRun(
+        ctx,
+        extractionRun.runId,
         "completed",
         20_000,
-        "laya extraction run",
+        "Cloudflare extraction run",
       );
-      const extracted = outputOf(layaDetail, "extract");
+      const extracted = outputOf(extractionDetail, "extract");
       const extractedAnswers = asRecord(extracted.answers);
       expect(
         asRecord(extractedAnswers.order_id).type === "text" &&
@@ -452,7 +451,7 @@ export const workflowEngineSystemOne: Scenario = {
         `the step output carries one typed answer per field: ${JSON.stringify(extractedAnswers)}`,
       );
       expect(
-        extracted.model === "e2e-systemone" && asRecord(extracted.usage).input_tokens === 10,
+        extracted.model === "clairic" && asRecord(extracted.usage).input_tokens === 10,
         "the step output reports the model and usage the host returned",
       );
       const clairicCalls = ctx.llm.requestsTo("/clairic");
@@ -460,11 +459,13 @@ export const workflowEngineSystemOne: Scenario = {
       const clairicBody = asRecord(clairicSeen?.body);
       expect(
         clairicCalls.length === clairicBefore + 1 &&
-          clairicSeen?.headers.authorization === "Bearer e2e-laya-key" &&
+          clairicSeen?.path ===
+            "/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clairic" &&
+          clairicSeen?.headers.authorization === "Bearer e2e-cloudflare-token" &&
           String(clairicBody.state).includes(marker) &&
           Object.keys(asRecord(clairicBody.fields)).join(",") === "order_id,parcels" &&
-          !("model" in clairicBody),
-        `extraction sent the key, the interpolated text and both fields, and no model: ${JSON.stringify(clairicSeen?.body)}`,
+          clairicBody.model === "clairic",
+        `Extraction must send the token, state, fields, and Clairic model: ${JSON.stringify(clairicSeen?.body)}`,
       );
       expect(
         ctx.llm.requestsTo("/systemone").length === decideCallsBeforeExtract,
@@ -472,12 +473,6 @@ export const workflowEngineSystemOne: Scenario = {
       );
 
       // ── extraction: configured, strict token check, no outbound call ────────
-      cleanups.push(
-        await setGlobalConfig(ctx, "CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef"),
-      );
-      cleanups.push(
-        await setGlobalConfig(ctx, "CLOUDFLARE_API_TOKEN", "e2e-cloudflare-token", true),
-      );
       // Not tracked for cleanup: deleting a workflow deletes its runs, and the coverage
       // report reads node types from the step rows that survive the run.
       const extractFlow = await createWorkflow(
