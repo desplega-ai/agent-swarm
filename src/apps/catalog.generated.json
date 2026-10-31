@@ -37,6 +37,7 @@
     "Calendar",
     "ContributionGraph",
     "Tree",
+    "SchemaForm",
     "ElementRef",
     "ElementSlot"
   ],
@@ -2476,6 +2477,60 @@
           }
         },
         "required": ["id", "nodes"],
+        "additionalProperties": false
+      }
+    },
+    "SchemaForm": {
+      "description": "Schema-driven props panel. Walks `schema.properties` and renders one control per property — text input (or a select when `enum` is present), number input, or switch — labelled by key with the property `description` as tooltip. Each field seeds from `value?.[key] ?? property.default`. On every field commit the draft object is written to `/ui/<id>/value` and the `onChange` chain is dispatched with `$form` = the current values. The draft rebuilds whenever the bound `schema` identity changes. With `baseDoc` (a `{ root, elements }` doc) and `nodeKey`, it edits `baseDoc.elements[nodeKey].props` and `/ui/<id>/value` holds the whole doc with the edit merged in, ready for one `app.mutate`. At most 100 fields and 200 enum options render, and a `baseDoc` over 5,000 elements is refused. `fill: true` grows the field list to fill a `fill`-aware parent and scrolls internally instead of sizing to content — pair it with a `fill` sibling (e.g. Tree) in the same column Stack to split the available height evenly between them.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "schema": {
+            "description": "JSON Schema (object with `properties`) held in state — usually a {$state} binding to a prop schema held in state"
+          },
+          "value": {
+            "description": "Current values object (bound) — seeds the draft; each key falls back to its default. Ignored in nested document editing (baseDoc + nodeKey), where the draft seeds from baseDoc.elements[nodeKey].props"
+          },
+          "baseDoc": {
+            "description": "Nested document editing: the full json-render doc ({ root, elements }) the edited props belong to — usually a {$state} binding to a query row's json column. When present with nodeKey, `/ui/<id>/value` receives the FULL doc with the draft merged into elements[nodeKey].props (a synchronous, parent-side merge), instead of the bare draft."
+          },
+          "nodeKey": {
+            "description": "Nested document editing: the element key inside baseDoc whose props this form edits — usually a {$state} binding to the selected node (e.g. a Tree's /ui/<id>/value).",
+            "type": "string"
+          },
+          "submitLabel": {
+            "type": "string"
+          },
+          "onChange": {
+            "description": "Action chain dispatched on every field commit. $form = the current draft values; with `baseDoc` + `nodeKey` read the merged doc from /ui/<id>/value.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "fill": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "schema"],
         "additionalProperties": false
       }
     },

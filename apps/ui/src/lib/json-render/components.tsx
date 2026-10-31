@@ -198,6 +198,7 @@ import type {
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import { parseNumberInputValue } from "./number-input-value";
+import { SchemaFormComponent } from "./schema-form";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
@@ -3333,4 +3334,5 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Calendar: ({ props }) => <CalendarComponent props={props} />,
   ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
   Tree: ({ props }) => <TreeComponent props={props} />,
+  SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
 };

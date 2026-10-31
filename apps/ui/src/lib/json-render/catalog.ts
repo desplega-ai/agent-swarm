@@ -320,6 +320,46 @@ const treeProps = z.object({
   fill: z.boolean().optional(),
 });
 
+const schemaFormProps = z.object({
+  /** State id — the current draft values object lands at `/ui/<id>/value`. */
+  id: z.string(),
+  schema: z
+    .unknown()
+    .describe(
+      "JSON Schema (object with `properties`) held in state — usually a {$state} binding to a prop schema held in state",
+    ),
+  value: z
+    .unknown()
+    .optional()
+    .describe(
+      "Current values object (bound) — seeds the draft; each key falls back to its default. Ignored in nested document editing (baseDoc + nodeKey), where the draft seeds from baseDoc.elements[nodeKey].props",
+    ),
+  baseDoc: z
+    .unknown()
+    .optional()
+    .describe(
+      "Nested document editing: the full json-render doc ({ root, elements }) the edited props belong to — usually a {$state} binding to a query row's json column. When present with nodeKey, `/ui/<id>/value` receives the FULL doc with the draft merged into elements[nodeKey].props (a synchronous, parent-side merge), instead of the bare draft.",
+    ),
+  nodeKey: z
+    .string()
+    .optional()
+    .describe(
+      "Nested document editing: the element key inside baseDoc whose props this form edits — usually a {$state} binding to the selected node (e.g. a Tree's /ui/<id>/value).",
+    ),
+  /** Accepted for compatibility; fields commit on change or blur, so no submit button renders. */
+  submitLabel: z.string().optional(),
+  onChange: actionChainSchema
+    .optional()
+    .describe(
+      "Action chain dispatched on every field commit. $form = the current draft values; with `baseDoc` + `nodeKey` read the merged doc from /ui/<id>/value.",
+    ),
+  /** Grow to fill a `fill`-aware parent instead of sizing to content — the
+   * field list scrolls inside whatever height the parent gives it. When a
+   * sibling (e.g. a `fill` Tree) also sets `fill`, both split the parent's
+   * height evenly and scroll independently. */
+  fill: z.boolean().optional(),
+});
+
 const markdownProps = z.object({
   content: z.string(),
 });
@@ -1084,6 +1124,11 @@ export const swarmCatalogSpec = {
       props: treeProps,
       description:
         'Collapsible tree view of a json-render flat element map. Bind `nodes` to a doc-shaped value (`{ root: string | string[], elements: Record<key,{type,children?}> }`) — usually `{ "$state": "/queries/<name>/data/0/<jsonColumn>" }`. Each row shows `key — type`; clicking one writes the node key to `/ui/<id>/value`, and the row bound to that path renders selected. A malformed or absent `nodes` value renders an empty state. Rows scroll inside a fixed-height viewport — `maxHeight` overrides the default `480px` — or set `fill: true` to grow inside a `fill`-aware parent and scroll within whatever height that gives it instead (ignores `maxHeight`). Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.',
+    },
+    SchemaForm: {
+      props: schemaFormProps,
+      description:
+        "Schema-driven props panel. Walks `schema.properties` and renders one control per property — text input (or a select when `enum` is present), number input, or switch — labelled by key with the property `description` as tooltip. Each field seeds from `value?.[key] ?? property.default`. On every field commit the draft object is written to `/ui/<id>/value` and the `onChange` chain is dispatched with `$form` = the current values. The draft rebuilds whenever the bound `schema` identity changes. With `baseDoc` (a `{ root, elements }` doc) and `nodeKey`, it edits `baseDoc.elements[nodeKey].props` and `/ui/<id>/value` holds the whole doc with the edit merged in, ready for one `app.mutate`. At most 100 fields and 200 enum options render, and a `baseDoc` over 5,000 elements is refused. `fill: true` grows the field list to fill a `fill`-aware parent and scrolls internally instead of sizing to content — pair it with a `fill` sibling (e.g. Tree) in the same column Stack to split the available height evenly between them.",
     },
     ElementRef: {
       props: elementRefProps,
