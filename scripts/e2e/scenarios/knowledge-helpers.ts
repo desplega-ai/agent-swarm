@@ -1,9 +1,6 @@
 // Shared helpers for the knowledge-* scenarios (memory, skills, prompt templates, pages,
 // assets, apps, rooms, comb). Black box: HTTP, MCP, the operator key and agent ids only.
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
-import { calledMcpTools } from "../mcp";
 import type { ScenarioContext } from "../run";
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -80,30 +77,8 @@ export async function connectTaskMcp(
   agentId: string,
   taskId: string,
 ): Promise<McpSession> {
-  const client = new Client({ name: "agent-swarm-e2e-task", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(`${ctx.baseUrl}/mcp`), {
-    requestInit: {
-      headers: {
-        Authorization: `Bearer ${ctx.apiKey}`,
-        "X-Agent-ID": agentId,
-        "X-Source-Task-ID": taskId,
-      },
-    },
-  });
-  await client.connect(transport);
-  return {
-    async listTools() {
-      const result = await client.listTools();
-      return result.tools;
-    },
-    async callTool(name: string, args: Record<string, unknown>) {
-      (calledMcpTools() as Set<string>).add(name);
-      return client.callTool({ name, arguments: args });
-    },
-    async close() {
-      await client.close();
-    },
-  };
+  // Task-scoped session: tools such as memory_rate read the source task from this header.
+  return ctx.connectMcp(agentId, { headers: { "X-Source-Task-ID": taskId } });
 }
 
 export async function registerAgent(
