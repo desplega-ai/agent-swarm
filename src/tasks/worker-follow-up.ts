@@ -34,6 +34,7 @@ import {
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { chatThreadOfContextKey } from "./context-key";
+import { scheduleFollowUpGateShadow } from "./follow-up-gate";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -261,6 +262,9 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  * `all` wait with siblings still pending wakes nobody, so the follow-up stays.
  * A `followUpConfig.onCompleted` / `onFailed` instruction for this status also
  * keeps the follow-up, because the wake-up task does not carry that text.
+ *
+ * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
+ * verifier's would-skip decision after commit; the follow-up is never skipped.
  */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
@@ -392,7 +396,7 @@ export async function createWorkerTaskFollowUp(args: {
     );
     return null;
   }
-  return await createTaskWithSiblingAwareness(
+  const followUp = await createTaskWithSiblingAwareness(
     changes.description ?? followUpDescription,
     {
       agentId: followUpAgentId,
@@ -413,6 +417,22 @@ export async function createWorkerTaskFollowUp(args: {
     },
     { origin: "followUp" },
   );
+  if (followUp) {
+    try {
+      scheduleFollowUpGateShadow({
+        task,
+        status,
+        followUpTaskId: followUp.id,
+        leadAgentId: leadAgent.id,
+      });
+    } catch (err) {
+      console.warn(
+        `[worker-follow-up] Follow-up gate shadow failed for task ${task.id.slice(0, 8)}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  return followUp;
 }
 
 /** Hop cap for `deferredWorkChatContextKey`; a defer/resume chain is short. */

@@ -29,12 +29,6 @@ import dailySwarmUpdateCheckConfig from "../../../templates/schedules/daily-swar
 import dailySwarmUpdateCheckContent from "../../../templates/schedules/daily-swarm-update-check/content.md" with {
   type: "text",
 };
-import dailyWorkflowHealthAuditConfig from "../../../templates/schedules/daily-workflow-health-audit/config.json" with {
-  type: "text",
-};
-import dailyWorkflowHealthAuditContent from "../../../templates/schedules/daily-workflow-health-audit/content.md" with {
-  type: "text",
-};
 import dreamingDailyConfig from "../../../templates/schedules/dreaming-daily/config.json" with {
   type: "text",
 };
@@ -152,10 +146,6 @@ const BUILT_IN_SCHEDULE_SOURCES: readonly ScheduleTemplateSource[] = [
   {
     config: asText(dailySwarmUpdateCheckConfig),
     content: asText(dailySwarmUpdateCheckContent),
-  },
-  {
-    config: asText(dailyWorkflowHealthAuditConfig),
-    content: asText(dailyWorkflowHealthAuditContent),
   },
   { config: asText(dreamingDailyConfig), content: asText(dreamingDailyContent) },
   { config: asText(gtmWeeklyReviewConfig), content: asText(gtmWeeklyReviewContent) },

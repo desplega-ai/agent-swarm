@@ -4,7 +4,10 @@
  * selection in the adapter, the presence gate, and the live check.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateProviderCredentials } from "../commands/provider-credentials";
 import { CodexAdapter, checkCodexCredentials } from "../providers/codex-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
@@ -75,6 +78,22 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+// The adapter reads `process.env.HOME` live (see `codexUserHome`) to decide
+// whether `~/.codex/auth.json` exists. A developer's real codex login would
+// make OAuth win over OPENAI_API_KEY and fail the API-key assertions, so run
+// the file against an empty home. The real auth.json is never touched.
+const realHome = process.env.HOME;
+let isolatedHome: string | undefined;
+beforeAll(() => {
+  isolatedHome = mkdtempSync(join(tmpdir(), "codex-gateway-route-home-"));
+  process.env.HOME = isolatedHome;
+});
+afterAll(() => {
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+  if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
+});
+
 describe("codex gateway route: adapter", () => {
   test("adds a Responses provider block and keeps OAuth and OPENAI_API_KEY out of the CLI env", async () => {
     const log = spyOn(console, "log");
@@ -101,6 +120,36 @@ describe("codex gateway route: adapter", () => {
     expect(env.CODEX_OAUTH).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(logged.some((line) => line.endsWith("Using credential: gateway"))).toBe(true);
+  });
+
+  test("launches the app-server on the gateway provider, and on the default without a gateway", async () => {
+    const launched = async (env: Record<string, string>) => {
+      let overrides: unknown = "not launched";
+      const adapter = new CodexAdapter({
+        bypassSubprocess: true,
+        appServerFactory: ({ configOverrides }) => {
+          overrides = configOverrides;
+          throw new Error("test stops before app-server spawn");
+        },
+      });
+      await expect(adapter.createSession(testConfig({ env }))).rejects.toThrow(
+        "test stops before app-server spawn",
+      );
+      return overrides;
+    };
+    expect(await launched({ ...GATEWAY_ENV, OPENAI_API_KEY: "sk-openai" })).toEqual({
+      model_provider: "swarm-gateway",
+      model_providers: {
+        "swarm-gateway": {
+          name: "Swarm gateway",
+          base_url: "https://sub2api.example.com/v1",
+          env_key: "CODEX_GATEWAY_API_KEY",
+          wire_api: "responses",
+          requires_openai_auth: false,
+        },
+      },
+    });
+    expect(await launched({ OPENAI_API_KEY: "sk-openai" })).toBeUndefined();
   });
 
   test("a gateway URL on api.openai.com is not a gateway: no provider block", async () => {

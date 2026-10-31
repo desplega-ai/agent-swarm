@@ -4,6 +4,7 @@
 
 import { normalizeAssetKey } from "./assets/key";
 import { isSafeBundlePath } from "./extensions/bundle-path";
+import { THEME_IMPORT_FORMATS } from "./themes/import";
 import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 import { z } from "./utils/zod-openapi";
 
@@ -1738,6 +1739,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_deferred_wait_woke",
   // The lead follow-up was skipped because the woken waiter already carries the result
   "task_follow_up_suppressed",
+  // Shadow follow-up gate: what a verifier said about a gated run (never skips the follow-up)
+  "task_follow_up_gate_shadow",
   // store-progress refused a completion once because its citations were inaccurate
   "task_citation_check_refused",
   "channel_message",
@@ -2818,10 +2821,36 @@ export type PageContentType = z.infer<typeof PageContentTypeSchema>;
 export const PageAuthModeSchema = z.enum(["public", "authed", "password"]);
 export type PageAuthMode = z.infer<typeof PageAuthModeSchema>;
 
+// Per-page theme overrides as stored: page token names (`--color-primary`,
+// `--radius-lg`) mapped to CSS values, per mode. Writes go through
+// `importThemeTokens` (src/themes/import.ts), which maps outside names onto the
+// token contract and checks every value, so the stored form is always normalized.
+export const PageThemeTokensSchema = z
+  .object({
+    light: z.record(z.string(), z.string()),
+    dark: z.record(z.string(), z.string()),
+  })
+  .openapi("PageThemeTokens");
+
+// Write-side `themeTokens` input, mirroring `ThemeImportInput` (src/themes/import.ts)
+// as one flat object: the default `tokens` format sends `light` / `dark` maps,
+// the `css` format sends a CSS variable block. `importThemeTokens` checks which
+// fields go with which format, so a mismatch gets a precise error message. The
+// `format` enum is the importer's own list, so a new importer needs no change
+// here unless it takes a new payload field.
+export const PageThemeTokensInputSchema = z.strictObject({
+  format: z.enum(THEME_IMPORT_FORMATS).optional(),
+  light: z.record(z.string(), z.string()).optional(),
+  dark: z.record(z.string(), z.string()).optional(),
+  css: z.string().optional(),
+});
+export type PageThemeTokensInput = z.infer<typeof PageThemeTokensInputSchema>;
+
 // PageSnapshot captures the mutable content fields frozen per-version in
 // page_versions.snapshot. Omits id / agentId / slug / timestamps (these are
 // invariant across versions for a given page id; the slug is a parent-only
-// identifier).
+// identifier). The design fields are optional because snapshots taken before
+// design version 2 do not carry them (they read as design version 1).
 export const PageSnapshotSchema = z
   .object({
     title: z.string(),
@@ -2831,6 +2860,9 @@ export const PageSnapshotSchema = z
     passwordHash: z.string().optional(),
     body: z.string(),
     needsCredentials: z.array(z.string()).optional(),
+    theme: z.string().nullable().optional(),
+    themeTokens: PageThemeTokensSchema.nullable().optional(),
+    designVersion: z.number().int().min(1).optional(),
   })
   .openapi("PageSnapshot");
 export type PageSnapshot = z.infer<typeof PageSnapshotSchema>;
@@ -2848,6 +2880,9 @@ export const PageSchema = z
     passwordHash: z.string().optional(),
     body: z.string(),
     needsCredentials: z.array(z.string()).optional(),
+    theme: z.string().nullable(),
+    themeTokens: PageThemeTokensSchema.nullable(),
+    designVersion: z.number().int().min(1),
     viewCount: z.number().int().min(0).default(0),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -2871,8 +2906,15 @@ export type WorkflowSummary = Omit<
   "definition" | "triggers" | "cooldown" | "input" | "triggerSchema"
 > & { nodeCount: number };
 
-/** `/api/pages` list item — drops the (potentially huge) `body` and `passwordHash`. */
-export type PageSummary = Omit<Page, "body" | "passwordHash">;
+/**
+ * `/api/pages` list item: drops the (potentially huge) `body` and `passwordHash`,
+ * plus the design fields (`theme`, `themeTokens`, `designVersion`). List views do
+ * not render a page, so those only come with `?fields=full` or the get-by-id route.
+ */
+export type PageSummary = Omit<
+  Page,
+  "body" | "passwordHash" | "theme" | "themeTokens" | "designVersion"
+>;
 
 /** `/api/schedules` list item — swaps the full `taskTemplate` for a short preview. */
 export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {

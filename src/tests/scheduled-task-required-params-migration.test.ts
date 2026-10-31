@@ -104,7 +104,9 @@ describe("scheduled task required params repair", () => {
   });
 
   test("keeps every requirement on genuinely tokenized fresh templates", async () => {
-    for (const name of canonicalNames.filter((name) => name !== "dream-daily")) {
+    // Migrations 141 and 151 still name these, but no template ships for them.
+    const unshipped = ["dream-daily", "daily-workflow-health-audit"];
+    for (const name of canonicalNames.filter((name) => !unshipped.includes(name))) {
       const template = new URL(`../../templates/schedules/${name}/content.md`, import.meta.url);
       insert(name, await Bun.file(template).text());
     }

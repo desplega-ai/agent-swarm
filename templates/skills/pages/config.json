@@ -4,7 +4,7 @@
   "displayName": "Pages",
   "slug": "pages",
   "title": "Pages",
-  "description": "Publish human-readable task outputs as DB-backed shareable pages (HTML or JSON) via `create_page` — no server, no tunnel. Covers auth modes, share URLs, versioning, the injected browser SDK, the `<swarm-diff>` primitive, print/PDF export, limits, and the minimalist taste baseline plus report-density layer every page should follow.",
+  "description": "Publish human-readable task outputs as DB-backed shareable pages (HTML or JSON) via `create_page`, with no server and no tunnel. Covers auth modes, share URLs, versioning, the injected browser SDK, the `<swarm-diff>` web component, print/PDF export, and limits. Also covers the swarm design system every page should use: theme tokens, `swarm-*` primitives, Tailwind v4 utilities, theme presets, dark mode, and the minimalist taste and report-density rules.",
   "version": "2.0.0",
   "category": "skills",
   "placeholders": [],

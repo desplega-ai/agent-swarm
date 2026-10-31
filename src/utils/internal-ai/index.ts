@@ -19,11 +19,14 @@ export {
   completeStructuredWithModel,
 } from "./complete-structured.js";
 export {
+  CREDENTIAL_KIND_PRECEDENCE,
   type CredentialKind,
   DEFAULT_MODEL,
   type ResolveCredentialOptions,
+  type ResolveCredentialsOptions,
   type ResolvedCredential,
   resolveCredential,
+  resolveCredentials,
 } from "./credentials.js";
 export {
   MEMORY_RATER_DEFAULT_MODEL,
@@ -36,3 +39,10 @@ export {
   summarizeSession,
   summaryToolSchema,
 } from "./summarize-session.js";
+export {
+  type GenerateTaskTitleOptions,
+  type GenerateTaskTitleResult,
+  generateTaskTitle,
+  TASK_TITLE_MODEL_CANDIDATES,
+  TASK_TITLE_MODEL_ENV,
+} from "./task-title.js";

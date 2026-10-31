@@ -1,0 +1,56 @@
+<base target="_blank">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  if (window.tailwind) {
+    window.tailwind.config = { corePlugins: { preflight: false } };
+  }
+</script>
+<style>
+  *, ::before, ::after { box-sizing: border-box; border: 0 solid #e5e7eb; }
+  hr { border-top-width: 1px; }
+  img, video { display: block; max-width: 100%; height: auto; }
+  button, input, optgroup, select, textarea, ::file-selector-button { font: inherit; }
+  :root {
+    color-scheme: light;
+    --swarm-bg: #fbfbfa;
+    --swarm-card: #ffffff;
+    --swarm-border: #e5e7eb;
+    --swarm-text: #111827;
+    --swarm-muted: #6b7280;
+    --swarm-primary: #3b82f6;
+  }
+  html, body { background: var(--swarm-bg); color: var(--swarm-text); }
+  body {
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.5;
+  }
+  code, pre, kbd, samp { font-family: "Space Mono", ui-monospace, monospace; }
+  a { color: var(--swarm-primary); }
+  ::selection { background: var(--swarm-primary); color: #fff; }
+  @media print {
+    /* Override theme variables so built-in primitives (swarm-diff, swarm-card)
+       that read var(--swarm-card) / var(--swarm-border) etc. inline-styled
+       backgrounds also flip to light. Without this, diff cards stay dark navy
+       on print. */
+    :root {
+      --swarm-bg: #ffffff;
+      --swarm-card: #ffffff;
+      --swarm-border: #cccccc;
+      --swarm-text: #000000;
+      --swarm-muted: #555555;
+    }
+    html, body { background: white !important; color: black !important; }
+    a { color: black !important; text-decoration: underline; }
+    /* Hide any swarm chrome the agent (or built-in primitives) tagged with
+       .no-print. Use this class on annotation badges, jump-list nav, anything
+       that shouldn't appear in the PDF export. */
+    .no-print { display: none !important; }
+    /* Avoid page-break inside cards / diff blocks. */
+    .swarm-card, swarm-diff { break-inside: avoid; }
+  }
+</style>

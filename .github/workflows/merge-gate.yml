@@ -36,11 +36,15 @@ jobs:
       ui: ${{ steps.check.outputs.ui }}
       ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
+      e2e: ${{ steps.check.outputs.e2e }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Blobless: the diff below reads commits and trees only, so full
+          # history without blobs is enough and clones much faster.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Determine base for diff
         id: base
@@ -59,7 +63,12 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          CHANGED=$(git diff --name-only ${{ steps.base.outputs.ref }}...HEAD)
+          # --no-renames: with rename detection on (git's default), a move
+          # lists only its destination, so moving a file out of a domain
+          # (src/x.ts -> docs/x.ts) would hide the removal from that domain's
+          # flag. Listing both sides keeps every flag honest.
+          # src/tests/merge-gate-detect-changes.test.ts runs this step.
+          CHANGED=$(git diff --no-renames --name-only ${{ steps.base.outputs.ref }}...HEAD)
           echo "Changed files:"
           echo "$CHANGED"
           echo "---"
@@ -136,7 +145,16 @@ jobs:
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS; do
+          # E2E contract suite: everything the SUT (`bun run src/http.ts`) and the
+          # runner load. src/ is the server; it statically imports packages/ and
+          # templates/ (skills, schedules, workflows) and slack-manifest.json, and
+          # reads vendored-openapi/ at runtime. scripts/e2e/ is the runner, and
+          # its tsconfig extends the root one. The manifests and lockfile feed the
+          # frozen install. Docs, runbooks, apps/ui sources, docs-site and other
+          # workflows skip it.
+          E2E=$(match '^(src/|packages/|templates/|vendored-openapi/|slack-manifest\.json$|scripts/e2e/|scripts/check-e2e-boundary\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+
+          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS E2E; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -595,6 +613,9 @@ jobs:
   e2e-contract:
     name: E2E Contract
     needs: detect-changes
+    # PRs skip the suite when they touch nothing it loads. merge_group (and any
+    # other event) always runs it.
+    if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1336,7 +1357,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The checker compares the candidate tree with the event's base commit.
+          # It reads commits and trees only, so blobs can stay on the server.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Check migration numbering and immutability
         env:
@@ -1355,8 +1378,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The scan range needs the base branch history.
+          # The scan range needs the base branch history. Blobless: gitleaks
+          # fetches the few blobs the scanned range touches on demand.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Self-test the scanner
         run: bash scripts/gitleaks-selftest.sh

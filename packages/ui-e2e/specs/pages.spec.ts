@@ -20,7 +20,9 @@ test("pages list opens the public page and its share URL", async ({
   const shareUrl = `${swarm.apiUrl}/p/${seed!.pages.public.id}`;
   // `exact` keeps the header's "Open agent-swarm on GitHub" link out of the match.
   const openLink = page.getByRole("link", { name: "Open", exact: true });
-  await expect(openLink).toHaveAttribute("href", shareUrl);
+  // A fresh browser runs the dashboard in dark mode, and the viewer passes
+  // that mode on to the page.
+  await expect(openLink).toHaveAttribute("href", `${shareUrl}?__swarm-mode=dark`);
   expect(new URL(shareUrl).pathname).toBe(new URL(seed!.pages.public.apiUrl).pathname);
 
   const anonymous = await browser.newContext();
@@ -147,7 +149,8 @@ test("page viewer forwards its query params to the page body", async ({
   // everything else rides along so a page can deep-link on its own params.
   await page.goto(`/pages/${id}?target=pr-1373&status=failed&key=secret`);
   const frame = page.locator("iframe[title='e2e public page']");
-  const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed$`);
+  // The viewer appends its dark mode after the forwarded params.
+  const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed&__swarm-mode=dark$`);
   await expect(frame).toHaveAttribute("src", forwarded);
   await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
     "href",

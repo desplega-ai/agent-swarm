@@ -17,6 +17,8 @@ afterAll(async () => {
 const SRC = new URL("../../../", import.meta.url).pathname;
 for (const alias of [
   "@/components/session-panel/model",
+  "@/components/steering/steering-message-chips",
+  "@/components/steering/steering-receipt",
   "@/components/shared/copy-value-button",
   "@/components/shared/message-copy-button",
   "@/components/shared/relative-time",
@@ -24,6 +26,8 @@ for (const alias of [
   "@/components/shared/prompt-context",
   "@/components/shared/task-status-icon",
   "@/components/ui/button",
+  "@/components/ui/badge",
+  "@/components/ui/popover",
   "@/components/ui/collapsible",
   "@/components/ui/tooltip",
   "@/components/ui/trace",
@@ -44,6 +48,14 @@ for (const alias of [
 }
 mock.module("@/api/hooks/use-users", () => ({
   useUsers: () => ({ data: [{ id: "u1", name: "Taras" }] }),
+}));
+mock.module("@/contexts/current-user-context", () => ({
+  useCurrentUser: () => ({ userId: "u1" }),
+}));
+mock.module("@/components/shared/user-avatar", () => ({
+  UserAvatar: ({ id, name }: { id: string; name: string }) => (
+    <span role="img" aria-label={name} data-user-id={id} />
+  ),
 }));
 mock.module("@/components/shared/agent-avatar", () => ({
   AgentAvatar: ({ agentId }: { agentId: string }) => (
@@ -92,31 +104,119 @@ function steering(id: string, body: string, status: SteeringMessage["status"]): 
     mode: "queue",
     status,
     createdByKind: "user",
+    createdByUserId: "u1",
     createdAt: "2026-10-30T10:00:00Z",
     deliveredAt: status === "pending" ? undefined : "2026-10-30T10:00:05Z",
   } as SteeringMessage;
 }
 
 describe("Transcript steering", () => {
-  test("steering messages are the person's message; only a pending one says Queued", async () => {
+  test("steering keeps the sender and a receipt for every lifecycle state", async () => {
     const rows = buildTranscriptRows({
       messages: [],
       steering: [
         steering("s1", "Use the staging DB", "delivered"),
         steering("s2", "Then open the PR", "pending"),
+        steering("s3", "Use Carbon tokens", "handled"),
+        steering("s4", "Try another task", "promoted"),
+        steering("s5", "Never mind", "cancelled"),
       ],
     });
     const { container, unmount } = await mount(<Transcript rows={rows} running />);
     const messages = [
       ...container.querySelectorAll('section[aria-label="Steering message"]'),
     ] as HTMLElement[];
-    expect(messages.map((m) => m.dataset.slot)).toEqual(["transcript-user", "transcript-user"]);
-    expect(messages[0].textContent).toBe("Use the staging DB");
-    expect(messages[0].querySelector('[data-slot="transcript-queued"]')).toBeNull();
-    expect(messages[1].textContent).toContain("Then open the PR");
-    expect(messages[1].querySelector('[data-slot="transcript-queued"]')?.textContent).toBe(
-      "Queued",
+    expect(messages).toHaveLength(5);
+    for (const message of messages) {
+      expect(message.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("Taras");
+      expect(message.className).toContain("flex-row-reverse");
+      const controls = [...message.querySelectorAll("button, time")].map((el) =>
+        el.tagName === "TIME" ? "time" : el.getAttribute("aria-label"),
+      );
+      expect(controls).toEqual([
+        "Show raw",
+        "Copy message",
+        message.querySelector('[data-slot="steering-receipt"]')?.getAttribute("aria-label"),
+        "time",
+      ]);
+    }
+    expect(
+      [...container.querySelectorAll('[data-slot="steering-receipt"]')].map((el) =>
+        el.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "Delivered: message status",
+      "Processed: message status",
+      "Follow-up task: message status",
+      "Cancelled: message status",
+      "Queued: message status",
+    ]);
+    expect(messages[0].textContent).toContain("Use the staging DB");
+    await unmount();
+  });
+
+  test("the receipt shows confirmed processing time and the acknowledgement note", async () => {
+    const message = {
+      ...steering("s1", "Use Carbon tokens", "handled"),
+      handledAt: "2026-10-30T10:00:12Z",
+      handledNote: "Applied the Carbon theme tokens.",
+    };
+    const rows = buildTranscriptRows({ messages: [], steering: [message] });
+    const { container, unmount } = await mount(<Transcript rows={rows} running={false} />);
+    const button = container.querySelector<HTMLButtonElement>('[data-slot="steering-receipt"]')!;
+    await act(async () => button.click());
+    const popover = document.querySelector('[data-slot="popover-content"]');
+    expect(popover?.textContent).toContain("The agent confirmed handling this message.");
+    expect(popover?.textContent).toContain("Applied the Carbon theme tokens.");
+    expect(popover?.textContent).toContain("BCN");
+    expect([...popover!.querySelectorAll("time")].map((el) => el.dateTime)).toEqual([
+      message.createdAt,
+      message.deliveredAt!,
+      message.handledAt,
+    ]);
+    await unmount();
+  });
+
+  test("another sender's message stays on the left with their identity", async () => {
+    const rows = buildTranscriptRows({
+      messages: [],
+      steering: [
+        {
+          ...steering("s1", "Check this too", "pending"),
+          createdByUserId: "u2",
+          senderLabel: "Lena",
+        },
+      ],
+    });
+    const { container, unmount } = await mount(<Transcript rows={rows} running />);
+    const message = container.querySelector('section[aria-label="Steering message"]')!;
+    expect(message.className).not.toContain("flex-row-reverse");
+    expect(message.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("Lena");
+    expect(message.textContent).toContain("Lena");
+    expect(
+      [...message.querySelectorAll("button, time")].map((el) =>
+        el.tagName === "TIME" ? "time" : el.getAttribute("aria-label"),
+      ),
+    ).toEqual(["time", "Queued: message status", "Show raw", "Copy message"]);
+    await unmount();
+  });
+
+  test("a delivery receipt changes only after the agent acknowledges processing", async () => {
+    const message = steering("s1", "Use Carbon tokens", "delivered");
+    const rows = (next: SteeringMessage) => buildTranscriptRows({ messages: [], steering: [next] });
+    const { container, rerender, unmount } = await mount(
+      <Transcript rows={rows(message)} running />,
     );
+    const receipt = () => container.querySelector('[data-slot="steering-receipt"]');
+    expect(receipt()?.getAttribute("aria-label")).toBe("Delivered: message status");
+    await rerender(
+      <Transcript
+        rows={rows({ ...message, status: "handled", handledAt: "2026-10-30T10:00:12Z" })}
+        running={false}
+      />,
+    );
+    expect(receipt()?.getAttribute("aria-label")).toBe("Processed: message status");
+    expect(container.querySelectorAll('section[aria-label="Steering message"]')).toHaveLength(1);
     await unmount();
   });
 });

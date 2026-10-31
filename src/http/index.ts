@@ -33,6 +33,7 @@ import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-poo
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import { initBitbucket } from "../bitbucket";
@@ -465,6 +466,7 @@ const detachRealtime = attachRealtimeTransport(httpServer);
 const { attachControllerTransport } = await import("./controllers-connect");
 const detachControllers = attachControllerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
+const taskAutoTitles = startTaskAutoTitleListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
   void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
     console.error("[rooms] Deletion failed:", scrubSecrets(String(error))),
@@ -474,6 +476,7 @@ globalState.__closeRealtime = () => {
   detachRealtime();
   detachControllers();
   stopWorkerNudges();
+  taskAutoTitles.stop();
   stopRoomDeletion();
 };
 globalState.__httpServer = httpServer;

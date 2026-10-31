@@ -17,14 +17,13 @@
  *   - terminal (`completed` / `failed` / `cancelled` / `superseded`): one
  *     "Worked for 3m 12s" line, collapsed by default, that expands on click.
  *
- * Polling cost is deliberately bounded: the transcript and steering fetches
- * are enabled only for tasks that are still active, or terminal tasks the
- * user has explicitly expanded. A caller that passes the `task` row it holds
- * also skips the task fetch until then, so a long session's historical rows
- * never fire a request.
+ * Transcript fetches run only for active tasks or expanded history.
+ * Steering history loads even when folded, so messages remain visible.
+ * A caller that passes its task row skips the task fetch until expansion.
+ * Finished tasks do not poll their steering history.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useTask, useTaskSessionLogs, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
@@ -60,7 +59,7 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
   const [expanded, setExpanded] = useState(false);
   // Poll while the task is active so new activity rows flow in. Stop polling
   // once the task reaches a terminal state. A closed fold over a known row
-  // needs no fetch (an empty id disables the query).
+  // needs no task fetch (an empty id disables the query).
   const { data: fetched } = useTask(known && !isActive && !expanded ? "" : taskId, {
     refetchInterval: isActive ? 4000 : false,
   });
@@ -71,10 +70,18 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
   // shared subscription rather than one request each.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
-  const { data: steeringMessages } = useTaskSteeringMessages(taskId, {
-    enabled: steerGate.supported && steeringEnabled && (isActive || expanded),
+  const { data: steeringMessages, refetch: refetchSteering } = useTaskSteeringMessages(taskId, {
+    enabled: steerGate.supported && steeringEnabled,
     refetchInterval: isActive ? 5000 : false,
   });
+  const wasActive = useRef(isActive);
+  useEffect(() => {
+    // Read the final acknowledgement before the finished task stops polling.
+    if (wasActive.current && !isActive && steerGate.supported && steeringEnabled) {
+      void refetchSteering();
+    }
+    wasActive.current = isActive;
+  }, [isActive, steerGate.supported, steeringEnabled, refetchSteering]);
   // Shares the detail sheet's query key, so opening the sheet reuses it. A
   // disabled query still returns the cached transcript, so a turn watched
   // live keeps its steps once it ends.

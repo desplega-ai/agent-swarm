@@ -20,6 +20,7 @@ import {
   Database,
   HeartPulse,
   Layers,
+  ListTodo,
   type LucideIcon,
   Palette,
   Plug,
@@ -169,6 +170,32 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         options: ["steer", "queue"],
         defaultValue: "queue",
         docsUrl: `${DOCS}guides/task-steering`,
+      },
+    ],
+  },
+  {
+    id: "tasks",
+    title: "Tasks & sessions",
+    description: "How new tasks are named in the dashboard and the sessions sidebar.",
+    icon: ListTodo,
+    entries: [
+      {
+        key: "TASK_AUTO_TITLE_ENABLED",
+        label: "Automatic task titles",
+        description:
+          "Give every new task a short display title from the cheapest configured model (OpenRouter DeepSeek v4.1 Flash, Claude Haiku, GPT Luna, or the claude CLI). A title a person set is never replaced. Off keeps the prompt as the title.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#task-titles`,
+      },
+      {
+        key: "TASK_AUTO_TITLE_MODEL",
+        label: "Task title model",
+        description:
+          "Pin one model for task titles: provider/model-id (openrouter/deepseek/deepseek-v4.1-flash, anthropic/claude-haiku-5-5, openai/gpt-6-luna, openai-codex/gpt-6-luna) or a claude -p alias such as haiku. Unset picks the first provider with a credential, cheapest model first, and falls back down the list on errors.",
+        kind: "string",
+        placeholder: "openrouter/deepseek/deepseek-v4.1-flash",
+        docsUrl: `${DOCS}ui/configuration#task-titles`,
       },
     ],
   },
@@ -1578,6 +1605,34 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         options: ["typesafe", "openrouter", "cloudflare", "laya", "openai"],
         defaultValue: "typesafe",
         docsUrl: `${DOCS}concepts/workflows`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_MODE",
+        label: "Follow-up gate mode",
+        description:
+          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up.",
+        kind: "enum",
+        options: ["off", "shadow"],
+        defaultValue: "off",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_SCHEDULE_IDS",
+        label: "Follow-up gate schedules",
+        description:
+          "Comma-separated schedule ids whose runs the follow-up gate evaluates. Empty evaluates nothing. Leave off any schedule whose follow-up does required work.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_VERIFIER_SCRIPT",
+        label: "Follow-up gate verifier",
+        description:
+          "Name of a global script run as the Lead with { taskId }. It returns { ok: true | false | null, controls: { ok }, check?, detail?, unverified? }. Empty in shadow mode logs an error row for each gated run.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
       },
       {
         key: "SCRIPT_EXECUTOR",

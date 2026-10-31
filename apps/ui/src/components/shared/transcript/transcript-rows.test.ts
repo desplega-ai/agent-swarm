@@ -233,7 +233,7 @@ describe("foldedTurnRows", () => {
     expect(open[2]?.kind === "work" && open[2].entries[0]).toMatchObject({ status: "error" });
   });
 
-  test("closed, a message still waiting for the agent stays in view", () => {
+  test("closed, steering stays visible after delivery and acknowledgement", () => {
     const rows = buildTranscriptRows({
       messages: [msg("assistant", [{ type: "text", text: "last" }])],
       steering: [
@@ -243,9 +243,19 @@ describe("foldedTurnRows", () => {
           status: "pending",
           createdAt: "2026-10-30T09:00:00Z",
         } as SteeringMessage,
+        ...(["delivered", "handled", "promoted", "cancelled"] as const).map(
+          (status) =>
+            ({
+              id: status,
+              body: status,
+              status,
+              createdAt: "2026-10-30T09:00:00Z",
+              deliveredAt: "2026-10-30T10:00:05Z",
+            }) as SteeringMessage,
+        ),
       ],
     });
-    expect(foldedTurnRows(rows, false).map((r) => r.kind)).toEqual(["assistant", "steer"]);
+    expect(foldedTurnRows(rows, false).filter((r) => r.kind === "steer")).toHaveLength(5);
   });
 
   test("closed, a run with no prose shows nothing under the fold line", () => {

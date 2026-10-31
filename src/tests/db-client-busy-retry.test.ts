@@ -306,4 +306,85 @@ describe("db-client SQLITE_BUSY retry", () => {
     expect(rows.map((r) => r.name)).toEqual(["pre-existing"]);
     await released;
   });
+  test("a crowd of queued writers does not spin the event loop while a holder persists", async () => {
+    // Regression for the 31/10 stalls: a long external holder (a Litestream
+    // snapshot) with many writers queued. Each writer used to spin its full
+    // attemptSpinMs inside the FIFO lock on every attempt, so a round of
+    // attempts blocked the loop for writers x spin and the nominal retry
+    // budget stretched to minutes.
+    const crowdClient = createBunSqliteClient(() => main, {
+      maxWaitMs: 4_000,
+      backoffMs: [25, 50, 100, 250, ...Array<number>(20).fill(250)],
+      attemptSpinMs: 50,
+      finalAttemptSpinMs: 50,
+    });
+    const writers = 60;
+    const released = holdWriteLock(1_500);
+
+    let maxLagMs = 0;
+    let last = performance.now();
+    const ticker = setInterval(() => {
+      const now = performance.now();
+      maxLagMs = Math.max(maxLagMs, now - last - 10);
+      last = now;
+    }, 10);
+
+    const startedAt = performance.now();
+    const results = await Promise.allSettled(
+      Array.from({ length: writers }, (_, i) =>
+        crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
+      ),
+    );
+    const wallMs = performance.now() - startedAt;
+    clearInterval(ticker);
+    await released;
+
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    // Ungated: 60 writers x 50ms = 3s of blocked loop per round of attempts.
+    expect(maxLagMs).toBeLessThan(500);
+    // Ungated the crowd needed several seconds of spin rounds after release.
+    expect(wallMs).toBeLessThan(3_000);
+    const rows = await crowdClient.query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM items WHERE name LIKE 'crowd-%'",
+    );
+    expect(rows[0]?.n).toBe(writers);
+  });
+
+  test("a held lock past the budget fails fast for the whole crowd", async () => {
+    const crowdClient = createBunSqliteClient(() => main, {
+      maxWaitMs: 400,
+      backoffMs: [25, 50, 100, 250],
+      attemptSpinMs: 50,
+      finalAttemptSpinMs: 50,
+    });
+    const released = holdWriteLock(2_500);
+    const startedAt = performance.now();
+    const results = await Promise.allSettled(
+      Array.from({ length: 40 }, (_, i) =>
+        crowdClient.run("INSERT INTO items (name) VALUES (?)", [`doomed-${i}`]),
+      ),
+    );
+    const wallMs = performance.now() - startedAt;
+    await released;
+    expect(results.every((r) => r.status === "rejected")).toBe(true);
+    for (const r of results) {
+      expect((r as PromiseRejectedResult).reason.code).toBe("SQLITE_BUSY");
+    }
+    // Ungated: 40 writers x 5 spins x 50ms = 10s. Gated: well under 2s.
+    expect(wallMs).toBeLessThan(2_000);
+  });
+
+  test("the gate closes once a blocked write lands, so the next BUSY probes afresh", async () => {
+    const released = holdWriteLock(150);
+    await client.run("INSERT INTO items (name) VALUES (?)", ["after-hold"]);
+    await released;
+    // New episode: a second, short hold is still bridged.
+    const second = holdWriteLock(100);
+    await client.run("INSERT INTO items (name) VALUES (?)", ["after-second-hold"]);
+    await second;
+    const rows = await client.query<{ name: string }>(
+      "SELECT name FROM items WHERE name LIKE 'after-%' ORDER BY name",
+    );
+    expect(rows.map((r) => r.name)).toEqual(["after-hold", "after-second-hold"]);
+  });
 });
