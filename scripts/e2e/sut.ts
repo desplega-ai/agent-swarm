@@ -157,12 +157,16 @@ export async function startSut(
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
+  // The SUT writes home-relative files (skill filesystem sync into ~/.claude/skills
+  // and friends). A per-run HOME keeps those off the developer's real home.
+  const homeDir = `/tmp/e2e-home-${stamp}`;
   const secretsPath = `${secretsDir}/key`;
-  await Bun.$`mkdir -p ${fsDir} ${secretsDir}`.quiet();
+  await Bun.$`mkdir -p ${fsDir} ${secretsDir} ${homeDir}`.quiet();
   await Bun.write(secretsPath, randomBytes(32).toString("base64"));
 
   const env = {
     ...minimalEnv(),
+    HOME: homeDir,
     PORT: String(port),
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,
@@ -201,7 +205,7 @@ export async function startSut(
     dbPath,
     logPath,
     logPaths: [logPath],
-    tempPaths: [fsDir, secretsDir],
+    tempPaths: [fsDir, secretsDir, homeDir],
     process: spawned.child,
     flushLog: spawned.flushLog,
     drains: spawned.drains,

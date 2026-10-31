@@ -18,6 +18,21 @@ export async function registerAgent(
   return asString(asRecord(response.json).id, `${label} agent id`);
 }
 
+const leads = new Map<string, string>();
+
+/**
+ * One lead per run for every script-* scenario that needs one (global scope writes, lead-only
+ * MCP tools). Agents cannot be deleted, so sharing keeps the lead count at one. A lead changes
+ * routing for later scenarios, so only scenarios that need it call this.
+ */
+export async function getLead(ctx: ScenarioContext): Promise<string> {
+  const existing = leads.get(ctx.nonce);
+  if (existing) return existing;
+  const id = await registerAgent(ctx, "lead", { lead: true });
+  leads.set(ctx.nonce, id);
+  return id;
+}
+
 /** `POST /api/scripts/run` that must answer 200. Returns the run envelope. */
 export async function runScript(
   ctx: ScenarioContext,
