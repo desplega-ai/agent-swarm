@@ -4409,11 +4409,12 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
  */
 export async function claimMentions(
   agentId: string,
-): Promise<{ channelId: string; lastReadAt: string | null }[]> {
+): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const client = getDbClient();
   const channels = await getAllChannels();
-  const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
+  const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
+    [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
@@ -4457,7 +4458,11 @@ export async function claimMentions(
 
       // Only add to claimed list if we actually claimed it (not already processing)
       if (result.changes > 0) {
-        claimedChannels.push({ channelId: channel.id, lastReadAt });
+        claimedChannels.push({
+          channelId: channel.id,
+          lastReadAt,
+          mentionsCount: mentionCountRow.count,
+        });
       }
     }
   }
@@ -7197,24 +7202,29 @@ export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapp
   );
 }
 
+/**
+ * Map an inbox to an agent. Re-registering an inbox the same agent already owns
+ * refreshes its email. Returns null, and changes nothing, when the inbox is
+ * already mapped to a different agent.
+ */
 export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): Promise<AgentMailInboxMapping> {
+): Promise<AgentMailInboxMapping | null> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = await getDbClient().get<AgentMailInboxMapping>(
     `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
+       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
+         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
        RETURNING *`,
     [id, inboxId, agentId, inboxEmail ?? null, now],
   );
 
-  if (!row) throw new Error("Failed to create AgentMail inbox mapping");
-  return row;
+  return row ?? null;
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
@@ -14244,8 +14254,8 @@ export async function createScriptRun(data: {
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
-         created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         created_by, updated_by, startedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14261,6 +14271,8 @@ export async function createScriptRun(data: {
       data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      new Date().toISOString(),
     ],
   );
   if (!row) throw new Error("Failed to create script run");

@@ -619,7 +619,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -639,8 +639,8 @@ jobs:
       - name: Type check E2E runner
         run: bun run e2e:tsc
 
-      - name: Run E2E contract suite
-        run: bun run e2e --json e2e-results.json --summary-md e2e-summary.md
+      - name: Run E2E contract suite (strict coverage gate)
+        run: bun run e2e --strict --json e2e-results.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()

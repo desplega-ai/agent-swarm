@@ -220,8 +220,10 @@ export async function updateTrackerSync(
   await getDbClient().run(`UPDATE tracker_sync SET ${sets.join(", ")} WHERE id = ?`, values);
 }
 
-export async function deleteTrackerSync(id: string): Promise<void> {
-  await getDbClient().run("DELETE FROM tracker_sync WHERE id = ?", [id]);
+/** Whether a mapping with `id` existed and was removed. */
+export async function deleteTrackerSync(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM tracker_sync WHERE id = ?", [id]);
+  return result.changes > 0;
 }
 
 /**

@@ -14,17 +14,29 @@ export function listedMcpTools(): ReadonlySet<string> {
 
 export type McpConnection = Awaited<ReturnType<ReturnType<typeof createMcpConnector>>>;
 
+export type McpConnectOptions = {
+  /** Extra request headers, such as `X-Source-Task-ID` for task-scoped tools. */
+  headers?: Record<string, string>;
+  /** Bearer to send instead of the run's operator key (a user `aswt_` token, a run token). */
+  apiKey?: string;
+  /** Endpoint path, default `/mcp`. `/mcp-user` for user-token sessions. */
+  path?: string;
+};
+
 export function createMcpConnector(baseUrl: string, key: string) {
-  return async function connectMcp(agentId: string) {
+  return async function connectMcp(agentId: string, options: McpConnectOptions = {}) {
     const client = new Client({ name: "agent-swarm-e2e", version: "1.0.0" });
-    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
-      requestInit: {
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "X-Agent-ID": agentId,
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${options.apiKey ?? key}`);
+    headers.set("X-Agent-ID", agentId);
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`${baseUrl}${options.path ?? "/mcp"}`),
+      {
+        requestInit: {
+          headers,
         },
       },
-    });
+    );
     await client.connect(transport);
 
     return {

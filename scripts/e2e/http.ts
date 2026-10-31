@@ -1,16 +1,23 @@
-export type HttpCall = { method: string; path: string; status: number };
+export type HttpCall = { method: string; path: string; status: number; durationMs: number };
 
 export type ApiOptions = {
   body?: unknown;
   agentId?: string;
   apiKey?: string | null;
   headers?: Record<string, string>;
+  /** Raw body (form, multipart, binary). Wins over `body`. */
+  rawBody?: string | Uint8Array | FormData | URLSearchParams | Blob;
+  /** Follow redirects (default) or return the 3xx as is. */
+  redirect?: "follow" | "manual" | "error";
+  /** Abort the request after this many milliseconds (default 30 s). */
+  timeoutMs?: number;
 };
 
 export type ApiResponse = {
   status: number;
   json: unknown;
   text: string;
+  headers: Headers;
 };
 
 export type ApiClient = (
@@ -25,6 +32,14 @@ export function recordedHttpCalls(): readonly HttpCall[] {
   return calls;
 }
 
+/**
+ * Record a call made outside the client (a raw fetch, a WebSocket upgrade, an SSE
+ * stream) so it counts toward route coverage. `path` is the request pathname.
+ */
+export function recordHttpCall(method: string, path: string, status: number, durationMs = 0) {
+  calls.push({ method: method.toUpperCase(), path, status, durationMs });
+}
+
 export function createApiClient(baseUrl: string, runKey: string): ApiClient {
   return async (method, path, options = {}) => {
     const headers: Record<string, string> = { ...options.headers };
@@ -32,14 +47,25 @@ export function createApiClient(baseUrl: string, runKey: string): ApiClient {
       headers.Authorization = `Bearer ${options.apiKey ?? runKey}`;
     }
     if (options.agentId) headers["X-Agent-ID"] = options.agentId;
-    if (options.body !== undefined) headers["Content-Type"] = "application/json";
+    if (options.body !== undefined && options.rawBody === undefined) {
+      headers["Content-Type"] = "application/json";
+    }
 
+    const started = performance.now();
     const response = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      redirect: options.redirect,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+      body:
+        options.rawBody !== undefined
+          ? options.rawBody
+          : options.body === undefined
+            ? undefined
+            : JSON.stringify(options.body),
     });
     const text = await response.text();
+    const durationMs = performance.now() - started;
     const contentType = response.headers.get("content-type") ?? "";
     let json: unknown = null;
     if (contentType.includes("json") && text) {
@@ -53,8 +79,9 @@ export function createApiClient(baseUrl: string, runKey: string): ApiClient {
       method: method.toUpperCase(),
       path: new URL(path, baseUrl).pathname,
       status: response.status,
+      durationMs,
     });
-    return { status: response.status, json, text };
+    return { status: response.status, json, text, headers: response.headers };
   };
 }
 
@@ -88,4 +115,17 @@ export function asRecord(value: unknown): Record<string, unknown> {
     "Expected an object",
   );
   return value as Record<string, unknown>;
+}
+
+/** `asRecord(value)[field]` as an array of records, or throw. */
+export function asRecords(value: unknown, field: string): Record<string, unknown>[] {
+  const list = asRecord(value)[field];
+  expect(Array.isArray(list), `Expected ${field} to be an array`);
+  return list.map(asRecord);
+}
+
+/** A string field, or throw with the field name in the message. */
+export function asString(value: unknown, label: string): string {
+  expect(typeof value === "string" && value.length > 0, `${label} is not a non-empty string`);
+  return value;
 }

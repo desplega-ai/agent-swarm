@@ -158,6 +158,27 @@ describe("GET /api/users", () => {
     const events = row.recentEvents as Array<{ eventType: string }>;
     expect(events.map((e) => e.eventType)).toContain("identity_added");
   });
+
+  test("recentEvents=0 returns no events, on the list and on a single user", async () => {
+    const u = await createUser({ name: "Quiet", email: "quiet@x.com" });
+    await linkIdentity(u.id, "slack", "U_QUIET", { kind: "operator", id: OPERATOR_FP });
+
+    const list = await authedFetch("/api/users?recentEvents=0");
+    expect(list.status).toBe(200);
+    const { users } = (await list.json()) as { users: Array<{ recentEvents: unknown[] }> };
+    expect(users[0]?.recentEvents).toEqual([]);
+
+    const one = await authedFetch(`/api/users/${u.id}?recentEvents=0`);
+    expect(one.status).toBe(200);
+    expect(((await one.json()) as { user: { recentEvents: unknown[] } }).user.recentEvents).toEqual(
+      [],
+    );
+
+    const limited = await authedFetch(`/api/users/${u.id}?recentEvents=1`);
+    expect(
+      ((await limited.json()) as { user: { recentEvents: unknown[] } }).user.recentEvents.length,
+    ).toBe(1);
+  });
 });
 
 describe("POST /api/users", () => {
@@ -185,6 +206,25 @@ describe("POST /api/users", () => {
     }
     expect(await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users")).toEqual({
       n: 0,
+    });
+  });
+
+  test("a duplicate email answers 409 user_exists without SQLite text", async () => {
+    const first = await authedFetch("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ name: "First", email: "dupe@example.com" }),
+    });
+    expect(first.status).toBe(200);
+    const second = await authedFetch("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ name: "Second", email: "dupe@example.com" }),
+    });
+    expect(second.status).toBe(409);
+    const text = await second.text();
+    expect(JSON.parse(text)).toEqual({ error: "user_exists" });
+    expect(text).not.toContain("UNIQUE");
+    expect(await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users")).toEqual({
+      n: 1,
     });
   });
 
@@ -469,6 +509,29 @@ describe("identity link/unlink", () => {
       identities: Array<{ kind: string; externalId: string }>;
     };
     expect(delBody.identities).toEqual([]);
+  });
+
+  test("linking a taken identity answers 409 identity_taken without SQLite text", async () => {
+    const owner = await createUser({ name: "Owner" });
+    const other = await createUser({ name: "Other" });
+    const link = (userId: string) =>
+      authedFetch(`/api/users/${userId}/identities`, {
+        method: "POST",
+        body: JSON.stringify({ kind: "slack", externalId: "U_TAKEN" }),
+      });
+    expect((await link(owner.id)).status).toBe(200);
+
+    for (const userId of [owner.id, other.id]) {
+      const collision = await link(userId);
+      expect(collision.status).toBe(409);
+      const text = await collision.text();
+      expect(JSON.parse(text)).toEqual({ error: "identity_taken" });
+      expect(text).not.toContain("UNIQUE");
+    }
+    const rows = await getDbClient().query<{ userId: string }>(
+      "SELECT userId FROM user_external_ids WHERE kind = 'slack' AND externalId = 'U_TAKEN'",
+    );
+    expect(rows).toEqual([{ userId: owner.id }]);
   });
 
   test("DELETE with URL-encoded externalId removes the literal identity", async () => {

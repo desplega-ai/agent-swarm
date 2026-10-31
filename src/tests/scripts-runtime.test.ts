@@ -582,6 +582,30 @@ describe("runScript", () => {
     });
   }
 
+  spawnTest(
+    "extracted args schema leaves defaulted fields optional and keeps their default",
+    async () => {
+      const schema = await extractArgsJsonSchema(`
+      import { z } from "zod";
+      export const argsSchema = z.object({
+        n: z.number(),
+        scale: z.number().default(2),
+        nested: z.object({ a: z.number().default(1), b: z.string() }).default({ a: 1, b: "x" }),
+      });
+      export default async (args: z.infer<typeof argsSchema>) => args.n * args.scale;
+    `);
+      expect(schema).not.toBeNull();
+      const parsed = JSON.parse(schema!) as {
+        required: string[];
+        properties: Record<string, { default?: unknown; required?: string[] }>;
+      };
+      expect(parsed.required).toEqual(["n"]);
+      expect(parsed.properties.scale?.default).toBe(2);
+      expect(parsed.properties.nested?.default).toEqual({ a: 1, b: "x" });
+      expect(parsed.properties.nested?.required).toEqual(["b"]);
+    },
+  );
+
   spawnTest("script without argsSchema still works (backward-compat)", async () => {
     const output = await runScript({
       agentId: "agent-1",

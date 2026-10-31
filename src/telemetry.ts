@@ -42,7 +42,34 @@ type FamilyProps<Prefix extends string, S extends string> = PropsFor<
   Extract<SwarmEventName, `${Prefix}.${S}`>
 >;
 
-const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
+const DEFAULT_TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
+
+/**
+ * `DESPLEGA_TELEMETRY_ENDPOINT` is a test knob: the black-box suite points it at a
+ * loopback mock sink. Telemetry carries install ids and route templates, so the
+ * override is accepted only for https origins or plain http on loopback. Anything
+ * else is ignored with a warning and the default sink is used.
+ */
+export function resolveTelemetryEndpoint(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_TELEMETRY_ENDPOINT;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    console.warn("[telemetry] DESPLEGA_TELEMETRY_ENDPOINT is not a URL; using the default sink");
+    return DEFAULT_TELEMETRY_ENDPOINT;
+  }
+  const loopback =
+    url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+  if (url.protocol === "https:" || (url.protocol === "http:" && loopback)) return url.toString();
+  console.warn(
+    "[telemetry] DESPLEGA_TELEMETRY_ENDPOINT must be https, or http on loopback; using the default sink",
+  );
+  return DEFAULT_TELEMETRY_ENDPOINT;
+}
+
+const TELEMETRY_ENDPOINT = resolveTelemetryEndpoint(process.env.DESPLEGA_TELEMETRY_ENDPOINT);
 const PRODUCT = "agent-swarm";
 const TIMEOUT_MS = 5_000;
 

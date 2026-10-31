@@ -20,6 +20,8 @@ function hangUntilAborted(req: Request): Promise<Response> {
       hang.aborted++;
       resolve(new Response("aborted"));
     });
+    // Bun reports canceled uploads only when the handler consumes their bodies.
+    void req.arrayBuffer().catch(() => {});
   });
 }
 async function waitFor(check: () => boolean, timeoutMs = 3_000): Promise<boolean> {

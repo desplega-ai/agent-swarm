@@ -251,6 +251,7 @@ const createUserRoute = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    409: { description: "A user with this email already exists (user_exists)" },
   },
   auth: { apiKey: true },
 });
@@ -624,9 +625,10 @@ const addIdentityRoute = route({
       description: "Updated identity list",
       schema: z.object({ identities: z.array(UserIdentityLinkSchema) }),
     },
-    400: { description: "Validation error or PK collision" },
+    400: { description: "Validation error" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
+    409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
   auth: { apiKey: true },
 });
@@ -650,6 +652,15 @@ const deleteIdentityRoute = route({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** True when `err` is a SQLite UNIQUE violation whose message names `target` (e.g. `users.email`). */
+function isUniqueViolation(err: unknown, target: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.includes("UNIQUE constraint") &&
+    err.message.includes(target)
+  );
+}
 
 const UNMAPPED_KINDS = [
   "slack",
@@ -877,6 +888,10 @@ export async function handleUsers(
       const composed = await composeUser(user.id);
       createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
+      if (isUniqueViolation(err, "users.email")) {
+        jsonError(res, "user_exists", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Failed to create user", 500);
     }
     return true;
@@ -1249,6 +1264,10 @@ export async function handleUsers(
         identities: await getUserIdentities(parsed.params.id),
       });
     } catch (err) {
+      if (isUniqueViolation(err, "user_external_ids")) {
+        jsonError(res, "identity_taken", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Failed to link identity", 400);
     }
     return true;

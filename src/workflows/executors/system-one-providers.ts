@@ -51,7 +51,7 @@ export interface SystemOneBuiltEndpoint {
   /** What the value is, for messages: "the account id of a Cloudflare account". */
   readonly describe: string;
   /** Request URL, or null when the value is not usable. `model` is already allowlisted. */
-  readonly build: (value: string, model: string) => string | null;
+  readonly build: (value: string, model: string, env: NodeJS.ProcessEnv) => string | null;
 }
 
 export type SystemOneEndpoint = string | SystemOneConfiguredEndpoint | SystemOneBuiltEndpoint;
@@ -155,11 +155,30 @@ async function readFirstGlobalConfig(
 const CLOUDFLARE_ENDPOINT: SystemOneBuiltEndpoint = {
   configKey: CLOUDFLARE_ACCOUNT_KEY,
   describe: "the 32-character id of a Cloudflare account",
-  build: (accountId, model) => {
+  build: (accountId, model, env) => {
     const id = accountId.trim();
-    return CLOUDFLARE_ACCOUNT_RE.test(id)
-      ? `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`
-      : null;
+    if (!CLOUDFLARE_ACCOUNT_RE.test(id)) return null;
+    const path = `/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`;
+    // Test traffic can reach a local mock. Config rows cannot set this reserved key.
+    if (env.NODE_ENV === "test" && env.CLOUDFLARE_API_BASE_URL) {
+      try {
+        const url = new URL(env.CLOUDFLARE_API_BASE_URL);
+        if (
+          url.protocol === "http:" &&
+          LOOPBACK_HOSTS.has(url.hostname) &&
+          url.pathname === "/" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        ) {
+          return `${url.origin}${path}`;
+        }
+      } catch {
+        // Ignore an invalid override and use the production endpoint.
+      }
+    }
+    return `https://api.cloudflare.com${path}`;
   },
 };
 
@@ -576,7 +595,7 @@ export async function resolveSystemOneTarget(
         errors.push(systemOneUrlMissingMessage(id, capability));
       } else {
         const resolved = isBuiltEndpoint(service.endpoint)
-          ? service.endpoint.build(base, overrides.model ?? service.defaultModel ?? "")
+          ? service.endpoint.build(base, overrides.model ?? service.defaultModel ?? "", ctx.env)
           : systemOneEndpointFromBase(base, service.endpoint.path);
         if (resolved) endpoint = resolved;
         else errors.push(systemOneUrlInvalidMessage(id, capability));

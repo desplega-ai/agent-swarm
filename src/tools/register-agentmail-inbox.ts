@@ -80,6 +80,11 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
             requestInfo.agentId,
             inboxEmail,
           );
+          if (!mapping) {
+            return toolErr(`Inbox ${inboxId} is owned by another agent`, {
+              data: { yourAgentId: requestInfo.agentId },
+            });
+          }
           const text = `Registered inbox ${inboxId} → agent ${agent.name} (${requestInfo.agentId})`;
           return toolOk(text, {
             data: { yourAgentId: requestInfo.agentId, mappings: [mapping] },

@@ -6,7 +6,7 @@ import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-
 import { updateOnboardingAiFromCodexDevice } from "../be/onboarding";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json";
 import {
-  CODEX_DEVICE_VERIFICATION_URL,
+  codexDeviceVerificationUrl,
   DeviceCodeNotEnabledError,
   exchangeDeviceAuthorizationCode,
   pollDeviceToken,
@@ -306,7 +306,7 @@ export async function handleCodexOAuthDevice(
       startDeviceFlow.respond(res, 200, {
         flowId,
         userCode: device.userCode,
-        verificationUrl: CODEX_DEVICE_VERIFICATION_URL,
+        verificationUrl: codexDeviceVerificationUrl(),
         intervalSeconds: device.intervalSeconds,
         expiresAt: new Date(expiresAt).toISOString(),
       });

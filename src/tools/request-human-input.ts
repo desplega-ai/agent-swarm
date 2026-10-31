@@ -20,7 +20,7 @@ const QuestionSchema = z.object({
     .describe(
       "The question text displayed to the user (required except for config, which defaults to the key)",
     ),
-  required: z.boolean().optional().describe("Whether this question is required (default: true)"),
+  required: z.boolean().default(true).describe("Whether this question is required (default: true)"),
   description: z
     .string()
     .optional()

@@ -106,6 +106,10 @@ const createMcpServerRoute = route({
   responses: {
     201: { description: "MCP server created", schema: z.object({ server: McpServerSchema }) },
     400: { description: "Validation error" },
+    409: {
+      description:
+        "A server with this name already exists in the same scope and owner (mcp_server_name_taken)",
+    },
   },
   rbac: { permission: "mcp-server.create.swarm" },
 });
@@ -518,6 +522,10 @@ export async function handleMcpServers(
       await emitMcpServerConnectedTelemetry();
       createMcpServerRoute.respond(res, 201, { server });
     } catch (err) {
+      if (err instanceof Error && err.message.includes("UNIQUE constraint")) {
+        jsonError(res, "mcp_server_name_taken", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Create failed", 400);
     }
     return true;
