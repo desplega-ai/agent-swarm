@@ -59,7 +59,15 @@ export type E2eResult = {
   scenarios: ScenarioResult[];
   harness: HarnessResult[];
   coverage: Coverage;
-  gates: { minRouteCoverage: number; minToolCoverage: number; passed: boolean };
+  gates: {
+    minRouteCoverage: number;
+    minToolCoverage: number;
+    /** `--strict`: every exposed route, tool and node type is covered or excluded. */
+    strict: boolean;
+    /** Reasons the strict contract failed. Empty when it held or strict was off. */
+    failures: string[];
+    passed: boolean;
+  };
   ok: boolean;
 };
 
@@ -76,6 +84,7 @@ export type Options = {
   keep: boolean;
   minRouteCoverage: number;
   minToolCoverage: number;
+  strict: boolean;
   sutEnv: Record<string, string>;
   visualsDir?: string;
 };
@@ -98,6 +107,9 @@ Options:
   --keep                        Keep the database, logs, and temporary directories
   --min-route-coverage N        Minimum route coverage percent (default: 0)
   --min-tool-coverage N         Minimum MCP tool coverage percent (default: 0)
+  --strict                      Fail unless every route operation, MCP tool and workflow
+                                node type is covered or excluded in coverage-manifest.json,
+                                no exclusion is stale or dead, and every pinned flow passed
   --help                        Show this help`;
 
 function optionValue(args: string[], index: number, flag: string): string {
@@ -150,6 +162,7 @@ export function parseOptions(
     keep: false,
     minRouteCoverage: 0,
     minToolCoverage: 0,
+    strict: false,
     sutEnv: {},
   };
   for (let index = 0; index < args.length; index++) {
@@ -168,6 +181,7 @@ export function parseOptions(
     } else if (arg === "--visuals") options.visualsDir = value();
     else if (arg === "--min-route-coverage") options.minRouteCoverage = coverageValue(value(), arg);
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
+    else if (arg === "--strict") options.strict = true;
     else if (arg === "--list") options.list = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--keep") options.keep = true;
@@ -300,26 +314,66 @@ export function markdownSummary(result: E2eResult): string {
       ...harnessFailureDetails(result.harness),
     );
   }
+  const surfaceLine = (label: string, surface: Coverage["routes"] | Coverage["mcpTools"]) =>
+    `${label}: ${surface.covered}/${surface.total} (${surface.percent.toFixed(1)}%)` +
+    (surface.excluded > 0 ? `, ${surface.excluded} excluded` : "");
   lines.push(
     "",
     "### Coverage",
     "",
-    `routes: ${result.coverage.routes.covered}/${result.coverage.routes.total} (${result.coverage.routes.percent.toFixed(1)}%)`,
+    surfaceLine("routes", result.coverage.routes),
     "",
-    `mcp tools: ${result.coverage.mcpTools.covered}/${result.coverage.mcpTools.total} (${result.coverage.mcpTools.percent.toFixed(1)}%)`,
+    surfaceLine("mcp tools", result.coverage.mcpTools),
     "",
-    `coverage gates: ${result.gates.passed ? "PASS" : "FAIL"} (routes >= ${result.gates.minRouteCoverage}%, MCP tools >= ${result.gates.minToolCoverage}%)`,
+    surfaceLine("workflow node types", result.coverage.nodeTypes),
     "",
-    "| Group | Covered | Total |",
-    "| --- | ---: | ---: |",
+    `coverage gates: ${result.gates.passed ? "PASS" : "FAIL"} (routes >= ${result.gates.minRouteCoverage}%, MCP tools >= ${result.gates.minToolCoverage}%${result.gates.strict ? ", strict" : ""})`,
+    "",
+  );
+  if (result.gates.failures.length > 0) {
+    lines.push("```text", ...result.gates.failures, "```", "");
+  }
+  if (result.coverage.flows.length > 0) {
+    lines.push(
+      "| Flow | Status | Scenarios | Detail |",
+      "| --- | --- | --- | --- |",
+      ...result.coverage.flows.map(
+        (flow) =>
+          `| ${flow.name} | ${flow.status.toUpperCase()} | ${markdownCell(flow.scenarios.join(", "))} | ${markdownCell(flow.detail ?? "")} |`,
+      ),
+      "",
+    );
+  }
+  lines.push(
+    "| Group | Covered | Total | p50 ms | p95 ms | max ms | calls |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...Object.entries(result.coverage.routes.byGroup)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([group, counts]) => `| ${group} | ${counts.covered} | ${counts.total} |`),
+      .map(([group, counts]) => {
+        const latency = result.coverage.latency.byGroup[group];
+        return `| ${group} | ${counts.covered} | ${counts.total} | ${latency?.p50 ?? ""} | ${latency?.p95 ?? ""} | ${latency?.max ?? ""} | ${latency?.count ?? 0} |`;
+      }),
+    "",
+    `overall latency: p50 ${result.coverage.latency.overall.p50} ms, p95 ${result.coverage.latency.overall.p95} ms, max ${result.coverage.latency.overall.max} ms over ${result.coverage.latency.overall.count} calls`,
     "",
     "<details>",
     "<summary>Uncovered routes</summary>",
     "",
     ...result.coverage.routes.uncovered.map((route) => `- ${route}`),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>Uncovered MCP tools</summary>",
+    "",
+    ...result.coverage.mcpTools.uncovered.map((tool) => `- ${tool}`),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>Uncovered workflow node types</summary>",
+    "",
+    ...result.coverage.nodeTypes.uncovered.map((type) => `- ${type}`),
     "",
     "</details>",
     "",

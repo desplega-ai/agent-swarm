@@ -3,6 +3,35 @@ import { createServer } from "node:net";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
+/**
+ * Every capability the API knows. Mirrors ALL_CAPABILITIES in src/server.ts (the
+ * black-box runner cannot import it). An unknown name is harmless: it never matches,
+ * and the register response filters it out.
+ */
+export const ALL_CAPABILITIES = [
+  "core",
+  "task-pool",
+  "scripts",
+  "config",
+  "prompt-templates",
+  "mcp",
+  "profiles",
+  "scheduling",
+  "memory",
+  "workflows",
+  "pages",
+  "metrics",
+  "kv",
+  "slack",
+  "tracker",
+  "skills",
+  "messaging",
+  "repo",
+  "agentmail",
+  "kapso",
+  "swarm-x",
+] as const;
+
 export type Sut = {
   port: number;
   baseUrl: string;
@@ -148,6 +177,9 @@ export async function startSut(
     SLACK_THREAD_STEERING: "off",
     // Background boot triage at T+90s must not steal a scenario's next poll.
     HEARTBEAT_CHECKLIST_DISABLE: "true",
+    // Every tool group registers, so the MCP coverage denominator is the whole surface.
+    // The chat-sdk group follows CHAT_SDK_ENABLED, not this list.
+    CAPABILITIES: ALL_CAPABILITIES.join(","),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,

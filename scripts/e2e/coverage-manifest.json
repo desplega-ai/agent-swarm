@@ -1,0 +1,7 @@
+{
+  "$comment": "Deliberate coverage exclusions for `bun run e2e --strict`. Every entry needs a reason a reviewer can check. A stale entry (the item is covered anyway) or a dead entry (the server no longer exposes it) fails the strict run. `flows` pins scenario names that must exist and pass.",
+  "routes": [],
+  "mcpTools": [],
+  "nodeTypes": [],
+  "flows": {}
+}
