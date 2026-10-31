@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -5027,13 +5028,22 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
       thinkingTokens,
       input.durationMs,
       input.numTurns,
-      input.model,
+      // Cost rows group by the underlying model, while task configuration and
+      // session logs retain the pi route used to select credentials.
+      chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
       input.isError ? 1 : 0,
       costSource,
       input.harnessCostUsd ?? null,
       input.cacheWrite5mTokens ?? null,
       input.cacheWrite1hTokens ?? null,
-      input.modelBreakdown ? JSON.stringify(input.modelBreakdown) : null,
+      input.modelBreakdown
+        ? JSON.stringify(
+            input.modelBreakdown.map((entry) => ({
+              ...entry,
+              model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
+            })),
+          )
+        : null,
     ],
   );
 

@@ -96,6 +96,7 @@ export function createSwarmEventHandler(
 ): (event: ProviderEvent) => void {
   const lastCall: Record<string, number> = {};
   let sessionId: string | undefined;
+  let latestContextWindow: number | undefined;
 
   const shouldRun = (key: string, throttleMs: number): boolean => {
     const now = Date.now();
@@ -229,6 +230,7 @@ export function createSwarmEventHandler(
         body: JSON.stringify({
           eventType: "completion",
           sessionId: sessionId ?? `${opts.sessionIdFallbackPrefix ?? "session"}-${opts.taskId}`,
+          contextTotalTokens: latestContextWindow,
         }),
       });
     }
@@ -251,6 +253,13 @@ export function createSwarmEventHandler(
           break;
         }
         case "context_usage": {
+          if (
+            event.contextTotalTokens != null &&
+            Number.isFinite(event.contextTotalTokens) &&
+            event.contextTotalTokens > 0
+          ) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           progressContextUsage({
             contextUsedTokens: event.contextUsedTokens,
             contextTotalTokens: event.contextTotalTokens,
@@ -260,6 +269,9 @@ export function createSwarmEventHandler(
           break;
         }
         case "compaction": {
+          if (Number.isFinite(event.contextTotalTokens) && event.contextTotalTokens > 0) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           progressCompaction({
             contextTotalTokens: event.contextTotalTokens,
             preCompactTokens: event.preCompactTokens,

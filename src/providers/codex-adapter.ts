@@ -978,7 +978,7 @@ export class CodexSession implements ProviderSession {
   private readonly thread: CodexThread;
   private readonly config: ProviderSessionConfig;
   private readonly resolvedModel: string;
-  private readonly contextWindow: number;
+  private contextWindow: number;
   private readonly skillsDir: string;
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
@@ -1459,7 +1459,14 @@ export class CodexSession implements ProviderSession {
         this.accountUsage(event.usage);
         break;
       case "context.updated":
-        this.emitContextUsage(event.usage, event.contextWindow ?? this.contextWindow);
+        if (
+          event.contextWindow != null &&
+          Number.isFinite(event.contextWindow) &&
+          event.contextWindow > 0
+        ) {
+          this.contextWindow = event.contextWindow;
+        }
+        this.emitContextUsage(event.usage, this.contextWindow);
         // Codex input tokens already include the cached read and write subsets.
         void this.observeContextBound(event.usage.input_tokens);
         break;

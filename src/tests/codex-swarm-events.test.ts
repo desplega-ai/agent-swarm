@@ -220,6 +220,16 @@ describe("createCodexSwarmEventHandler", () => {
       const { calls } = installFetchStub(() => new Response("{}", { status: 200 }));
       const handler = createCodexSwarmEventHandler(buildOpts());
       handler({ type: "session_init", sessionId: "thread-abc" });
+      // The second live update is throttled, but its window must reach completion.
+      for (const contextTotalTokens of [258_400, 272_000]) {
+        handler({
+          type: "context_usage",
+          contextUsedTokens: 1000,
+          contextTotalTokens,
+          contextPercent: 1,
+          outputTokens: 50,
+        });
+      }
       handler({
         type: "result",
         cost: {
@@ -239,11 +249,16 @@ describe("createCodexSwarmEventHandler", () => {
         isError: false,
       });
       await new Promise((resolve) => setTimeout(resolve, 10));
-      const ctxCall = calls.find((c) => c.url.includes("/api/tasks/task-1/context"));
+      const ctxCall = calls.find(
+        (c) =>
+          c.url.includes("/api/tasks/task-1/context") &&
+          JSON.parse(String(c.init?.body)).eventType === "completion",
+      );
       expect(ctxCall).toBeDefined();
       const body = JSON.parse((ctxCall?.init?.body as string) ?? "{}");
       expect(body.eventType).toBe("completion");
       expect(body.sessionId).toBe("thread-abc");
+      expect(body.contextTotalTokens).toBe(272_000);
     });
   });
 

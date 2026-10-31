@@ -90,6 +90,8 @@ interface CostResponse {
   cost: {
     totalCostUsd: number;
     model: string;
+    reasoningOutputTokens: number;
+    modelBreakdown?: Array<{ model: string }>;
     costSource: "harness" | "pricing-table" | "unpriced";
   };
 }
@@ -155,6 +157,63 @@ describe("normalizeModelKey()", () => {
 });
 
 describe("Phase 2 fix — POST /api/session-costs normalizes routing prefixes", () => {
+  test("pi subscription and Codex persist one rollup key without changing pricing", async () => {
+    for (const provider of ["pi", "codex"] as const) {
+      for (const [tokenClass, pricePerMillionUsd] of [
+        ["input", 2],
+        ["output", 8],
+      ] as const) {
+        await insertPricingRow({
+          provider,
+          model: "gpt-5.6-luna",
+          tokenClass,
+          pricePerMillionUsd,
+          effectiveFrom: 1,
+        });
+      }
+      const model = provider === "pi" ? "openai-codex/gpt-5.6-luna" : "gpt-5.6-luna";
+      const res = await authedFetch("/api/session-costs", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: `${provider}-subscription-rollup`,
+          agentId: testAgent.id,
+          totalCostUsd: 9.99,
+          inputTokens: 500_000,
+          outputTokens: 250_000,
+          reasoningOutputTokens: 120,
+          model,
+          provider,
+          models: [
+            {
+              model,
+              inputTokens: 500_000,
+              outputTokens: 250_000,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+          durationMs: 1_000,
+          numTurns: 1,
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as CostResponse;
+      expect(body.cost).toMatchObject({
+        model: "gpt-5.6-luna",
+        costSource: "pricing-table",
+        reasoningOutputTokens: 120,
+      });
+      expect(body.cost.totalCostUsd).toBeCloseTo(3, 5);
+      expect(body.cost.modelBreakdown?.map((entry) => entry.model)).toEqual(["gpt-5.6-luna"]);
+    }
+    // The built-in usage widgets group the persisted column directly.
+    expect(
+      await getDbClient().query(
+        "SELECT model, COUNT(*) AS sessions, SUM(totalCostUsd) AS cost FROM session_costs GROUP BY model",
+      ),
+    ).toEqual([{ model: "gpt-5.6-luna", sessions: 2, cost: 6 }]);
+  });
+
   test("opencode `openrouter/anthropic/claude-sonnet-4.5` resolves the seeded `anthropic/claude-sonnet-4.5` row", async () => {
     // Seed mirrors what models.dev → seed-pricing.ts produces for the
     // openrouter section: bare `anthropic/<id>` under the `opencode` provider.

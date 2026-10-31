@@ -369,6 +369,13 @@ Every adapter emits one `CostData` row per CLI invocation and one or more `conte
 
 Full story: [Cost & context computation](./cost-and-context-computation).
 
+Pi's ChatGPT subscription route (`openai-codex/<id>`) keeps its prefix in
+task configuration, latest-model reports, and logs; persisted cost rows use
+the bare OpenAI id, matching Codex for per-model reporting. Pi also records
+the reasoning-token subset from assistant usage events. For both harnesses,
+completion context snapshots retain the last live window, including updates
+whose progress posts were throttled, before falling back to the catalog.
+
 All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 
 ```ts

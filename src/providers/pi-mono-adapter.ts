@@ -1077,6 +1077,8 @@ export class PiMonoSession implements ProviderSession {
    * surface it directly.
    */
   private prevOutputTokens = 0;
+  /** Pi SessionStats omits reasoning; assistant events report it as an output subset. */
+  private reasoningOutputTokens = 0;
   /**
    * Terminal error message captured from structured pi-coding-agent events.
    *
@@ -1206,8 +1208,13 @@ export class PiMonoSession implements ProviderSession {
           role?: string;
           stopReason?: string;
           errorMessage?: string;
+          usage?: { reasoning?: number };
         };
         if (endMsg.role === "assistant") {
+          const reasoning = endMsg.usage?.reasoning;
+          if (typeof reasoning === "number" && Number.isFinite(reasoning) && reasoning >= 0) {
+            this.reasoningOutputTokens += reasoning;
+          }
           const turn = describeAssistantTurn(event.message);
           this.lastAssistantTurn = turn;
           // Ahead of the turn's text and tool lines: the chip rides on the
@@ -1601,6 +1608,7 @@ export class PiMonoSession implements ProviderSession {
       totalCostUsd: stats.cost || 0,
       inputTokens: stats.tokens.input,
       outputTokens: stats.tokens.output,
+      reasoningOutputTokens: this.reasoningOutputTokens,
       cacheReadTokens: stats.tokens.cacheRead,
       cacheWriteTokens: stats.tokens.cacheWrite,
       // Phase 7: real wallclock duration; pi-ai SessionStats doesn't carry
