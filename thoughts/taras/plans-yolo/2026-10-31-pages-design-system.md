@@ -17,7 +17,7 @@ HTML pages served at `/p/:id` get one opinionated default look (Hive, the dashbo
 - Direct links (outside the dashboard) render light. Inside the dashboard, the page follows the dashboard mode. (asked)
 - Token names = the dashboard contract (`--color-*`, `--radius-*`, `--font-*`). `--swarm-*` stay as aliases. (asked earlier: Taras accepted the proposal and its risks)
 - Theme sources go through an importer registry, so a Figma/DTCG importer is one new entry. (asked: Taras wants Figma import to be easy later)
-- Migration ordinal 267 (main tail 266, open PRs use 248 and 265). (assumed)
+- Migration ordinal 269. Main ends at 266. Open PRs #2219 and #2458 use 267 and 268.
 - QA fixtures: the demo leads page copied as the baseline (as-is on v1, as-is on v2, and a v2 rewrite of the same content), a few existing prod pages copied read-only from the prod DB, and 4 pages a local Opus agent authors from the new skill. No prod swarm authoring. (asked)
 - Prod-page screenshots stay local. Only demo and locally authored pages go into the PR. (assumed: prod pages can hold internal data)
 - Parallel agents never run `bun test` at the same time (shared `./test-*.sqlite` fixtures). Only the sequential chain runs tests. (assumed: bun test gotcha)
@@ -36,7 +36,7 @@ HTML pages served at `/p/:id` get one opinionated default look (Hive, the dashbo
 - [x] Spec: pin module layout, function signatures, columns, query params, CSS layering
 - [x] QA fixtures: `/tmp/pds-qa/fixtures/demo-leads.html` + 5 prod pages in `/tmp/pds-qa/fixtures/prod/`
 - [x] Foundation: shared theme engine in `src/` (presets moved from `apps/ui`, re-exported), token contract, importer registry, page token CSS builder, `paper` preset
-- [x] Data: migration 267 (`theme`, `theme_tokens`, `design_version`), types, DB layer, REST, MCP tool, OpenAPI
+- [x] Data: migration 269 (`theme`, `theme_tokens`, `design_version`), types, DB layer, REST, MCP tool, OpenAPI
 - [x] Serving: v2 head (layered base + primitives + Tailwind v4 + aliases), version gate, `__swarm-theme` / `__swarm-mode` resolution
 - [x] Dashboard: iframe and Open link pass preset + mode (`key={src}` avoids history entries)
 - [x] Agent guidance: pages skill design section + example rewrite, hardcoded-color nudge, docs
@@ -51,11 +51,15 @@ HTML pages served at `/p/:id` get one opinionated default look (Hive, the dashbo
 - [x] E2E: `bun run e2e` 28/28 pass. `bun run e2e:ui -- --grep pages` first failed 4 (console 401s on `/p/tailwindcss/theme` and `/utilities`): the browser preload scanner fetches `@import` inside any `<style>` in the markup, even `type="text/tailwindcss"`. Fix: a script creates the `text/tailwindcss` element (`TAILWIND_SOURCE_SCRIPT` in page-head.ts), test guards no `@import` in markup styles. Re-run 6/6 pass.
 - [x] Full `bun run e2e:ui`: 103 passed, 28 skipped, 0 failed.
 - [x] QA render: 58 shots + recording in `/tmp/pds-qa/shots/` (gallery `/tmp/pds-qa/gallery.html`, report `qa-render-report.md`). v1 baseline pixel-identical. Dashboard passes theme/mode correctly (iframe src table in the report), history stays flat.
-- [ ] QA fixes: workflow `wf_248c1d7a-661` (Agent Q: hardcoded-color pages stay light, no html bg band, table scroll shadows, tfoot, print tables, in-page anchors, code chips, jump labels, skill lines)
+- [x] QA fixes: workflow `wf_248c1d7a-661` (Agent Q: hardcoded-color pages stay light, no html bg band, table scroll shadows, tfoot, print tables, in-page anchors, code chips, jump labels, skill lines)
 - Deferred (follow-ups for Taras): solarized/tokyo muted-text contrast in the shared presets (dashboard too), Hive chart-1 hue differs by mode, importer does not check brand contrast, search-cancel glyph color.
-- Note: origin/main moved past the merge base b19645965. Rebase before the PR and regenerate openapi/MCP.md if they conflict.
-- [ ] QA render: boot API (`AGENT_SWARM_API_KEY=123123 DATABASE_PATH=/tmp/pds-qa/db.sqlite`), `bun /tmp/pds-qa/seed.ts`, screenshot matrix (v1 vs v2, hive light/dark, paper, github, brand tokens), dashboard viewer check + recording (SPA `?apiUrl=&apiKey=`)
-- [ ] Commit (then offer PR; frontend PR needs Before / after media)
+- [x] Rebase onto main at `3d6d8a750`. All 23 gates passed. Generated files have no drift.
+- [x] Final pages browser tests: 6 passed after rebase.
+- [x] Final full suite: 19135 passed, 36 skipped, 4 failed. Main also fails the QuickJS binary-body test. The other three pass in isolation on main.
+- [x] QA render: API seed, screenshot matrix, dashboard viewer check, and recording completed.
+- [x] Commit implementation at `d5d8f5883`.
+- [x] Upload five public-safe images and the recording. All five image links return HTTP 200.
+- [ ] Publish PR and request approval from desplega-bot on the final commit.
 
 ## Verification
 
