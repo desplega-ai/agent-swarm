@@ -59,7 +59,11 @@ HTML pages served at `/p/:id` get one opinionated default look (Hive, the dashbo
 - [x] QA render: API seed, screenshot matrix, dashboard viewer check, and recording completed.
 - [x] Commit implementation at `d5d8f5883`.
 - [x] Upload five public-safe images and the recording. All five image links return HTTP 200.
-- [ ] Publish PR and request approval from desplega-bot on the final commit.
+- [x] Publish PR #2607 and request approval from desplega-bot.
+- [x] Review B1: reject external CSS image functions in token maps and CSS blocks. The regression fails before the fix.
+- [x] Review B2: compare the served v1 head against a fixture from main at `3d6d8a750`. A one-byte renderer mutation fails the test.
+- [x] Review verification: 96 importer and head tests pass.
+- [ ] Receive approval from desplega-bot on the final commit.
 
 ## Verification
 

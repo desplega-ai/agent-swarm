@@ -51,7 +51,8 @@
  *   go to `ignored`. They never throw.
  * - A value must be 1 to 200 characters (a trailing `!important` is dropped
  *   first), without `; { } < > \`, control characters (newlines included),
- *   `url(`, `expression(`, `@import`, `javascript:` or comment markers, and
+ *   resource functions (`url`, `src`, `image`, `image-set`), `expression(`,
+ *   `@import`, `javascript:` or comment markers, and
  *   with balanced quotes and parentheses, so it cannot break out of its
  *   declaration. A bad value throws. The length check runs before any regex,
  *   so a huge value costs one pass.
@@ -96,7 +97,7 @@ const IMPORTANT_ROOM = 16;
 /** Linear time: the only quantifier comes after the literal `!`. */
 const IMPORTANT_SUFFIX = /!\s*important$/i;
 const UNSAFE_CHARACTERS = ";{}<>\\";
-const UNSAFE_PATTERN = /url\(|expression\(|@import|javascript:|\/\*|\*\//i;
+const UNSAFE_PATTERN = /(?:url|src|image(?:-set)?|expression)\(|@import|javascript:|\/\*|\*\//i;
 const HSL_TRIPLET = /^-?[\d.]+(?:deg)?\s+-?[\d.]+%\s+-?[\d.]+%(?:\s*\/\s*[\d.]+%?)?$/;
 const VAR_REFERENCE = /var\(\s*--([\w-]+)/gi;
 const CONTRACT_TOKENS: ReadonlySet<string> = new Set<string>(PAGE_THEME_TOKENS);

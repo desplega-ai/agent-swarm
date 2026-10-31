@@ -623,6 +623,24 @@ body { --primary: red; content: "} { ;"; }
 });
 
 describe("importThemeTokens: unsafe values", () => {
+  test("rejects external image functions in token maps and CSS blocks", () => {
+    for (const value of [
+      'image-set("https://example.com/track.png" 1x)',
+      'IMAGE-SET("https://example.com/track.png" 1x)',
+      '-webkit-image-set("https://example.com/track.png" 1x)',
+      'image("https://example.com/track.png")',
+      'src("https://example.com/track.png")',
+      'cross-fade(image-set("https://example.com/track.png" 1x), red, 50%)',
+    ]) {
+      for (const input of [
+        { light: { "--color-surface": value } },
+        { format: "css" as const, css: `:root { --color-surface: ${value}; }` },
+      ]) {
+        expect(importError(input).message).toContain("value must not contain");
+      }
+    }
+  });
+
   const unsafe = [
     "red; color: blue",
     "red{",
