@@ -10,13 +10,17 @@
  * a finished turn folds behind a "Worked for 4m 12s" line that keeps only the
  * agent's last message in view.
  *
- * A task this one delegated is a row of its own at the time it was created:
- * a child-task card that links to the child's own transcript.
+ * A task this one started is a row of its own at the time it was created,
+ * linking to the child's own transcript: a delegation, a person's follow-up,
+ * a deferral's wake-up, a resume, or the result sent to the lead
+ * (`childKind`). A task started after the run ended comes after its outcome
+ * (`rowsAfterEnd`).
  */
 
 import type { AgentLog, AgentTask, SteeringMessage } from "@/api/types";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { classifyTool } from "@/components/shared/session-log-viewer";
+import { isAutoReview } from "@/lib/auto-review";
 import { formatDuration, parseUTCDate } from "@/lib/utils";
 import type { ParsedMessage, ToolResultBlock } from "@/logs-parser";
 
@@ -32,6 +36,12 @@ export type WorkEntry =
       detail: string;
       /** `running` while the call has no result yet. */
       status: "running" | "done" | "error";
+      /** The call's raw input: the details panel formats it only when it opens. */
+      input: unknown;
+      /** The result's text, once the result arrives. */
+      output?: string;
+      /** From the call to its result, from the two log timestamps. */
+      durationMs?: number;
     }
   | { kind: "thinking"; id: string; at: string; text: string }
   | { kind: "event"; id: string; at: string; text: string };
@@ -39,7 +49,7 @@ export type WorkEntry =
 export type TranscriptRow =
   | { kind: "assistant"; id: string; at: string; text: string }
   | { kind: "steer"; id: string; at: string; message: SteeringMessage }
-  | { kind: "delegation"; id: string; at: string; task: AgentTask; agentName: string | null }
+  | { kind: "child"; id: string; at: string; task: AgentTask; agentName: string | null }
   | { kind: "work"; id: string; at: string; entries: WorkEntry[] };
 
 /** `t` is the sort time in ms: when the item entered the run. */
@@ -88,6 +98,20 @@ function timeOf(at: string | undefined): number {
 }
 
 /**
+ * The newest time among rows and the steps of their work rows, in ms (0 when
+ * there are none). The transcript compares new data with it, never with the
+ * browser's clock, which can be off from the server's.
+ */
+export function newestTime(items: (TranscriptRow | WorkEntry)[]): number {
+  let newest = 0;
+  for (const item of items) {
+    newest = Math.max(newest, timeOf(item.at));
+    if (item.kind === "work") newest = Math.max(newest, newestTime(item.entries));
+  }
+  return newest;
+}
+
+/**
  * Where a steering message sits in the run: a delivered one when the agent
  * got it, not when it was sent (a queued message waits for a turn boundary),
  * and a pending one after everything, since the agent has not seen it yet.
@@ -104,10 +128,12 @@ function steerTime(message: SteeringMessage): number {
  * settles its call's status.
  */
 function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
-  const results = new Map<string, ToolResultBlock>();
+  const results = new Map<string, { block: ToolResultBlock; t: number }>();
   for (const m of parsed) {
     for (const block of m.content) {
-      if (block.type === "tool_result") results.set(block.tool_use_id, block);
+      if (block.type === "tool_result") {
+        results.set(block.tool_use_id, { block, t: timeOf(m.timestamp) });
+      }
     }
   }
   const out: Item[] = [];
@@ -130,7 +156,10 @@ function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
             name: tool.name,
             title: tool.title,
             detail: tool.detail.trim(),
-            status: !result ? "running" : result.isError ? "error" : "done",
+            status: !result ? "running" : result.block.isError ? "error" : "done",
+            input: block.input,
+            output: result?.block.content,
+            durationMs: result && t > 0 && result.t >= t ? result.t - t : undefined,
           },
         });
       } else if (block.type === "thinking" && block.thinking.trim()) {
@@ -154,7 +183,7 @@ export interface TranscriptSources {
   /** The task's activity events (`task.logs`). */
   logs?: AgentLog[];
   steering?: SteeringMessage[];
-  /** The tasks this one delegated (`directChildren`), each with its agent's name. */
+  /** The tasks this one started (`directChildren`), each with its agent's name. */
   children?: { task: AgentTask; agentName: string | null }[];
   /** Keep the agent's prose as rows. Off: work and steering only (an inline activity feed). */
   withMessages?: boolean;
@@ -176,7 +205,7 @@ export function buildTranscriptRows({
   for (const { task, agentName } of children) {
     items.push({
       t: timeOf(task.createdAt),
-      row: { kind: "delegation", id: `child-${task.id}`, at: task.createdAt, task, agentName },
+      row: { kind: "child", id: `child-${task.id}`, at: task.createdAt, task, agentName },
     });
   }
   for (const log of logs) {
@@ -227,7 +256,7 @@ function sameText(a: string, b: string): boolean {
 /**
  * The rows a finished turn shows. Closed, the fold keeps only the agent's last
  * message in view (unless it says the same as `outcomeText`, the task's
- * outcome shown under the run), the delegated tasks (each its own
+ * outcome shown under the run), the tasks it started (each its own
  * transcript), and any steering message still waiting for the agent. Open,
  * every row shows in run order: work after the last message stays after it.
  */
@@ -248,9 +277,45 @@ export function foldedTurnRows(
   return rows.filter(
     (row, i) =>
       i === lastAssistant ||
-      row.kind === "delegation" ||
+      row.kind === "child" ||
       (row.kind === "steer" && row.message.status === "pending"),
   );
+}
+
+/**
+ * What a task this one started is. The server makes three kinds itself:
+ * `resume` (the same work in a new session, after a shutdown or a crash),
+ * `deferred` (the wake-up of a deferral, created when it fires) and the
+ * system `follow-up` that sends a finished task's result to the lead
+ * (`notify`). A task a person sent from the dashboard, Slack or a chat is
+ * their follow-up message (`person`). Anything else an agent delegated.
+ */
+export type ChildKind = "delegation" | "person" | "deferred" | "resume" | "notify";
+
+export function childKind(task: Pick<AgentTask, "taskType" | "source">): ChildKind {
+  if (task.taskType === "resume") return "resume";
+  if (task.taskType === "deferred") return "deferred";
+  if (isAutoReview(task)) return "notify";
+  if (task.source === "ui" || task.source === "slack" || task.source === "chat") return "person";
+  return "delegation";
+}
+
+/**
+ * Splits off the tasks started after the run ended (`endedAt`): a person's
+ * follow-up, a wake-up, a resume. They come after the run's outcome, in time
+ * order. Every other row stays in the run.
+ */
+export function rowsAfterEnd(
+  rows: TranscriptRow[],
+  endedAt: string | undefined,
+): { during: TranscriptRow[]; after: TranscriptRow[] } {
+  const end = endedAt ? timeOf(endedAt) : 0;
+  if (!end) return { during: rows, after: [] };
+  const during: TranscriptRow[] = [];
+  const after: TranscriptRow[] = [];
+  for (const row of rows)
+    (row.kind === "child" && timeOf(row.at) >= end ? after : during).push(row);
+  return { during, after };
 }
 
 /** A long transcript shows its newest rows first, this many per page. */

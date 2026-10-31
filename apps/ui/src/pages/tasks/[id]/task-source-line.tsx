@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { formatSlackMentions, parseSlackPrompt, type SlackPrompt } from "@/lib/slack-text";
 import { cn } from "@/lib/utils";
@@ -117,20 +118,33 @@ function describeSource(
         </span>
       ) : null;
       if (task.vcsUrl && task.vcsNumber) {
+        // "agent-swarm#2593" (a GitLab MR: "agent-swarm!12"), the way people
+        // write a reference. The tooltip names the kind and the full repo.
+        const ref = `${kind === "MR" ? "!" : "#"}${task.vcsNumber}`;
+        const repoName = task.vcsRepo?.split("/").pop();
         return {
           lead: (
-            <a
-              href={task.vcsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn("font-medium", TARGET_LINK_CLASS)}
-            >
-              {kind ? `${kind} ` : ""}#{task.vcsNumber}
-            </a>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={task.vcsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn("font-medium", TARGET_LINK_CLASS)}
+                >
+                  {repoName ? `${repoName}${ref}` : `${kind ? `${kind} ` : ""}${ref}`}
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="start">
+                {kind ? `${kind} ` : ""}
+                {ref}
+                {task.vcsRepo ? ` in ${task.vcsRepo}` : ""}
+              </TooltipContent>
+            </Tooltip>
           ),
           named: false,
           shrinks: false,
-          extras: repo ? [{ key: "repo", node: repo }] : [],
+          extras: [],
         };
       }
       if (task.vcsUrl && task.vcsRepo) {

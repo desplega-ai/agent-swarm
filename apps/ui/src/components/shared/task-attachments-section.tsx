@@ -1,30 +1,43 @@
 import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Copy,
   Download,
   Expand,
   ExternalLink,
+  Eye,
+  EyeOff,
   File,
   FileText,
+  Film,
+  Github,
   Image as ImageIcon,
+  Link2,
+  PanelsTopLeft,
   Paperclip,
   Star,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
-import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
+import type { TaskAttachment } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
 import {
   type AgentFsLinkContext,
   AttachmentName,
   agentFsAttachmentLinks,
 } from "@/components/shared/task-attachment-link";
-import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -63,48 +76,6 @@ function resolveLinks(
     case "shared-fs":
       return { href: null, combTo: null };
   }
-}
-
-function KindBadge({ kind }: { kind: TaskAttachmentKind }) {
-  return (
-    <Badge variant="outline" size="tag" className="text-muted-foreground">
-      {kind}
-    </Badge>
-  );
-}
-
-function ProviderBadge({ providerId }: { providerId?: string }) {
-  if (!providerId) return null;
-  return (
-    <Badge variant="secondary" size="tag" className="text-muted-foreground">
-      {providerId}
-    </Badge>
-  );
-}
-
-function CopyPathButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      aria-label={copied ? "Copied" : "Copy path"}
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-      className={cn(
-        "inline-flex h-5 w-5 items-center justify-center rounded-md",
-        "border border-border bg-popover/60 text-muted-foreground",
-        "opacity-70 transition-opacity hover:opacity-100 hover:text-foreground",
-        copied && "opacity-100 text-status-success-strong",
-      )}
-    >
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-    </button>
-  );
 }
 
 type PreviewKind = "image" | "video" | "pdf" | "text";
@@ -194,6 +165,115 @@ function PreviewIcon({ kind }: { kind: PreviewKind | null }) {
   return <File className="h-4 w-4 text-muted-foreground" />;
 }
 
+/** A list row's icon: the link's provider, a page, or the file's type. */
+function KindIcon({
+  attachment,
+  previewKind,
+}: {
+  attachment: TaskAttachment;
+  previewKind: PreviewKind | null;
+}) {
+  const className = "size-4";
+  if (attachment.kind === "url") {
+    return attachment.providerId === "github" ? (
+      <Github className={className} />
+    ) : (
+      <Link2 className={className} />
+    );
+  }
+  if (attachment.kind === "page") return <PanelsTopLeft className={className} />;
+  if (previewKind === "image") return <ImageIcon className={className} />;
+  if (previewKind === "video") return <Film className={className} />;
+  if (previewKind === "text" || previewKind === "pdf") return <FileText className={className} />;
+  return <File className={className} />;
+}
+
+/** "task-deliverable" reads "Task deliverable". A sentence stays as it is. */
+const SLUG_RE = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+
+function humanizeSlug(slug: string): string {
+  const words = slug.replace(/[-_]/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A GitHub or GitLab PR, MR or issue link, read from its URL: a short label
+ * ("PR #2593") and the repo. Null for any other link.
+ */
+function vcsRef(url: string | undefined): { label: string; repo: string } | null {
+  let path: string;
+  let host: string;
+  try {
+    ({ pathname: path, hostname: host } = new URL(url ?? ""));
+  } catch {
+    return null;
+  }
+  const gitlab = /^\/(.+?)\/-\/(merge_requests|issues)\/(\d+)/.exec(path);
+  if (gitlab) {
+    const label = gitlab[2] === "issues" ? `Issue #${gitlab[3]}` : `MR !${gitlab[3]}`;
+    return { label, repo: gitlab[1] };
+  }
+  // GitLab's `/-/` paths are its own on any host; the GitHub shape is not
+  // (Sentry has `/organizations/<org>/issues/<n>`), so it needs GitHub's host.
+  const github =
+    host === "github.com" ? /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/.exec(path) : null;
+  if (github) {
+    const label = github[2] === "pull" ? `PR #${github[3]}` : `Issue #${github[3]}`;
+    return { label, repo: github[1] };
+  }
+  return null;
+}
+
+/**
+ * A list row's one meta line: what the row is (a PR's repo, the link's
+ * host, "Page", or the file's type), its size, and a short intent ("Task
+ * deliverable"). A longer intent or description goes on its own line
+ * (`note`).
+ */
+function rowMeta(
+  attachment: TaskAttachment,
+  previewKind: PreviewKind | null,
+  ref: { repo: string } | null,
+): { meta: string; note: string | null } {
+  // A file named without an extension ("Research report") keeps it in its path.
+  const extension = getExtension(attachment.name) || getExtension(attachment.path ?? "");
+  const what =
+    attachment.kind === "url"
+      ? (ref?.repo ?? hostOf(attachment.url) ?? "Link")
+      : attachment.kind === "page"
+        ? "Page"
+        : extension
+          ? extension.toUpperCase()
+          : previewKind === "pdf"
+            ? "PDF"
+            : previewKind
+              ? previewKind.charAt(0).toUpperCase() + previewKind.slice(1)
+              : "File";
+  const descriptor = attachment.intent || attachment.description || null;
+  const shortIntent = descriptor && SLUG_RE.test(descriptor) ? humanizeSlug(descriptor) : null;
+  const meta = [
+    what,
+    attachment.sizeBytes != null ? formatBytes(attachment.sizeBytes) : null,
+    attachment.kind === "shared-fs" ? "shared-fs" : null,
+    shortIntent,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return { meta, note: shortIntent ? null : descriptor };
+}
+
+/** A list row's hover action: a 24 px ghost icon button. */
+const ROW_ACTION = "size-6 text-muted-foreground hover:text-foreground";
+
 function AttachmentRow({
   attachment,
   onDownload,
@@ -211,7 +291,6 @@ function AttachmentRow({
 }) {
   const agentFs = useOptionalAgentFs();
   const { href, combTo } = resolveLinks(attachment, agentFs);
-  const descriptor = attachment.intent || attachment.description;
   const previewKind = getPreviewKind(attachment);
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -219,14 +298,10 @@ function AttachmentRow({
   const previewStateRef = useRef<PreviewState["kind"]>("idle");
   const sourceKey = `${taskId}:${attachment.id}`;
   const previousSourceKeyRef = useRef(sourceKey);
-  // For agent-fs / shared-fs we show the raw path so users can at least copy
-  // it; for `page` and `url` the anchor itself communicates the target.
-  const pathDisplay =
-    attachment.kind === "shared-fs"
-      ? `shared-fs:${attachment.path ?? ""}`
-      : attachment.kind === "agent-fs"
-        ? `agent-fs:${attachment.path ?? ""}`
-        : null;
+  // Only drive files have bytes to download (the raw route 404s for `url`
+  // and `page`), and a path to copy. For `page` and `url` the name is the link.
+  const isFile = attachment.kind === "agent-fs" || attachment.kind === "shared-fs";
+  const pathDisplay = isFile ? `${attachment.kind}:${attachment.path ?? ""}` : null;
 
   useEffect(() => {
     if (previousSourceKeyRef.current === sourceKey) return;
@@ -517,135 +592,128 @@ function AttachmentRow({
     );
   }
 
+  // A PR or issue link reads "PR #2593"; the stored name is its tooltip.
+  const ref = attachment.kind === "url" ? vcsRef(attachment.url) : null;
+  const name = ref?.label ?? attachment.name;
+  const { meta, note } = rowMeta(attachment, previewKind, ref);
   return (
-    <div className="rounded-md border border-border/70 bg-background">
-      <div className="flex items-start gap-3 p-3">
-        <button
-          type="button"
-          onClick={toggleExpanded}
-          disabled={!previewKind}
-          className={cn(
-            "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40",
-            previewKind && "transition-colors hover:bg-muted",
-          )}
-          aria-label={
-            previewKind
-              ? `${expanded ? "Collapse" : "Expand"} ${attachment.name}`
-              : `${attachment.name} has no inline preview`
-          }
+    // One calm row: a kind icon, the name, one meta line. The actions show on
+    // hover or focus over the row's end. A touch screen shows them under the
+    // text, since it has no hover.
+    <div className="group/attachment hover-linger rounded-lg transition-colors hover:bg-muted focus-within:bg-muted">
+      <div className="relative flex items-start gap-2.5 px-2 py-1.5">
+        <span
+          aria-hidden
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground group-hover/attachment:bg-background group-focus-within/attachment:bg-background"
         >
-          <PreviewIcon kind={previewKind} />
-        </button>
-
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-center gap-2">
+          <KindIcon attachment={attachment} previewKind={previewKind} />
+        </span>
+        <div className="min-w-0 flex-1" title={pathDisplay ?? (ref ? attachment.name : undefined)}>
+          <div className="flex min-w-0 items-center gap-1.5">
             {attachment.isPrimary && (
               <Star
-                className="h-3 w-3 shrink-0 text-status-active-strong"
+                className="size-3 shrink-0 text-status-active-strong"
                 aria-label="Primary attachment"
               />
             )}
-            <AttachmentName href={href} to={combTo} name={attachment.name} />
+            <AttachmentName href={href} to={combTo} name={name} />
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <KindBadge kind={attachment.kind} />
-            <ProviderBadge providerId={attachment.providerId} />
-            {previewKind ? (
-              <Badge variant="secondary" size="tag" className="text-muted-foreground">
-                {previewKindLabel(previewKind)}
-              </Badge>
-            ) : (
-              <Badge variant="outline" size="tag" className="text-muted-foreground">
-                Download only
-              </Badge>
+          {meta ? <p className="truncate text-xs text-muted-foreground">{meta}</p> : null}
+          {note ? <p className="line-clamp-2 text-xs text-muted-foreground">{note}</p> : null}
+          <div
+            className={cn(
+              "pointer-events-none absolute top-1 right-1 flex items-center gap-0.5 rounded-md bg-muted p-0.5 opacity-0 transition-opacity duration-150 ease-snappy",
+              "group-hover/attachment:pointer-events-auto group-hover/attachment:opacity-100 group-focus-within/attachment:pointer-events-auto group-focus-within/attachment:opacity-100",
+              "pointer-coarse:pointer-events-auto pointer-coarse:static pointer-coarse:-ml-1 pointer-coarse:mt-0.5 pointer-coarse:w-fit pointer-coarse:bg-transparent pointer-coarse:opacity-100",
             )}
-          </div>
-          {descriptor && (
-            <p className="line-clamp-2 text-xs italic text-muted-foreground">{descriptor}</p>
-          )}
-          {pathDisplay && (
-            <div className="flex items-center gap-1.5">
-              {/* flex-1: a middle-truncated value needs a definite width to fit. */}
-              <code className="min-w-0 flex-1 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                <MiddleTruncation>{pathDisplay}</MiddleTruncation>
-              </code>
-              <CopyPathButton value={attachment.path ?? ""} />
-            </div>
-          )}
-          {(attachment.mimeType || attachment.sizeBytes != null) && (
-            <p className="font-mono text-[10px] text-muted-foreground/70">
-              {[
-                attachment.mimeType,
-                attachment.sizeBytes != null ? formatBytes(attachment.sizeBytes) : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          {previewKind ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={toggleExpanded}
-              aria-label={`${expanded ? "Collapse" : "Expand"} ${attachment.name}`}
-              title={expanded ? "Collapse" : "Expand"}
-            >
-              {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          ) : null}
-          {/* The name opens Comb, so the live link moves here as "Open in agent-fs". */}
-          {href && (combTo || !previewKind) ? (
-            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" asChild>
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={
-                  combTo ? `Open ${attachment.name} in agent-fs` : `Open ${attachment.name}`
-                }
-                title={combTo ? "Open in agent-fs" : "Open"}
+          >
+            {previewKind ? (
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className={ROW_ACTION}
+                onClick={toggleExpanded}
+                aria-expanded={expanded}
+                aria-label={`${expanded ? "Hide" : "Show"} ${name} preview`}
+                title={expanded ? "Hide preview" : "Show preview"}
               >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={() => onDownload(attachment)}
-            aria-label={`Download ${attachment.name}`}
-            title="Download"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-status-error-strong hover:text-status-error-strong"
-            onClick={() => onDelete?.(attachment)}
-            disabled={deleting}
-            aria-label={`Delete ${attachment.name}`}
-            title="Delete"
-          >
-            {deleting ? <Spinner className="size-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
-          </Button>
+                {expanded ? <EyeOff /> : <Eye />}
+              </Button>
+            ) : null}
+            {/* The name opens Comb, so the live link moves here as "Open in agent-fs". */}
+            {href && combTo ? (
+              <Button type="button" size="icon-xs" variant="ghost" className={ROW_ACTION} asChild>
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Open ${name} in agent-fs`}
+                  title="Open in agent-fs"
+                >
+                  <ExternalLink />
+                </a>
+              </Button>
+            ) : null}
+            {isFile && attachment.path ? (
+              <CopyValueButton
+                value={attachment.path}
+                label="Copy path"
+                size="icon-xs"
+                className={ROW_ACTION}
+                title="Copy path"
+              />
+            ) : null}
+            {isFile ? (
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className={ROW_ACTION}
+                onClick={() => onDownload(attachment)}
+                aria-label={`Download ${name}`}
+                title="Download"
+              >
+                <Download />
+              </Button>
+            ) : null}
+            {onDelete ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-6 text-muted-foreground hover:text-status-error-strong"
+                    disabled={deleting}
+                    aria-label={`Delete ${name}`}
+                    title="Delete"
+                  >
+                    {deleting ? <Spinner className="size-3" /> : <Trash2 />}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete attachment</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This removes {name} from the task. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={() => onDelete(attachment)}>
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
+          </div>
         </div>
       </div>
 
       {expanded && previewKind ? (
-        <div className="border-t border-border bg-muted/20 p-3">
+        <div className="px-2 pb-2">
           {preview.kind === "loading" ? (
             <div className="flex h-28 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background text-xs text-muted-foreground">
               <Spinner className="size-3.5" />
@@ -837,7 +905,7 @@ export function TaskAttachmentsSection({
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
-  /** `plain`: no card around the list (the task page's Files tab names it). */
+  /** `plain`: the rows only (the task page's details card names the list). */
   variant?: "card" | "plain";
   className?: string;
 }) {
@@ -869,9 +937,26 @@ export function TaskAttachmentsSection({
     remove.mutate(attachment.id);
   };
 
+  const list = (
+    <ul className={cn("space-y-0.5", variant === "plain" && className)}>
+      {rows.map((a) => (
+        <li key={a.id}>
+          <AttachmentRow
+            attachment={a}
+            onDownload={handleDownload}
+            onDelete={handleDelete}
+            deleting={remove.isPending && remove.variables === a.id}
+            taskId={taskId}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+  if (variant === "plain") return list;
+
   return (
     <CollapsibleSection
-      variant={variant}
+      variant="card"
       title={`Attachments (${rows.length})`}
       icon={Paperclip}
       iconColor="text-muted-foreground"
@@ -880,20 +965,7 @@ export function TaskAttachmentsSection({
       className={className}
       defaultOpen
     >
-      <div className="space-y-3">
-        <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
-          {rows.map((a) => (
-            <AttachmentRow
-              key={a.id}
-              attachment={a}
-              onDownload={handleDownload}
-              onDelete={handleDelete}
-              deleting={remove.isPending && remove.variables === a.id}
-              taskId={taskId}
-            />
-          ))}
-        </div>
-      </div>
+      <div className="-mx-2 max-h-[34rem] overflow-auto">{list}</div>
     </CollapsibleSection>
   );
 }

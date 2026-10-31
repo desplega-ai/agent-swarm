@@ -394,6 +394,7 @@ value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
 value:getScriptRunExecutionArgs
+value:getScriptRunFollowUpGuard
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -586,6 +587,7 @@ value:setApiKeyName
 value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
+value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
 value:setUserFavorite
 value:settleSupersededTaskDependents

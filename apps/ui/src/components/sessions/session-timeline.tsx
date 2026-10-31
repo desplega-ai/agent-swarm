@@ -25,6 +25,7 @@ import { useAgent } from "@/api/hooks/use-agents";
 import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { isAutoReview } from "@/lib/auto-review";
 import { CHAT_COLUMN } from "@/lib/chat-width";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
@@ -67,12 +68,9 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
                 : " was cancelled"}
           <span className="text-muted-foreground/70">
             {" · finished "}
-            <time
-              dateTime={parent.lastUpdatedAt}
-              title={new Date(parent.lastUpdatedAt).toLocaleString()}
-            >
+            <RelativeTime at={parent.lastUpdatedAt} label="Finished">
               {formatRelativeTime(parent.lastUpdatedAt)}
-            </time>
+            </RelativeTime>
           </span>
         </span>
       </div>

@@ -6,19 +6,28 @@
  * (https://github.com/pingdotgg/t3code, MIT License, Copyright (c) 2026 T3
  * Tools Inc.): the person's message is a right-aligned bubble, the agent's
  * prose is plain markdown with no bubble, a run of tool calls is one summary
- * line that opens to compact 24 px lines, a live run shows its newest step
+ * line that opens to compact 24 px lines (each tool line opens to its full
+ * command or input and its output), a live run shows its newest step
  * with a "Working for" timer, and a finished run folds behind "Worked for".
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
  *
  * A steering message is the person's message too, right-aligned, with a
- * "Queued" mark until the agent gets it. A delegated task is one line
- * (agent, status, duration) that links to its own transcript. The task's
- * outcome comes last, as the final reply. A long run shows its newest
+ * "Queued" mark until the agent gets it. A task this one started links to
+ * its own transcript: a delegation is one line (agent, status, duration), a
+ * person's follow-up is their message with a status line, and a deferral's
+ * wake-up, a resume or the result sent to the lead is one quiet line. The
+ * task's outcome comes last, as the final reply, and the tasks started after
+ * the run ended (`later`) come after it. A long run shows its newest
  * `TRANSCRIPT_PAGE_ROWS` rows, with "Show older" above them, so a 1,000-row
  * run mounts a page at a time.
+ *
+ * A live run fakes streaming between polls: a row or step that a poll
+ * brings in fades in, and the agent's prose and progress lines reveal their
+ * new words (`useRevealText`). What was there at mount shows at once.
  */
 
 import {
+  AlarmClock,
   ArrowDown,
   Bot,
   Brain,
@@ -30,14 +39,30 @@ import {
   Globe,
   type LucideIcon,
   Plug,
+  RotateCcw,
+  Send,
   Sparkles,
   Terminal,
   Wrench,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
+import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask } from "@/api/types";
+import { stripContextFooter } from "@/components/session-panel/model";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { MessageCopyButton, MessageRawToggle } from "@/components/shared/message-copy-button";
+import { PromptContext } from "@/components/shared/prompt-context";
+import { RelativeTime } from "@/components/shared/relative-time";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
@@ -51,12 +76,18 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import { useRevealText } from "@/hooks/use-reveal-text";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { statusLabel } from "@/lib/status-labels";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatDuration, formatRelativeTime, parseUTCDate } from "@/lib/utils";
+import { MessageText } from "./message-text";
+import { ToolDetails } from "./tool-details";
 import {
+  childKind,
   entrySummary,
   foldedTurnRows,
+  newestTime,
   pagedRows,
   summarizeWork,
   TRANSCRIPT_PAGE_ROWS,
@@ -78,6 +109,24 @@ const TOOL_ICONS: Record<ToolKind, LucideIcon> = {
 const LONG_MESSAGE_LINES = 8;
 const LONG_MESSAGE_CHARS = 600;
 
+/**
+ * While the run is live: the time (ms) after which a row or step counts as
+ * brought in by a poll. It is the newest data time of the first render that
+ * had rows, or of a work list when it opened. Both come from the data, so
+ * the browser's clock does not matter. Null when the run is not live.
+ */
+const ArrivedAfter = createContext<number | null>(null);
+
+/** Whether the row or step at `at` arrived while the reader watched. Fixed at mount. */
+function useArrived(at: string): boolean {
+  const since = useContext(ArrivedAfter);
+  const [arrived] = useState(() => since !== null && parseUTCDate(at).getTime() > since);
+  return arrived;
+}
+
+/** A row or step that arrived fades in (DESIGN.md § Motion), never under reduced motion. */
+const ARRIVE_CLASS = "animate-in fade-in-0 duration-200 ease-snappy motion-reduce:animate-none";
+
 export interface TranscriptFold {
   /** "Worked for 4m 12s". */
   label: string;
@@ -93,6 +142,8 @@ export interface TranscriptProps {
   prompt?: ReactNode;
   /** The task's outcome, after every row: the run's final reply. */
   outcome?: ReactNode;
+  /** Tasks started after the run ended (`rowsAfterEnd`), after the outcome. */
+  later?: TranscriptRow[];
   /**
    * The outcome's text. A folded run hides the agent's last message when it
    * says the same, so the answer shows once.
@@ -114,6 +165,7 @@ export function Transcript({
   running,
   prompt,
   outcome,
+  later,
   outcomeText,
   fold,
   workingSince,
@@ -129,6 +181,11 @@ export function Transcript({
   );
   const liveRowId = running ? rows[rows.length - 1]?.id : undefined;
   const contentRef = useFollowEnd(scroller ?? null, running);
+  // Fixed at the first render with rows: rows that a page load or a tab
+  // switch shows are not new, whatever their age.
+  const [firstSeen, setFirstSeen] = useState<number | null>(null);
+  const seen = firstSeen ?? (rows.length > 0 ? newestTime(rows) : null);
+  if (firstSeen === null && seen !== null) setFirstSeen(seen);
 
   return (
     <div
@@ -150,10 +207,15 @@ export function Transcript({
           Show {Math.min(hidden, TRANSCRIPT_PAGE_ROWS)} older ({hidden.toLocaleString()} hidden)
         </Button>
       ) : null}
-      {shown.map((row) => (
-        <TranscriptRowView key={row.id} row={row} live={row.id === liveRowId} />
-      ))}
+      <ArrivedAfter.Provider value={running ? seen : null}>
+        {shown.map((row) => (
+          <TranscriptRowView key={row.id} row={row} live={row.id === liveRowId} />
+        ))}
+      </ArrivedAfter.Provider>
       {outcome}
+      {later?.map((row) => (
+        <TranscriptRowView key={row.id} row={row} live={false} />
+      ))}
       {running && rows.length === 0 && waitingLabel ? (
         <Trace aria-live="polite">
           <div>
@@ -173,16 +235,15 @@ export function Transcript({
 }
 
 function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean }) {
+  const arrived = useArrived(row.at);
+  const className = arrived ? ARRIVE_CLASS : undefined;
   switch (row.kind) {
     case "assistant":
-      return (
-        <div data-slot="transcript-assistant" className="min-w-0 px-1 text-sm leading-relaxed">
-          <MarkdownView text={row.text} />
-        </div>
-      );
+      return <AssistantMessage text={row.text} arrived={arrived} />;
     case "steer":
       return (
         <TranscriptUserMessage
+          className={className}
           text={row.message.body}
           label="Steering message"
           footer={
@@ -198,30 +259,160 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
           }
         />
       );
-    case "delegation":
-      return <DelegationCard task={row.task} agentName={row.agentName} />;
+    case "child":
+      return <ChildRow task={row.task} agentName={row.agentName} className={className} />;
     case "work":
-      return <WorkRow entries={row.entries} live={live} />;
+      return <WorkRow entries={row.entries} live={live} className={className} />;
   }
 }
 
-/** A delegated task, one line: agent, status and duration, linking to its own transcript. */
-function DelegationCard({ task, agentName }: { task: AgentTask; agentName: string | null }) {
+/**
+ * The agent's prose, as markdown. In a live run its new words reveal
+ * between polls; one that a poll brought in reveals from the start. Copy
+ * always takes the full text.
+ */
+function AssistantMessage({ text, arrived }: { text: string; arrived: boolean }) {
+  const live = useContext(ArrivedAfter) !== null;
+  const shown = useRevealText(text, live, arrived);
+  return (
+    <div
+      data-slot="transcript-assistant"
+      className={cn(
+        "group/transcript-message flex min-w-0 items-start gap-1 px-1 text-sm leading-relaxed",
+        arrived && ARRIVE_CLASS,
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <MarkdownView text={shown} />
+      </div>
+      <MessageCopyButton text={text} hover group="transcript-message" />
+    </div>
+  );
+}
+
+/** A task this one started, drawn by its kind (`childKind`). */
+function ChildRow({
+  task,
+  agentName,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  className?: string;
+}) {
+  switch (childKind(task)) {
+    case "person":
+      return <PersonFollowUp task={task} agentName={agentName} className={className} />;
+    case "deferred":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={AlarmClock}
+          label={`Deferred until ${shortDateTime(task.createdAt)} ·`}
+          className={className}
+        />
+      );
+    case "resume":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={RotateCcw}
+          label={`${resumeLabel(task.tags)} ·`}
+          className={className}
+        />
+      );
+    case "notify":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={Send}
+          label="Result sent to"
+          className={className}
+        />
+      );
+    case "delegation":
+      return <DelegationCard task={task} agentName={agentName} className={className} />;
+  }
+}
+
+/** "Oct 30, 17:15" in the reader's time zone. */
+function shortDateTime(at: string): string {
+  return parseUTCDate(at).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Why the server resumed the work (`ResumeReason`), from the resume's `reason:` tag. */
+const RESUME_REASONS: Record<string, string> = {
+  graceful_shutdown: "a shutdown",
+  context_limits: "a full context window",
+  manual_supersede: "a manual restart",
+  crash_recovery: "a crash",
+};
+
+function resumeLabel(tags: readonly string[] | undefined): string {
+  const reason = tags?.find((tag) => tag.startsWith("reason:"))?.slice("reason:".length);
+  if (!reason) return "Resumed";
+  return `Resumed after ${RESUME_REASONS[reason] ?? reason.replaceAll("_", " ")}`;
+}
+
+/** "[avatar] Lead · Completed · 1m 23s": who runs a task this one started, and how it went. */
+function ChildAgentStatus({ task, agentName }: { task: AgentTask; agentName: string | null }) {
   const start = parseUTCDate(task.acceptedAt ?? task.createdAt).getTime();
   const end = task.finishedAt ? parseUTCDate(task.finishedAt).getTime() : Number.NaN;
   const ran = Number.isFinite(end - start) ? formatDuration(Math.max(0, end - start)) : null;
   return (
+    <>
+      {task.agentId ? (
+        <AgentAvatar
+          agentId={task.agentId}
+          agentName={agentName}
+          size="xs"
+          className="size-4 shrink-0 shadow-none"
+        />
+      ) : null}
+      <span className="truncate">
+        {agentName ?? "an agent"} · {statusLabel(task.status)}
+        {ran ? ` · ${ran}` : ""}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A delegated task, one line: its title, then the agent (avatar and name),
+ * status and duration, linking to its own transcript.
+ */
+function DelegationCard({
+  task,
+  agentName,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  className?: string;
+}) {
+  return (
     <Link
       to={`/tasks/${task.id}`}
       data-slot="transcript-delegation"
-      className="-mx-2 flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60"
+      className={cn(
+        "-mx-2 flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60",
+        className,
+      )}
     >
       <TaskStatusIcon status={task.status} label={statusLabel(task.status)} />
       <span className="min-w-0 flex-1">
         <span className="block truncate">{taskListTitle(task)}</span>
-        <span className="block truncate text-xs text-muted-foreground">
-          Delegated to {agentName ?? "an agent"} · {statusLabel(task.status)}
-          {ran ? ` · ${ran}` : ""}
+        <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          <span className="shrink-0">Delegated to</span>
+          <ChildAgentStatus task={task} agentName={agentName} />
         </span>
       </span>
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
@@ -230,7 +421,84 @@ function DelegationCard({ task, agentName }: { task: AgentTask; agentName: strin
 }
 
 /**
- * The person's message: a right-aligned bubble. A long one shows its first
+ * A task the server started (a deferral's wake-up, a resume, the result
+ * sent to the lead): one quiet line, its kind's icon and label, then the
+ * agent and status, linking to its own transcript.
+ */
+function ChildLine({
+  task,
+  agentName,
+  icon: Icon,
+  label,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  icon: LucideIcon;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <Link
+      to={`/tasks/${task.id}`}
+      data-slot="transcript-child-line"
+      className={cn(
+        "-mx-2 flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+        className,
+      )}
+    >
+      <Icon aria-hidden className="mr-1 size-3.5 shrink-0" />
+      <span className="shrink-0">{label}</span>
+      <ChildAgentStatus task={task} agentName={agentName} />
+      <ChevronRight aria-hidden className="ml-auto size-3.5 shrink-0" />
+    </Link>
+  );
+}
+
+/**
+ * A person's follow-up (from the dashboard, Slack or a chat): their message,
+ * as the prompt shows it, with a line under it that names them and links to
+ * the task it started.
+ */
+function PersonFollowUp({
+  task,
+  agentName,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  className?: string;
+}) {
+  const { data: users } = useUsers();
+  const prompt = parsePromptDisplay(stripContextFooter(task.task));
+  const person =
+    (task.requestedByUserId
+      ? users?.find((user) => user.id === task.requestedByUserId)?.name
+      : undefined) ?? prompt.speaker;
+  return (
+    <TranscriptUserMessage
+      className={className}
+      text={prompt.ask}
+      header={<PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />}
+      label="Follow-up message"
+      footer={
+        <Link
+          to={`/tasks/${task.id}`}
+          data-slot="transcript-follow-up-status"
+          className="flex max-w-full min-w-0 items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <span className="shrink-0">Follow-up{person ? ` from ${person}` : ""} to</span>
+          <ChildAgentStatus task={task} agentName={agentName} />
+          <ChevronRight aria-hidden className="size-3.5 shrink-0" />
+        </Link>
+      }
+    />
+  );
+}
+
+/**
+ * The person's message: a right-aligned bubble, as markdown, with "Show raw"
+ * and Copy under it (Copy takes the raw text). A long one shows its first
  * lines under a fade, with "Show full message". The task's prompt and every
  * steering message use it.
  */
@@ -252,12 +520,13 @@ export function TranscriptUserMessage({
 }) {
   const long = text.length > LONG_MESSAGE_CHARS || text.split("\n").length > LONG_MESSAGE_LINES;
   const [expanded, setExpanded] = useState(false);
+  const [raw, setRaw] = useState(false);
   const clipped = long && !expanded;
   return (
     <section
       aria-label={label}
       data-slot="transcript-user"
-      className={cn("flex min-w-0 flex-col items-end gap-1", className)}
+      className={cn("group/transcript-message flex min-w-0 flex-col items-end gap-1", className)}
     >
       <div
         className={cn(
@@ -266,17 +535,25 @@ export function TranscriptUserMessage({
         )}
       >
         {header}
-        {text}
+        <MessageText text={text} raw={raw} />
       </div>
-      {long ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="hit-area text-xs text-muted-foreground hover:text-foreground"
-        >
-          {expanded ? "Show less" : "Show full message"}
-        </button>
-      ) : null}
+      <div className="flex min-w-0 items-center gap-2">
+        {long ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="hit-area text-xs text-muted-foreground hover:text-foreground"
+          >
+            {expanded ? "Show less" : "Show full message"}
+          </button>
+        ) : null}
+        {text.trim() ? (
+          <>
+            <MessageRawToggle raw={raw} onRawChange={setRaw} hover group="transcript-message" />
+            <MessageCopyButton text={text} hover group="transcript-message" />
+          </>
+        ) : null}
+      </div>
       {footer}
     </section>
   );
@@ -323,62 +600,189 @@ function WorkingRow({ since }: { since: string }) {
 /**
  * A run of work. One tool call is its own line. More fold into a summary
  * line that opens to every step; a live run also shows its newest step.
+ * The open list scrolls past 18rem until a tool line in it opens: from then
+ * on, until the list closes, it shows every step, so details never scroll
+ * inside it. In a live run, a step that arrives while the list is open fades
+ * in; the steps that opening it shows do not.
  */
-function WorkRow({ entries, live }: { entries: WorkEntry[]; live: boolean }) {
+function WorkRow({
+  entries,
+  live,
+  className,
+}: {
+  entries: WorkEntry[];
+  live: boolean;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
+  const [uncapped, setUncapped] = useState(false);
+  const [openedAt, setOpenedAt] = useState(0);
+  const since = useContext(ArrivedAfter);
   const newest = entries[entries.length - 1];
   if (entries.length === 1 && newest.kind !== "thinking") {
     return (
-      <Trace>
-        <WorkEntryLine entry={newest} running={live} />
+      <Trace className={className}>
+        <WorkEntryLine key={newest.id} entry={newest} running={live} />
       </Trace>
     );
   }
-  const failed = entries.some((e) => e.kind === "tool" && e.status === "error");
   return (
-    <Trace data-slot="transcript-work" className="gap-1">
-      <TraceCollapsible open={open} onOpenChange={setOpen}>
+    <Trace data-slot="transcript-work" className={cn("gap-1", className)}>
+      <TraceCollapsible
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) setOpenedAt(newestTime(entries));
+          else setUncapped(false);
+        }}
+      >
         <TraceCollapsibleTrigger className="hit-area">
-          <TraceLine status={failed ? "error" : undefined} className="text-sm">
+          {/* The summary stays neutral; only a failed line inside is red. */}
+          <TraceLine className="text-sm">
             <TraceTitle>{summarizeWork(entries)}</TraceTitle>
           </TraceLine>
         </TraceCollapsibleTrigger>
-        <TraceCollapsibleContent className="mt-1 max-h-[min(18rem,50dvh)] overflow-y-auto">
-          <Trace className="gap-1">
-            {entries.map((entry) => (
-              <WorkEntryLine key={entry.id} entry={entry} running={false} />
-            ))}
-          </Trace>
+        <TraceCollapsibleContent
+          className={cn("mt-1", !uncapped && "max-h-[min(18rem,50dvh)] overflow-y-auto")}
+        >
+          <ArrivedAfter.Provider value={since === null ? null : Math.max(since, openedAt)}>
+            <Trace className="gap-1">
+              {entries.map((entry) => (
+                <WorkEntryLine
+                  key={entry.id}
+                  entry={entry}
+                  running={false}
+                  onOpen={() => setUncapped(true)}
+                />
+              ))}
+            </Trace>
+          </ArrivedAfter.Provider>
         </TraceCollapsibleContent>
       </TraceCollapsible>
-      {live && !open ? <WorkEntryLine entry={newest} running /> : null}
+      {/* Keyed: a new call gets a closed line, never the details of the call before it. */}
+      {live && !open ? <WorkEntryLine key={newest.id} entry={newest} running /> : null}
     </Trace>
   );
 }
 
 function EntryTime({ at }: { at: string }) {
   return (
-    <TraceDescription
-      className="font-mono text-[10px] text-muted-foreground/60"
-      title={new Date(at).toLocaleString()}
-    >
-      {formatRelativeTime(at)}
+    <TraceDescription className="font-mono text-[10px] text-muted-foreground/60">
+      <RelativeTime at={at} focusable={false}>
+        {formatRelativeTime(at)}
+      </RelativeTime>
     </TraceDescription>
   );
 }
 
-function WorkEntryLine({ entry, running }: { entry: WorkEntry; running: boolean }) {
-  if (entry.kind === "thinking") return <ThinkingLine text={entry.text} running={running} />;
+function WorkEntryLine({
+  entry,
+  running,
+  onOpen,
+}: {
+  entry: WorkEntry;
+  running: boolean;
+  /** A tool line's details opened. */
+  onOpen?: () => void;
+}) {
+  const arrived = useArrived(entry.at);
+  const className = arrived ? ARRIVE_CLASS : undefined;
+  if (entry.kind === "thinking") {
+    return <ThinkingLine text={entry.text} running={running} className={className} />;
+  }
   if (entry.kind === "tool") {
-    const Icon = TOOL_ICONS[entry.toolKind];
-    const status =
-      entry.status === "error"
-        ? "error"
-        : running || entry.status === "running"
-          ? "running"
-          : undefined;
-    return (
-      <div title={entrySummary(entry)}>
+    return <ToolLine entry={entry} running={running} onOpen={onOpen} className={className} />;
+  }
+  return <EventLine entry={entry} running={running} arrived={arrived} />;
+}
+
+/** A status event or a progress note. The live one reveals its words. */
+function EventLine({
+  entry,
+  running,
+  arrived,
+}: {
+  entry: Extract<WorkEntry, { kind: "event" }>;
+  running: boolean;
+  arrived: boolean;
+}) {
+  const text = useRevealText(entry.text, running, arrived);
+  return (
+    <div title={entry.text} className={arrived ? ARRIVE_CLASS : undefined}>
+      <TraceLine status={running ? "running" : undefined} className="min-h-6 text-xs">
+        <TraceIcon>
+          {running ? (
+            <CircleDot className="size-3 text-primary animate-pulse" />
+          ) : (
+            <Check className="size-3 text-muted-foreground/70" />
+          )}
+        </TraceIcon>
+        <TraceTitle className={cn(running && "font-medium")}>{text}</TraceTitle>
+        <EntryTime at={entry.at} />
+      </TraceLine>
+    </div>
+  );
+}
+
+/**
+ * Scrolls `el`'s scroll containers, innermost first, until `el` is back at
+ * `top` on screen.
+ */
+function keepInPlace(el: HTMLElement, top: number) {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    const delta = el.getBoundingClientRect().top - top;
+    if (Math.abs(delta) < 1) return;
+    const { overflowY } = getComputedStyle(parent);
+    if (overflowY === "auto" || overflowY === "scroll") parent.scrollTop += delta;
+  }
+}
+
+/**
+ * A tool call: one quiet line that opens to its full command or input and its
+ * output. Opening it can lift the work list's height cap (`WorkRow`), so the
+ * line is scrolled back to where it was clicked.
+ */
+function ToolLine({
+  entry,
+  running,
+  onOpen,
+  className,
+}: {
+  entry: Extract<WorkEntry, { kind: "tool" }>;
+  running: boolean;
+  onOpen?: () => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const clickedTop = useRef<number | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after each toggle
+  useLayoutEffect(() => {
+    if (triggerRef.current && clickedTop.current !== null) {
+      keepInPlace(triggerRef.current, clickedTop.current);
+    }
+    clickedTop.current = null;
+  }, [open]);
+  const toggle = (next: boolean) => {
+    clickedTop.current = triggerRef.current?.getBoundingClientRect().top ?? null;
+    setOpen(next);
+    if (next) onOpen?.();
+  };
+  const Icon = TOOL_ICONS[entry.toolKind];
+  const status =
+    entry.status === "error"
+      ? "error"
+      : running || entry.status === "running"
+        ? "running"
+        : undefined;
+  return (
+    <TraceCollapsible open={open} onOpenChange={toggle} className={className}>
+      <TraceCollapsibleTrigger
+        ref={triggerRef}
+        quietChevron
+        className="hit-area"
+        title={entrySummary(entry)}
+      >
         <TraceLine status={status} className="min-h-6 text-xs">
           <TraceIcon>
             <Icon className="size-3" />
@@ -389,32 +793,28 @@ function WorkEntryLine({ entry, running }: { entry: WorkEntry; running: boolean 
           </TraceTitle>
           <EntryTime at={entry.at} />
         </TraceLine>
-      </div>
-    );
-  }
-  return (
-    <div title={entry.text}>
-      <TraceLine status={running ? "running" : undefined} className="min-h-6 text-xs">
-        <TraceIcon>
-          {running ? (
-            <CircleDot className="size-3 text-primary animate-pulse" />
-          ) : (
-            <Check className="size-3 text-muted-foreground/70" />
-          )}
-        </TraceIcon>
-        <TraceTitle className={cn(running && "font-medium")}>{entry.text}</TraceTitle>
-        <EntryTime at={entry.at} />
-      </TraceLine>
-    </div>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="mt-1 mb-2">
+        <ToolDetails entry={entry} />
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }
 
 /** A reasoning block: a one-line preview that opens to the full text. */
-function ThinkingLine({ text, running }: { text: string; running: boolean }) {
+function ThinkingLine({
+  text,
+  running,
+  className,
+}: {
+  text: string;
+  running: boolean;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const preview = text.replace(/\s+/g, " ");
   return (
-    <TraceCollapsible open={open} onOpenChange={setOpen}>
+    <TraceCollapsible open={open} onOpenChange={setOpen} className={className}>
       <TraceCollapsibleTrigger className="hit-area">
         <TraceLine status={running ? "running" : undefined} className="min-h-6 text-xs">
           <TraceIcon>

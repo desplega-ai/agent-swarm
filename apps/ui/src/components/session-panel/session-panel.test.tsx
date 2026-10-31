@@ -25,6 +25,7 @@ mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/input", () => require("../ui/input"));
+mock.module("@/components/ui/kbd", () => require("../ui/kbd"));
 mock.module("@/components/ui/popover", () => require("../ui/popover"));
 mock.module("@/hooks/use-debounced-value", () => require("../../hooks/use-debounced-value"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
