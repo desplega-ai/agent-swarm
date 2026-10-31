@@ -66,6 +66,7 @@ export const extensions: Scenario = {
   order: 170,
   async run(ctx) {
     const installedIds = new Set<string>();
+    const leftoverTaskIds: string[] = [];
     let leadConnection: McpConnection | undefined;
     let workerConnection: McpConnection | undefined;
 
@@ -153,13 +154,13 @@ export const extensions: Scenario = {
         body: { task: `blocked extension task ${ctx.nonce}` },
       });
       expectStatus(blockedTask, [422], "block REST task without a ticket reference");
-      expectStatus(
-        await ctx.api("POST", "/api/tasks", {
-          body: { task: `ENG-123 ticketed extension task ${ctx.nonce}` },
-        }),
-        [201],
-        "allow REST task with a ticket reference",
-      );
+      const ticketedTask = await ctx.api("POST", "/api/tasks", {
+        body: { task: `ENG-123 ticketed extension task ${ctx.nonce}` },
+      });
+      expectStatus(ticketedTask, [201], "allow REST task with a ticket reference");
+      // The lead registered above auto-claims this pool task. Cancel it on the way
+      // out, or it stays pending on the lead and the next scenario's poll gets it.
+      leftoverTaskIds.push(String(asRecord(ticketedTask.json).id));
 
       // A blocked Slack-origin task must surface the extension's reason in the thread.
       expectStatus(
@@ -255,6 +256,9 @@ export const extensions: Scenario = {
       await workerConnection?.close();
       await leadConnection?.close();
       await cleanupExtensions(ctx, installedIds);
+      for (const taskId of leftoverTaskIds) {
+        await ctx.api("POST", `/api/tasks/${taskId}/cancel`, { body: {} });
+      }
     }
   },
 };

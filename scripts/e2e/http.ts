@@ -9,6 +9,8 @@ export type ApiOptions = {
   rawBody?: string | Uint8Array | FormData | URLSearchParams | Blob;
   /** Follow redirects (default) or return the 3xx as is. */
   redirect?: "follow" | "manual" | "error";
+  /** Abort the request after this many milliseconds (default 30 s). */
+  timeoutMs?: number;
 };
 
 export type ApiResponse = {
@@ -54,6 +56,7 @@ export function createApiClient(baseUrl: string, runKey: string): ApiClient {
       method,
       headers,
       redirect: options.redirect,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
       body:
         options.rawBody !== undefined
           ? options.rawBody
