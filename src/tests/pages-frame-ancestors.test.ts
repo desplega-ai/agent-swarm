@@ -50,6 +50,7 @@ describe("PAGES_FRAME_ANCESTORS on /p/:id", () => {
     APP_URL: process.env.APP_URL,
     DASHBOARD_URL: process.env.DASHBOARD_URL,
     PAGE_SESSION_SECRET: process.env.PAGE_SESSION_SECRET,
+    NODE_ENV: process.env.NODE_ENV,
   };
 
   function restore(key: keyof typeof ORIG): void {
@@ -93,7 +94,10 @@ describe("PAGES_FRAME_ANCESTORS on /p/:id", () => {
     BASE = `http://localhost:${port}`;
   });
 
-  afterEach(() => restore("PAGES_FRAME_ANCESTORS"));
+  afterEach(() => {
+    restore("PAGES_FRAME_ANCESTORS");
+    restore("NODE_ENV");
+  });
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -149,6 +153,29 @@ describe("PAGES_FRAME_ANCESTORS on /p/:id", () => {
     expect(unset).not.toContain("agent-swarm.dev");
     expect(blank).toBe(unset);
   });
+
+  // Deployed images leave NODE_ENV unset. Localhost dev origins must only be
+  // allowed to frame pages under an explicit development or test NODE_ENV.
+  for (const nodeEnv of [undefined, "production", "staging"]) {
+    test(`NODE_ENV=${nodeEnv ?? "<unset>"} emits no localhost ancestors`, async () => {
+      if (nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = nodeEnv;
+      const id = await createPage(`public-env-${nodeEnv ?? "unset"}`, "public");
+      const fa = frameAncestors(await fetch(`${BASE}/p/${id}`));
+      expect(fa.trim()).toBe("frame-ancestors 'self' https://app.example.test");
+    });
+  }
+
+  for (const nodeEnv of ["development", "test"]) {
+    test(`NODE_ENV=${nodeEnv} keeps the local dashboard origins`, async () => {
+      process.env.NODE_ENV = nodeEnv;
+      const id = await createPage(`public-env-${nodeEnv}`, "public");
+      const fa = frameAncestors(await fetch(`${BASE}/p/${id}`));
+      expect(fa).toContain("https://app.example.test");
+      expect(fa).toContain("http://localhost:5274");
+      expect(fa).toContain("https://*.localhost");
+    });
+  }
 
   test("parser accepts comma or space lists and drops invalid entries", () => {
     process.env.PAGES_FRAME_ANCESTORS =
