@@ -327,6 +327,10 @@ export function markdownSummary(result: E2eResult): string {
     "",
     surfaceLine("workflow node types", result.coverage.nodeTypes),
     "",
+    ...result.coverage.engines.flatMap((engine) => [
+      `engine ${engine.name}: ${engine.percent.toFixed(1)}% (routes ${engine.routes.covered}/${engine.routes.total}, tools ${engine.mcpTools.covered}/${engine.mcpTools.total}, node types ${engine.nodeTypes.covered}/${engine.nodeTypes.total}, states ${engine.stateValues.covered}/${engine.stateValues.total})`,
+      "",
+    ]),
     ...result.coverage.stateSurfaces.flatMap((state) => [
       surfaceLine(`state ${state.name}`, state) +
         (state.unexpected.length > 0 ? `, unexpected: ${state.unexpected.join(", ")}` : ""),

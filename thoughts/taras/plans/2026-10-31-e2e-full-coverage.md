@@ -140,6 +140,15 @@ reviewers checked standards and spec, zero blockers. Outcome:
   backlog tasks; a waiting workflow run; aborted_limit and paused script runs).
 - Every scenario must belong to a flow; the manifest pins 67 flows covering all 92 scenarios.
 
+## Fifth pass (same PR): per-engine roll-ups, retirement report, hermetic codex test
+
+- `engines` in the manifest roll route groups, tool patterns, node types and state surfaces into
+  one figure per engine (script, workflow, task); strict requires 100% for each.
+- `bun scripts/e2e/unit-overlap.ts` lists wire-level unit tests with a candidate/review/keep
+  verdict; the runbook points at it. Deleting tests stays a per-domain decision for Taras.
+- `codex-gateway-route.test.ts` isolates HOME: the local failure was the developer's real
+  `~/.codex/auth.json` making OAuth win over `OPENAI_API_KEY` inside the test.
+
 ## Security scan findings (Superagent, same PR)
 
 - P1: `CODEX_OAUTH_DEVICE_BASE_URL` was config-writable and unvalidated. Now an env-only reserved
@@ -153,5 +162,3 @@ reviewers checked standards and spec, zero blockers. Outcome:
 
 - Retire the first batch of redundant unit tests (list in runbooks/e2e-blackbox.md), one domain
   per PR, after the strict suite has been green on main.
-- `codex-gateway-route` "not a gateway" fails on this Mac on every branch; CI passes it. Root
-  cause not chased (local Codex config or env).

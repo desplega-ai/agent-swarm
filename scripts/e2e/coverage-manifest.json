@@ -1,8 +1,208 @@
 {
-  "$comment": "Deliberate coverage exclusions for `bun run e2e --strict`. Every entry needs a reason a reviewer can check. A stale entry (the item is covered anyway) or a dead entry (the server no longer exposes it) fails the strict run. `flows` pins scenario names that must exist and pass. `stateSurfaces` declare the values an engine column can hold (statuses, step types, executors); each is read from the SUT database after the run and every declared value must be observed unless excluded, and every observed value must be declared. Every scenario must belong to a flow.",
+  "$comment": "Deliberate coverage exclusions for `bun run e2e --strict`. Every entry needs a reason a reviewer can check. A stale entry (the item is covered anyway) or a dead entry (the server no longer exposes it) fails the strict run. `flows` pins scenario names that must exist and pass. `stateSurfaces` declare the values an engine column can hold (statuses, step types, executors); each is read from the SUT database after the run and every declared value must be observed unless excluded, and every observed value must be declared. Every scenario must belong to a flow. `engines` roll named route groups, tools, node types and state surfaces into one figure per engine; strict requires 100% for each engine.",
+  "engines": [
+    {
+      "name": "script-engine",
+      "routeGroups": [
+        "scripts",
+        "script-runs",
+        "script-connections",
+        "internal",
+        "kv",
+        "x",
+        "credential-bindings",
+        "db-query"
+      ],
+      "tools": [
+        "script-*",
+        "kv-*",
+        "launch-script-run",
+        "get-script-run",
+        "list-script-runs",
+        "credential-bindings",
+        "db-query"
+      ],
+      "stateSurfaces": [
+        "script-run-statuses",
+        "script-run-step-types",
+        "script-run-step-statuses",
+        "script-scopes",
+        "script-fs-modes",
+        "script-executors"
+      ]
+    },
+    {
+      "name": "workflow-engine",
+      "routeGroups": [
+        "workflows",
+        "workflow-runs",
+        "workflow-events",
+        "executor-types",
+        "approval-requests",
+        "schedules",
+        "scheduled-tasks",
+        "webhooks"
+      ],
+      "tools": [
+        "*-workflow",
+        "*-workflow-run",
+        "*-workflow-runs",
+        "list-workflows",
+        "patch-workflow-node",
+        "*-schedule",
+        "list-schedules",
+        "run-schedule-now",
+        "system-one-decide",
+        "request-human-input",
+        "cancel-approval-request"
+      ],
+      "nodeTypes": true,
+      "stateSurfaces": ["workflow-run-statuses", "workflow-step-statuses"]
+    },
+    {
+      "name": "task-engine",
+      "routeGroups": [
+        "tasks",
+        "poll",
+        "heartbeat",
+        "steering-messages",
+        "paused-tasks",
+        "task-templates",
+        "session-tree",
+        "session-triage",
+        "session-moves",
+        "active-sessions"
+      ],
+      "tools": [
+        "get-tasks",
+        "get-task-details",
+        "task-action",
+        "store-progress",
+        "send-task",
+        "cancel-task",
+        "defer-task",
+        "steer-task",
+        "accept-steer",
+        "poll-task",
+        "task-dedup"
+      ],
+      "stateSurfaces": ["task-statuses"]
+    }
+  ],
   "routes": [],
   "mcpTools": [],
   "nodeTypes": [],
+  "stateSurfaces": [
+    {
+      "name": "task-statuses",
+      "query": "SELECT DISTINCT status AS value FROM agent_tasks",
+      "universe": [
+        "draft",
+        "backlog",
+        "unassigned",
+        "offered",
+        "reviewing",
+        "pending",
+        "in_progress",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+        "superseded",
+        "resume"
+      ],
+      "excluded": [
+        {
+          "value": "draft",
+          "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
+        },
+        {
+          "value": "reviewing",
+          "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
+        },
+        {
+          "value": "resume",
+          "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
+        },
+        {
+          "value": "unassigned",
+          "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
+        }
+      ]
+    },
+    {
+      "name": "workflow-run-statuses",
+      "query": "SELECT DISTINCT status AS value FROM workflow_runs",
+      "universe": ["running", "waiting", "completed", "failed", "skipped", "cancelled"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: every run the suite starts reaches a terminal or waiting state before the table is read"
+        }
+      ]
+    },
+    {
+      "name": "workflow-step-statuses",
+      "query": "SELECT DISTINCT status AS value FROM workflow_run_steps",
+      "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
+        },
+        {
+          "value": "skipped",
+          "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
+        }
+      ]
+    },
+    {
+      "name": "script-run-statuses",
+      "query": "SELECT DISTINCT status AS value FROM script_runs",
+      "universe": ["running", "paused", "completed", "failed", "cancelled", "aborted_limit"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: every durable run the suite launches is settled or cancelled before the table is read"
+        }
+      ]
+    },
+    {
+      "name": "script-run-step-types",
+      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
+      "universe": ["raw-llm", "agent-task", "swarm-script"],
+      "excluded": []
+    },
+    {
+      "name": "script-run-step-statuses",
+      "query": "SELECT DISTINCT status AS value FROM script_run_journal",
+      "universe": ["completed", "failed"],
+      "excluded": []
+    },
+    {
+      "name": "script-scopes",
+      "query": "SELECT DISTINCT scope AS value FROM scripts",
+      "universe": ["global", "agent"],
+      "excluded": []
+    },
+    {
+      "name": "script-fs-modes",
+      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
+      "universe": ["none", "workspace-rw"],
+      "excluded": [
+        {
+          "value": "workspace-rw",
+          "reason": "v1 answers 501 before a script is stored, so no row can carry it"
+        }
+      ]
+    },
+    {
+      "name": "script-executors",
+      "query": "SELECT DISTINCT executor AS value FROM scripts WHERE executor IS NOT NULL",
+      "universe": ["native", "quickjs"],
+      "excluded": []
+    }
+  ],
   "flows": {
     "agent-access-tokens": {
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
@@ -296,116 +496,5 @@
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
     }
-  },
-  "stateSurfaces": [
-    {
-      "name": "task-statuses",
-      "query": "SELECT DISTINCT status AS value FROM agent_tasks",
-      "universe": [
-        "draft",
-        "backlog",
-        "unassigned",
-        "offered",
-        "reviewing",
-        "pending",
-        "in_progress",
-        "paused",
-        "completed",
-        "failed",
-        "cancelled",
-        "superseded",
-        "resume"
-      ],
-      "excluded": [
-        {
-          "value": "draft",
-          "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
-        },
-        {
-          "value": "reviewing",
-          "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
-        },
-        {
-          "value": "resume",
-          "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
-        },
-        {
-          "value": "unassigned",
-          "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
-        }
-      ]
-    },
-    {
-      "name": "workflow-run-statuses",
-      "query": "SELECT DISTINCT status AS value FROM workflow_runs",
-      "universe": ["running", "waiting", "completed", "failed", "skipped", "cancelled"],
-      "excluded": [
-        {
-          "value": "running",
-          "reason": "transient: every run the suite starts reaches a terminal or waiting state before the table is read"
-        }
-      ]
-    },
-    {
-      "name": "workflow-step-statuses",
-      "query": "SELECT DISTINCT status AS value FROM workflow_run_steps",
-      "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
-      "excluded": [
-        {
-          "value": "running",
-          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
-        },
-        {
-          "value": "skipped",
-          "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
-        }
-      ]
-    },
-    {
-      "name": "script-run-statuses",
-      "query": "SELECT DISTINCT status AS value FROM script_runs",
-      "universe": ["running", "paused", "completed", "failed", "cancelled", "aborted_limit"],
-      "excluded": [
-        {
-          "value": "running",
-          "reason": "transient: every durable run the suite launches is settled or cancelled before the table is read"
-        }
-      ]
-    },
-    {
-      "name": "script-run-step-types",
-      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
-      "universe": ["raw-llm", "agent-task", "swarm-script"],
-      "excluded": []
-    },
-    {
-      "name": "script-run-step-statuses",
-      "query": "SELECT DISTINCT status AS value FROM script_run_journal",
-      "universe": ["completed", "failed"],
-      "excluded": []
-    },
-    {
-      "name": "script-scopes",
-      "query": "SELECT DISTINCT scope AS value FROM scripts",
-      "universe": ["global", "agent"],
-      "excluded": []
-    },
-    {
-      "name": "script-fs-modes",
-      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
-      "universe": ["none", "workspace-rw"],
-      "excluded": [
-        {
-          "value": "workspace-rw",
-          "reason": "v1 answers 501 before a script is stored, so no row can carry it"
-        }
-      ]
-    },
-    {
-      "name": "script-executors",
-      "query": "SELECT DISTINCT executor AS value FROM scripts WHERE executor IS NOT NULL",
-      "universe": ["native", "quickjs"],
-      "excluded": []
-    }
-  ]
+  }
 }

@@ -105,6 +105,7 @@ function emptyCoverage(): Coverage {
   const empty = { total: 0, covered: 0, excluded: 0, percent: 0, uncovered: [] };
   const latency = { count: 0, p50: 0, p95: 0, max: 0 };
   return {
+    engines: [],
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
@@ -385,6 +386,11 @@ async function main(): Promise<number> {
   console.log(surfaceLine("workflow node types", coverage.nodeTypes));
   for (const state of coverage.stateSurfaces)
     console.log(surfaceLine(`state ${state.name}`, state));
+  for (const engine of coverage.engines) {
+    console.log(
+      `engine ${engine.name}: ${engine.percent.toFixed(1)}% (routes ${engine.routes.covered}/${engine.routes.total}, tools ${engine.mcpTools.covered}/${engine.mcpTools.total}, node types ${engine.nodeTypes.covered}/${engine.nodeTypes.total}, states ${engine.stateValues.covered}/${engine.stateValues.total})`,
+    );
+  }
   console.log(
     `latency: p50 ${coverage.latency.overall.p50} ms, p95 ${coverage.latency.overall.p95} ms over ${coverage.latency.overall.count} calls`,
   );
