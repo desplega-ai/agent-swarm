@@ -58,8 +58,17 @@ CLAUDE_ROUTES_E2E_LOG=1 bun run test:root -- src/tests/claude-routes-e2e.test.ts
 
 `bun run e2e` starts the real API on a free port with a fresh SQLite database.
 It runs deterministic HTTP and MCP scenarios with simulated agents. It does not use Docker or an LLM.
-The runner discovers route and MCP tool coverage from the running server.
+The runner discovers route, MCP tool and workflow node-type coverage from the running server.
 It writes `./e2e-results.json` by default.
+
+`bun run e2e --strict` is the CI contract: it fails when any route operation, MCP tool or
+workflow node type the server exposes is neither covered nor excluded with a reason in
+`scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned
+flow did not pass. Inference is mocked (`scripts/e2e/mocks/llm.ts`: OpenAI chat + Responses
++ embeddings, SystemOne) and the SUT boots with every capability on. Latency is recorded per
+call; `bun run e2e:bench before.json after.json` diffs two runs. Operator guide:
+[runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md). Authoring guide:
+[scripts/e2e/README.md](./scripts/e2e/README.md).
 
 The runner discovers exported scenarios in `scripts/e2e/scenarios/*.ts` and sorts them by their explicit numeric `order`. New scenarios need a unique name and order; duplicate values or a scenario file with no valid export fail discovery. Use optional `groups` tags and `--group` to select related scenarios without editing the runner or workflow lists.
 
@@ -87,6 +96,7 @@ bun run e2e --only slack-task-output-citations
 bun run e2e --skip workflow-script-node
 bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
 bun run e2e --min-route-coverage 4 --min-tool-coverage 3
+bun run e2e --strict
 bun run e2e --keep
 ```
 
