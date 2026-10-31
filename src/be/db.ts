@@ -413,6 +413,7 @@ export {
   recordTaskProviderIfUnset,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
+  setTaskTitleIfUnset,
   settleSupersededTaskDependents,
   startTask,
   supersedeTask,

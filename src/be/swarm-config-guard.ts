@@ -525,6 +525,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "MODEL_AUTO_UPGRADE",
     "COMB_ENABLED",
     "AGENT_FS_PROXY",
+    "TASK_AUTO_TITLE_ENABLED",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),

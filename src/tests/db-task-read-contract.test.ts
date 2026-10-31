@@ -566,6 +566,7 @@ value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
+value:setTaskTitleIfUnset
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
