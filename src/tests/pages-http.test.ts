@@ -313,4 +313,334 @@ describe("Pages HTTP API", () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe("design fields (theme, themeTokens, designVersion)", () => {
+    const shadcnTokens = {
+      light: {
+        "--primary": "oklch(0.55 0.2 260)",
+        background: "oklch(1 0 0)",
+        radius: "0.5rem",
+        "--sidebar": "oklch(0.9 0 0)",
+      },
+      dark: { "--primary": "oklch(0.7 0.15 260)" },
+    };
+    const normalizedShadcnTokens = {
+      light: {
+        "--color-primary": "oklch(0.55 0.2 260)",
+        "--color-background": "oklch(1 0 0)",
+        "--radius-sm": "calc(0.5rem - 4px)",
+        "--radius-md": "calc(0.5rem - 2px)",
+        "--radius-lg": "0.5rem",
+        "--radius-xl": "calc(0.5rem + 4px)",
+      },
+      dark: { "--color-primary": "oklch(0.7 0.15 260)" },
+    };
+
+    function postDesignPage(extra: Record<string, unknown> = {}) {
+      return fetch(`${baseUrl}/api/pages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          slug: `design-${crypto.randomUUID().slice(0, 8)}`,
+          title: "Design page",
+          contentType: "text/html",
+          authMode: "public",
+          body: "<h1>hi</h1>",
+          ...extra,
+        }),
+      });
+    }
+
+    function putPage(id: string, body: Record<string, unknown>) {
+      return fetch(`${baseUrl}/api/pages/${id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function getDesignPage(id: string): Promise<Page> {
+      const res = await fetch(`${baseUrl}/api/pages/${id}`, { headers });
+      expect(res.status).toBe(200);
+      return (await res.json()) as Page;
+    }
+
+    async function versionCount(id: string): Promise<number> {
+      const res = await fetch(`${baseUrl}/api/pages/${id}/versions`, { headers });
+      return ((await res.json()) as { versions: unknown[] }).versions.length;
+    }
+
+    test("a new page gets design version 2 with no theme and no tokens", async () => {
+      const res = await postDesignPage();
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as {
+        id: string;
+        ignoredTokens?: string[];
+        designVersion?: number;
+      };
+      expect(created.ignoredTokens).toBeUndefined();
+      expect(created.designVersion).toBe(2);
+
+      const page = await getDesignPage(created.id);
+      expect(page.designVersion).toBe(2);
+      expect(page.theme).toBeNull();
+      expect(page.themeTokens).toBeNull();
+    });
+
+    test("POST stores a preset theme and an explicit design version", async () => {
+      const res = await postDesignPage({ theme: "paper", designVersion: 1 });
+      expect(res.status).toBe(201);
+      const { id, designVersion } = (await res.json()) as { id: string; designVersion?: number };
+      expect(designVersion).toBe(1);
+      const page = await getDesignPage(id);
+      expect(page.theme).toBe("paper");
+      expect(page.designVersion).toBe(1);
+    });
+
+    test("POST with a design version other than 1 or 2 → 400", async () => {
+      for (const designVersion of [0, 3, "2", null]) {
+        const res = await postDesignPage({ designVersion });
+        expect(res.status).toBe(400);
+      }
+    });
+
+    test("POST with an unknown theme → 400 that lists the presets, and no page is created", async () => {
+      const slug = `unknown-theme-${crypto.randomUUID().slice(0, 8)}`;
+      const res = await postDesignPage({ slug, theme: "neon" });
+      expect(res.status).toBe(400);
+      const { error } = (await res.json()) as { error: string };
+      expect(error).toContain('Unknown theme "neon"');
+      for (const id of ["hive", "paper", "github"]) expect(error).toContain(id);
+
+      const resolved = await fetch(`${baseUrl}/api/pages/resolve?slug=${slug}&agentId=${agentId}`, {
+        headers,
+      });
+      expect(resolved.status).toBe(404);
+    });
+
+    test("POST stores shadcn-style tokens normalized and reports the ignored names", async () => {
+      const res = await postDesignPage({ themeTokens: shadcnTokens });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; ignoredTokens?: string[] };
+      expect(created.ignoredTokens).toEqual(["--sidebar"]);
+
+      const page = await getDesignPage(created.id);
+      expect(page.themeTokens).toEqual(normalizedShadcnTokens);
+    });
+
+    test("POST accepts the css format", async () => {
+      const css = `
+        :root { --primary: 222.2 47.4% 11.2%; --radius: 0.625rem; --shadow-2xs: 0 1px 2px #0000; }
+        .dark { --primary: 210 40% 98%; --sidebar-primary: red; }
+      `;
+      const res = await postDesignPage({ themeTokens: { format: "css", css } });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; ignoredTokens?: string[] };
+      expect([...(created.ignoredTokens ?? [])].sort()).toEqual([
+        "--shadow-2xs",
+        "--sidebar-primary",
+      ]);
+
+      const page = await getDesignPage(created.id);
+      expect(page.themeTokens).toEqual({
+        light: {
+          "--color-primary": "hsl(222.2 47.4% 11.2%)",
+          "--radius-sm": "calc(0.625rem - 4px)",
+          "--radius-md": "calc(0.625rem - 2px)",
+          "--radius-lg": "0.625rem",
+          "--radius-xl": "calc(0.625rem + 4px)",
+        },
+        dark: { "--color-primary": "hsl(210 40% 98%)" },
+      });
+    });
+
+    test("POST with bad themeTokens → 400 that names the problem", async () => {
+      const unsafe = await postDesignPage({
+        themeTokens: { light: { "--color-primary": "red; } body { display: none" } },
+      });
+      expect(unsafe.status).toBe(400);
+      const unsafeError = ((await unsafe.json()) as { error: string }).error;
+      expect(unsafeError).toContain("Invalid themeTokens");
+      expect(unsafeError).toContain("--color-primary");
+
+      const missingCss = await postDesignPage({ themeTokens: { format: "css" } });
+      expect(missingCss.status).toBe(400);
+      expect(((await missingCss.json()) as { error: string }).error).toContain(
+        "Invalid themeTokens",
+      );
+
+      const noBlocks = await postDesignPage({ themeTokens: { format: "css", css: "body { }" } });
+      expect(noBlocks.status).toBe(400);
+      expect(((await noBlocks.json()) as { error: string }).error).toContain(
+        "no :root, .dark, or @theme block",
+      );
+    });
+
+    test("POST with an unknown themeTokens format or field → 400", async () => {
+      const format = await postDesignPage({ themeTokens: { format: "dtcg", light: {} } });
+      expect(format.status).toBe(400);
+      expect(((await format.json()) as { error: string }).error).toContain("themeTokens");
+
+      const field = await postDesignPage({ themeTokens: { lite: { "--color-primary": "red" } } });
+      expect(field.status).toBe(400);
+      expect(((await field.json()) as { error: string }).error).toContain("themeTokens");
+    });
+
+    test("PUT keeps the design fields it does not mention", async () => {
+      const created = await postDesignPage({ theme: "paper", themeTokens: shadcnTokens });
+      const { id } = (await created.json()) as { id: string };
+
+      const res = await putPage(id, { body: "<h1>v2</h1>" });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { designVersion?: number }).designVersion).toBe(2);
+      const page = await getDesignPage(id);
+      expect(page.body).toBe("<h1>v2</h1>");
+      expect(page.theme).toBe("paper");
+      expect(page.themeTokens).toEqual(normalizedShadcnTokens);
+      expect(page.designVersion).toBe(2);
+    });
+
+    test("PUT sets a new theme, replaces the tokens, and moves the design version", async () => {
+      const created = await postDesignPage({ designVersion: 1, themeTokens: shadcnTokens });
+      const { id } = (await created.json()) as { id: string };
+
+      const res = await putPage(id, {
+        theme: "github",
+        designVersion: 2,
+        themeTokens: { light: { "--color-ring": "oklch(0.6 0.2 30)", "--spacing": "4px" } },
+      });
+      expect(res.status).toBe(200);
+      const updated = (await res.json()) as { ignoredTokens?: string[]; designVersion?: number };
+      expect(updated.ignoredTokens).toEqual(["--spacing"]);
+      expect(updated.designVersion).toBe(2);
+
+      const page = await getDesignPage(id);
+      expect(page.theme).toBe("github");
+      expect(page.designVersion).toBe(2);
+      // The new tokens replace the old set, they do not merge into it.
+      expect(page.themeTokens).toEqual({
+        light: { "--color-ring": "oklch(0.6 0.2 30)" },
+        dark: {},
+      });
+    });
+
+    test("PUT reports the design version the page keeps", async () => {
+      const created = await postDesignPage({ designVersion: 1 });
+      const { id } = (await created.json()) as { id: string };
+      const res = await putPage(id, { body: '<main class="swarm-page">v2</main>' });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { designVersion?: number }).designVersion).toBe(1);
+    });
+
+    test("POST reports a reference outside the contract with the reference", async () => {
+      const res = await postDesignPage({
+        themeTokens: {
+          format: "css",
+          css: ":root { --font-sans: var(--font-geist-sans); --primary: red; } body { --ring: blue; }",
+        },
+      });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { ignoredTokens?: string[] };
+      expect(created.ignoredTokens).toEqual([
+        "--font-sans (references --font-geist-sans)",
+        "--ring (in body)",
+      ]);
+    });
+
+    test("PUT with null clears the theme and the tokens", async () => {
+      const created = await postDesignPage({ theme: "paper", themeTokens: shadcnTokens });
+      const { id } = (await created.json()) as { id: string };
+
+      const res = await putPage(id, { theme: null, themeTokens: null });
+      expect(res.status).toBe(200);
+      const page = await getDesignPage(id);
+      expect(page.theme).toBeNull();
+      expect(page.themeTokens).toBeNull();
+      expect(page.designVersion).toBe(2);
+    });
+
+    test("PUT with a bad theme or bad tokens → 400, and the page and its history stay as they were", async () => {
+      const created = await postDesignPage({ theme: "paper" });
+      const { id } = (await created.json()) as { id: string };
+
+      const badTheme = await putPage(id, { theme: "neon", body: "<h1>changed</h1>" });
+      expect(badTheme.status).toBe(400);
+      expect(((await badTheme.json()) as { error: string }).error).toContain(
+        'Unknown theme "neon"',
+      );
+
+      const badTokens = await putPage(id, {
+        themeTokens: { light: { "--color-primary": "url(https://example.test/x)" } },
+        body: "<h1>changed</h1>",
+      });
+      expect(badTokens.status).toBe(400);
+      expect(((await badTokens.json()) as { error: string }).error).toContain(
+        "Invalid themeTokens",
+      );
+
+      const page = await getDesignPage(id);
+      expect(page.body).toBe("<h1>hi</h1>");
+      expect(page.theme).toBe("paper");
+      expect(await versionCount(id)).toBe(0);
+    });
+
+    test("PUT with a design version other than 1 or 2 → 400", async () => {
+      const created = await postDesignPage();
+      const { id } = (await created.json()) as { id: string };
+      const res = await putPage(id, { designVersion: 3 });
+      expect(res.status).toBe(400);
+    });
+
+    test("GET resolve returns the design fields", async () => {
+      const slug = `resolve-${crypto.randomUUID().slice(0, 8)}`;
+      const created = await postDesignPage({ slug, theme: "paper", designVersion: 1 });
+      expect(created.status).toBe(201);
+      const res = await fetch(`${baseUrl}/api/pages/resolve?slug=${slug}&agentId=${agentId}`, {
+        headers,
+      });
+      expect(res.status).toBe(200);
+      const page = (await res.json()) as Page;
+      expect(page.theme).toBe("paper");
+      expect(page.designVersion).toBe(1);
+      expect(page.themeTokens).toBeNull();
+    });
+
+    test("the list leaves the design fields out unless fields=full", async () => {
+      const ownerId = crypto.randomUUID();
+      const ownerHeaders = { "Content-Type": "application/json", "X-Agent-ID": ownerId };
+      const created = await fetch(`${baseUrl}/api/pages`, {
+        method: "POST",
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          slug: "listed",
+          title: "Listed",
+          contentType: "text/html",
+          authMode: "public",
+          body: "<h1>hi</h1>",
+          theme: "paper",
+          themeTokens: shadcnTokens,
+        }),
+      });
+      expect(created.status).toBe(201);
+
+      const slimRes = await fetch(`${baseUrl}/api/pages?agentId=${ownerId}`, {
+        headers: ownerHeaders,
+      });
+      expect(slimRes.status).toBe(200);
+      const [slim] = ((await slimRes.json()) as { pages: Array<Record<string, unknown>> }).pages;
+      expect(slim?.slug).toBe("listed");
+      for (const field of ["body", "theme", "themeTokens", "designVersion"]) {
+        expect(field in slim!).toBe(false);
+      }
+
+      const fullRes = await fetch(`${baseUrl}/api/pages?agentId=${ownerId}&fields=full`, {
+        headers: ownerHeaders,
+      });
+      expect(fullRes.status).toBe(200);
+      const [full] = ((await fullRes.json()) as { pages: Page[] }).pages;
+      expect(full?.theme).toBe("paper");
+      expect(full?.themeTokens).toEqual(normalizedShadcnTokens);
+      expect(full?.designVersion).toBe(2);
+    });
+  });
 });

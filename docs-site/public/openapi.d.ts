@@ -15450,6 +15450,9 @@ export interface paths {
                                 passwordHash?: string;
                                 body?: string;
                                 needsCredentials?: string[];
+                                theme?: string | null;
+                                themeTokens?: components["schemas"]["PageThemeTokens"];
+                                designVersion?: number;
                                 /** @default 0 */
                                 viewCount: number;
                                 createdAt: string;
@@ -15493,6 +15496,22 @@ export interface paths {
                         password?: string;
                         body: string;
                         needsCredentials?: string[];
+                        /** @description Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it. */
+                        theme?: string | null;
+                        /** @description Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: "css", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them. */
+                        themeTokens?: {
+                            /** @enum {string} */
+                            format?: "tokens" | "css";
+                            light?: {
+                                [key: string]: string;
+                            };
+                            dark?: {
+                                [key: string]: string;
+                            };
+                            css?: string;
+                        } | null;
+                        /** @description Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value. */
+                        designVersion?: number;
                     };
                 };
             };
@@ -15511,10 +15530,14 @@ export interface paths {
                             version: 1;
                             api_url: string;
                             app_url: string;
+                            /** @description Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored. */
+                            ignoredTokens?: string[];
+                            /** @description The design version of the new page: 2 unless the body set designVersion: 1. */
+                            designVersion: number;
                         };
                     };
                 };
-                /** @description Invalid body */
+                /** @description Invalid body, unknown theme, or invalid themeTokens */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15606,6 +15629,22 @@ export interface paths {
                         password?: string | null;
                         body?: string;
                         needsCredentials?: string[] | null;
+                        /** @description Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it. */
+                        theme?: string | null;
+                        /** @description Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: "css", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them. */
+                        themeTokens?: {
+                            /** @enum {string} */
+                            format?: "tokens" | "css";
+                            light?: {
+                                [key: string]: string;
+                            };
+                            dark?: {
+                                [key: string]: string;
+                            };
+                            css?: string;
+                        } | null;
+                        /** @description Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value. */
+                        designVersion?: number;
                     };
                 };
             };
@@ -15621,7 +15660,20 @@ export interface paths {
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
                             version: number;
+                            /** @description Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored. */
+                            ignoredTokens?: string[];
+                            /** @description The design version the page has after the update. An omitted designVersion keeps the stored one, so an older page stays on 1. */
+                            designVersion: number;
                         };
+                    };
+                };
+                /** @description Unknown theme or invalid themeTokens */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Page not found */
@@ -28576,6 +28628,14 @@ export interface components {
             language?: string;
             verbosity?: string;
         };
+        PageThemeTokens: {
+            light: {
+                [key: string]: string;
+            };
+            dark: {
+                [key: string]: string;
+            };
+        } | null;
         Page: {
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
@@ -28591,6 +28651,9 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+            theme: string | null;
+            themeTokens: components["schemas"]["PageThemeTokens"];
+            designVersion: number;
             /** @default 0 */
             viewCount: number;
             createdAt: string;
@@ -28615,6 +28678,9 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+            theme?: string | null;
+            themeTokens?: components["schemas"]["PageThemeTokens"];
+            designVersion?: number;
         };
         PromptTemplateResponse: components["schemas"]["PromptTemplate"] & {
             defaultDrifted: boolean;

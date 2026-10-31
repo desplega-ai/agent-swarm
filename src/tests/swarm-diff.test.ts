@@ -28,6 +28,16 @@ const EXAMPLE_HUNK = {
   ],
 };
 
+/** The rendered diff rows: old-side and new-side gutter numbers plus the row HTML. */
+function diffRows(html: string): { old: string; new: string; html: string }[] {
+  return [...html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map(([, row]) => {
+    const [oldCell = "", newCell = ""] = [
+      ...row!.matchAll(/<td class="swarm-diff-gutter"[^>]*>([^<]*)<\/td>/g),
+    ].map(([, cell]) => cell!);
+    return { old: oldCell, new: newCell, html: row! };
+  });
+}
+
 type StubInstance = {
   innerHTML: string;
   textContent: string;
@@ -55,12 +65,15 @@ function makeRig(
 ): {
   Ctor: new () => StubInstance;
   CursorsCtor: new () => StubInstance;
+  JumpsCtor: new () => StubInstance;
   SdkCtor?: new () => { room: (name?: string, options?: unknown) => Promise<unknown> };
   body: StubInstance;
   setText: (el: StubInstance, attrs: Record<string, string>, text: string) => void;
   fireDocumentEvent: (name: string, event: unknown) => void;
   fireNextFrame: () => void;
   flushMicrotasks: () => Promise<void>;
+  /** Sets what `document.querySelectorAll` returns (the jump list's anchors). */
+  setAnchors: (anchors: unknown[]) => void;
 } {
   const registry = new Map<string, new () => StubInstance>();
   const documentListeners = new Map<string, ((event: unknown) => void)[]>();
@@ -143,12 +156,13 @@ function makeRig(
 
   // Provide `document` stubs the jump-list path uses.
   const body = new StubHTMLElement();
+  let anchors: unknown[] = [];
   const doc = {
     readyState,
     documentElement: { scrollWidth: 1000, scrollHeight: 500, clientWidth: 1000, clientHeight: 500 },
     body,
     createElement: () => new StubHTMLElement(),
-    querySelectorAll: () => [],
+    querySelectorAll: () => anchors,
     addEventListener: (name: string, handler: (event: unknown) => void) => {
       const handlers = documentListeners.get(name) ?? [];
       handlers.push(handler);
@@ -176,7 +190,7 @@ function makeRig(
     "CustomEvent",
     "queueMicrotask",
     "console",
-    `${SWARM_UI_JS}\nreturn { diff: window.customElements.get('swarm-diff'), cursors: window.customElements.get('swarm-cursors'), sdk: window.SwarmSDK };`,
+    `${SWARM_UI_JS}\nreturn { diff: window.customElements.get('swarm-diff'), cursors: window.customElements.get('swarm-cursors'), jumps: window.customElements.get('swarm-diff-jumps'), sdk: window.SwarmSDK };`,
   );
   const constructors = factory(
     win,
@@ -189,16 +203,20 @@ function makeRig(
   ) as {
     diff?: new () => StubInstance;
     cursors?: new () => StubInstance;
+    jumps?: new () => StubInstance;
     sdk?: new () => { room: (name?: string, options?: unknown) => Promise<unknown> };
   };
   const Ctor = constructors.diff;
   if (!Ctor) throw new Error("custom element did not register");
   const CursorsCtor = constructors.cursors;
   if (!CursorsCtor) throw new Error("swarm-cursors custom element did not register");
+  const JumpsCtor = constructors.jumps;
+  if (!JumpsCtor) throw new Error("swarm-diff-jumps custom element did not register");
 
   return {
     Ctor,
     CursorsCtor,
+    JumpsCtor,
     SdkCtor: constructors.sdk,
     body,
     setText(el, attrs, text) {
@@ -219,6 +237,9 @@ function makeRig(
     async flushMicrotasks() {
       // Drain the chained async room-open and render callbacks.
       for (let i = 0; i < 5; i++) await Promise.resolve();
+    },
+    setAnchors(list) {
+      anchors = list;
     },
   };
 }
@@ -517,6 +538,58 @@ describe("<swarm-diff> render", () => {
     expect(html).toContain("Avoid raw console.log");
   });
 
+  test("shows an annotation once, on its new-side line, not on a context row with that old-side number", async () => {
+    // Three added lines shift the new side: the context row `});` is old 63,
+    // new 66, and the annotation names new line 63.
+    const shifted = {
+      hunks: [
+        {
+          old_start: 60,
+          old_lines: 4,
+          new_start: 60,
+          new_lines: 7,
+          lines: [
+            { type: "context", text: "start();" },
+            { type: "add", text: "one();" },
+            { type: "add", text: "two();" },
+            { type: "add", text: "three();" },
+            { type: "context", text: "four();" },
+            { type: "context", text: "five();" },
+            { type: "context", text: "});" },
+          ],
+          annotations: [{ line: 63, severity: "warn", text: "Note on new line 63" }],
+        },
+      ],
+    };
+    const html = await renderViaStub(JSON.stringify(shifted), { file: "src/a.ts" });
+    const rows = diffRows(html);
+    expect(rows.find((row) => row.html.includes("});"))).toMatchObject({ old: "63", new: "66" });
+    const annotated = rows.filter((row) => row.html.includes("Note on new line 63"));
+    expect(annotated.map((row) => [row.old, row.new])).toEqual([["", "63"]]);
+  });
+
+  test("matches a deleted row's annotation on its old-side number", async () => {
+    const deleted = {
+      hunks: [
+        {
+          old_start: 10,
+          old_lines: 3,
+          new_start: 20,
+          new_lines: 2,
+          lines: [
+            { type: "context", text: "keep();" },
+            { type: "del", text: "drop();" },
+            { type: "context", text: "keepToo();" },
+          ],
+          annotations: [{ line: 11, severity: "error", text: "Why drop this?" }],
+        },
+      ],
+    };
+    const html = await renderViaStub(JSON.stringify(deleted), { file: "src/b.ts" });
+    const annotated = diffRows(html).filter((row) => row.html.includes("Why drop this?"));
+    expect(annotated.map((row) => [row.old, row.new])).toEqual([["11", ""]]);
+  });
+
   test("handles empty/missing JSON body gracefully (no rows, no throw)", async () => {
     const html = await renderViaStub("", { file: "empty.ts" });
     // Should still render an outer container with the file name.
@@ -542,6 +615,52 @@ describe("<swarm-diff> render", () => {
     expect(html).not.toContain("<script>alert(");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&lt;bad&gt;");
+  });
+});
+
+describe("<swarm-diff-jumps> labels", () => {
+  const hunk = (oldStart: number, newStart: number) => ({
+    old_start: oldStart,
+    old_lines: 1,
+    new_start: newStart,
+    new_lines: 1,
+    lines: [{ type: "context", text: "x();" }],
+  });
+
+  test("a file with more than one hunk shows each hunk's new-side start line", async () => {
+    const rig = makeRig();
+    const render = async (file: string, hunks: unknown[]) => {
+      const el = new rig.Ctor();
+      rig.setText(el, { file }, JSON.stringify({ hunks }));
+      el.connectedCallback?.();
+      await rig.flushMicrotasks();
+      return el;
+    };
+    // The anchors the jump list finds in the document, built from the rendered HTML.
+    const anchorsOf = (diff: StubInstance) =>
+      [
+        ...diff.innerHTML.matchAll(
+          /<a id="([^"]*)" class="swarm-diff-anchor" data-hunk="([^"]*)" data-new-start="([^"]*)"><\/a>/g,
+        ),
+      ].map(([, id, slug, newStart]) => {
+        const attrs: Record<string, string> = { "data-hunk": slug!, "data-new-start": newStart! };
+        return { id, getAttribute: (name: string) => attrs[name] ?? null, closest: () => diff };
+      });
+    const x = await render("src/x.ts", [hunk(10, 58), hunk(100, 120)]);
+    const y = await render("src/y.ts", [hunk(5, 5)]);
+    rig.setAnchors([...anchorsOf(x), ...anchorsOf(y)]);
+
+    const jumps = new rig.JumpsCtor();
+    jumps.connectedCallback?.();
+    await rig.flushMicrotasks();
+    const links = [
+      ...jumps.innerHTML.matchAll(/<a href="#([^"]*)" target="_self"[^>]*>([^<]*)<\/a>/g),
+    ].map(([, href, label]) => [href, label]);
+    expect(links).toEqual([
+      ["swarm-diff-src-x-ts-10", "src/x.ts:58"],
+      ["swarm-diff-src-x-ts-100", "src/x.ts:120"],
+      ["swarm-diff-src-y-ts-5", "src/y.ts"],
+    ]);
   });
 });
 

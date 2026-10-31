@@ -198,6 +198,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageSearchSql } from "./db/page-search";
+import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import {
   assertAssetKeyMovesAllowed,
@@ -8620,6 +8621,9 @@ type PageRow = {
   createdAt: string;
   updatedAt: string;
   view_count: number;
+  theme: string | null;
+  theme_tokens: string | null;
+  design_version: number;
 };
 
 function rowToPage(row: PageRow): Page {
@@ -8637,6 +8641,9 @@ function rowToPage(row: PageRow): Page {
     needsCredentials: row.needsCredentials
       ? (JSON.parse(row.needsCredentials) as string[])
       : undefined,
+    theme: row.theme ?? null,
+    themeTokens: parsePageThemeTokens(row.theme_tokens),
+    designVersion: typeof row.design_version === "number" ? row.design_version : 1,
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -8654,13 +8661,17 @@ export async function createPage(data: {
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
+  theme?: string | null;
+  themeTokens?: Page["themeTokens"];
+  /** Defaults to 2 (the swarm design system). Rows inserted outside this function default to 1. */
+  designVersion?: number;
 }): Promise<Page> {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
   const row = await getDbClient().get<PageRow>(
-    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
@@ -8673,6 +8684,9 @@ export async function createPage(data: {
       data.passwordHash ?? null,
       data.body,
       data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+      data.theme ?? null,
+      data.themeTokens ? JSON.stringify(data.themeTokens) : null,
+      data.designVersion ?? 2,
     ],
   );
   if (!row) throw new Error("Failed to create page");
@@ -8859,6 +8873,11 @@ export async function updatePage(
     body?: string;
     needsCredentials?: string[] | null;
     slug?: string;
+    /** undefined keeps the stored value, null clears it. */
+    theme?: string | null;
+    /** undefined keeps the stored value, null clears it. */
+    themeTokens?: Page["themeTokens"];
+    designVersion?: number;
   },
 ): Promise<Page | null> {
   const updates: string[] = [];
@@ -8898,6 +8917,18 @@ export async function updatePage(
   if (data.slug !== undefined) {
     updates.push("slug = ?");
     params.push(data.slug);
+  }
+  if (data.theme !== undefined) {
+    updates.push("theme = ?");
+    params.push(data.theme);
+  }
+  if (data.themeTokens !== undefined) {
+    updates.push("theme_tokens = ?");
+    params.push(data.themeTokens ? JSON.stringify(data.themeTokens) : null);
+  }
+  if (data.designVersion !== undefined) {
+    updates.push("design_version = ?");
+    params.push(data.designVersion);
   }
   if (updates.length === 0) return getPage(id);
   updates.push("updatedAt = ?");

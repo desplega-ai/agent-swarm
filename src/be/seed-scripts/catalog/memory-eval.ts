@@ -522,6 +522,8 @@ export default async function memoryEval(args: any, ctx: any) {
         description: `3-axis memory quality dashboard: carry-forward ${report.axis1.score}%, preferences usefulness ${report.axis2.avgUsefulness}, freshness ${report.axis3.freshScore}%. ${history.length} data points.`,
         contentType: "text/html",
         authMode: "authed",
+        // The dashboard ships its own palette, written for the v1 page head.
+        designVersion: 1,
         body: html,
       });
       const payload = response?.data ?? response;

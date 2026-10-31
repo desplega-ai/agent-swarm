@@ -219,3 +219,185 @@ describe("pages storage CRUD", () => {
     await expect(snapshotPage("0".repeat(32), "agent-x")).rejects.toThrow(/not found/);
   });
 });
+
+describe("pages design fields", () => {
+  const tokens = {
+    light: { "--color-primary": "oklch(0.55 0.2 260)", "--radius-lg": "0.5rem" },
+    dark: { "--color-primary": "oklch(0.7 0.15 260)" },
+  };
+
+  test("createPage defaults to design version 2 with no theme and no tokens", async () => {
+    const created = await createPage({
+      agentId: makeAgentId(),
+      slug: "design-default",
+      title: "Design default",
+      contentType: "text/html",
+      body: "<h1>hi</h1>",
+    });
+    expect(created.designVersion).toBe(2);
+    expect(created.theme).toBeNull();
+    expect(created.themeTokens).toBeNull();
+
+    const fetched = await getPage(created.id);
+    expect(fetched?.designVersion).toBe(2);
+    expect(fetched?.theme).toBeNull();
+    expect(fetched?.themeTokens).toBeNull();
+  });
+
+  test("createPage stores the theme, the tokens, and an explicit design version", async () => {
+    const created = await createPage({
+      agentId: makeAgentId(),
+      slug: "design-explicit",
+      title: "Design explicit",
+      contentType: "text/html",
+      body: "<h1>hi</h1>",
+      theme: "paper",
+      themeTokens: tokens,
+      designVersion: 1,
+    });
+    const fetched = await getPage(created.id);
+    expect(fetched?.theme).toBe("paper");
+    expect(fetched?.themeTokens).toEqual(tokens);
+    expect(fetched?.designVersion).toBe(1);
+  });
+
+  test("a row inserted without the design columns reads design version 1", async () => {
+    const row = await getDbClient().get<{ id: string }>(
+      `INSERT INTO pages (agentId, slug, title, contentType, body)
+         VALUES (?, ?, ?, ?, ?) RETURNING id`,
+      [makeAgentId(), "sql-design-default", "SQL design default", "text/html", "<h1>old</h1>"],
+    );
+    const page = await getPage(row!.id);
+    expect(page?.designVersion).toBe(1);
+    expect(page?.theme).toBeNull();
+    expect(page?.themeTokens).toBeNull();
+  });
+
+  test("updatePage keeps omitted design fields, sets new ones, and clears with null", async () => {
+    const page = await createPage({
+      agentId: makeAgentId(),
+      slug: "design-update",
+      title: "Design update",
+      contentType: "text/html",
+      body: "<h1>v1</h1>",
+      theme: "paper",
+      themeTokens: tokens,
+    });
+
+    // Omitted fields stay as they were.
+    const kept = await updatePage(page.id, { body: "<h1>v2</h1>" });
+    expect(kept?.theme).toBe("paper");
+    expect(kept?.themeTokens).toEqual(tokens);
+    expect(kept?.designVersion).toBe(2);
+
+    // New values replace the stored ones.
+    const replaced = await updatePage(page.id, {
+      theme: "github",
+      themeTokens: { light: { "--radius-lg": "1rem" }, dark: {} },
+      designVersion: 1,
+    });
+    expect(replaced?.theme).toBe("github");
+    expect(replaced?.themeTokens).toEqual({ light: { "--radius-lg": "1rem" }, dark: {} });
+    expect(replaced?.designVersion).toBe(1);
+
+    // null clears the theme and the tokens.
+    const cleared = await updatePage(page.id, { theme: null, themeTokens: null });
+    expect(cleared?.theme).toBeNull();
+    expect(cleared?.themeTokens).toBeNull();
+    expect(cleared?.designVersion).toBe(1);
+    const reread = await getPage(page.id);
+    expect(reread?.theme).toBeNull();
+    expect(reread?.themeTokens).toBeNull();
+  });
+
+  test("theme_tokens that is not valid tokens JSON reads as null", async () => {
+    const page = await createPage({
+      agentId: makeAgentId(),
+      slug: "design-bad-json",
+      title: "Design bad JSON",
+      contentType: "text/html",
+      body: "<h1>hi</h1>",
+      themeTokens: tokens,
+    });
+    for (const stored of ["{not json", '{"light": 1}', '["light"]', "null", ""]) {
+      await getDbClient().run("UPDATE pages SET theme_tokens = ? WHERE id = ?", [stored, page.id]);
+      expect((await getPage(page.id))?.themeTokens).toBeNull();
+    }
+  });
+
+  test("snapshotPage carries the design fields", async () => {
+    const agentId = makeAgentId();
+    const page = await createPage({
+      agentId,
+      slug: "design-snapshot",
+      title: "Design snapshot",
+      contentType: "text/html",
+      body: "<h1>v1</h1>",
+      theme: "paper",
+      themeTokens: tokens,
+      designVersion: 1,
+    });
+    await snapshotPage(page.id, agentId);
+    await updatePage(page.id, { theme: null, themeTokens: null, designVersion: 2 });
+
+    const version = await getPageVersion(page.id, 1);
+    expect(version?.snapshot.theme).toBe("paper");
+    expect(version?.snapshot.themeTokens).toEqual(tokens);
+    expect(version?.snapshot.designVersion).toBe(1);
+
+    // A page without a theme snapshots the nulls, not missing keys.
+    await snapshotPage(page.id, agentId);
+    const second = await getPageVersion(page.id, 2);
+    expect(second?.snapshot.theme).toBeNull();
+    expect(second?.snapshot.themeTokens).toBeNull();
+    expect(second?.snapshot.designVersion).toBe(2);
+  });
+
+  test("a snapshot stored before design version 2 still reads, without the design fields", async () => {
+    const page = await createPage({
+      agentId: makeAgentId(),
+      slug: "design-old-snapshot",
+      title: "Design old snapshot",
+      contentType: "text/html",
+      body: "<h1>old</h1>",
+    });
+    const oldSnapshot = JSON.stringify({
+      title: "Old",
+      contentType: "text/html",
+      authMode: "public",
+      body: "<h1>old</h1>",
+    });
+    await getDbClient().run(
+      "INSERT INTO page_versions (pageId, version, snapshot) VALUES (?, 1, ?)",
+      [page.id, oldSnapshot],
+    );
+    const version = await getPageVersion(page.id, 1);
+    expect(version?.snapshot.title).toBe("Old");
+    expect(version?.snapshot.theme).toBeUndefined();
+    expect(version?.snapshot.themeTokens).toBeUndefined();
+    expect(version?.snapshot.designVersion).toBeUndefined();
+  });
+
+  test("slim list rows leave out the design fields and full rows carry them", async () => {
+    const agentId = makeAgentId();
+    await createPage({
+      agentId,
+      slug: "design-list",
+      title: "Design list",
+      contentType: "text/html",
+      body: "<h1>hi</h1>",
+      theme: "paper",
+      themeTokens: tokens,
+    });
+    const [slim] = await listPagesByAgent(agentId, 10, 0, { slim: true });
+    expect(slim).toBeDefined();
+    expect("theme" in slim!).toBe(false);
+    expect("themeTokens" in slim!).toBe(false);
+    expect("designVersion" in slim!).toBe(false);
+
+    const [full] = await listPagesByAgent(agentId, 10, 0, { slim: false });
+    expect(full?.theme).toBe("paper");
+    expect(full?.themeTokens).toEqual(tokens);
+    expect(full?.designVersion).toBe(2);
+  });
+});

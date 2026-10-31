@@ -51,8 +51,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTheme } from "@/hooks/use-theme";
 import { getConfig } from "@/lib/config";
 import { getPageContext } from "@/lib/page-context";
+import { DEFAULT_THEME_ID } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
 import { FeedbackConfirmDialog } from "./feedback-confirm-dialog";
@@ -80,12 +82,28 @@ function getPageHtmlUrl(id: string): string {
 }
 
 /**
+ * Query params that give a design version 2 page the viewer's theme preset
+ * and color mode. The API reads them on `/p/:id` under the same constant
+ * names (`src/pages/page-head.ts`). Version 1 pages ignore them.
+ */
+const PAGE_THEME_PARAM = "__swarm-theme";
+const PAGE_MODE_PARAM = "__swarm-mode";
+
+/**
  * Query params the SPA owns on `/pages/:id` and must never forward to the
  * page body: `mode` (full-screen toggle), `key` (password unlock is handled
- * by the password frame itself) and the connection overrides, which would
- * otherwise hand the API key to agent-authored HTML.
+ * by the password frame itself), the connection overrides, which would
+ * otherwise hand the API key to agent-authored HTML, and the viewer theme
+ * params, which only `withViewerTheme` sets (from the dashboard theme).
  */
-const SPA_RESERVED_PAGE_PARAMS = new Set(["mode", "key", "apiUrl", "apiKey"]);
+const SPA_RESERVED_PAGE_PARAMS = new Set([
+  "mode",
+  "key",
+  "apiUrl",
+  "apiKey",
+  PAGE_THEME_PARAM,
+  PAGE_MODE_PARAM,
+]);
 
 /**
  * Query string forwarded from the SPA route to the page body, so a link like
@@ -99,6 +117,24 @@ function pageFrameQuery(searchParams: URLSearchParams): string {
     if (!SPA_RESERVED_PAGE_PARAMS.has(name)) forwarded.append(name, value);
   }
   const query = forwarded.toString();
+  return query ? `?${query}` : "";
+}
+
+/**
+ * `frameQuery` plus the viewer's theme, for the URLs that load the page body:
+ * the iframe src and the "Open" link. Hive and light mode are the page
+ * defaults, so they add no param. The "Full" route renders the frame itself,
+ * so it does not take this query. "Export PDF" takes the preset only (it
+ * passes light), because print is always light.
+ */
+function withViewerTheme(
+  frameQuery: string,
+  viewer: { preset: string; theme: "dark" | "light" },
+): string {
+  const params = new URLSearchParams(frameQuery);
+  if (viewer.preset !== DEFAULT_THEME_ID) params.set(PAGE_THEME_PARAM, viewer.preset);
+  if (viewer.theme === "dark") params.set(PAGE_MODE_PARAM, "dark");
+  const query = params.toString();
   return query ? `?${query}` : "";
 }
 
@@ -177,7 +213,10 @@ async function fetchPageMetadataWithLaunchRetry(id: string): Promise<PageMetadat
 interface FrameProps {
   id: string;
   title: string;
-  /** `?a=b` string forwarded to the page body (see `pageFrameQuery`), or "". */
+  /**
+   * `?a=b` string for the page body URL: the forwarded params plus the viewer
+   * theme (see `pageFrameQuery` and `withViewerTheme`), or "".
+   */
   frameQuery: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
@@ -193,6 +232,10 @@ function PageIframe({
 }) {
   return (
     <iframe
+      // A new src (a theme or mode switch, a param change) mounts a new
+      // frame. Changing the src of a loaded frame would add a browser
+      // history entry, so Back would step through old frame URLs.
+      key={src}
       ref={iframeRef}
       src={src}
       title={title}
@@ -305,17 +348,26 @@ function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
 
 function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
   const [password, setPassword] = useState("");
-  const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
 
-  if (iframeSrc) {
-    return <PageIframe src={iframeSrc} title={title} iframeRef={iframeRef} />;
+  // The src comes from the current `frameQuery` on each render, so a theme or
+  // mode switch reloads the unlocked frame too. The form is gone after the
+  // submit, so `password` keeps the submitted key.
+  if (unlocked) {
+    const params = new URLSearchParams(frameQuery);
+    params.set("key", password);
+    return (
+      <PageIframe
+        src={`${getPageHtmlUrl(id)}?${params.toString()}`}
+        title={title}
+        iframeRef={iframeRef}
+      />
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const params = new URLSearchParams(frameQuery);
-    params.set("key", password);
-    setIframeSrc(`${getPageHtmlUrl(id)}?${params.toString()}`);
+    setUnlocked(true);
   }
 
   return (
@@ -377,8 +429,12 @@ function ArtifactPageError({ message }: { message: string }) {
 export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const viewer = useTheme();
   const fullMode = searchParams.get("mode") === "full";
   const frameQuery = pageFrameQuery(searchParams);
+  // The page body URLs (the frames, "Open") follow the dashboard theme. A
+  // theme or mode switch changes this string, which reloads the frame.
+  const themedFrameQuery = withViewerTheme(frameQuery, viewer);
   const feedbackOn = isFeedbackOn(searchParams);
   const toggleFeedback = useCallback(() => {
     setSearchParams(
@@ -435,12 +491,13 @@ export default function ArtifactPage() {
   // server appends an auto-print snippet to the `?print=1` response, and the
   // page-session cookie (minted during the metadata fetch) rides along on the
   // top-level navigation so authed/password pages still resolve. Triggered
-  // synchronously from the click so the pop-up isn't blocked.
+  // synchronously from the click so the pop-up isn't blocked. The PDF keeps
+  // the viewer's preset but never the dark mode: print is always light.
   const handleExportPdf = useCallback(() => {
     if (!pageId) return;
-    const url = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(pageId)}?print=1`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, [pageId]);
+    const query = withViewerTheme("?print=1", { preset: viewer.preset, theme: "light" });
+    window.open(`${getPageHtmlUrl(pageId)}${query}`, "_blank", "noopener,noreferrer");
+  }, [pageId, viewer.preset]);
 
   if (!gate.supported) {
     return (
@@ -483,7 +540,7 @@ export default function ArtifactPage() {
           <PublicHtmlFrame
             id={pageId!}
             title={data.title}
-            frameQuery={frameQuery}
+            frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
           />
         );
@@ -493,7 +550,7 @@ export default function ArtifactPage() {
           <AuthedHtmlFrame
             id={pageId!}
             title={data.title}
-            frameQuery={frameQuery}
+            frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
           />
         );
@@ -503,7 +560,7 @@ export default function ArtifactPage() {
           <PasswordHtmlFrame
             id={pageId!}
             title={data.title}
-            frameQuery={frameQuery}
+            frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
           />
         );
@@ -548,6 +605,7 @@ export default function ArtifactPage() {
           <PageHeaderActions
             id={pageId!}
             frameQuery={frameQuery}
+            themedFrameQuery={themedFrameQuery}
             authMode={data.authMode}
             favorite={pageRow?.favorite}
             favoriteDisabled={favoriteToggle.isPending}
@@ -556,8 +614,9 @@ export default function ArtifactPage() {
             }
             onExportPdf={handleExportPdf}
             feedback={
-              // HTML only (JSON pages render in the SPA), and not for password
-              // pages: the unlocked frame keeps the URL it was opened with.
+              // HTML only (JSON pages render in the SPA). Not offered for
+              // password pages yet, though their unlocked frame follows the
+              // frame query, so the toggle would reach it.
               data.contentType === "text/html" && data.authMode !== "password"
                 ? { on: feedbackOn, onToggle: toggleFeedback }
                 : undefined
@@ -601,6 +660,7 @@ function PageSlugLine({ id }: { id: string }) {
 function PageHeaderActions({
   id,
   frameQuery,
+  themedFrameQuery,
   authMode,
   favorite,
   favoriteDisabled,
@@ -609,7 +669,10 @@ function PageHeaderActions({
   feedback,
 }: {
   id: string;
+  /** Forwarded page params, for the "Full" route. */
   frameQuery: string;
+  /** `frameQuery` plus the viewer theme, for the "Open" link. */
+  themedFrameQuery: string;
   authMode: PageMetadata["authMode"];
   favorite?: boolean;
   favoriteDisabled?: boolean;
@@ -618,9 +681,9 @@ function PageHeaderActions({
   /** Feedback-overlay toggle; omitted when the page cannot take feedback. */
   feedback?: { on: boolean; onToggle: () => void };
 }) {
-  // The share link carries the same forwarded params as the iframe, so
-  // "Open" keeps whatever filter the page is showing.
-  const href = getPageHtmlUrl(id) + frameQuery;
+  // The share link carries the same query as the iframe, so "Open" keeps
+  // whatever filter, theme and mode the page is showing.
+  const href = getPageHtmlUrl(id) + themedFrameQuery;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
