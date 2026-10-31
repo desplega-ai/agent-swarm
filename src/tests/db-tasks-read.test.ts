@@ -36,6 +36,27 @@ beforeEach(async () => {
 });
 afterEach(() => db.closeDb());
 
+test("unfiltered small pages use the lastUpdatedAt index without planner statistics", async () => {
+  const client = db.getDbClient();
+  for (const includeHeartbeat of [false, true]) {
+    for (const limit of [1, 5, 50]) {
+      const query = spyOn(client, "query");
+      let sql = "";
+      let params: unknown[] = [];
+      try {
+        await db.getAllTasks({ limit, includeHeartbeat });
+        [sql, params = []] = query.mock.calls.find(([s]) => s.includes("WITH page AS"))!;
+      } finally {
+        query.mockRestore();
+      }
+      const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
+      expect(plan.map((row) => row.detail).join("\n")).toContain(
+        "SCAN agent_tasks USING INDEX idx_agent_tasks_last_updated",
+      );
+    }
+  }
+});
+
 // Characterized against the pre-extraction facade at 8a8b7b53.
 const cases: {
   name: string;
