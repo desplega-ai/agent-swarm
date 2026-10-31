@@ -310,6 +310,34 @@ function envelope(result: unknown = clairicResult()) {
 // ─── Request and answers ────────────────────────────────────
 
 describe("system-one-extraction on Cloudflare Clairic", () => {
+  test("a test process can send the Cloudflare request to a loopback mock", async () => {
+    const { executor, calls } = makeExecutor([jsonResponse(envelope())], {
+      env: { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://localhost" },
+    });
+    expect((await run(executor, config())).status).toBe("success");
+    expect(calls[0]?.url).toBe(
+      `http://localhost/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/cloudflare/clairic`,
+    );
+  });
+
+  for (const env of [
+    { NODE_ENV: "production", CLOUDFLARE_API_BASE_URL: "http://localhost" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "https://example.com" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://example.com" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://localhost.example.com" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://user:pass@localhost" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://localhost/proxy" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://localhost?target=remote" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "http://localhost#fragment" },
+    { NODE_ENV: "test", CLOUDFLARE_API_BASE_URL: "invalid-url" },
+  ]) {
+    test(`ignores the Cloudflare override ${JSON.stringify(env)}`, async () => {
+      const { executor, calls } = makeExecutor([jsonResponse(envelope())], { env });
+      expect((await run(executor, config())).status).toBe("success");
+      expect(calls[0]?.url).toBe(`${CF_BASE}/clairic`);
+    });
+  }
+
   test("sends the Clairic request to the account-scoped route and returns typed answers", async () => {
     const { executor, calls } = makeExecutor([jsonResponse(envelope())]);
     const result = await run(executor, config({ referenceDate: "2026-10-09" }));
@@ -538,7 +566,8 @@ describe("system-one-extraction config", () => {
   test("only Clairic models and extraction hosts are accepted", () => {
     expect(parse({ model: "clef" }).success).toBe(false);
     expect(parse({ provider: "typesafe" }).success).toBe(false);
-    expect(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).toEqual(["laya", "cloudflare"]);
+    expect(parse({ provider: "laya" }).success).toBe(false);
+    expect(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).toEqual(["cloudflare"]);
     // The decision hosts are unchanged.
     expect(SYSTEM_ONE_PROVIDER_IDS).toEqual([
       "typesafe",

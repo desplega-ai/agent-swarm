@@ -26,15 +26,14 @@ export type McpConnectOptions = {
 export function createMcpConnector(baseUrl: string, key: string) {
   return async function connectMcp(agentId: string, options: McpConnectOptions = {}) {
     const client = new Client({ name: "agent-swarm-e2e", version: "1.0.0" });
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${options.apiKey ?? key}`);
+    headers.set("X-Agent-ID", agentId);
     const transport = new StreamableHTTPClientTransport(
       new URL(`${baseUrl}${options.path ?? "/mcp"}`),
       {
         requestInit: {
-          headers: {
-            Authorization: `Bearer ${options.apiKey ?? key}`,
-            "X-Agent-ID": agentId,
-            ...options.headers,
-          },
+          headers,
         },
       },
     );

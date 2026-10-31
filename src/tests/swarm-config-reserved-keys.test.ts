@@ -157,6 +157,7 @@ describe("swarm-config reserved keys guard", () => {
     "CHAT_SDK_API_URL_OVERRIDES",
     "CODEX_OAUTH_DEVICE_BASE_URL",
     "DESPLEGA_TELEMETRY_ENDPOINT",
+    "CLOUDFLARE_API_BASE_URL",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };
