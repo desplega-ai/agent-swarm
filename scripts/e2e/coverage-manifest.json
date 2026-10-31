@@ -3,5 +3,207 @@
   "routes": [],
   "mcpTools": [],
   "nodeTypes": [],
-  "flows": {}
+  "flows": {
+    "agent-access-tokens": {
+      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
+      "scenarios": ["core-agent-access"]
+    },
+    "agent-fs-public-edge": {
+      "description": "public share/site pages through the agent-fs proxy and the Comb review-batch gate",
+      "scenarios": ["knowledge-agentfs-edges"]
+    },
+    "agentfs-proxy": {
+      "description": "Pass-through proxy to agent-fs with header allowlists, registration gate and rate limit, public share and site pages",
+      "scenarios": ["platformb-agentfs-proxy"]
+    },
+    "app-engine": {
+      "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
+      "scenarios": ["knowledge-apps"]
+    },
+    "asset-namespaces": {
+      "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
+      "scenarios": ["knowledge-assets"]
+    },
+    "budget-refusal": {
+      "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
+      "scenarios": ["core-budgets"]
+    },
+    "config-store": {
+      "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
+      "scenarios": ["platform-config", "platform-lead-tools"]
+    },
+    "cost-and-orphan-recovery": {
+      "description": "Session costs priced and billed, active sessions, orphan task recovery",
+      "scenarios": ["core-session-data"]
+    },
+    "credential-bindings": {
+      "description": "Standalone credential broker bindings swap a stored secret into a script's outbound fetch without the script ever seeing it.",
+      "scenarios": ["script-credential-bindings"]
+    },
+    "credential-pool": {
+      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
+      "scenarios": ["platform-keys", "platform-pool-keys", "platform-codex-accounts"]
+    },
+    "extension-lead-gating": {
+      "description": "Install by catalog name, enable and disable by lead tool, hook blocks and unblocks, run log, version list, owner delete",
+      "scenarios": ["extensions", "platformb-extensions"]
+    },
+    "external-script-endpoint": {
+      "description": "A saved script exposed as a bearer or open HTTP endpoint and invoked from outside.",
+      "scenarios": ["platform-edge"]
+    },
+    "first-run-onboarding": {
+      "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
+      "scenarios": ["platform-onboarding"]
+    },
+    "kapso-whatsapp-inbound": {
+      "description": "Lead registers a Kapso number, a signed inbound message becomes a task pinned to the mapped agent, unregister stops routing.",
+      "scenarios": ["platform-lead-tools", "platform-webhooks"]
+    },
+    "kv": {
+      "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
+      "scenarios": ["script-kv"]
+    },
+    "mcp-server-lifecycle": {
+      "description": "MCP server definitions created over HTTP and MCP tools, installed per agent, OAuth client pre-registered, deleted.",
+      "scenarios": ["platform-mcp-servers", "platform-mcp-server-tools"]
+    },
+    "memory-lifecycle": {
+      "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
+      "scenarios": ["knowledge-memory"]
+    },
+    "mention-wakeup": {
+      "description": "post-message with a mention produces an unread_mentions poll trigger",
+      "scenarios": ["core-messaging"]
+    },
+    "metric-dashboards": {
+      "description": "Metric definition lifecycle, versions, run, create_metric upsert",
+      "scenarios": ["core-telemetry"]
+    },
+    "model-catalog-and-pricing": {
+      "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
+      "scenarios": ["platformb-models"]
+    },
+    "oauth-app-authorization": {
+      "description": "OAuth app -> authorize-url -> provider callback -> authorization -> refresh -> remote revoke -> delete, against a loopback provider.",
+      "scenarios": ["platform-oauth-apps"]
+    },
+    "page-publishing": {
+      "description": "create page, serve public/authed/password, version history, feedback task, delete",
+      "scenarios": ["knowledge-pages"]
+    },
+    "prompt-template-override": {
+      "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
+      "scenarios": ["knowledge-prompt-templates"]
+    },
+    "provider-webhooks": {
+      "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore.",
+      "scenarios": ["platform-webhooks"]
+    },
+    "realtime-room-state": {
+      "description": "room reset/change/decode over HTTP, MCP, WebSocket and workflow wait",
+      "scenarios": ["realtime-rooms", "knowledge-rooms"]
+    },
+    "repo-registry": {
+      "description": "Register, update, gate allowMerge, list and delete repo records over HTTP and MCP",
+      "scenarios": ["platformb-repos"]
+    },
+    "script-apis": {
+      "description": "A saved script is published as a public endpoint, called with its bearer secret, rotated, disabled and deleted.",
+      "scenarios": ["script-apis"]
+    },
+    "script-connections": {
+      "description": "Script connections (openapi, graphql, sql, mcp): lifecycle, ctx.api egress with brokered bearer secret, MCP and SQL proxy routes, lead-only tool.",
+      "scenarios": ["script-connections"]
+    },
+    "script-credential-egress": {
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
+      "scenarios": ["script-connections", "script-credential-bindings"]
+    },
+    "script-inline-run": {
+      "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
+      "scenarios": ["script-inline-run"]
+    },
+    "script-limits": {
+      "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
+      "scenarios": ["script-limits"]
+    },
+    "script-runs-durable": {
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
+      "scenarios": ["script-runs-durable"]
+    },
+    "script-saved-lifecycle": {
+      "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",
+      "scenarios": ["script-saved-lifecycle"]
+    },
+    "script-sdk-calls": {
+      "description": "A script drives ctx.swarm (kv, agent, tasks, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
+      "scenarios": ["script-sdk-calls"]
+    },
+    "session-sharing": {
+      "description": "Owner, reader, writer and everyone access on a session, triage and moves",
+      "scenarios": ["core-sessions"]
+    },
+    "skills-lifecycle": {
+      "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",
+      "scenarios": ["knowledge-skills"]
+    },
+    "slack-agent-tools": {
+      "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread",
+      "scenarios": ["platformb-slack-tools"]
+    },
+    "task-attachments-local-fs": {
+      "description": "Upload, list, download byte for byte, delete a task attachment on the local-fs provider",
+      "scenarios": ["platformb-fs"]
+    },
+    "task-defer-wake": {
+      "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
+      "scenarios": ["core-task-tools"]
+    },
+    "task-delegation": {
+      "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
+      "scenarios": ["core-task-tools"]
+    },
+    "task-steering": {
+      "description": "Steer outcomes per harness, worker callbacks, accept-steer, promotion of undelivered steering",
+      "scenarios": ["core-steering"]
+    },
+    "tracker-disabled-contract": {
+      "description": "Linear and Jira routes answer the unconfigured contract; tracker tools keep sync and agent mappings without a provider",
+      "scenarios": ["platformb-trackers"]
+    },
+    "used-by-consent": {
+      "description": "Consent grant relayed to the proxy, persisted, revoked",
+      "scenarios": ["core-org"]
+    },
+    "user-token-lifecycle": {
+      "description": "Operator mints a user MCP token, the user authenticates with it on /api/whoami and /mcp-user, the operator revokes it and it stops working.",
+      "scenarios": ["platform-users-access"]
+    },
+    "workflow-approvals": {
+      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards",
+      "scenarios": ["workflow-approvals"]
+    },
+    "workflow-definitions": {
+      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types over HTTP and MCP",
+      "scenarios": ["workflow-definitions"]
+    },
+    "workflow-engine-control": {
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "scenarios": ["workflow-engine-control", "workflow-engine-cancel"]
+    },
+    "workflow-engine-nodes": {
+      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
+      "scenarios": [
+        "workflow-engine-instant-nodes",
+        "workflow-engine-async-nodes",
+        "workflow-engine-system-one",
+        "workflow-script-node"
+      ]
+    },
+    "workflow-schedules": {
+      "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
+      "scenarios": ["workflow-schedules"]
+    }
+  }
 }
