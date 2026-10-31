@@ -3810,6 +3810,9 @@
           },
           "requestedByUserId": {
             "type": "string"
+          },
+          "sourceTaskId": {
+            "type": "string"
           }
         },
         "required": [
@@ -49285,6 +49288,9 @@
                   "outputSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "allowRedelegation": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -49356,8 +49362,38 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent task failed, was cancelled, or was superseded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Blocked by the follow-up re-delegation guard",
             "content": {
               "application/json": {
                 "schema": {

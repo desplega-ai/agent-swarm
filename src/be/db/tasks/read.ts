@@ -1969,8 +1969,13 @@ export async function findRecentFailedTaskInThread(
 }
 
 /**
- * Count the tasks one agent created through `send-task` in a Slack thread
- * since the window start. The follow-up re-delegation loop cap reads this.
+ * Count the dispatches one agent made into a Slack thread since the window
+ * start: each `send-task` task counts once, and each durable script run counts
+ * once however many `ctx.step.agentTask` steps it created (step tasks share the
+ * `script-run:<runId>:` contextKey prefix). A run is dated by its first step,
+ * the dispatch the guard checked, so a run that started before the window does
+ * not count again for steps it adds later. The follow-up re-delegation loop cap
+ * reads this.
  */
 export async function countAgentDispatchesInThread(
   channelId: string,
@@ -1980,13 +1985,20 @@ export async function countAgentDispatchesInThread(
 ): Promise<number> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
   const row = await getDbClient().get<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM agent_tasks
-       WHERE slackChannelId = ?
-       AND slackThreadTs = ?
-       AND creatorAgentId = ?
-       AND source = 'mcp'
-       AND createdAt > ?`,
-    [channelId, threadTs, creatorAgentId, since],
+    `SELECT COUNT(*) AS c FROM (
+       SELECT MIN(createdAt) AS firstAt FROM agent_tasks
+         WHERE slackChannelId = ?
+         AND slackThreadTs = ?
+         AND creatorAgentId = ?
+         AND source = 'mcp'
+         AND (createdAt > ? OR taskType = 'script-run-step')
+         GROUP BY CASE
+           WHEN taskType = 'script-run-step' AND contextKey LIKE 'script-run:%:%'
+             THEN substr(contextKey, 1, instr(substr(contextKey, 12), ':') + 10)
+           ELSE id
+         END
+     ) WHERE firstAt > ?`,
+    [channelId, threadTs, creatorAgentId, since, since],
   );
   return row?.c ?? 0;
 }

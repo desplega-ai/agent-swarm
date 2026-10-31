@@ -28725,6 +28725,7 @@ export interface components {
             lastHeartbeatAt?: string;
             idempotencyKey?: string;
             requestedByUserId?: string;
+            sourceTaskId?: string;
         };
         ScriptRunJournalEntry: {
             /** Format: uuid */
@@ -32256,6 +32257,7 @@ export interface operations {
                     outputSchema?: {
                         [key: string]: unknown;
                     };
+                    allowRedelegation?: boolean;
                 };
             };
         };
@@ -32285,8 +32287,35 @@ export interface operations {
                     };
                 };
             };
+            /** @description Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Script run not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent task failed, was cancelled, or was superseded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blocked by the follow-up re-delegation guard */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
