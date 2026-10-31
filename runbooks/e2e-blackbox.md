@@ -32,6 +32,11 @@ the mock cannot issue"), never "flaky" or "later".
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | none, disabled | `*_DISABLE=true` |
 | Harness workers | none in the contract run; `--harness` legs spawn real workers with real credentials | |
 
+Two scenarios touch the network on purpose and accept every documented outcome, so an
+offline run still passes: `platformb-models` forces a models.dev catalog refresh, and
+`knowledge-skills` exercises only the validation paths of remote skill installs. Everything
+else is hermetic.
+
 Every request the mocks receive is journaled. Scenarios assert on the journal
 (`ctx.llm.requests`, `ctx.slack.apiCalls(...)`) so a silent "the server never called the
 model" is a failure, not a pass.
