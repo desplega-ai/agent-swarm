@@ -11,9 +11,8 @@ import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/
 import {
   advanceIdentityBaselines,
   contentSha256,
-  type FileReader,
-  type FileWriter,
-  readFileIfExists,
+  PROFILE_FILE_IO,
+  type ProfileFileIO,
   readIdentityBaselines,
 } from "../commands/profile-sync";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
@@ -108,19 +107,6 @@ export async function fetchTaskDetails(
   }
 }
 
-/** Profile-file IO, injectable so tests never touch the real workspace. */
-export interface ProfileFileIO {
-  readFile: FileReader;
-  writeFile: FileWriter;
-}
-
-const PROFILE_FILE_IO: ProfileFileIO = {
-  readFile: readFileIfExists,
-  writeFile: async (path, content) => {
-    await Bun.write(path, content);
-  },
-};
-
 /**
  * Sync identity files (SOUL.md, IDENTITY.md, TOOLS.md) to server. A file whose
  * hash still equals its baseline was not edited and is skipped, so a stale copy
@@ -161,7 +147,7 @@ export async function syncIdentityFilesToServer(
       body: JSON.stringify({ ...updates, changeSource }),
       signal,
     });
-    if (resp.ok) await advanceIdentityBaselines(updates, io.readFile, io.writeFile);
+    if (resp.ok) await advanceIdentityBaselines(updates, io);
   } catch {
     /* silently fail */
   }
@@ -199,7 +185,7 @@ export async function syncSetupScriptToServer(
       body: JSON.stringify({ setupScript: content, changeSource }),
     });
     if (resp.ok) {
-      await advanceIdentityBaselines({ setupScript: content }, io.readFile, io.writeFile);
+      await advanceIdentityBaselines({ setupScript: content }, io);
     }
   } catch {
     /* silently fail */
