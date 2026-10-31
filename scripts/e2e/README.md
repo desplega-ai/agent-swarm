@@ -134,10 +134,17 @@ After the scenarios, `coverage.ts`:
    tool. Node types come from `SELECT DISTINCT nodeType FROM workflow_run_steps`.
 3. Applies `coverage-manifest.json`: excluded items leave the denominator. An exclusion
    that is covered anyway is **stale**; one that matches nothing is **dead**. Both fail strict.
-4. Checks `flows`: each named scenario must exist and have passed.
+4. Reads every `stateSurfaces` entry: one read-only `SELECT ... AS value` on the SUT database
+   (task statuses, workflow run and step statuses, script run statuses, script step types,
+   script scopes, fs modes, executors). Every value in the declared universe must have been
+   produced unless excluded with a reason; a value in the database that the universe does not
+   list is a new engine state and fails strict until it is declared.
+5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
+   registry must belong to at least one flow.
 
 The result JSON carries `coverage.routes.uncovered`, `coverage.mcpTools.uncovered`,
-`coverage.nodeTypes.uncovered`, `coverage.flows`, `coverage.latency.byGroup`
+`coverage.nodeTypes.uncovered`, `coverage.stateSurfaces[]` (uncovered and unexpected values per
+surface), `coverage.scenariosWithoutFlow`, `coverage.flows`, `coverage.latency.byGroup`
 (count, p50, p95, max in ms) and `gates.failures`. The Markdown summary renders the same.
 
 Adding an exclusion is a review decision. Write the reason so a reviewer can verify it

@@ -605,6 +605,58 @@ export const scriptRunsDurable: Scenario = {
     await ctx.api("DELETE", `/api/script-runs/${asString(asRecord(afterCap.json).id, "id")}`);
     for (const id of [taskRunId, failId]) await ctx.api("DELETE", `/api/script-runs/${id}`);
 
+    // ── parked for the state-surface gate: one run aborted by a limit, one left paused ──
+    // The 51st journaled agent-task step exceeds SCRIPT_RUN_MAX_AGENT_TASKS (default 50): the
+    // journal write answers 429 and the run ends aborted_limit. Neither run is cancelled.
+    const limitRunId = await createRun(
+      ctx,
+      launcherId,
+      { source: NOOP, background: false },
+      "run to abort on a limit",
+    );
+    let limited: Record<string, unknown> | undefined;
+    for (let step = 1; step <= 60 && !limited; step += 1) {
+      const wrote = await ctx.api("POST", `/api/internal/script-runs/${limitRunId}/steps`, {
+        body: { stepKey: `limit-${step}`, stepType: "agent-task", status: "completed" },
+      });
+      if (wrote.status === 429) limited = asRecord(wrote.json);
+      else expectStatus(wrote, [201], "journal an agent-task step under the limit");
+    }
+    expect(limited, "the agent-task step limit never refused a journal write");
+    expect(
+      limited.error === "script_run_limit" &&
+        String(limited.message).includes("SCRIPT_RUN_MAX_AGENT_TASKS"),
+      `429 limit body is wrong: ${JSON.stringify(limited)}`,
+    );
+    const aborted = asRecord(
+      asRecord((await ctx.api("GET", `/api/script-runs/${limitRunId}`)).json).run,
+    );
+    expect(
+      aborted.status === "aborted_limit" &&
+        typeof aborted.finishedAt === "string" &&
+        String(aborted.error).includes("SCRIPT_RUN_MAX_AGENT_TASKS"),
+      `a run over the step limit must end aborted_limit: ${JSON.stringify(aborted)}`,
+    );
+
+    const parkedRunId = await createRun(
+      ctx,
+      launcherId,
+      { source: NOOP, background: false },
+      "run to leave paused",
+    );
+    expectStatus(
+      await ctx.api("POST", `/api/internal/script-runs/${parkedRunId}/status`, {
+        body: { status: "paused" },
+      }),
+      [204],
+      "pause the parked run",
+    );
+    expect(
+      asRecord(asRecord((await ctx.api("GET", `/api/script-runs/${parkedRunId}`)).json).run)
+        .status === "paused",
+      "the parked run must be paused",
+    );
+
     // ── C. MCP tools: launch-script-run, get-script-run, list-script-runs ──
     await withMcp(ctx, launcherId, async (mcp) => {
       const toolKey = `e2e-tool-run-${ctx.nonce}`;

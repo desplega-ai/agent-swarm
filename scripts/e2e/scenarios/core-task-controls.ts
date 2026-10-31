@@ -413,6 +413,36 @@ async function drafts(ctx: ScenarioContext, agentId: string) {
   await cancelQuietly(ctx, draftId);
 }
 
+/**
+ * Parked tail: leave one `offered` and one `paused` task behind. The strict state-surface gate
+ * reads agent_tasks.status after every scenario and expects both values to still exist.
+ */
+async function parkForStateGate(ctx: ScenarioContext, agentId: string) {
+  // A worker that never polls keeps its offer open: nobody accepts or rejects it.
+  const offeredToId = await registerWorker(ctx, "offered");
+  const offered = await ctx.api("POST", "/api/tasks", {
+    body: {
+      task: `parked offer ${ctx.nonce}`,
+      offeredTo: offeredToId,
+      routingReason: "human_pinned",
+      source: "api",
+    },
+  });
+  expectStatus(offered, [201], "offer a task to a worker that never polls");
+  expect(asRecord(offered.json).status === "offered", "An offered task is not offered");
+  expect(
+    (await readTask(ctx, String(asRecord(offered.json).id))).status === "offered",
+    "The offer was not persisted",
+  );
+
+  // A paused task stays paused: nobody resumes it.
+  const pausedId = await createAssignedTask(ctx, agentId, `parked pause ${ctx.nonce}`);
+  await claimTask(ctx, agentId, pausedId);
+  const paused = await ctx.api("POST", `/api/tasks/${pausedId}/pause`, { agentId });
+  expectStatus(paused, [200], "pause the parked task");
+  expect((await readTask(ctx, pausedId)).status === "paused", "The parked task is not paused");
+}
+
 export const coreTaskControls: Scenario = {
   name: "core-task-controls",
   order: 220,
@@ -424,5 +454,6 @@ export const coreTaskControls: Scenario = {
     await pauseAndResume(ctx, agentId, otherId);
     await supersede(ctx, agentId, otherId);
     await drafts(ctx, agentId);
+    await parkForStateGate(ctx, agentId);
   },
 };

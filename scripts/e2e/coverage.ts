@@ -30,6 +30,14 @@ export type FlowStatus = {
   detail?: string;
 };
 
+/**
+ * An engine state surface: the distinct values a column can hold (a status enum, a step
+ * type, an executor name) against the values the suite actually drove the engine through.
+ * `unexpected` lists values the database holds that the manifest universe does not know,
+ * so a new engine state is noticed the day it ships.
+ */
+export type StateSurfaceCoverage = SurfaceCoverage & { name: string; unexpected: string[] };
+
 export type Coverage = {
   routes: SurfaceCoverage & {
     byGroup: Record<string, { total: number; covered: number }>;
@@ -37,7 +45,10 @@ export type Coverage = {
   };
   mcpTools: SurfaceCoverage;
   nodeTypes: SurfaceCoverage;
+  stateSurfaces: StateSurfaceCoverage[];
   flows: FlowStatus[];
+  /** Scenarios no flow names. Every scenario must belong to a flow so the flow list stays complete. */
+  scenariosWithoutFlow: string[];
   /** Excluded items that were covered anyway. The exclusion is stale and must go. */
   staleExclusions: string[];
   /** Manifest entries that match nothing the server exposes. */
@@ -52,10 +63,21 @@ export type Coverage = {
  * reports it (`METHOD /template`, tool name, node type) and carries a reason a reviewer
  * can check. `flows` pins scenario names that must exist and pass in a strict run.
  */
+export type StateSurfaceSpec = {
+  name: string;
+  /** One read-only SELECT returning a `value` column, run on the SUT database after the scenarios. */
+  query: string;
+  /** Every value the engine can produce. A value the database holds outside this list fails strict. */
+  universe: string[];
+  /** Values a black box cannot leave behind (transient states, paths that refuse before storing). */
+  excluded: Array<{ value: string; reason: string }>;
+};
+
 export type CoverageManifest = {
   routes: Array<{ operation: string; reason: string }>;
   mcpTools: Array<{ name: string; reason: string }>;
   nodeTypes: Array<{ type: string; reason: string }>;
+  stateSurfaces: StateSurfaceSpec[];
   flows: Record<string, { description: string; scenarios: string[] }>;
 };
 
@@ -63,6 +85,7 @@ export const EMPTY_MANIFEST: CoverageManifest = {
   routes: [],
   mcpTools: [],
   nodeTypes: [],
+  stateSurfaces: [],
   flows: {},
 };
 
@@ -171,6 +194,8 @@ export type CoverageInputs = {
   scenarios: readonly ScenarioResult[];
   /** Every scenario the registry knows, selected or not. */
   knownScenarios: ReadonlySet<string>;
+  /** Runs one manifest state-surface query on the SUT database and returns the `value` column. */
+  queryValues: (sql: string) => string[];
   manifest: CoverageManifest;
 };
 
@@ -220,7 +245,7 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
     };
   }
 
-  const staleExclusions = [
+  const staleExclusions: string[] = [
     ...[...excludedRoutes].filter((key) => coveredKeys.has(key)).map((key) => `route ${key}`),
     ...[...excludedTools]
       .filter((name) => inputs.calledTools.has(name))
@@ -229,7 +254,7 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
       .filter((type) => inputs.observedNodeTypes.has(type))
       .map((type) => `node type ${type}`),
   ].sort();
-  const deadExclusions = [
+  const deadExclusions: string[] = [
     ...[...excludedRoutes].filter((key) => !routeUniverse.has(key)).map((key) => `route ${key}`),
     ...[...excludedTools]
       .filter((name) => !inputs.toolUniverse.has(name))
@@ -259,6 +284,28 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
     };
   });
 
+  const stateSurfaces: StateSurfaceCoverage[] = inputs.manifest.stateSurfaces.map((spec) => {
+    const observed = new Set(inputs.queryValues(spec.query));
+    const excluded = new Set(spec.excluded.map((entry) => entry.value));
+    const universe = new Set(spec.universe);
+    for (const value of excluded) {
+      if (observed.has(value)) staleExclusions.push(`state ${spec.name}: ${value}`);
+      if (!universe.has(value)) deadExclusions.push(`state ${spec.name}: ${value}`);
+    }
+    return {
+      name: spec.name,
+      ...surface(universe, observed, excluded),
+      unexpected: [...observed].filter((value) => !universe.has(value)).sort(),
+    };
+  });
+  staleExclusions.sort();
+  deadExclusions.sort();
+  const inAFlow = new Set(Object.values(inputs.manifest.flows).flatMap((flow) => flow.scenarios));
+  const scenariosWithoutFlow =
+    Object.keys(inputs.manifest.flows).length === 0
+      ? []
+      : [...inputs.knownScenarios].filter((name) => !inAFlow.has(name)).sort();
+
   const byGroupLatency: Record<string, LatencyStats> = {};
   for (const [group, values] of latencyByGroup) byGroupLatency[group] = latencyStats(values);
 
@@ -270,7 +317,9 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
     },
     mcpTools: surface(inputs.toolUniverse, inputs.calledTools, excludedTools),
     nodeTypes: surface(nodeTypeUniverse, inputs.observedNodeTypes, excludedNodeTypes),
+    stateSurfaces,
     flows,
+    scenariosWithoutFlow,
     staleExclusions,
     deadExclusions,
     unknownFlowScenarios: [...unknownFlowScenarios].sort(),
@@ -299,6 +348,23 @@ export function strictFailures(coverage: Coverage): string[] {
   if (coverage.nodeTypes.uncovered.length > 0) {
     failures.push(
       `${coverage.nodeTypes.uncovered.length} workflow node type(s) never executed:\n${list(coverage.nodeTypes.uncovered)}`,
+    );
+  }
+  for (const state of coverage.stateSurfaces) {
+    if (state.uncovered.length > 0) {
+      failures.push(
+        `state surface ${state.name}: ${state.uncovered.length} value(s) the suite never produced:\n${list(state.uncovered)}`,
+      );
+    }
+    if (state.unexpected.length > 0) {
+      failures.push(
+        `state surface ${state.name}: ${state.unexpected.length} value(s) outside the manifest universe (new engine state, add it):\n${list(state.unexpected)}`,
+      );
+    }
+  }
+  if (coverage.scenariosWithoutFlow.length > 0) {
+    failures.push(
+      `${coverage.scenariosWithoutFlow.length} scenario(s) belong to no flow in coverage-manifest.json:\n${list(coverage.scenariosWithoutFlow)}`,
     );
   }
   if (coverage.staleExclusions.length > 0) {
@@ -333,6 +399,9 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
     routes: Array.isArray(raw.routes) ? raw.routes.map(asRecord).map(routeEntry) : [],
     mcpTools: Array.isArray(raw.mcpTools) ? raw.mcpTools.map(asRecord).map(toolEntry) : [],
     nodeTypes: Array.isArray(raw.nodeTypes) ? raw.nodeTypes.map(asRecord).map(nodeEntry) : [],
+    stateSurfaces: Array.isArray(raw.stateSurfaces)
+      ? raw.stateSurfaces.map(asRecord).map(stateSurfaceEntry)
+      : [],
     flows: {},
   };
   for (const [name, value] of Object.entries(asRecord(raw.flows ?? {}))) {
@@ -345,6 +414,10 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
       description: typeof flow.description === "string" ? flow.description : "",
       scenarios: scenarios as string[],
     };
+  }
+  const surfaceNames = findDuplicates(manifest.stateSurfaces.map((spec) => spec.name));
+  if (surfaceNames.length > 0) {
+    throw new Error(`coverage-manifest lists duplicate state surfaces: ${surfaceNames.join(", ")}`);
   }
   const duplicates = findDuplicates([
     ...manifest.routes.map((entry) => `route ${entry.operation}`),
@@ -387,6 +460,53 @@ function nodeEntry(entry: Record<string, unknown>) {
     throw new Error(`coverage-manifest nodeTypes entry needs a type: ${JSON.stringify(entry)}`);
   }
   return { type, reason: reasonOf(entry, `node type ${type}`) };
+}
+
+function stateSurfaceEntry(entry: Record<string, unknown>): StateSurfaceSpec {
+  const name = entry.name;
+  const query = entry.query;
+  if (typeof name !== "string" || !/^[a-z0-9-]+$/.test(name)) {
+    throw new Error(
+      `coverage-manifest stateSurfaces entry needs a kebab-case name: ${JSON.stringify(entry)}`,
+    );
+  }
+  // Read-only by construction: one SELECT, no statement separator, an aliased `value` column.
+  if (
+    typeof query !== "string" ||
+    !/^\s*SELECT\s/i.test(query) ||
+    query.includes(";") ||
+    !/\bAS\s+value\b/i.test(query)
+  ) {
+    throw new Error(
+      `coverage-manifest state surface ${name} needs one SELECT ... AS value query without ';'`,
+    );
+  }
+  const universe = entry.universe;
+  if (
+    !Array.isArray(universe) ||
+    universe.length === 0 ||
+    universe.some((value) => typeof value !== "string" || value.length === 0)
+  ) {
+    throw new Error(
+      `coverage-manifest state surface ${name} needs a non-empty universe of strings`,
+    );
+  }
+  const excludedRaw = Array.isArray(entry.excluded) ? entry.excluded.map(asRecord) : [];
+  const excluded = excludedRaw.map((item) => {
+    const value = item.value;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`coverage-manifest state surface ${name} has an exclusion without a value`);
+    }
+    return { value, reason: reasonOf(item, `state ${name}: ${value}`) };
+  });
+  const excludedValues = excluded.map((item) => item.value);
+  if (
+    findDuplicates(universe as string[]).length > 0 ||
+    findDuplicates(excludedValues).length > 0
+  ) {
+    throw new Error(`coverage-manifest state surface ${name} repeats a value`);
+  }
+  return { name, query, universe: universe as string[], excluded };
 }
 
 function findDuplicates(items: string[]): string[] {

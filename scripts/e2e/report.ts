@@ -327,6 +327,11 @@ export function markdownSummary(result: E2eResult): string {
     "",
     surfaceLine("workflow node types", result.coverage.nodeTypes),
     "",
+    ...result.coverage.stateSurfaces.flatMap((state) => [
+      surfaceLine(`state ${state.name}`, state) +
+        (state.unexpected.length > 0 ? `, unexpected: ${state.unexpected.join(", ")}` : ""),
+      "",
+    ]),
     `coverage gates: ${result.gates.passed ? "PASS" : "FAIL"} (routes >= ${result.gates.minRouteCoverage}%, MCP tools >= ${result.gates.minToolCoverage}%${result.gates.strict ? ", strict" : ""})`,
     "",
   );

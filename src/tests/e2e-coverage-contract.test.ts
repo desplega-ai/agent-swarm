@@ -18,7 +18,9 @@ function coverage(overrides: Partial<Coverage> = {}): Coverage {
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
+    stateSurfaces: [],
     flows: [],
+    scenariosWithoutFlow: [],
     staleExclusions: [],
     deadExclusions: [],
     unknownFlowScenarios: [],
@@ -70,6 +72,29 @@ describe("e2e strict coverage contract", () => {
     expect(failures.join("\n")).toContain("scripts: not run: script-run");
   });
 
+  test("state surfaces fail on values never produced, values outside the universe, and orphan scenarios", () => {
+    const failures = strictFailures(
+      coverage({
+        stateSurfaces: [
+          {
+            name: "script-run-statuses",
+            total: 3,
+            covered: 1,
+            excluded: 1,
+            percent: 33.3,
+            uncovered: ["aborted_limit", "paused"],
+            unexpected: ["exploded"],
+          },
+        ],
+        scenariosWithoutFlow: ["lonely-scenario"],
+      }),
+    );
+    expect(failures).toHaveLength(3);
+    expect(failures[0]).toContain("aborted_limit");
+    expect(failures[1]).toContain("exploded");
+    expect(failures[2]).toContain("lonely-scenario");
+  });
+
   test("the committed manifest parses and every exclusion carries a reason", async () => {
     const manifest: CoverageManifest = await loadManifest(REPO_MANIFEST);
     for (const entry of manifest.routes) {
@@ -83,6 +108,41 @@ describe("e2e strict coverage contract", () => {
       expect(name).toMatch(/^[a-z0-9-]+$/);
       expect(flow.scenarios.length).toBeGreaterThan(0);
     }
+    expect(manifest.stateSurfaces.length).toBeGreaterThan(0);
+    for (const surface of manifest.stateSurfaces) {
+      expect(surface.query).toMatch(/^SELECT /);
+      for (const entry of surface.excluded) expect(surface.universe).toContain(entry.value);
+    }
+  });
+
+  test("a state surface with a non-SELECT query or a value outside its universe is rejected", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "e2e-manifest-"));
+    const bad = join(dir, "bad-query.json");
+    await writeFile(
+      bad,
+      JSON.stringify({
+        stateSurfaces: [{ name: "x", query: "DELETE FROM scripts", universe: ["a"], excluded: [] }],
+      }),
+    );
+    await expect(loadManifest(bad)).rejects.toThrow(/SELECT/);
+    const orphan = join(dir, "orphan-exclusion.json");
+    await writeFile(
+      orphan,
+      JSON.stringify({
+        stateSurfaces: [
+          {
+            name: "x",
+            query: "SELECT DISTINCT status AS value FROM scripts",
+            universe: ["a"],
+            excluded: [
+              { value: "a", reason: "transient between two ticks" },
+              { value: "a", reason: "repeated on purpose" },
+            ],
+          },
+        ],
+      }),
+    );
+    await expect(loadManifest(orphan)).rejects.toThrow(/repeats a value/);
   });
 
   test("a manifest entry without a reason or with a duplicate is rejected", async () => {
