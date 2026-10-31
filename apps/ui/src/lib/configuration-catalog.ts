@@ -1580,6 +1580,34 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}concepts/workflows`,
       },
       {
+        key: "FOLLOW_UP_GATE_MODE",
+        label: "Follow-up gate mode",
+        description:
+          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up.",
+        kind: "enum",
+        options: ["off", "shadow"],
+        defaultValue: "off",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_SCHEDULE_IDS",
+        label: "Follow-up gate schedules",
+        description:
+          "Comma-separated schedule ids whose runs the follow-up gate evaluates. Empty evaluates nothing. Leave off any schedule whose follow-up does required work.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_VERIFIER_SCRIPT",
+        label: "Follow-up gate verifier",
+        description:
+          "Name of a global script run as the Lead with { taskId }. It returns { ok: true | false | null, controls: { ok }, check?, detail?, unverified? }. Empty in shadow mode logs an error row for each gated run.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
         key: "SCRIPT_EXECUTOR",
         label: "Script executor",
         description:

@@ -12,6 +12,10 @@ import {
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
+import {
+  isFollowUpGateScheduleId,
+  parseFollowUpGateScheduleIds,
+} from "../utils/follow-up-gate-schedule-ids";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -428,6 +432,13 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
+  // `enforce` is deliberately absent: the follow-up gate only records decisions.
+  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
+  FOLLOW_UP_GATE_SCHEDULE_IDS: (value: unknown) => {
+    const message = "Invalid FOLLOW_UP_GATE_SCHEDULE_IDS (must be comma-separated schedule UUIDs)";
+    if (typeof value !== "string") return message;
+    return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
+  },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
