@@ -316,6 +316,12 @@ Hard rules:
 
 </important>
 
+<important if="you are adding or changing an HTTP route, an MCP tool, or a workflow executor, or the merge-gate job 'E2E Contract' failed on coverage">
+
+`bun run e2e --strict` (CI) fails when a route operation, MCP tool or workflow node type the server exposes has no black-box scenario and no reasoned exclusion in `scripts/e2e/coverage-manifest.json`. A new route or tool ships with a scenario in `scripts/e2e/scenarios/` in the same PR. Authoring rules, the mocked edges (inference, embeddings, SystemOne, Slack) and the simulated agent: [scripts/e2e/README.md](./scripts/e2e/README.md). Operator view and failure triage: [runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md).
+
+</important>
+
 <important if="you are preparing a commit, push, or pull request — or CI just failed and you need to know why">
 
 `CHANGELOG.md` is edited only by release PRs (`release: vX.Y.Z`); feature, fix, chore and docs PRs never touch it, not even an `[Unreleased]` entry. On a `CHANGELOG.md` merge conflict in a non-release PR, restore the merge-base version so the PR diff shows no CHANGELOG change.
