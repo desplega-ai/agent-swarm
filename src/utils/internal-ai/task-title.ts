@@ -12,6 +12,7 @@
 
 import { Type } from "typebox";
 import { z } from "zod";
+import { scrubSecrets } from "../secret-scrubber.js";
 import { completeStructuredWithModel } from "./complete-structured.js";
 import { type CredentialKind, type ResolvedCredential, resolveCredentials } from "./credentials.js";
 import { kindForModelString } from "./models.js";
@@ -270,8 +271,11 @@ async function attemptTitle(
     });
     return result ? normalizeTaskTitle(result.data.title) : "";
   } catch (error) {
+    // Provider errors can echo request fragments; scrub before logging.
     console.error(
-      `[task-title] ${attempt.model} threw: ${error instanceof Error ? error.message : String(error)}`,
+      scrubSecrets(
+        `[task-title] ${attempt.model} threw: ${error instanceof Error ? error.message : String(error)}`,
+      ),
     );
     return "";
   }

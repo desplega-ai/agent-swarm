@@ -116,9 +116,12 @@ async function titleTask(
   }
   const updated = await setTaskTitleIfUnset(taskId, result.title);
   const elapsed = Date.now() - startedAt;
+  // The title derives from task text, so a pasted token could reach the log.
   console.log(
-    `[task-title] ${shortId}: "${result.title}" via ${result.model} in ${elapsed}ms${
-      updated ? "" : " (kept the existing title)"
-    }`,
+    scrubSecrets(
+      `[task-title] ${shortId}: "${result.title}" via ${result.model} in ${elapsed}ms${
+        updated ? "" : " (kept the existing title)"
+      }`,
+    ),
   );
 }
