@@ -208,13 +208,18 @@ describe("CodexAppServer", () => {
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
 
-  // The pinned Codex CLI (0.166+) rejects input on a thread whose provider
-  // differs from the launch-configured one, so a provider set only in
-  // `thread/start` config fails every turn. Runs the real binary, offline:
-  // the check fires before any request to the gateway.
-  for (const launchOnGateway of [false, true]) {
+  for (const { name, launchOnGateway } of [
+    {
+      name: "pinned Codex rejects a gateway turn on an app-server launched without it",
+      launchOnGateway: false,
+    },
+    {
+      name: "pinned Codex accepts a gateway turn on an app-server launched on the gateway",
+      launchOnGateway: true,
+    },
+  ]) {
     test(
-      `pinned Codex ${launchOnGateway ? "accepts" : "rejects"} a gateway turn when the app-server is ${launchOnGateway ? "" : "not "}launched on the gateway`,
+      name,
       async () => {
         const gateway = {
           model_provider: "swarm-gateway",

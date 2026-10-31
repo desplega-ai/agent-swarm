@@ -2053,8 +2053,6 @@ export async function createInProcessCodexSession(
     const appServerFactory = opts.appServerFactory ?? ((options) => new CodexAppServer(options));
     const client = appServerFactory({
       ...(codexPathOverride ? { codexPath: codexPathOverride } : {}),
-      // Launch on the gateway provider too: Codex 0.166+ rejects `turn/start`
-      // when the thread's provider differs from the launch-configured one.
       ...(gateway ? { configOverrides: codexGatewayConfig(gateway) } : {}),
       env,
       onStderr: (line) => {

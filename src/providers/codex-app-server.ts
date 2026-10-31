@@ -26,11 +26,6 @@ export interface CodexAppServerOptions {
   env: Readonly<Record<string, string | undefined>>;
   requestTimeoutMs?: number;
   onStderr?: (line: string) => void;
-  /**
-   * Config passed as `-c key=value` at launch. Codex 0.166+ rejects input on a
-   * thread whose provider differs from the launch-configured one, so a
-   * provider set only in `thread/start` config fails every `turn/start`.
-   */
   configOverrides?: Readonly<Record<string, CodexConfigValue | undefined>>;
 }
 
