@@ -155,6 +155,8 @@ describe("swarm-config reserved keys guard", () => {
     "EXTENSION_ALLOW_LEAD_ACTIVATION",
     "extension_allow_lead_activation",
     "CHAT_SDK_API_URL_OVERRIDES",
+    "CODEX_OAUTH_DEVICE_BASE_URL",
+    "DESPLEGA_TELEMETRY_ENDPOINT",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };

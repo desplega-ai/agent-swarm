@@ -51,6 +51,8 @@ export type ScenarioContext = {
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
+  /** The environment the SUT booted with (ports for stand-ins, feature flags). Read-only. */
+  sutEnv: Readonly<Record<string, string>>;
   log: (message: string) => void;
   markThread: (label: string, channel: string, ts: string) => void;
   restartSut: () => Promise<void>;
@@ -230,6 +232,7 @@ async function main(): Promise<number> {
       return agent;
     },
     recordHttpCall,
+    sutEnv: activeSut.env,
     async restartSut() {
       if (!activeSut || !activeSlack) throw new Error("E2E harness is not running");
       const connectionCalls = activeSlack.mock.apiCalls("apps.connections.open").length;

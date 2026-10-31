@@ -474,7 +474,7 @@ type DeviceStub = ReturnType<typeof startDeviceServer>;
  * A loopback stand-in for the ChatGPT device authorization endpoints and the token endpoint
  * that ends an approved login. `state` scripts what each endpoint answers.
  */
-function startDeviceServer() {
+function startDeviceServer(port = 0) {
   const state = {
     /** Status of the user-code endpoint. 200 issues a code. */
     usercode: 200,
@@ -519,7 +519,7 @@ function startDeviceServer() {
       });
     }
     return new Response("not found", { status: 404 });
-  });
+  }, port);
   return Object.assign(server, { state });
 }
 
@@ -527,31 +527,37 @@ function deviceRequests(stub: DeviceStub, path: string): MockRequest[] {
   return stub.requests.filter((r) => r.path === `/api/accounts/deviceauth/${path}`);
 }
 
-// The ChatGPT device login, run against a loopback stand-in. The base URL is read from
-// CODEX_OAUTH_DEVICE_BASE_URL on every call, so a global config row plus a reload points the
-// login at the stand-in, including the token endpoint that an approved login ends at. Covered:
-// the start outcomes, the pending, failed and approved poll outcomes, and the stored account.
+// The ChatGPT device login, run against a loopback stand-in. CODEX_OAUTH_DEVICE_BASE_URL is an
+// env-only, loopback-only key: the runner fixes a free port at boot (ctx.sutEnv) and the stub
+// binds there, so the login, including the token endpoint an approved login ends at, reaches
+// the stand-in. A config write of that key must be refused. Covered: the start outcomes, the
+// pending, failed and approved poll outcomes, and the stored account.
 export const platformCodexDeviceLogin: Scenario = {
   name: "platform-codex-device-login",
   order: 648,
   async run(ctx) {
     const cleanup = cleanupStack(ctx);
-    const stub = startDeviceServer();
+    const bootBase = ctx.sutEnv.CODEX_OAUTH_DEVICE_BASE_URL;
+    expect(
+      typeof bootBase === "string" && bootBase.startsWith("http://127.0.0.1:"),
+      "the runner booted the SUT with a loopback CODEX_OAUTH_DEVICE_BASE_URL",
+    );
+    const stub = startDeviceServer(Number(new URL(bootBase).port));
     cleanup.add("stop the device stand-in", async () => stub.stop());
     try {
-      const row = await putConfig(ctx, {
-        key: "CODEX_OAUTH_DEVICE_BASE_URL",
-        value: stub.origin,
+      expect(stub.origin === bootBase, `the stub binds the boot port: ${stub.origin}`);
+      // The key is deployment-env only: a config writer cannot redirect the login.
+      const reservedWrite = await ctx.api("PUT", "/api/config", {
+        body: {
+          scope: "global",
+          key: "CODEX_OAUTH_DEVICE_BASE_URL",
+          value: "https://evil.example",
+        },
       });
-      cleanup.add("delete the device base url and reload", async () => {
-        await deleteConfig(ctx, String(row.id));
-        await reloadConfig(ctx);
-      });
-      const reloaded = await reloadConfig(ctx);
+      expectStatus(reservedWrite, [400], "config write of CODEX_OAUTH_DEVICE_BASE_URL is refused");
       expect(
-        Array.isArray(reloaded.keysUpdated) &&
-          reloaded.keysUpdated.includes("CODEX_OAUTH_DEVICE_BASE_URL"),
-        `a config reload hydrates the device base url: ${JSON.stringify(reloaded)}`,
+        String(asRecord(reservedWrite.json).error).toLowerCase().includes("reserved"),
+        `the refusal names the reserved key: ${reservedWrite.text.slice(0, 200)}`,
       );
 
       // ── start ──────────────────────────────────────────────────────────────
