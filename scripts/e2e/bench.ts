@@ -47,7 +47,9 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const mdIndex = args.indexOf("--md");
   const mdPath = mdIndex >= 0 ? args[mdIndex + 1] : undefined;
-  const files = args.filter((arg, index) => arg !== "--md" && index !== mdIndex + 1);
+  const files = args.filter(
+    (arg, index) => arg !== "--md" && (mdIndex < 0 || index !== mdIndex + 1),
+  );
   if (files.length !== 2 || (mdIndex >= 0 && !mdPath)) usage();
   const [before, after] = await Promise.all([read(files[0]!), read(files[1]!)]);
 
