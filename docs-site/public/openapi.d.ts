@@ -28796,19 +28796,15 @@ export interface components {
             defaultBranch: string;
             /** @default true */
             autoClone: boolean;
-            /**
-             * @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.
-             * @default {
-             *       "enabled": true
-             *     }
-             */
-            hooks: {
-                /** @default false */
-                enabled: boolean;
-            };
+            hooks: components["schemas"]["RepoHooks"];
             guidelines?: components["schemas"]["RepoGuidelines"];
             createdAt: string;
             lastUpdatedAt: string;
+        };
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        RepoHooks: {
+            /** @default false */
+            enabled: boolean;
         };
         RepoGuidelines: {
             prChecks: string[];
@@ -28817,10 +28813,6 @@ export interface components {
             allowMerge: boolean;
             review: string[];
         } | null;
-        RepoHooks: {
-            /** @default false */
-            enabled: boolean;
-        };
         RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];

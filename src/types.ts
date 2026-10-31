@@ -2075,11 +2075,9 @@ export const SwarmRepoSchema = z
     clonePath: z.string().min(1),
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
-    hooks: RepoHooksSchema.optional()
-      .default({ enabled: true })
-      .describe(
-        "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
-      ),
+    hooks: RepoHooksSchema.describe(
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+    ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
