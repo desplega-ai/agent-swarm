@@ -3702,17 +3702,7 @@
             "default": true
           },
           "hooks": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean",
-                "default": false
-              }
-            },
-            "default": {
-              "enabled": true
-            },
-            "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
+            "$ref": "#/components/schemas/RepoHooks"
           },
           "guidelines": {
             "$ref": "#/components/schemas/RepoGuidelines"
@@ -3729,9 +3719,20 @@
           "url",
           "name",
           "clonePath",
+          "hooks",
           "createdAt",
           "lastUpdatedAt"
         ]
+      },
+      "RepoHooks": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -3767,15 +3768,6 @@
           "mergeChecks",
           "review"
         ]
-      },
-      "RepoHooks": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": false
-          }
-        }
       },
       "RepoGuidelinesInput": {
         "type": [
