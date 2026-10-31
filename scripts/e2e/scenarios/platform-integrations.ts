@@ -3,7 +3,7 @@ import type { Scenario } from "../run";
 import { cleanupStack, deleteConfig, putConfig } from "./platform-helpers";
 
 // Operator-facing integration status, the Slack app manifest, the MCP client config and the
-// disabled contracts of the Chat SDK channel and the Claude Managed integration.
+// disabled adapters of the Chat SDK channel and the Claude Managed integration.
 
 const CHAT_ADAPTERS = ["telegram", "slack", "discord", "teams"] as const;
 
@@ -142,11 +142,11 @@ export const platformIntegrations: Scenario = {
       );
       expect(!/xox[bap]-|signing/i.test(diagnostics.text), "diagnostics never include credentials");
 
-      // ── Chat SDK channel (disabled in the test SUT) ────────────────────────
+      // Chat SDK tools are enabled, with no configured adapters.
       const status = await ctx.api("GET", "/api/integrations/chat/status");
       expectStatus(status, [200], "chat status");
       const chat = asRecord(status.json);
-      expect(chat.enabled === false && chat.slackClash === false, "the Chat SDK channel is off");
+      expect(chat.enabled === true && chat.slackClash === false, "the Chat SDK channel is on");
       const adapters = asRecords(chat, "adapters");
       expect(
         adapters.map((a) => a.name).join() === CHAT_ADAPTERS.join(),
@@ -168,10 +168,10 @@ export const platformIntegrations: Scenario = {
       const register = await ctx.api("POST", "/api/integrations/chat/telegram/register-webhook", {
         body: {},
       });
-      expectStatus(register, [400], "register the telegram webhook while the channel is off");
+      expectStatus(register, [400], "register the telegram webhook without an adapter");
       expect(
-        String(asRecord(register.json).error).includes("CHAT_SDK_ENABLED"),
-        "the 400 tells the operator to enable the channel",
+        String(asRecord(register.json).error).includes("Telegram is not configured"),
+        "the 400 tells the operator to configure Telegram",
       );
 
       for (const adapter of [...CHAT_ADAPTERS, `unknown-${ctx.nonce}`]) {
@@ -186,7 +186,7 @@ export const platformIntegrations: Scenario = {
         );
       }
       const status2 = asRecord((await ctx.api("GET", "/api/integrations/chat/status")).json);
-      expect(status2.enabled === false, "webhook probes leave the channel off");
+      expect(status2.enabled === true, "webhook probes leave the channel enabled");
 
       // ── Claude Managed connection test ─────────────────────────────────────
       const missing = await ctx.api("POST", "/api/integrations/claude-managed/test", { body: {} });

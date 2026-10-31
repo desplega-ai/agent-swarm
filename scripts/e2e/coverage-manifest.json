@@ -236,6 +236,10 @@
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
       "scenarios": ["core-budgets"]
     },
+    "chat-sdk-tools": {
+      "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, and Telegram messages through a loopback mock.",
+      "scenarios": ["platform-chat-sdk"]
+    },
     "config-roundtrip": {
       "description": "A config write is readable back and masked when secret",
       "scenarios": ["config-roundtrip"]

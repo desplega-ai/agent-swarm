@@ -155,6 +155,7 @@ export async function startSut(
   // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
   const codexDevicePort = await freePort();
+  const chatSdkPort = await freePort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
@@ -185,8 +186,12 @@ export async function startSut(
     // Background boot triage at T+90s must not steal a scenario's next poll.
     HEARTBEAT_CHECKLIST_DISABLE: "true",
     // Every tool group registers, so the MCP coverage denominator is the whole surface.
-    // The chat-sdk group follows CHAT_SDK_ENABLED, not this list.
     CAPABILITIES: ALL_CAPABILITIES.join(","),
+    CHAT_SDK_ENABLED: "true",
+    CHAT_SDK_ADAPTERS: "{}",
+    CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
+      telegram: `http://127.0.0.1:${chatSdkPort}`,
+    }),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,

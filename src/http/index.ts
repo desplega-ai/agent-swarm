@@ -910,8 +910,8 @@ httpServer
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
-    // Re-extract stored script args schemas so rows saved before `.default()`
-    // fields became optional pick up the fix. Idempotent and non-fatal.
+    // Normalize stored schema JSON so defaulted fields become optional.
+    // This repair never executes script source. It is idempotent and non-fatal.
     import("../be/scripts/boot-args-schema")
       .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
       .catch((err) => {
