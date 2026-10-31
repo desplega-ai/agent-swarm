@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 for mode in url nourl; do
   home=$(mktemp -d); port=$(bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{data(){}}});console.log(s.port);s.stop()')
   app=""; [ "$mode" = url ] && app="https://app.example.test"
-  (cd "$AFS_REPO" && env -i PATH="$PATH" HOME="$home" AGENT_FS_HOME="$home" AGENT_FS_STORAGE_PROVIDER=local \
+  (cd "$AFS_REPO" && exec env -i PATH="$PATH" HOME="$home" AGENT_FS_HOME="$home" AGENT_FS_STORAGE_PROVIDER=local \
      AGENT_FS_LOCAL_ROOT="$home/storage" EMBEDDING_PROVIDER=none SERVER_PORT="$port" SERVER_HOST=127.0.0.1 \
      AGENT_FS_RATE_LIMIT=0 ANONYMIZED_TELEMETRY=false ${app:+AGENT_FS_APP_URL="$app"} \
      bun packages/server/src/index.ts >"$home/daemon.log" 2>&1) &
