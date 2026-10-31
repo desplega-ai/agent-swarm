@@ -12,6 +12,13 @@ mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy
 mock.module("@/components/shared/inline-identifier-code", () => ({
   InlineIdentifierCode: ({ children }: { children?: ReactNode }) => <code>{children}</code>,
 }));
+mock.module("@/components/shared/markdown-link-chip", () => ({
+  SwarmLinkChip: () => null,
+  useSwarmLinkPlugins: () => [],
+}));
+mock.module("@/components/shared/show-more", () => ({
+  ShowMore: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
 mock.module("@/components/shared/json-tree", () => ({ JsonTree: () => null }));
 mock.module("@/components/ui/button", () => ({
   Button: ({ children }: { children?: ReactNode }) => <button type="button">{children}</button>,

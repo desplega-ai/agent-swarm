@@ -7,11 +7,13 @@ import type { AgentTask } from "../../api/types";
 // parent's closing chip copy is under test.
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/task-activity", () => require("../../lib/task-activity"));
+mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/lib/auto-review", () => require("../../lib/auto-review"));
 mock.module("@/api/hooks/use-agents", () => ({
   useAgent: (id: string) => ({ data: id ? { id, name: "Lead" } : undefined }),
 }));
 mock.module("@/components/shared/agent-avatar", () => ({ AgentAvatar: () => null }));
+mock.module("@/components/shared/relative-time", () => ({ RelativeTime: () => null }));
 mock.module("@/components/shared/empty-state", () => ({ EmptyState: () => null }));
 mock.module("./task-card", () => ({ TaskCard: () => null, ParallelGroup: () => null }));
 mock.module("./task-outcome", () => ({
