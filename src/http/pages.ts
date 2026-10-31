@@ -25,6 +25,8 @@ import { resolveTemplate } from "../prompts/resolver";
 // Side-effect import: registers `task.page.feedback`.
 import "../prompts/session-templates";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { readThemeFields } from "../themes/page-fields";
+import { THEME_PRESET_IDS } from "../themes/presets";
 import {
   AssetKeySchema,
   type Page,
@@ -32,6 +34,7 @@ import {
   PageContentTypeSchema,
   PageSchema,
   type PageSummary,
+  PageThemeTokensInputSchema,
   PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
@@ -94,11 +97,42 @@ const PageWithShareUrlsSchema = PageSchema.extend({
  * used, which omits them entirely) — modeled as optional rather than a union
  * since both shapes share every other field verbatim.
  */
-const PageListItemSchema = PageSchema.partial({ body: true, passwordHash: true }).extend({
+const PageListItemSchema = PageSchema.partial({
+  body: true,
+  passwordHash: true,
+  theme: true,
+  themeTokens: true,
+  designVersion: true,
+}).extend({
   favorite: z.boolean(),
   api_url: z.string(),
   app_url: z.string(),
 });
+
+/** Design fields shared by the create and update bodies. */
+const pageDesignBodyFields = {
+  theme: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      `Theme preset id that restyles the whole page. One of: ${THEME_PRESET_IDS.join(", ")}. Omit to follow the viewer's theme. Pass null on update to clear it.`,
+    ),
+  themeTokens: PageThemeTokensInputSchema.nullable()
+    .optional()
+    .describe(
+      'Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: "css", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them.',
+    ),
+  designVersion: z
+    .number()
+    .int()
+    .min(1)
+    .max(2)
+    .optional()
+    .describe(
+      "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value.",
+    ),
+};
 
 // ─── Route Definitions ──────────────────────────────────────────────────────
 
@@ -118,6 +152,7 @@ const createPageRoute = route({
     password: z.string().min(1).optional(),
     body: z.string(),
     needsCredentials: z.array(z.string()).optional(),
+    ...pageDesignBodyFields,
   }),
   responses: {
     201: {
@@ -128,9 +163,20 @@ const createPageRoute = route({
         version: z.literal(1),
         api_url: z.string(),
         app_url: z.string(),
+        ignoredTokens: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored.",
+          ),
+        designVersion: z
+          .number()
+          .int()
+          .min(1)
+          .describe("The design version of the new page: 2 unless the body set designVersion: 1."),
       }),
     },
-    400: { description: "Invalid body" },
+    400: { description: "Invalid body, unknown theme, or invalid themeTokens" },
     409: { description: "Slug already exists for this agent" },
   },
 });
@@ -214,12 +260,31 @@ const updatePageRoute = route({
     password: z.string().min(1).nullable().optional(),
     body: z.string().optional(),
     needsCredentials: z.array(z.string()).nullable().optional(),
+    ...pageDesignBodyFields,
   }),
   responses: {
     200: {
       description: "Page updated",
-      schema: z.object({ id: z.string(), key: AssetKeySchema, version: z.number().int().min(1) }),
+      schema: z.object({
+        id: z.string(),
+        key: AssetKeySchema,
+        version: z.number().int().min(1),
+        ignoredTokens: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored.",
+          ),
+        designVersion: z
+          .number()
+          .int()
+          .min(1)
+          .describe(
+            "The design version the page has after the update. An omitted designVersion keeps the stored one, so an older page stays on 1.",
+          ),
+      }),
     },
+    400: { description: "Unknown theme or invalid themeTokens" },
     404: { description: "Page not found" },
     413: { description: "Payload too large" },
   },
@@ -562,6 +627,12 @@ export async function handlePages(
       return true;
     }
 
+    const themeFields = readThemeFields(parsed.body);
+    if ("error" in themeFields) {
+      jsonError(res, themeFields.error, 400);
+      return true;
+    }
+
     const slug = parsed.body.slug ?? slugify(parsed.body.title);
 
     // Hash password if provided. Bun.password.hash is async (Argon2 by default;
@@ -589,6 +660,9 @@ export async function handlePages(
         passwordHash,
         body: parsed.body.body,
         needsCredentials: parsed.body.needsCredentials,
+        theme: themeFields.theme,
+        themeTokens: themeFields.themeTokens,
+        designVersion: parsed.body.designVersion,
       });
       // First write has no prior snapshot — version 1 is implicit (the parent
       // IS v1). Subsequent edits land via PUT and bump the counter.
@@ -598,6 +672,8 @@ export async function handlePages(
         version: 1,
         api_url: `${getApiBaseUrl()}/p/${page.id}`,
         app_url: `${getAppBaseUrl()}/pages/${page.slug}`,
+        ...(themeFields.ignored.length > 0 ? { ignoredTokens: themeFields.ignored } : {}),
+        designVersion: page.designVersion,
       });
     } catch (err) {
       if (err instanceof AssetKeyAuthorizationError) {
@@ -790,6 +866,13 @@ export async function handlePages(
       return true;
     }
 
+    // Before the snapshot: a rejected theme must not leave a version row behind.
+    const themeFields = readThemeFields(parsed.body);
+    if ("error" in themeFields) {
+      jsonError(res, themeFields.error, 400);
+      return true;
+    }
+
     // Hash password if a new one was provided. `null` → clear the hash.
     let passwordHashUpdate: string | null | undefined;
     if (parsed.body.password === null) {
@@ -830,6 +913,9 @@ export async function handlePages(
       passwordHash: passwordHashUpdate,
       body: parsed.body.body,
       needsCredentials: parsed.body.needsCredentials ?? undefined,
+      theme: themeFields.theme,
+      themeTokens: themeFields.themeTokens,
+      designVersion: parsed.body.designVersion,
     });
     if (!updated) {
       res.writeHead(404);
@@ -840,6 +926,8 @@ export async function handlePages(
       id: updated.id,
       key: updated.key,
       version: await getPageEditCounter(updated.id),
+      ...(themeFields.ignored.length > 0 ? { ignoredTokens: themeFields.ignored } : {}),
+      designVersion: updated.designVersion,
     });
     return true;
   }

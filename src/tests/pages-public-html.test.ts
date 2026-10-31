@@ -5,6 +5,8 @@
  *     `class SwarmSDK` which is unique to the constant)
  *   - the response `Content-Type` is `text/html`
  *   - a `Content-Security-Policy` header is set
+ *   - a design version 1 page keeps the frozen original head, and a body
+ *     without `<head>` still gets it prepended, byte for byte
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
@@ -19,6 +21,8 @@ import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
+import { PAGE_HEAD_V1 } from "../pages/page-head";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-public-html.sqlite";
@@ -82,6 +86,9 @@ describe("GET /p/:id — HTML public path", () => {
         contentType: "text/html",
         authMode: "public",
         body: html,
+        // Design version 1 keeps the original head. Version 2 (the default)
+        // is covered by pages-head-v2.test.ts.
+        designVersion: 1,
       }),
     });
     expect(post.status).toBe(201);
@@ -109,9 +116,45 @@ describe("GET /p/:id — HTML public path", () => {
     const text = await res.text();
     expect(text).toContain("<h1>Hello</h1>");
     expect(text).toContain("class SwarmSDK"); // BROWSER_SDK_JS sentinel
+    // The frozen design version 1 head, verbatim, right after <head>.
+    expect(text).toContain(`<head>${PAGE_HEAD_V1}<script>`);
     expect(text).toContain("color-scheme: light");
     expect(text).toContain("--swarm-bg: #fbfbfa");
     expect(text).toContain("--swarm-text: #111827");
+    expect(text).toContain('<script src="https://cdn.tailwindcss.com"></script>');
+    expect(text).not.toContain("@tailwindcss/browser");
+    expect(text).not.toContain('id="swarm-theme"');
+
+    // Version 1 ignores the viewer theme and mode params.
+    const themed = await fetch(`${BASE}/p/${id}?__swarm-theme=github&__swarm-mode=dark`);
+    expect(themed.status).toBe(200);
+    expect(await themed.text()).toBe(text);
+  });
+
+  test("a version 1 body without a <head> still gets the injection prepended, byte for byte", async () => {
+    const injection = `${PAGE_HEAD_V1}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
+    // Version 2 adds a doctype and moves the head (pages-head-v2.test.ts).
+    // Version 1 never does.
+    const bodies = ["<h1>Fragment</h1>", "<!doctype html><html><body>x</body></html>"];
+    for (const [index, body] of bodies.entries()) {
+      const post = await fetch(`${BASE}/api/pages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          slug: `v1-no-head-${index}`,
+          title: "No head",
+          contentType: "text/html",
+          authMode: "public",
+          body,
+          designVersion: 1,
+        }),
+      });
+      expect(post.status).toBe(201);
+      const { id } = (await post.json()) as { id: string };
+      const res = await fetch(`${BASE}/p/${id}`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(injection + body);
+    }
   });
 
   for (const authMode of ["public", "authed", "password"]) {

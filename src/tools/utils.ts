@@ -22,6 +22,7 @@ import { upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
+import { COLOR_LITERAL_THRESHOLD } from "../pages/color-literals";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -315,6 +316,37 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
 };
 
 /**
+ * One call can fall into more than one create_page trap, and a result carries
+ * one nudge, so this entry joins one sentence per trap that applies: a
+ * design version 1 page that uses the design system, theme tokens that set
+ * light colors only, and hardcoded colors. The tool computes the flags.
+ */
+const createPageNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const data = r.data as
+    | {
+        designVersion?: unknown;
+        usesDesignSystem?: unknown;
+        lightOnlyColors?: unknown;
+        colorLiteralCount?: unknown;
+      }
+    | undefined;
+  const count = data?.colorLiteralCount;
+  const sentences = [
+    data?.designVersion === 1 && data.usesDesignSystem === true
+      ? "This page is on designVersion 1 (the original look), so design system classes, tokens and themes have no effect. Pass designVersion: 2."
+      : undefined,
+    data?.lightOnlyColors === true
+      ? "Your themeTokens set colors for light mode only. Dark mode keeps the preset's dark colors; add a dark map (or a .dark block) to restyle it too."
+      : undefined,
+    typeof count === "number" && count >= COLOR_LITERAL_THRESHOLD
+      ? `This page hardcodes ${count} color values. Use theme tokens (var(--color-primary), bg-primary, text-muted-foreground) so theme and dark-mode switches restyle it. Until then the page stays light in a dark dashboard.`
+      : undefined,
+  ].filter((sentence) => sentence !== undefined);
+  return sentences.length > 0 ? sentences.join(" ") : undefined;
+};
+
+/**
  * Central conditional nudges, keyed by tool name. Applied by the finalize
  * pipeline when the tool did not set an explicit nudge. Keep entries to a
  * single sentence; derive only from already-scrubbed result fields.
@@ -333,6 +365,7 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "patch-workflow-node": workflowLongScriptTimeoutNudge,
   "slack-download-file": slackDownloadFileNudge,
   "slack-read": slackReadNudge,
+  create_page: createPageNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
     // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },

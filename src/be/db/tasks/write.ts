@@ -394,6 +394,25 @@ export async function updateTaskTitle(
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Sets a generated display title only while the task has none. A rename that
+ * landed first (a person, or another API replica) wins: the row is left alone
+ * and `null` comes back. Like `updateTaskTitle`, it does not bump
+ * `lastUpdatedAt`.
+ */
+export async function setTaskTitleIfUnset(
+  taskId: string,
+  title: string,
+): Promise<AgentTask | null> {
+  const normalized = title.trim();
+  if (!normalized) return null;
+  const row = await getDbClient().get<AgentTaskRow>(
+    "UPDATE agent_tasks SET title = ? WHERE id = ? AND title IS NULL RETURNING *",
+    [normalized, taskId],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 export async function completeTask(
   id: string,
   output?: string,

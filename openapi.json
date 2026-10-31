@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.5",
+    "version": "2.7.6",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3172,6 +3172,7 @@
               "task_released",
               "task_deferred_wait_woke",
               "task_follow_up_suppressed",
+              "task_follow_up_gate_shadow",
               "task_citation_check_refused",
               "channel_message",
               "service_registered",
@@ -3227,6 +3228,30 @@
           }
         }
       },
+      "PageThemeTokens": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "light": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "dark": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "light",
+          "dark"
+        ]
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -3279,6 +3304,19 @@
               "type": "string"
             }
           },
+          "theme": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "themeTokens": {
+            "$ref": "#/components/schemas/PageThemeTokens"
+          },
+          "designVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
           "viewCount": {
             "type": "integer",
             "minimum": 0,
@@ -3303,6 +3341,9 @@
           "contentType",
           "authMode",
           "body",
+          "theme",
+          "themeTokens",
+          "designVersion",
           "createdAt",
           "updatedAt"
         ]
@@ -3374,6 +3415,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "theme": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "themeTokens": {
+            "$ref": "#/components/schemas/PageThemeTokens"
+          },
+          "designVersion": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -36836,6 +36890,51 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it."
+                  },
+                  "themeTokens": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "tokens",
+                          "css"
+                        ]
+                      },
+                      "light": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "dark": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "css": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: \"css\", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them."
+                  },
+                  "designVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2,
+                    "description": "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value."
                   }
                 },
                 "required": [
@@ -36875,6 +36974,18 @@
                     },
                     "app_url": {
                       "type": "string"
+                    },
+                    "ignoredTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored."
+                    },
+                    "designVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The design version of the new page: 2 unless the body set designVersion: 1."
                     }
                   },
                   "required": [
@@ -36882,14 +36993,15 @@
                     "key",
                     "version",
                     "api_url",
-                    "app_url"
+                    "app_url",
+                    "designVersion"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid body",
+            "description": "Invalid body, unknown theme, or invalid themeTokens",
             "content": {
               "application/json": {
                 "schema": {
@@ -37061,6 +37173,19 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "theme": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "themeTokens": {
+                            "$ref": "#/components/schemas/PageThemeTokens"
+                          },
+                          "designVersion": {
+                            "type": "integer",
+                            "minimum": 1
                           },
                           "viewCount": {
                             "type": "integer",
@@ -37261,6 +37386,51 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it."
+                  },
+                  "themeTokens": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "tokens",
+                          "css"
+                        ]
+                      },
+                      "light": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "dark": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "css": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: \"css\", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them."
+                  },
+                  "designVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2,
+                    "description": "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value."
                   }
                 }
               }
@@ -37287,13 +37457,36 @@
                     "version": {
                       "type": "integer",
                       "minimum": 1
+                    },
+                    "ignoredTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored."
+                    },
+                    "designVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The design version the page has after the update. An omitted designVersion keeps the stored one, so an older page stays on 1."
                     }
                   },
                   "required": [
                     "id",
                     "key",
-                    "version"
+                    "version",
+                    "designVersion"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown theme or invalid themeTokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

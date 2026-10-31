@@ -135,7 +135,7 @@ import {
 } from "./credential-wait.ts";
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
-  contentSha256,
+  bootIdentityBaselines,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
@@ -6779,12 +6779,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // are skipped, which prevents clobbering DB-side edits made by Lead via
   // update-profile during the running session.
   try {
-    const baselines: Record<string, string> = {};
-    if (agentSoulMd) baselines.soulMd = contentSha256(agentSoulMd);
-    if (agentIdentityMd) baselines.identityMd = contentSha256(agentIdentityMd);
-    if (agentToolsMd) baselines.toolsMd = contentSha256(agentToolsMd);
-    if (agentHeartbeatMd) baselines.heartbeatMd = contentSha256(agentHeartbeatMd);
-    if (agentClaudeMd) baselines.claudeMd = contentSha256(agentClaudeMd);
+    // start-up.sh is not rewritten here when it exists: the entrypoint composed
+    // it from the DB at container start, so its agent-managed section is the base.
+    const setupFile = Bun.file("/workspace/start-up.sh");
+    const baselines = bootIdentityBaselines(
+      {
+        soulMd: agentSoulMd,
+        identityMd: agentIdentityMd,
+        toolsMd: agentToolsMd,
+        heartbeatMd: agentHeartbeatMd,
+        claudeMd: agentClaudeMd,
+      },
+      (await setupFile.exists()) ? await setupFile.text() : undefined,
+      agentId,
+    );
     await writeIdentityBaselines(baselines);
     console.log(`[${role}] Recorded identity file baselines for session-end sync`);
   } catch {

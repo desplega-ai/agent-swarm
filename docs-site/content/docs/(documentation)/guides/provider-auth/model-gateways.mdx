@@ -121,7 +121,7 @@ Set two variables per agent, the same way as the Claude Code gateway route:
 
 A `CODEX_GATEWAY_BASE_URL` on any host except `api.openai.com` selects the gateway route, and it wins over Codex OAuth, `OPENAI_API_KEY`, and `~/.codex/auth.json`. On that route the worker:
 
-- Adds a provider block to the Codex session config, equivalent to this `~/.codex/config.toml`. Codex sends `POST <base URL>/responses`, so the gateway must serve the OpenAI Responses API. Codex no longer supports chat completions.
+- Adds a provider block to the Codex session config and to the `codex app-server` launch, equivalent to this `~/.codex/config.toml`. Codex sends `POST <base URL>/responses`, so the gateway must serve the OpenAI Responses API. Codex no longer supports chat completions.
 
   ```toml
   model_provider = "swarm-gateway"

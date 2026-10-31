@@ -2053,6 +2053,7 @@ export async function createInProcessCodexSession(
     const appServerFactory = opts.appServerFactory ?? ((options) => new CodexAppServer(options));
     const client = appServerFactory({
       ...(codexPathOverride ? { codexPath: codexPathOverride } : {}),
+      ...(gateway ? { configOverrides: codexGatewayConfig(gateway) } : {}),
       env,
       onStderr: (line) => {
         if (liveSession) liveSession.emitTransportStderr(line);
