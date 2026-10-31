@@ -122,6 +122,36 @@ describe("codex gateway route: adapter", () => {
     expect(logged.some((line) => line.endsWith("Using credential: gateway"))).toBe(true);
   });
 
+  test("launches the app-server on the gateway provider, and on the default without a gateway", async () => {
+    const launched = async (env: Record<string, string>) => {
+      let overrides: unknown = "not launched";
+      const adapter = new CodexAdapter({
+        bypassSubprocess: true,
+        appServerFactory: ({ configOverrides }) => {
+          overrides = configOverrides;
+          throw new Error("test stops before app-server spawn");
+        },
+      });
+      await expect(adapter.createSession(testConfig({ env }))).rejects.toThrow(
+        "test stops before app-server spawn",
+      );
+      return overrides;
+    };
+    expect(await launched({ ...GATEWAY_ENV, OPENAI_API_KEY: "sk-openai" })).toEqual({
+      model_provider: "swarm-gateway",
+      model_providers: {
+        "swarm-gateway": {
+          name: "Swarm gateway",
+          base_url: "https://sub2api.example.com/v1",
+          env_key: "CODEX_GATEWAY_API_KEY",
+          wire_api: "responses",
+          requires_openai_auth: false,
+        },
+      },
+    });
+    expect(await launched({ OPENAI_API_KEY: "sk-openai" })).toBeUndefined();
+  });
+
   test("a gateway URL on api.openai.com is not a gateway: no provider block", async () => {
     const { codexConfig, env } = await captureSpawn({
       CODEX_GATEWAY_BASE_URL: "https://api.openai.com/v1",

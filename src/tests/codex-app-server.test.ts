@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CodexAppServer,
@@ -205,4 +207,56 @@ describe("CodexAppServer", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  // The pinned Codex CLI (0.166+) rejects input on a thread whose provider
+  // differs from the launch-configured one, so a provider set only in
+  // `thread/start` config fails every turn. Runs the real binary, offline:
+  // the check fires before any request to the gateway.
+  for (const launchOnGateway of [false, true]) {
+    test(
+      `pinned Codex ${launchOnGateway ? "accepts" : "rejects"} a gateway turn when the app-server is ${launchOnGateway ? "" : "not "}launched on the gateway`,
+      async () => {
+        const gateway = {
+          model_provider: "swarm-gateway",
+          model_providers: {
+            "swarm-gateway": {
+              name: "Swarm gateway",
+              base_url: "http://127.0.0.1:9/v1",
+              env_key: "CODEX_GATEWAY_API_KEY",
+              wire_api: "responses",
+              requires_openai_auth: false,
+            },
+          },
+        };
+        const home = await mkdtemp(join(tmpdir(), "codex-app-server-provider-"));
+        const server = new CodexAppServer({
+          codexPath: join(import.meta.dir, "..", "..", "node_modules", ".bin", "codex"),
+          env: fixtureEnv({ HOME: home, CODEX_HOME: home, CODEX_GATEWAY_API_KEY: "example" }),
+          ...(launchOnGateway ? { configOverrides: gateway } : {}),
+        });
+        try {
+          const started = await server.request<{ thread: { id: string } }>("thread/start", {
+            cwd: home,
+            approvalPolicy: "never",
+            sandbox: "danger-full-access",
+            config: gateway,
+            ephemeral: true,
+          });
+          const turn = server.request("turn/start", {
+            threadId: started.thread.id,
+            input: [{ type: "text", text: "hi" }],
+          });
+          if (launchOnGateway) await turn;
+          else
+            await expect(turn).rejects.toThrow(
+              "This chat uses swarm-gateway, but your current provider is openai",
+            );
+        } finally {
+          await server.close();
+          await rm(home, { recursive: true, force: true });
+        }
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS,
+    );
+  }
 });
