@@ -26,6 +26,7 @@ const STATUS_ORDER: AgentTaskStatus[] = [
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ];
 
 /** Always shown, even when empty, so the board keeps a stable shape. */

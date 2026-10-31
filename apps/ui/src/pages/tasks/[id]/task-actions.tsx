@@ -14,6 +14,7 @@ import {
   Reply,
   RotateCcw,
   ScrollText,
+  SkipForward,
 } from "lucide-react";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -510,7 +511,7 @@ export function TaskActionsMenu({
  * - completed: Follow up, Copy answer, and "..." (Retry, Copy task id).
  * - failed: "..." only. The error callout under the hero holds Retry, Copy
  *   diagnostics and Get help.
- * - cancelled, superseded: Retry and "...".
+ * - cancelled, superseded, skipped: Retry and "...".
  * - in progress: Pause, Cancel and "...". Paused: Resume, Cancel and "...".
  * - not started yet: Cancel and "...".
  */
@@ -523,7 +524,9 @@ export function TaskActions({ model, className }: { model: TaskActionModel; clas
       {status === "completed" && model.answer ? (
         <CopyValueButton value={model.answer}>Copy answer</CopyValueButton>
       ) : null}
-      {status === "cancelled" || status === "superseded" ? <RetryButton model={model} /> : null}
+      {status === "cancelled" || status === "superseded" || status === "skipped" ? (
+        <RetryButton model={model} />
+      ) : null}
       {status === "in_progress" ? <PauseButton model={model} /> : null}
       {status === "paused" ? <ResumeButton model={model} /> : null}
       {terminal || !model.allowed.cancel ? null : <CancelTaskButton onConfirm={model.cancel} />}
@@ -540,6 +543,7 @@ export function TaskPrimaryAction({ model }: { model: TaskActionModel }) {
     case "failed":
     case "cancelled":
     case "superseded":
+    case "skipped":
       return <RetryButton model={model} />;
     case "in_progress":
       return <PauseButton model={model} />;
@@ -555,6 +559,20 @@ export function TaskPrimaryAction({ model }: { model: TaskActionModel }) {
  * what to do next. It replaces the auto-opening help dialog: "Get help" opens
  * that dialog now.
  */
+/**
+ * A skipped task's reason, always open. A skip is a decision, not an error,
+ * so it reads in the neutral tone, with no Retry or Get help.
+ */
+export function TaskSkippedCallout({ reason }: { reason: string }) {
+  return (
+    <AlertCallout tone="neutral" icon={SkipForward} title="Skipped">
+      <div className="mt-1 text-sm leading-relaxed text-foreground">
+        <MarkdownView text={reason} />
+      </div>
+    </AlertCallout>
+  );
+}
+
 export function TaskFailureCallout({
   model,
   duration,

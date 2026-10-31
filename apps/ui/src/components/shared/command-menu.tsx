@@ -414,7 +414,7 @@ function snippetRanges(parts: { text: string; hit: boolean }[]): Range[] {
 const GO_TO_LIMIT = 6;
 const ACTION_LIMIT = 6;
 const ACTIONABLE = new Set(["pending", "in_progress", "paused"]);
-const FINISHED = new Set(["completed", "failed", "cancelled", "superseded"]);
+const FINISHED = new Set(["completed", "failed", "cancelled", "superseded", "skipped"]);
 
 /**
  * A task action (pause, resume, cancel) shows only when the text names its

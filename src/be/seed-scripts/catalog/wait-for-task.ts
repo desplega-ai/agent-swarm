@@ -23,7 +23,7 @@ export default async function waitForTask(args: any, ctx: any) {
     const t: any = await ctx.swarm.task_get({ taskId });
     const d = t?.data ?? t ?? {};
     last = { status: d.status ?? null, output: d.output ?? null };
-    if (["completed", "failed", "cancelled"].includes(String(last.status))) {
+    if (["completed", "failed", "cancelled", "skipped"].includes(String(last.status))) {
       return { done: true, ...last };
     }
     await new Promise((r) => setTimeout(r, 2000));

@@ -21,7 +21,7 @@ type TaskWait = {
 
 type WaitMember = { taskId: string; taskStatus: string | null; deferred: number };
 
-type WakeReason = "ceiling" | "task.completed" | "task.failed" | "task.cancelled";
+type WakeReason = "ceiling" | "task.completed" | "task.failed" | "task.cancelled" | "task.skipped";
 
 /**
  * Read the wait row and its member set and decide whether the wait is ready.
@@ -59,7 +59,8 @@ async function resolveWaitCause(
       !member.deferred &&
       (member.taskStatus === "completed" ||
         member.taskStatus === "failed" ||
-        member.taskStatus === "cancelled") &&
+        member.taskStatus === "cancelled" ||
+        member.taskStatus === "skipped") &&
       (wait.eventName === "settled" || wait.eventName === `task.${member.taskStatus}`),
   );
   if (!matched.length || (wait.mode === "all" && matched.length !== members.length))
@@ -224,12 +225,14 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
     // even when the triggering event named their superseded parent.
     return reconcileDeferredTaskWaits();
   }
-  const rows = await client.query<TaskWait & { taskStatus: "completed" | "failed" | "cancelled" }>(
+  const rows = await client.query<
+    TaskWait & { taskStatus: "completed" | "failed" | "cancelled" | "skipped" }
+  >(
     `SELECT DISTINCT w.*, t.status AS taskStatus FROM deferred_task_waits w
      JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
      JOIN agent_tasks t ON t.id = m.taskId
      JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed', 'cancelled')
+     WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed', 'cancelled', 'skipped')
        AND NOT EXISTS (
          SELECT 1 FROM scheduled_tasks d
          WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
@@ -295,6 +298,7 @@ export async function initDeferredTaskWaits(): Promise<void> {
   workflowEventBus.on("task.completed", onTaskEvent);
   workflowEventBus.on("task.failed", onTaskEvent);
   workflowEventBus.on("task.cancelled", onTaskEvent);
+  workflowEventBus.on("task.skipped", onTaskEvent);
   workflowEventBus.on("task.superseded", onTaskEvent);
   // The resume may be committed after its parent's supersede event.
   workflowEventBus.on("task.created", onTaskEvent);
@@ -305,6 +309,7 @@ export function stopDeferredTaskWaits(): void {
   workflowEventBus.off("task.completed", onTaskEvent);
   workflowEventBus.off("task.failed", onTaskEvent);
   workflowEventBus.off("task.cancelled", onTaskEvent);
+  workflowEventBus.off("task.skipped", onTaskEvent);
   workflowEventBus.off("task.superseded", onTaskEvent);
   workflowEventBus.off("task.created", onTaskEvent);
 }

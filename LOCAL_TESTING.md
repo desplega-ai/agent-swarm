@@ -68,10 +68,12 @@ so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NO
 Scenarios drive that Slack workspace through `ctx.slack`. The harness disables heartbeat
 checklists and boot triage so background tasks cannot consume a scenario's poll.
 The Slack scenarios include `slack-mention`, `slack-follow-up`, `slack-failed-task`,
-`slack-relay-restart`, and `slack-task-output-citations`. The citation scenario enables
-`SLACK_RENDER_V2` and checks MCP `store-progress` citations in the mock outcome card,
+`slack-skipped-task-legacy`, `slack-skipped-task-v2`, `slack-relay-restart`, and `slack-task-output-citations`.
+The citation and `-v2` skipped scenarios enable `SLACK_RENDER_V2`. The citation one checks MCP `store-progress` citations in the mock outcome card,
 including fail-open completion for invalid and oversized batches. The other scenarios
-cover a mention, a thread follow-up, a failed task outcome,
+cover a mention, a thread follow-up, a failed task outcome, a skipped task
+(skip reaction only, including the `SLACK_REACTION_SKIPPED` override, no thread post, and
+under v2 the tree row edited to the skip and its reason),
 and exactly-once terminal relay delivery across an API-process restart. The restart
 reuses the run's database, port, API key, secrets, agent-fs directory, and Slack mock.
 `ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.

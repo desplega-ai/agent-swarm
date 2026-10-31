@@ -315,6 +315,7 @@ export default function TasksPage() {
                 { value: "failed", label: "Failed" },
                 { value: "cancelled", label: "Cancelled" },
                 { value: "superseded", label: "Superseded" },
+                { value: "skipped", label: "Skipped" },
               ]}
             />
           </FilterField>

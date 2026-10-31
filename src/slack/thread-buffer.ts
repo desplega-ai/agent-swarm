@@ -10,7 +10,7 @@ import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { ackSlackMessage } from "./ack";
+import { ackSlackMessage, skipSlackMessageReaction } from "./ack";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
@@ -349,7 +349,7 @@ async function slackFlush(
       scrubSecrets(error.reason),
     );
     if (app) {
-      await ackSlackMessage(app.client, channelId, items.at(-1)!.ts, "no_entry");
+      await skipSlackMessageReaction(app.client, channelId, items.at(-1)!.ts);
     }
     return;
   }

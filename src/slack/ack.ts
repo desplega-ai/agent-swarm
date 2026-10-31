@@ -11,7 +11,7 @@ import {
   SLACK_REACTION_DEFAULTS,
   type SlackReactionEvent,
 } from "./reaction-shortcode";
-import { deferralWakes, isAwaitingWake } from "./task-output";
+import { deferralWakes, isAwaitingWake, isDeferredTask } from "./task-output";
 
 export { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 
@@ -135,6 +135,27 @@ export async function finalizeSlackMessageReaction(
 }
 
 /**
+ * Mark a Slack message as seen but not taken: drop this bot's acceptance
+ * reactions and add the configured skip reaction (`SLACK_REACTION_SKIPPED`,
+ * default `mute`). Shared by the `skipped` task status and the
+ * `pre.task.create` extension block, so both look the same in the thread.
+ * Reactions only: a skip never posts a message, so it notifies no one.
+ */
+export async function skipSlackMessageReaction(
+  client: SlackReactionClient,
+  channel: string,
+  timestamp: string,
+): Promise<void> {
+  await finalizeSlackMessageReaction(
+    client,
+    channel,
+    timestamp,
+    reactionName("skipped"),
+    "skipped",
+  );
+}
+
+/**
  * The reaction to apply for one finalization: the shortcode to send, plus the
  * configurable event it came from when there is one. A choice with no `event`
  * is a fixed built-in shortcode, so it opts out of the `invalid_name` fallback
@@ -144,8 +165,21 @@ export type SlackReactionChoice = { name: string; event?: SlackReactionEvent };
 
 /** The reaction choice for a task's terminal outcome, honouring operator config. */
 export function terminalReactionChoice(task: AgentTask): SlackReactionChoice {
-  const event = terminalReactionEvent(task.status);
+  const event: SlackReactionEvent =
+    task.status === "skipped" ? "skipped" : terminalReactionEvent(task.status);
   return { name: reactionName(event), event };
+}
+
+/**
+ * The trigger message's terminal event. A skipped task did not answer, so it
+ * does not count against the tasks that did: the skip reaction shows only when
+ * every linked task skipped. A deferral is stored `completed` but its outcome
+ * is its wake-up's, which is also linked, so it does not count either.
+ */
+function linkedTasksReactionEvent(linkedTasks: AgentTask[]): SlackReactionEvent {
+  const answered = linkedTasks.filter((task) => task.status !== "skipped" && !isDeferredTask(task));
+  if (answered.length === 0) return "skipped";
+  return answered.every((task) => task.status === "completed") ? "completed" : "failed";
 }
 
 /** Finalize acknowledgement reactions that were added to Slack steer messages. */
@@ -231,16 +265,18 @@ export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promis
     ) {
       continue;
     }
-    const event: SlackReactionEvent = linkedTasks.every((task) => task.status === "completed")
-      ? "completed"
-      : "failed";
-    void finalizeSlackMessageReaction(
-      app.client,
-      channelId,
-      timestamp,
-      reactionName(event),
-      event,
-    ).catch((error) =>
+    const event = linkedTasksReactionEvent(linkedTasks);
+    const finalized =
+      event === "skipped"
+        ? skipSlackMessageReaction(app.client, channelId, timestamp)
+        : finalizeSlackMessageReaction(
+            app.client,
+            channelId,
+            timestamp,
+            reactionName(event),
+            event,
+          );
+    void finalized.catch((error) =>
       console.error(`[Slack] Failed to finalize reaction for ${channelId}/${timestamp}:`, error),
     );
   }

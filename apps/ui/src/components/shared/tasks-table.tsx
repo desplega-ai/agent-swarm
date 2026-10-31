@@ -173,7 +173,7 @@ function TooltipMarkdown({ text }: { text: string }) {
 
 function StatusCell({ task }: { task: AgentTask }) {
   const tooltip =
-    task.status === "failed"
+    task.status === "failed" || task.status === "skipped"
       ? task.failureReason
       : task.status === "completed"
         ? task.output

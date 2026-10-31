@@ -153,7 +153,8 @@
               "completed",
               "failed",
               "cancelled",
-              "superseded"
+              "superseded",
+              "skipped"
             ]
           },
           "source": {
@@ -10185,7 +10186,8 @@
                             "completed",
                             "failed",
                             "cancelled",
-                            "superseded"
+                            "superseded",
+                            "skipped"
                           ]
                         }
                       },
@@ -34226,7 +34228,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "source": {
@@ -34426,7 +34429,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "createdAt": {
@@ -35797,7 +35801,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "source": {
@@ -36083,7 +36088,8 @@
     },
     "/api/tasks/{id}/finish": {
       "post": {
-        "summary": "Mark task as completed or failed (runner endpoint)",
+        "summary": "Mark task as completed, failed, or skipped (runner endpoint)",
+        "description": "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
         "tags": [
           "Tasks"
         ],
@@ -36112,7 +36118,8 @@
                     "type": "string",
                     "enum": [
                       "completed",
-                      "failed"
+                      "failed",
+                      "skipped"
                     ]
                   },
                   "output": {
@@ -36195,7 +36202,7 @@
             }
           },
           "400": {
-            "description": "Invalid status",
+            "description": "Invalid status, or a skip without a reason",
             "content": {
               "application/json": {
                 "schema": {
@@ -36605,7 +36612,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -49543,7 +49551,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -51487,7 +51496,8 @@
                                       "completed",
                                       "failed",
                                       "cancelled",
-                                      "superseded"
+                                      "superseded",
+                                      "skipped"
                                     ]
                                   },
                                   "source": {
@@ -51649,7 +51659,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "readState": {

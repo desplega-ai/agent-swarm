@@ -15,6 +15,7 @@ import {
   getLatestTaskByContextKey,
   getPendingTaskForAgent,
   initDb,
+  skipTask,
   updateScriptRun,
 } from "../be/db";
 import * as modelValidation from "../be/model-validation";
@@ -24,6 +25,7 @@ import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
+import { buildWorkflowCtx } from "../script-workflows/workflow-ctx";
 import {
   FOLLOW_UP_DISPATCH_CAP,
   FOLLOW_UP_DISPATCH_WINDOW_MINUTES,
@@ -699,6 +701,61 @@ describe("/api/script-runs HTTP", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ taskId: step?.id, taskOutput: stepOutput });
   });
+
+  for (const failOnTaskFailure of [undefined, false] as const) {
+    test(`a skipped agent-task step settles the ctx.step.agentTask wait (failOnTaskFailure: ${failOnTaskFailure ?? "default"})`, async () => {
+      const created = await dispatch("/api/script-runs", {
+        method: "POST",
+        agentId,
+        body: createBody(),
+      });
+      const { id: runId } = (await created.json()) as { id: string };
+      // Drive the real ctx through these handlers, not a canned 409.
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+        const { pathname, search } = new URL(String(url));
+        const response = await dispatch(pathname + search, {
+          ...init,
+          headers: Object.fromEntries(new Headers(init?.headers).entries()),
+        });
+        return new Response(response.text || null, { status: response.status });
+      }) as typeof fetch;
+      try {
+        const { ctx } = buildWorkflowCtx({
+          runId,
+          agentId,
+          apiKey: API_KEY,
+          baseUrl: "http://script-runs.test",
+          args: {},
+        });
+        const step = ctx.step.agentTask("triage", {
+          task: "triage the thread",
+          timeoutMs: 5_000,
+          ...(failOnTaskFailure === false ? { failOnTaskFailure } : {}),
+        });
+        const settled = step.then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+
+        await Bun.sleep(50);
+        const task = await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:triage`);
+        expect(task).not.toBeNull();
+        await skipTask(task!.id, "Not mine.");
+
+        const outcome = await settled;
+        if (failOnTaskFailure === false) {
+          expect(outcome).toEqual({
+            value: { taskId: task!.id, status: "failed", error: "Agent task skipped" },
+          });
+        } else {
+          expect(String((outcome as { error?: unknown }).error)).toContain("Agent task skipped");
+        }
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }, 15_000);
+  }
 
   describe("agent-task parentTaskId attach gate", () => {
     let foreignAgentId: string;
