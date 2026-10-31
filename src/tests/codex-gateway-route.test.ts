@@ -4,7 +4,10 @@
  * selection in the adapter, the presence gate, and the live check.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateProviderCredentials } from "../commands/provider-credentials";
 import { CodexAdapter, checkCodexCredentials } from "../providers/codex-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
@@ -73,6 +76,22 @@ async function captureSpawn(
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
+});
+
+// The adapter reads `process.env.HOME` live (see `codexUserHome`) to decide
+// whether `~/.codex/auth.json` exists. A developer's real codex login would
+// make OAuth win over OPENAI_API_KEY and fail the API-key assertions, so run
+// the file against an empty home. The real auth.json is never touched.
+const realHome = process.env.HOME;
+let isolatedHome: string | undefined;
+beforeAll(() => {
+  isolatedHome = mkdtempSync(join(tmpdir(), "codex-gateway-route-home-"));
+  process.env.HOME = isolatedHome;
+});
+afterAll(() => {
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+  if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
 });
 
 describe("codex gateway route: adapter", () => {
