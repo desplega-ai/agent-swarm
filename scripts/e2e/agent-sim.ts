@@ -17,7 +17,7 @@ export type SimulatedTrigger = {
 
 export type TaskOutcome =
   | { status: "completed"; output: string; structuredOutput?: unknown }
-  | { status: "failed"; output: string }
+  | { status: "failed"; output: string; failureReason?: string }
   | { status: "ignore" };
 
 export type SimulatedAgentOptions = {
@@ -96,6 +96,9 @@ export async function startSimulatedAgent(
           output: outcome.output,
           ...("structuredOutput" in outcome && outcome.structuredOutput !== undefined
             ? { structuredOutput: outcome.structuredOutput }
+            : {}),
+          ...("failureReason" in outcome && outcome.failureReason !== undefined
+            ? { failureReason: outcome.failureReason }
             : {}),
         },
       });
