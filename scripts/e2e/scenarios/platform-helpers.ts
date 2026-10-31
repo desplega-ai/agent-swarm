@@ -187,11 +187,12 @@ export function jsonResponse(body: unknown, status = 200): Response {
  */
 export function startMockServer(
   handler: (request: MockRequest) => Response | Promise<Response>,
+  port = 0,
 ): MockServer {
   const requests: MockRequest[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
-    port: 0,
+    port,
     async fetch(request) {
       const url = new URL(request.url);
       const text = await request.text();

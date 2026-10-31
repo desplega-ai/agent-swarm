@@ -66,6 +66,11 @@ const RESERVED_KEYS = new Set([
   "CORS_ALLOW_ANY_ORIGIN",
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
   "CHAT_SDK_API_URL_OVERRIDES",
+  // Test knobs that redirect credential or telemetry traffic. Deployment env only: a
+  // config writer must not be able to point the Codex device login or the telemetry
+  // relay at a host of their choosing.
+  "CODEX_OAUTH_DEVICE_BASE_URL",
+  "DESPLEGA_TELEMETRY_ENDPOINT",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over

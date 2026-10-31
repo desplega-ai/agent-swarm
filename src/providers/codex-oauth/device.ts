@@ -8,9 +8,29 @@ const UPSTREAM_TIMEOUT_MS = 15_000;
  * Origin of the device login endpoints. Read on every call, so a config reload
  * can point the login at a stand-in (the black-box suite runs one).
  */
+/**
+ * `CODEX_OAUTH_DEVICE_BASE_URL` is a test knob for the black-box suite. It is an env-only
+ * reserved config key (swarm_config writes refuse it) and only a loopback origin is
+ * honoured: the device login carries ChatGPT credentials, so a redirect to any other host
+ * must be impossible. Anything else falls back to auth.openai.com.
+ */
+export function resolveCodexDeviceBaseUrl(raw: string | undefined): string {
+  const configured = raw?.trim();
+  if (!configured) return DEFAULT_DEVICE_BASE_URL;
+  try {
+    const url = new URL(configured);
+    const loopback =
+      url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    if (url.protocol === "http:" && loopback) return url.origin;
+  } catch {
+    // fall through
+  }
+  console.warn("[codex-oauth] CODEX_OAUTH_DEVICE_BASE_URL must be a loopback http origin; ignored");
+  return DEFAULT_DEVICE_BASE_URL;
+}
+
 function deviceBaseUrl(): string {
-  const configured = process.env.CODEX_OAUTH_DEVICE_BASE_URL?.trim();
-  return (configured || DEFAULT_DEVICE_BASE_URL).replace(/\/+$/, "");
+  return resolveCodexDeviceBaseUrl(process.env.CODEX_OAUTH_DEVICE_BASE_URL);
 }
 
 /** The page where the user enters the code. Read on every call, like the other URLs. */

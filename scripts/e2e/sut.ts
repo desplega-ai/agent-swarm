@@ -152,6 +152,9 @@ export async function startSut(
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
+  // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
+  // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
+  const codexDevicePort = await freePort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
@@ -190,6 +193,7 @@ export async function startSut(
     OAUTH_KEEPALIVE_DISABLE: "true",
     // MCP OAuth discovery refuses private hosts by default; scenarios run a loopback authorization server.
     MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
+    CODEX_OAUTH_DEVICE_BASE_URL: `http://127.0.0.1:${codexDevicePort}`,
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",
     LINEAR_DISABLE: "true",
