@@ -57,6 +57,7 @@ const ResolveResultSchema = z.object({
   scope: z.string().optional(),
   skipped: z.boolean(),
   unresolved: z.array(z.string()),
+  segments: z.array(z.object({ templateId: z.string(), chars: z.number().int() })).optional(),
 });
 
 /** Mirrors the return type of `resolvePromptTemplate` in src/be/db.ts */

@@ -126,6 +126,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRanking } from "./ranking";
 import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
+import { handleRequestComposition } from "./request-composition";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
@@ -361,6 +362,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
         () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
         () => handleContext(req, res, pathSegments, queryParams, myAgentId),
+        () => handleRequestComposition(req, res, pathSegments, queryParams, myAgentId),
         () => handleAssets(req, res, pathSegments, queryParams, myAgentId),
         () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
         () => handleStats(req, res, pathSegments, queryParams, myAgentId),

@@ -517,6 +517,91 @@ describe("Prompt Template Resolver", () => {
       const result = resolveTemplate("refdb.main", {});
       expect(result.text).toBe("Main: DB override sub");
     });
+
+    test("segments size each top-level ref after interpolation and sum to the text", () => {
+      registerTemplate({
+        eventType: "seg.main",
+        header: "Header {{name}}",
+        defaultBody: "{{@template[seg.a]}}\n{{@template[seg.b]}}\nTail",
+        variables: [],
+        category: "event",
+      });
+      registerTemplate({
+        eventType: "seg.a",
+        header: "",
+        defaultBody: "A says {{name}} [{{@template[seg.nested]}}]",
+        variables: [],
+        category: "common",
+      });
+      registerTemplate({
+        eventType: "seg.b",
+        header: "",
+        defaultBody: "B",
+        variables: [],
+        category: "common",
+      });
+      registerTemplate({
+        eventType: "seg.nested",
+        header: "",
+        defaultBody: "nested",
+        variables: [],
+        category: "common",
+      });
+
+      const result = resolveTemplate("seg.main", { name: "Ada" });
+      expect(result.text).toBe("Header Ada\n\nA says Ada [nested]\nB\nTail");
+      // Nested refs fold into their top-level parent.
+      expect(result.segments).toEqual([
+        { templateId: "seg.main", chars: "Header Ada\n\n\n\nTail".length },
+        { templateId: "seg.a", chars: "A says Ada [nested]".length },
+        { templateId: "seg.b", chars: 1 },
+      ]);
+      const total = (result.segments ?? []).reduce((sum, s) => sum + s.chars, 0);
+      expect(total).toBe(result.text.length);
+    });
+
+    test("no segments when the body references no template", () => {
+      registerTemplate({
+        eventType: "seg.plain",
+        header: "",
+        defaultBody: "Plain {{name}}",
+        variables: [],
+        category: "event",
+      });
+      const result = resolveTemplate("seg.plain", { name: "Ada" });
+      expect(result.text).toBe("Plain Ada");
+      expect(result.segments).toBeUndefined();
+    });
+
+    test("system.session.worker reports its six sections and stays byte-identical", async () => {
+      await restoreAllTemplateDefinitions();
+      const vars = { name: "Tester", role: "worker", agentId: "a-1", persona: "\nBe kind.\n" };
+      const result = resolveTemplate("system.session.worker", vars);
+
+      // Reference expansion by hand: the composite body with each ref replaced
+      // by its own interpolated text must match the resolver's text exactly.
+      const body = getTemplateDefinition("system.session.worker")?.defaultBody ?? "";
+      const expected = body.replace(
+        /\{\{@template\[([^\]]+)\]\}\}/g,
+        (_m, id: string) => resolveTemplate(id, vars).text,
+      );
+      expect(result.text).toBe(expected);
+
+      expect(result.segments?.map((s) => s.templateId)).toEqual([
+        "system.session.worker",
+        "system.agent.role",
+        "system.agent.worker",
+        "system.agent.workspace",
+        "system.agent.memory",
+        "system.agent.communication",
+        "system.agent.secrets",
+      ]);
+      for (const segment of result.segments?.slice(1) ?? []) {
+        expect(segment.chars).toBe(resolveTemplate(segment.templateId, vars).text.length);
+      }
+      const total = (result.segments ?? []).reduce((sum, s) => sum + s.chars, 0);
+      expect(total).toBe(result.text.length);
+    });
   });
 
   // ============================================================================

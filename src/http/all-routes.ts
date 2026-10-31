@@ -49,6 +49,7 @@ import "./prompt-templates";
 import "./poll";
 import "./pricing";
 import "./repos";
+import "./request-composition";
 import "./realtime";
 import "./rooms";
 import "./schedules";

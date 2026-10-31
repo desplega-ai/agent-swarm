@@ -3808,6 +3808,126 @@
           "review"
         ]
       },
+      "RequestComposition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "worker",
+              "harness-hook"
+            ]
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestCompositionPart"
+            }
+          },
+          "staticEstTokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tokenRatio": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "agentId",
+          "sessionId",
+          "seq",
+          "provider",
+          "model",
+          "source",
+          "parts",
+          "staticEstTokens",
+          "tokenRatio",
+          "createdAt"
+        ]
+      },
+      "RequestCompositionPart": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "system_section",
+              "persona",
+              "claude_md",
+              "operator_prompt",
+              "tool_schemas",
+              "skills_listing",
+              "task_prompt",
+              "memories"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "estimate"
+            ],
+            "default": "exact"
+          },
+          "estTokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "chars",
+          "estTokens"
+        ]
+      },
       "ScriptRun": {
         "type": "object",
         "properties": {
@@ -38221,6 +38341,24 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "segments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "templateId": {
+                                "type": "string"
+                              },
+                              "chars": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "templateId",
+                              "chars"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -38560,6 +38698,24 @@
                       "type": "array",
                       "items": {
                         "type": "string"
+                      }
+                    },
+                    "segments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "templateId": {
+                            "type": "string"
+                          },
+                          "chars": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "templateId",
+                          "chars"
+                        ]
                       }
                     }
                   },
@@ -40225,6 +40381,255 @@
                   "required": [
                     "error"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/request-composition": {
+      "post": {
+        "summary": "Record the request composition manifest of a task session",
+        "description": "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "toolLoading": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "core",
+                      "preloaded",
+                      "none"
+                    ]
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "system_section",
+                            "persona",
+                            "claude_md",
+                            "operator_prompt",
+                            "tool_schemas",
+                            "skills_listing",
+                            "task_prompt",
+                            "memories"
+                          ]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "chars": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fidelity": {
+                          "type": "string",
+                          "enum": [
+                            "exact",
+                            "estimate"
+                          ],
+                          "default": "exact"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id",
+                        "label",
+                        "chars"
+                      ]
+                    },
+                    "maxItems": 200
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "provider",
+                  "toolLoading",
+                  "parts"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Manifest recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "id",
+                    "seq"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The task already holds the maximum number of manifests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get the request composition manifests of a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Manifests, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "manifests": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RequestComposition"
+                      }
+                    }
+                  },
+                  "required": [
+                    "manifests"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

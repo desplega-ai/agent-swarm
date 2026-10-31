@@ -29,6 +29,7 @@ oauth_authorizations   # attribution via connectedByUserId (117)
 oauth_pending          # ephemeral PKCE state, 10-min GC (117)
 oauth_refresh_locks
 permission_audit
+request_composition    # agent-written per-session prompt-size telemetry, like session_costs (248)
 script_embeddings
 seed_state
 session_costs

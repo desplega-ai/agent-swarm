@@ -16254,6 +16254,10 @@ export interface paths {
                                 scope?: string;
                                 skipped: boolean;
                                 unresolved: string[];
+                                segments?: {
+                                    templateId: string;
+                                    chars: number;
+                                }[];
                             };
                             dbResult: {
                                 template: components["schemas"]["PromptTemplateResponse"];
@@ -16444,6 +16448,10 @@ export interface paths {
                             scope?: string;
                             skipped: boolean;
                             unresolved: string[];
+                            segments?: {
+                                templateId: string;
+                                chars: number;
+                            }[];
                         };
                     };
                 };
@@ -17408,6 +17416,146 @@ export interface paths {
                         "application/json": {
                             error: string;
                         };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/request-composition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the request composition manifests of a task */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Manifests, oldest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            manifests: components["schemas"]["RequestComposition"][];
+                        };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Record the request composition manifest of a task session
+         * @description The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        sessionId: string;
+                        provider: string;
+                        model?: string;
+                        /** @enum {string} */
+                        toolLoading: "all" | "core" | "preloaded" | "none";
+                        parts: {
+                            /** @enum {string} */
+                            kind: "system_section" | "persona" | "claude_md" | "operator_prompt" | "tool_schemas" | "skills_listing" | "task_prompt" | "memories";
+                            id: string;
+                            label: string;
+                            chars: number;
+                            /**
+                             * @default exact
+                             * @enum {string}
+                             */
+                            fidelity?: "exact" | "estimate";
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Manifest recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            ok: true;
+                            /** Format: uuid */
+                            id: string;
+                            seq: number;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task already holds the maximum number of manifests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -28772,6 +28920,36 @@ export interface components {
             allowMerge: boolean;
             review: string[];
         } | null;
+        RequestComposition: {
+            /** Format: uuid */
+            id: string;
+            taskId: string;
+            agentId: string;
+            sessionId: string;
+            seq: number;
+            provider: string;
+            model: string | null;
+            /** @enum {string} */
+            source: "worker" | "harness-hook";
+            parts: components["schemas"]["RequestCompositionPart"][];
+            staticEstTokens: number;
+            tokenRatio: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RequestCompositionPart: {
+            /** @enum {string} */
+            kind: "system_section" | "persona" | "claude_md" | "operator_prompt" | "tool_schemas" | "skills_listing" | "task_prompt" | "memories";
+            id: string;
+            label: string;
+            chars: number;
+            /**
+             * @default exact
+             * @enum {string}
+             */
+            fidelity: "exact" | "estimate";
+            estTokens: number;
+        };
         ScriptRun: {
             /** Format: uuid */
             id: string;

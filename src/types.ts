@@ -3893,6 +3893,64 @@ export const ContextSnapshotSchema = z
 
 export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 
+// Migration 248: per-session request composition manifest. Each part is one
+// static piece of the prompt the harness sends on every LLM call. Message
+// history and the harness's own base prompt are derived at read time.
+export const RequestCompositionPartKindSchema = z.enum([
+  "system_section",
+  "persona",
+  "claude_md",
+  "operator_prompt",
+  "tool_schemas",
+  "skills_listing",
+  "task_prompt",
+  "memories",
+]);
+export type RequestCompositionPartKind = z.infer<typeof RequestCompositionPartKindSchema>;
+
+export const RequestCompositionFidelitySchema = z.enum(["exact", "estimate"]);
+
+/** A part as the worker measures it: chars only, the server adds the estimate. */
+export const RequestCompositionPartInputSchema = z.object({
+  kind: RequestCompositionPartKindSchema,
+  id: z.string().min(1).max(200),
+  label: z.string().min(1).max(200),
+  chars: z.number().int().min(0),
+  fidelity: RequestCompositionFidelitySchema.default("exact"),
+});
+export type RequestCompositionPartInput = z.input<typeof RequestCompositionPartInputSchema>;
+
+export const RequestCompositionPartSchema = RequestCompositionPartInputSchema.extend({
+  estTokens: z.number().int().min(0),
+}).openapi("RequestCompositionPart");
+export type RequestCompositionPart = z.infer<typeof RequestCompositionPartSchema>;
+
+/**
+ * Which swarm tool schemas the harness sends up front. Worker-side facts:
+ * claude defers every MCP tool behind ToolSearch except preloaded ones, pi
+ * with PI_TOOL_DEFERRAL keeps the core set plus preloaded ones.
+ */
+export const RequestCompositionToolLoadingSchema = z.enum(["all", "core", "preloaded", "none"]);
+export type RequestCompositionToolLoading = z.infer<typeof RequestCompositionToolLoadingSchema>;
+
+export const RequestCompositionSchema = z
+  .object({
+    id: z.uuid(),
+    taskId: z.string(),
+    agentId: z.string(),
+    sessionId: z.string(),
+    seq: z.number().int().min(0),
+    provider: z.string(),
+    model: z.string().nullable(),
+    source: z.enum(["worker", "harness-hook"]),
+    parts: z.array(RequestCompositionPartSchema),
+    staticEstTokens: z.number().int().min(0),
+    tokenRatio: z.number(),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("RequestComposition");
+export type RequestComposition = z.infer<typeof RequestCompositionSchema>;
+
 // ============================================================================
 // Budgets + Pricing (per-agent daily cost budget — V1)
 // ============================================================================

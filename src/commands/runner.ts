@@ -16,6 +16,7 @@ import {
 import {
   type BasePromptArgs,
   getBasePrompt,
+  getBasePromptWithParts,
   getTaskContextPrompt,
   type RepoContext,
   type SlackTaskContext,
@@ -70,6 +71,8 @@ import {
   parseWorkerModelTierOverrides,
   type ReasoningEffort,
   type RepoGuidelines,
+  type RequestCompositionPartInput,
+  type RequestCompositionToolLoading,
   resolveTaskModelSelection,
   type SteeringMessage,
 } from "../types.ts";
@@ -3490,9 +3493,11 @@ export async function buildTaskSessionPrompts(input: {
   additionalSystemPrompt?: string;
   taskPrompt: string;
   context: TaskSessionContext;
-}): Promise<{ systemPrompt: string; prompt: string }> {
+  /** Chars of the recalled-memories block inside `taskPrompt`, for the manifest. */
+  memoryChars?: number;
+}): Promise<{ systemPrompt: string; prompt: string; parts: RequestCompositionPartInput[] }> {
   const { basePromptArgs, additionalSystemPrompt, context } = input;
-  const basePrompt = await getBasePrompt(basePromptArgs);
+  const { prompt: basePrompt, parts: baseParts } = await getBasePromptWithParts(basePromptArgs);
   const systemPrompt = additionalSystemPrompt
     ? `${basePrompt}\n\n${additionalSystemPrompt}`
     : basePrompt;
@@ -3509,10 +3514,33 @@ export async function buildTaskSessionPrompts(input: {
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
 
-  return {
-    systemPrompt,
-    prompt: taskContext ? `${input.taskPrompt}\n\n${taskContext}` : input.taskPrompt,
-  };
+  const prompt = taskContext ? `${input.taskPrompt}\n\n${taskContext}` : input.taskPrompt;
+  const parts = [...baseParts];
+  if (additionalSystemPrompt) {
+    parts.push({
+      kind: "operator_prompt",
+      id: "operator_prompt",
+      label: "operator SYSTEM_PROMPT",
+      chars: systemPrompt.length - basePrompt.length,
+    });
+  }
+  const memoryChars = Math.min(input.memoryChars ?? 0, prompt.length);
+  if (memoryChars > 0) {
+    parts.push({
+      kind: "memories",
+      id: "memories",
+      label: "recalled memories",
+      chars: memoryChars,
+    });
+  }
+  parts.push({
+    kind: "task_prompt",
+    id: "task_prompt",
+    label: "task prompt",
+    chars: prompt.length - memoryChars,
+  });
+
+  return { systemPrompt, prompt, parts };
 }
 
 /** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
@@ -3953,6 +3981,61 @@ async function fetchRelevantMemories(
   }
 }
 
+/**
+ * Which swarm tool schemas the harness sends with every call. Claude runs
+ * ToolSearch over every MCP tool, so only server-preloaded tools ride up front.
+ * Pi with PI_TOOL_DEFERRAL keeps the core set plus preloaded tools. The server
+ * cannot see either fact, so the worker reports it.
+ */
+export function requestToolLoading(
+  provider: string,
+  traits: { hasMcp?: boolean; hasToolSearch?: boolean },
+): RequestCompositionToolLoading {
+  if (traits.hasMcp === false) return "none";
+  if (provider === "claude" && traits.hasToolSearch) return "preloaded";
+  if (provider === "pi" && traits.hasToolSearch) return "core";
+  return "all";
+}
+
+/**
+ * Post the session's request composition manifest. Fire and forget: a lost
+ * manifest only blanks a dashboard panel, so it never delays or fails a task.
+ */
+export function postRequestComposition(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+  body: {
+    sessionId: string;
+    provider: string;
+    model?: string;
+    toolLoading: RequestCompositionToolLoading;
+    parts: RequestCompositionPartInput[];
+  },
+): void {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": agentId,
+  };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  fetch(`${apiUrl}/api/tasks/${taskId}/request-composition`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+    .then((response) => {
+      if (!response.ok) {
+        console.warn(`[runner] Request composition POST returned ${response.status}`);
+      }
+    })
+    .catch((err) => {
+      console.warn(
+        `[runner] Failed to post request composition: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+}
+
 /** Spawn a provider session without blocking - returns immediately with tracking info */
 /**
  * Extract a key field from tool arguments for event tracking.
@@ -4242,6 +4325,8 @@ export async function spawnProviderProcess(
     contextKey?: string;
     /** Forwarded to fetchResolvedEnv → resolveCredentialPools — see RunnerState.modelWindowBlocks. */
     localBlocks?: Map<string, number>;
+    /** Prompt part sizes from buildTaskSessionPrompts, posted as the session's manifest. */
+    compositionParts?: RequestCompositionPartInput[];
   },
   logDir: string,
   isYolo: boolean,
@@ -4536,6 +4621,15 @@ export async function spawnProviderProcess(
     reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, initialModelReport).catch((err) =>
       console.warn(`[runner] Failed to report latest model: ${err}`),
     );
+  }
+  if (realTaskId && opts.compositionParts) {
+    postRequestComposition(opts.apiUrl, opts.apiKey, opts.agentId, realTaskId, {
+      sessionId: opts.runnerSessionId,
+      provider: adapter.name,
+      model: model || undefined,
+      toolLoading: requestToolLoading(adapter.name, adapter.traits),
+      parts: opts.compositionParts,
+    });
   }
 
   // Set up log streaming
@@ -6871,6 +6965,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Build prompt with resume context + memory injection
+        let resumeMemoryChars = 0;
         let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter), {
           hasMcp: adapter.traits.hasMcp,
         });
@@ -6886,6 +6981,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         );
         if (resumeMemoryContext) {
           resumePrompt += resumeMemoryContext;
+          resumeMemoryChars = resumeMemoryContext.length;
           console.log(`[${role}] Injected relevant memories into resumed task prompt`);
         }
 
@@ -7001,6 +7097,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           basePromptArgs: basePromptArgs(),
           additionalSystemPrompt,
           taskPrompt: resumePrompt,
+          memoryChars: resumeMemoryChars,
           context: {
             repoContext: resumeRepoContext,
             slackContext: resumeSlackChannelId
@@ -7059,6 +7156,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               vcsRepo: task.vcsRepo,
               contextKey: (task as { contextKey?: string }).contextKey,
               localBlocks: state.modelWindowBlocks,
+              compositionParts: resumeSession.parts,
             },
             logDir,
             isYolo,
@@ -7351,6 +7449,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Build prompt based on trigger
+        let taskMemoryChars = 0;
         let triggerPrompt = await buildPromptForTrigger(
           trigger,
           prompt,
@@ -7375,6 +7474,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             );
             if (memoryContext) {
               triggerPrompt += memoryContext;
+              taskMemoryChars = memoryContext.length;
               console.log(`[${role}] Injected relevant memories into task prompt`);
             }
           }
@@ -7568,6 +7668,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           basePromptArgs: basePromptArgs(),
           additionalSystemPrompt,
           taskPrompt: triggerPrompt,
+          memoryChars: taskMemoryChars,
           context: {
             repoContext: currentRepoContext,
             slackContext: taskSlackContext,
@@ -7664,6 +7765,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               vcsRepo: taskVcsRepo,
               contextKey: taskContextKey,
               localBlocks: state.modelWindowBlocks,
+              compositionParts: taskSession.parts,
             },
             logDir,
             isYolo,

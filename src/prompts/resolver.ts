@@ -54,6 +54,17 @@ export interface ResolveResult {
   skipped: boolean;
   /** Any {{var}} tokens that couldn't be resolved */
   unresolved: string[];
+  /**
+   * Interpolated size of each top-level `{{@template[id]}}` the body expanded,
+   * plus one entry for the template's own text (header and glue). The chars
+   * sum to `text.length`. Absent when the body references no template.
+   */
+  segments?: ResolveSegment[];
+}
+
+export interface ResolveSegment {
+  templateId: string;
+  chars: number;
 }
 
 // ─── HTTP Resolver Mode ─────────────────────────────────────────────────────
@@ -221,7 +232,8 @@ function resolveTemplateViaDb(
   }
 
   // Expand {{@template[id]}} references in body
-  body = expandTemplateRefs(body, variables, options, new Set(), 0);
+  const expandedRefs: ExpandedRef[] = [];
+  body = expandTemplateRefs(body, variables, options, new Set(), 0, expandedRefs);
 
   // Compose header + body
   const composed = header ? `${header}\n\n${body}` : body;
@@ -235,7 +247,30 @@ function resolveTemplateViaDb(
     scope,
     skipped: false,
     unresolved,
+    ...(expandedRefs.length > 0 && {
+      segments: measureSegments(eventType, text, expandedRefs, variables),
+    }),
   };
+}
+
+type ExpandedRef = { templateId: string; body: string };
+
+/**
+ * Size each expanded reference by interpolating it alone. The template's own
+ * entry takes the remainder, so the segments always sum to the final text.
+ */
+function measureSegments(
+  eventType: string,
+  text: string,
+  refs: ExpandedRef[],
+  variables: Record<string, unknown>,
+): ResolveSegment[] {
+  const children = refs.map((ref) => ({
+    templateId: ref.templateId,
+    chars: interpolate(ref.body, variables).result.length,
+  }));
+  const childChars = children.reduce((sum, segment) => sum + segment.chars, 0);
+  return [{ templateId: eventType, chars: Math.max(0, text.length - childChars) }, ...children];
 }
 
 /**
@@ -248,6 +283,8 @@ function expandTemplateRefs(
   options: ResolveOptions,
   visited: Set<string>,
   depth: number,
+  /** Collects each top-level reference with its fully expanded body. */
+  expandedRefs?: ExpandedRef[],
 ): string {
   if (depth > MAX_TEMPLATE_REF_DEPTH) {
     return text;
@@ -291,6 +328,8 @@ function expandTemplateRefs(
     // Recursively expand nested refs in the referenced body
     const newVisited = new Set(visited);
     newVisited.add(referencedId);
-    return expandTemplateRefs(refBody, variables, options, newVisited, depth + 1);
+    const expanded = expandTemplateRefs(refBody, variables, options, newVisited, depth + 1);
+    expandedRefs?.push({ templateId: referencedId, body: expanded });
+    return expanded;
   });
 }

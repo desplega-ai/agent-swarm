@@ -3990,5 +3990,34 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "request_composition": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "model": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "enum"
+    },
+    "parts": {
+      "exempt": "size manifest: JSON of enum kinds, template ids, code-fixed labels and integer char/token counts; no prompt text"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
   }
 }

@@ -1,12 +1,21 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   type BasePromptArgs,
   getBasePrompt,
+  getBasePromptWithParts,
   getTaskContextPrompt,
   truncateRepoClaudeMd,
 } from "../prompts/base-prompt";
 import { generateDefaultClaudeMd, generateDefaultIdentityMd } from "../prompts/defaults";
+import { configureDbResolver, resetDbResolver } from "../prompts/resolver";
 import type { ProviderTraits } from "../providers/types";
+import MAIN_BASELINE from "./fixtures/base-prompt-baseline.json";
+import {
+  BASELINE_ARGS,
+  BASELINE_DEPLOYMENTS,
+  BASELINE_SKILLS,
+  baselineKey,
+} from "./fixtures/base-prompt-baseline-cases";
 
 // ---------------------------------------------------------------------------
 // Fixtures and env handling
@@ -1330,5 +1339,132 @@ describe("getBasePrompt: harness tool discovery", () => {
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).not.toContain(deferred);
     expect(result).toContain("Swarm tools are already in your tool list.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Request composition parts
+// ---------------------------------------------------------------------------
+
+describe("getBasePromptWithParts", () => {
+  const matrix = BASELINE_ARGS;
+  /** Parts that are text inside our prompt; skills_listing is harness-injected. */
+  const inPrompt = (kind: string) => kind !== "skills_listing";
+  const promptChars = (parts: { kind: string; chars: number }[]) =>
+    parts.filter((part) => inPrompt(part.kind)).reduce((sum, part) => sum + part.chars, 0);
+
+  for (const [deployment, env] of Object.entries(BASELINE_DEPLOYMENTS)) {
+    for (const [name, args] of Object.entries(matrix)) {
+      test(`${deployment} / ${name}: byte-identical to main's prompt, parts sum to its length`, async () => {
+        Object.assign(process.env, env);
+        const { prompt, parts } = await getBasePromptWithParts(args);
+        // Bytes rendered by main's getBasePrompt, not by the helper under test.
+        // Regenerate: bun scripts/capture-base-prompt-baseline.ts <checkout>
+        expect(prompt).toBe(MAIN_BASELINE[baselineKey(deployment, name)]!);
+        expect(promptChars(parts)).toBe(prompt.length);
+        expect(parts.every((part) => part.chars > 0)).toBe(true);
+      });
+    }
+  }
+
+  test("the baseline covers every case", () => {
+    const keys = Object.keys(BASELINE_DEPLOYMENTS).flatMap((deployment) =>
+      Object.keys(matrix).map((name) => baselineKey(deployment, name)),
+    );
+    expect(Object.keys(MAIN_BASELINE).sort()).toEqual(keys.sort());
+  });
+
+  test("the lead docs pointer gets its own part", async () => {
+    const { prompt, parts } = await getBasePromptWithParts({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      skillsSummary: [{ name: "swarm-docs", description: "docs index" }],
+    });
+    const docs = parts.find((part) => part.id === "system.agent.lead.docs");
+    expect(docs?.chars).toBeGreaterThan(0);
+    expect(promptChars(parts)).toBe(prompt.length);
+  });
+
+  describe("template overrides", () => {
+    const soulOnly: BasePromptArgs = { ...minimalArgs, soulMd: "ZZ" };
+    const overrides = (bodies: Record<string, string>) =>
+      configureDbResolver((eventType) => {
+        const body = bodies[eventType];
+        return body === undefined ? null : { template: { id: eventType, body, scope: "global" } };
+      });
+    const role = (parts: { id: string; chars: number }[]) =>
+      parts.find((part) => part.id === "system.agent.role")?.chars;
+
+    afterEach(() => resetDbResolver());
+
+    test("a role override that omits the persona counts no persona", async () => {
+      overrides({ "system.agent.role": "custom role" });
+      const { prompt, parts } = await getBasePromptWithParts(soulOnly);
+      expect(prompt).not.toContain("ZZ");
+      expect(parts.some((part) => part.kind === "persona")).toBe(false);
+      expect(role(parts)).toBe("custom role".length);
+      expect(promptChars(parts)).toBe(prompt.length);
+    });
+
+    test("a persona moved to another section is counted there, not taken from role", async () => {
+      overrides({
+        "system.agent.role": "custom role",
+        "system.agent.worker": "worker notes\n{{persona}}",
+      });
+      const { prompt, parts } = await getBasePromptWithParts(soulOnly);
+      expect(prompt).toContain("worker notes\n\nZZ\n");
+      expect(parts.find((part) => part.kind === "persona")?.chars).toBe("\nZZ\n".length);
+      expect(role(parts)).toBe("custom role".length);
+      expect(promptChars(parts)).toBe(prompt.length);
+    });
+
+    test("a persona rendered twice counts both copies", async () => {
+      overrides({ "system.agent.role": "custom role\n{{persona}}\n{{persona}}" });
+      const { prompt, parts } = await getBasePromptWithParts(soulOnly);
+      expect(prompt.split("ZZ").length - 1).toBe(2);
+      expect(parts.find((part) => part.kind === "persona")?.chars).toBeGreaterThanOrEqual(
+        2 * "ZZ".length,
+      );
+      expect(role(parts)).toBe("custom role\n\n".length);
+      expect(promptChars(parts)).toBe(prompt.length);
+    });
+  });
+
+  test("splits the composite into its sections and the persona", async () => {
+    const { parts } = await getBasePromptWithParts(matrix["claude worker"]!);
+    // The composite's own glue is only seam newlines, which collapsing removes.
+    const ids = parts.map((part) => part.id).filter((id) => id !== "system.session.worker");
+    expect(ids.slice(0, 7)).toEqual([
+      "persona",
+      "system.agent.role",
+      "system.agent.worker",
+      "system.agent.workspace",
+      "system.agent.memory",
+      "system.agent.communication",
+      "system.agent.secrets",
+    ]);
+    expect(ids).toContain("system.agent.tool_discovery.search");
+    expect(ids).toContain("system.agent.tools_skills");
+    expect(parts.find((part) => part.kind === "claude_md")?.chars).toBeGreaterThan(
+      matrix["claude worker"]!.claudeMd!.length,
+    );
+  });
+
+  test("native skill discovery adds a harness-side skills estimate; codex does not", async () => {
+    const claude = await getBasePromptWithParts(matrix["claude worker"]!);
+    const listing = claude.parts.find((part) => part.kind === "skills_listing");
+    expect(listing).toMatchObject({
+      fidelity: "estimate",
+      chars: BASELINE_SKILLS.reduce(
+        (sum, skill) => sum + `- ${skill.name}: ${skill.description}\n`.length,
+        0,
+      ),
+    });
+
+    // Codex gets the list inside tools_skills, so it is not counted twice.
+    const codex = await getBasePromptWithParts(matrix.codex!);
+    expect(codex.parts.some((part) => part.kind === "skills_listing")).toBe(false);
+    expect(codex.prompt).toContain("- /alpha: does alpha");
   });
 });
