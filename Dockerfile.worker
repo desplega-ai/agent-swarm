@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.314
+ARG CLAUDE_CODE_VERSION=2.1.316
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.3
+ARG OPENCODE_VERSION=2.2.5
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -575,9 +575,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793363705-g5c9ae5
-ARG AMP_SHA512_AMD64=825817ac7ef2c61ab1c944c87daebae5642fd311e9fe181351da2dc762aa826c9a39a45c039f353b7b6c2b5464a35f73f03b5925ec70cd000fa2ba583b8979ea
-ARG AMP_SHA512_ARM64=fbe7b998fe1c9612b7659462a8e3b33d242044189a34f4922d3074f4c8d8be8594c3b26c96e2aee8cc7ed5230520dbce156170b718ca954e68404a402f9eccfb
+ARG AMP_VERSION=0.0.1793419243-g67cb09
+ARG AMP_SHA512_AMD64=c89beb840aafb2eaea6d934c45ec03cc984920d0f854af98d5b97959a955ad9f80fa85b5b264324bffefd7ebe45bd1410370ff640eb86f3c28312454bbc4f13e
+ARG AMP_SHA512_ARM64=7fa56e7352dacb2ff380eb8a216fd0cb1b0d2ab4af625c3a7c82a3ce669e3f2bdc0e3434f2d8d4bad6acf0edf07d35112f23e5bb960f0a3fccd375043e56cb28
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -665,9 +665,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.36.0
-ARG KIRO_CLI_SHA256_AMD64=ede3772e2340b60758c45ba25fe0fed54aa4c3af87d038b1b70fa7ba2e139cb2
-ARG KIRO_CLI_SHA256_ARM64=7c9564c33a7423790566a953f8d5a27ca33fa6e7f4bc8bafa97ccd8c0c487502
+ARG KIRO_CLI_VERSION=2.37.0
+ARG KIRO_CLI_SHA256_AMD64=02c49873ba64285f34048aac377ccf0b546b5627f39dd775bae9fa306112ff19
+ARG KIRO_CLI_SHA256_ARM64=3588100df2addfbb2c6953698ea2d6e7d2b88c5ef664ec3235e08fa454219f68
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
