@@ -63,7 +63,12 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          CHANGED=$(git diff --name-only ${{ steps.base.outputs.ref }}...HEAD)
+          # --no-renames: with rename detection on (git's default), a move
+          # lists only its destination, so moving a file out of a domain
+          # (src/x.ts -> docs/x.ts) would hide the removal from that domain's
+          # flag. Listing both sides keeps every flag honest.
+          # src/tests/merge-gate-detect-changes.test.ts runs this step.
+          CHANGED=$(git diff --no-renames --name-only ${{ steps.base.outputs.ref }}...HEAD)
           echo "Changed files:"
           echo "$CHANGED"
           echo "---"
