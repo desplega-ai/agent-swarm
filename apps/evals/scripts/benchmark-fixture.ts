@@ -18,6 +18,7 @@ import {
   SUITE_VERSION,
 } from "../scenarios/suite.ts";
 import type { AnalyticsSourceRow } from "../src/api/analytics.ts";
+import { snapshotDay } from "../src/api/benchmark-routes.ts";
 import { baselinePairs } from "../src/baseline.ts";
 import {
   type BenchmarkAttempt,
@@ -172,11 +173,12 @@ const snapshot = buildSnapshot({
   harnessCommit: null,
   publishedAt: "2026-10-05T10:00:00.000Z",
 });
+const outDir = join(outRoot, SUITE_VERSION, snapshotDay(snapshot.publishedAt));
 for (const [path, content] of Object.entries(bundleFiles(snapshot))) {
-  const target = join(outRoot, SUITE_VERSION, path);
+  const target = join(outDir, path);
   await mkdir(dirname(target), { recursive: true });
   await Bun.write(target, content);
 }
 console.log(
-  `fixture ${SUITE_VERSION}: ${publicSuiteScenarioIds().length} public scenarios x ${CONFIGS.length} configs -> ${join(outRoot, SUITE_VERSION)}`,
+  `fixture ${SUITE_VERSION}: ${publicSuiteScenarioIds().length} public scenarios x ${CONFIGS.length} configs -> ${outDir}`,
 );

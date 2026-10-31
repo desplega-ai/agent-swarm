@@ -11,10 +11,13 @@ export const SUPPORTED_SNAPSHOT_SCHEMA = 1;
 
 export interface BenchmarkVersion {
   suiteVersion: string;
+  /** `YYYY-MM-DD` of the publish; with `suiteVersion` it names one snapshot. */
+  snapshot: string;
   publishedAt: string | null;
 }
 
 export interface BenchmarkIndex {
+  /** One entry per published snapshot, newest first. */
   versions: BenchmarkVersion[];
   latest: string | null;
 }
@@ -117,6 +120,11 @@ export function getBenchmarkIndex(): Promise<BenchmarkIndex> {
   return getJson<BenchmarkIndex>("/api/public/benchmark");
 }
 
-export function getBenchmarkSnapshot(version: string): Promise<BenchmarkSnapshot> {
-  return getJson<BenchmarkSnapshot>(`/api/public/benchmark/${encodeURIComponent(version)}`);
+/** `snapshot` omitted = the newest snapshot of that suite version. */
+export function getBenchmarkSnapshot(
+  version: string,
+  snapshot?: string | null,
+): Promise<BenchmarkSnapshot> {
+  const base = `/api/public/benchmark/${encodeURIComponent(version)}`;
+  return getJson<BenchmarkSnapshot>(snapshot ? `${base}/${encodeURIComponent(snapshot)}` : base);
 }

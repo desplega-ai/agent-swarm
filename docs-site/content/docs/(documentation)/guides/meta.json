@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "one-click-deploy",
     "kubernetes",
     "podman-rootless",
     "published-artifacts",
@@ -30,7 +31,9 @@
     "scripts-external-apis",
     "scripts-credential-broker",
     "script-workflow-runs",
+    "dreaming",
     "claude-bridge-experimental",
+    "claude-artifacts-read",
     "worker-credential-recovery",
     "provider-auth",
     "x402-payments",

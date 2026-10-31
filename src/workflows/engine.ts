@@ -66,6 +66,13 @@ function maxIterations(): number {
 
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
+  /**
+   * The agent that started the run, as the server authenticated it: the caller
+   * of a manual or API trigger, a schedule's creator, a parent run's principal.
+   * A creator-less workflow's `swarm-script` nodes run as this agent. Never
+   * take it from trigger data, which the caller controls.
+   */
+  triggeredByAgentId?: string;
   triggerType?: "schedule" | "manual" | "event" | "api";
   /** Set when a `sub-workflow` step starts this run as its child. */
   parentStepId?: string;
@@ -185,7 +192,7 @@ export async function startWorkflowExecution(
   const newRunId = crypto.randomUUID();
   const release = holdWorkflowRun(newRunId);
   try {
-    const { runId, created, preflightAlert } = await createRunWithInitialState(
+    const { runId, created, preflightAlert, status } = await createRunWithInitialState(
       workflow,
       triggerData,
       options,
@@ -197,7 +204,7 @@ export async function startWorkflowExecution(
       if (preflightAlert) await notifyAutomationPreflightFailure(preflight);
       return runId;
     }
-    if (initial.status === "skipped") return runId;
+    if (status === "skipped") return runId;
     telemetry.workflow("started", {
       workflowId: workflow.id,
       nodeCount: workflow.definition.nodes.length,
@@ -310,7 +317,12 @@ async function createRunWithInitialState(
   options: WorkflowExecutionOptions,
   initial: InitialRunState,
   runId: string,
-): Promise<{ runId: string; created: boolean; preflightAlert?: boolean }> {
+): Promise<{
+  runId: string;
+  created: boolean;
+  preflightAlert?: boolean;
+  status?: InitialRunState["status"];
+}> {
   return getDbClient().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
@@ -321,6 +333,16 @@ async function createRunWithInitialState(
       const existingId = await getChildWorkflowRunId(parentStepId, attempt);
       if (existingId) return { runId: existingId, created: false };
     }
+    // The cooldown check before this transaction is only a fast path: two
+    // triggers can both pass it before either run exists. The write lock is
+    // held from BEGIN, across processes too, so this recheck sees every run
+    // committed before it and the losing trigger records a skipped run.
+    const state: InitialRunState =
+      !initial.status &&
+      workflow.cooldown &&
+      (await shouldSkipCooldown(workflow.id, workflow.cooldown))
+        ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
+        : initial;
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -329,19 +351,20 @@ async function createRunWithInitialState(
       createdBy: options.requestedByUserId,
       parentStepId,
       parentStepAttempt: parentStepId ? attempt : undefined,
+      triggeredByAgentId: options.triggeredByAgentId,
     });
     await updateWorkflowRun(
       runId,
-      initial.status
-        ? { status: initial.status, error: initial.error, finishedAt: initial.finishedAt }
-        : { context: initial.context },
+      state.status
+        ? { status: state.status, error: state.error, finishedAt: state.finishedAt }
+        : { context: state.context },
     );
     const preflightAlert =
-      initial.status === "failed" && initial.preflight
+      state.status === "failed" && state.preflight
         ? await isFirstWorkflowPreflightFailureToday(workflow.id, runId)
         : undefined;
-    await options.accept?.({ runId, skipped: initial.status === "skipped" });
-    return { runId, created: true, preflightAlert };
+    await options.accept?.({ runId, skipped: state.status === "skipped" });
+    return { runId, created: true, preflightAlert, status: state.status };
   });
 }
 
@@ -1426,8 +1449,8 @@ export function interpolateNodeConfig(
     // a declared alias (`inputs: { payload: "trigger.payload" }` used as
     // `{{payload}}`) carry webhook data into the body, and upstream node outputs
     // (`{{someNode.stdout}}`) are LLM- or script-generated text with the same
-    // problem. Dynamic per-run values must flow through `args` instead, which
-    // are passed as separate argv elements (data), not spliced into source text.
+    // problem. Dynamic per-run values must flow through args or env as data,
+    // not be spliced into source text.
     // Preserve the original source when a body token cannot be resolved. The
     // caller fails the node before execution and reports the token explicitly;
     // returning partially blanked source here would recreate the silent-green
@@ -1466,6 +1489,7 @@ export function scriptBodyInterpolationError(nodeId: string, tokens: string[]): 
   return (
     `Script body interpolation failed for node "${nodeId}": unresolved or disallowed token(s): ${renderedTokens}. ` +
     "Executable source may interpolate only input, workflow, swarm, or run values. " +
-    "Pass dynamic trigger or upstream values through config.args and read them from argv."
+    "Pass dynamic trigger or upstream values through config.args and read them from argv. " +
+    "Inline script nodes also support config.env for environment variables."
   );
 }

@@ -13,6 +13,7 @@ import type {
   AgentRuntimeInstancesResponse,
   AgentRuntimeResponse,
   AgentSkillsResponse,
+  AgentSlackIcon,
   AgentsResponse,
   AgentTask,
   AgentWithTasks,
@@ -496,6 +497,28 @@ class ApiClient {
     return config.apiUrl;
   }
 
+  /**
+   * GET a list endpoint with query params. Cmd+K search uses it: `signal`
+   * aborts the request a newer keystroke made stale.
+   */
+  async getList<T>(
+    path: string,
+    params: Record<string, string | number | undefined>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") search.set(key, String(value));
+    }
+    const qs = search.toString();
+    const res = await fetch(`${this.getBaseUrl()}${path}${qs ? `?${qs}` : ""}`, {
+      headers: this.getHeaders(),
+      signal,
+    });
+    if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status}`);
+    return res.json();
+  }
+
   async fetchModelsCatalog(): Promise<ModelsCatalogResponse> {
     const url = `${this.getBaseUrl()}/api/models-catalog`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -580,6 +603,7 @@ class ApiClient {
       heartbeatMd?: string;
       /** `null` resets to the deterministic fallback; omit to leave untouched. */
       avatar?: AgentAvatar | null;
+      slackIcon?: AgentSlackIcon | null;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
@@ -607,7 +631,8 @@ class ApiClient {
       | "dsh"
       | "cursor"
       | "amp"
-      | "grok";
+      | "grok"
+      | "fx";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
@@ -1060,6 +1085,15 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/integrations/slack/manifest?name=${encodeURIComponent(name)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch Slack manifest: ${res.status}`);
+    return res.json();
+  }
+
+  /** The Slack app's own avatar (null when Slack is off or the lookup failed). */
+  async fetchSlackAppIcon(): Promise<{ imageUrl: string | null }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/integrations/slack/app-icon`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to fetch the Slack app icon: ${res.status}`);
     return res.json();
   }
 

@@ -154,6 +154,13 @@ async function settle() {
   });
 }
 
+async function waitFor(check: () => boolean) {
+  for (let i = 0; i < 50 && !check(); i++) {
+    await settle();
+  }
+  expect(check()).toBe(true);
+}
+
 async function mount(data = onboarding()) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -255,13 +262,17 @@ describe("StepMemory on a server that has memory search on", () => {
         finish = resolve;
       });
     const view = await mount();
-    expect(blockers.at(-1)).toBe("Testing memory…");
-    expect(view.container.textContent).toContain("Testing the endpoint");
-    await act(async () => finish(PASS));
-    await settle();
-    expect(blockers.at(-1)).toBeNull();
-    expect(view.container.textContent).toContain("Memory works.");
-    await view.unmount();
+    try {
+      // React Query notifies on another timer turn; wait for the pending render
+      // before resolving the probe, rather than assuming one settle was enough.
+      await waitFor(() => blockers.at(-1) === "Testing memory…");
+      expect(view.container.textContent).toContain("Testing the endpoint");
+      await act(async () => finish(PASS));
+      await waitFor(() => blockers.at(-1) === null);
+      expect(view.container.textContent).toContain("Memory works.");
+    } finally {
+      await view.unmount();
+    }
   });
 
   test("a failed test shows the error under the providers", async () => {

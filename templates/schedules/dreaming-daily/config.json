@@ -1,0 +1,19 @@
+{
+  "kind": "schedule",
+  "name": "dreaming-daily",
+  "displayName": "Dreaming",
+  "slug": "dreaming-daily",
+  "title": "Dreaming Daily Trigger",
+  "description": "Start the dreaming workflow once a day, directly as a workflow schedule. The workflow's 20-hour cooldown skips a second run.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": [],
+  "requires": [],
+  "runAllSeedersCandidate": true,
+  "autoEnableCandidate": true,
+  "tags": [
+    "memory",
+    "skills",
+    "self-improvement"
+  ]
+}

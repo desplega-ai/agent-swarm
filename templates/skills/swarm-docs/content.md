@@ -49,6 +49,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Open Oncall](https://docs.agent-swarm.dev/docs/playbooks/open-oncall). When: Someone wants alerts from PagerDuty, Datadog, Sentry or a webhook investigated and fixed, with a person approving each fix. Not when: A one-off question about a single incident.
 - [PR Review](https://docs.agent-swarm.dev/docs/playbooks/pr-review). When: Someone wants every pull request reviewed automatically before a person looks at it.
 - [Linear Delivery Loop](https://docs.agent-swarm.dev/docs/playbooks/linear-delivery-loop). When: Someone wants agents to take Linear issues through implementation, CI and review to merged pull requests, with a person approving each one. Template: `community/linear-delivery-loop`.
+- [Slack Reply Gate](https://docs.agent-swarm.dev/docs/playbooks/slack-reply-gate). When: Someone wants Lead to stop answering or waking on Slack thread banter, reactions, or messages meant for other people. Not when: Someone wants to route Slack messages to a specific agent or channel, which is a pre.slack.route extension.
 - [Hot Patterns](https://docs.agent-swarm.dev/docs/playbooks/patterns). Reference.
 - [Pattern: Litmus Tests (LLM-as-Judge Quality Gates)](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests). When: Someone wants one agent to check another agent's output against a rubric before it ships.
 - [Pattern: Drain Loops (Stacked PRs + Merge Loop)](https://docs.agent-swarm.dev/docs/playbooks/patterns/drain-loops). When: Someone wants a large change split into small stacked pull requests and merged in order.
@@ -59,6 +60,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 ## Guides
 
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
+- [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
 - [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless). When: Someone wants to run Agent Swarm under rootless Podman.
 - [Published Artifacts](https://docs.agent-swarm.dev/docs/guides/published-artifacts). Reference.
@@ -87,13 +89,16 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Scripts as external APIs](https://docs.agent-swarm.dev/docs/guides/scripts-external-apis). When: Someone wants a swarm script exposed as a public HTTP endpoint or webhook receiver.
 - [Scripts credential broker](https://docs.agent-swarm.dev/docs/guides/scripts-credential-broker). Reference.
 - [One-off Script Workflow Runs](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs). Reference.
+- [Dreaming](https://docs.agent-swarm.dev/docs/guides/dreaming). When: Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes.
 - [Claude Bridge](https://docs.agent-swarm.dev/docs/guides/claude-bridge-experimental). Reference.
+- [Reading claude.ai Artifacts headless](https://docs.agent-swarm.dev/docs/guides/claude-artifacts-read). When: Someone wants an agent to read a claude.ai Artifact link, such as a design and its canvas.json, from a headless session.
 - [Worker Credential Recovery](https://docs.agent-swarm.dev/docs/guides/worker-credential-recovery). Reference.
 - [Model Gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways). Reference.
 - [Codex OAuth](https://docs.agent-swarm.dev/docs/guides/provider-auth/codex-oauth). Reference.
 - [Cursor](https://docs.agent-swarm.dev/docs/guides/provider-auth/cursor). Reference.
 - [Amp](https://docs.agent-swarm.dev/docs/guides/provider-auth/amp). Reference.
 - [Grok](https://docs.agent-swarm.dev/docs/guides/provider-auth/grok). Reference.
+- [fx](https://docs.agent-swarm.dev/docs/guides/provider-auth/fx). Reference.
 - [DeepSeek Harness (dsh)](https://docs.agent-swarm.dev/docs/guides/provider-auth/dsh). Reference.
 - [x402 Payments](https://docs.agent-swarm.dev/docs/guides/x402-payments). Reference.
 - [Multi-runtime agents](https://docs.agent-swarm.dev/docs/guides/multi-runtime-agents). Reference.

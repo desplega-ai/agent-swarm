@@ -57,7 +57,7 @@ services:
 
   agent-fs:
     container_name: so-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.18.9
+    image: ghcr.io/desplega-ai/agent-fs:0.18.13
     platform: linux/amd64
     depends_on:
       minio-init:
@@ -111,8 +111,14 @@ services:
         condition: service_healthy
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
+      # Experiment runs are test traffic: keep them out of install metrics and
+      # new-org alerts. A source-built image has no .git, so it would report
+      # production.
+      - DESPLEGA_TELEMETRY_ENV=test
       # The heartbeat reaper supersedes/fails any in_progress task whose lastUpdatedAt is
       # older than HEARTBEAT_STALL_NO_SESSION_MIN (5 min) with no active session, and spawns
       # a "resume" follow-up. That would eat the triage scenario's deliberately stale
@@ -151,6 +157,8 @@ services:
         condition: service_healthy
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}
@@ -158,6 +166,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000001
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=lead
       - AGENT_NAME=lead
       - MCP_BASE_URL=http://api:3013
@@ -188,6 +197,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}
@@ -195,6 +206,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000002
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=worker
       - AGENT_NAME=analyst
       - SYSTEM_PROMPT=You are the swarm's analyst — a data-oriented light coder. You excel at writing small TypeScript scripts to gather, aggregate, and summarize data. Return compact, structured results.
@@ -226,6 +238,8 @@ services:
     stop_grace_period: 60s
 
     environment:
+      # Test matrix: keep these swarms out of production telemetry.
+      - ANONYMIZED_TELEMETRY=false
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - HARNESS_PROVIDER=${MATRIX_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MATRIX_MODEL:-}
@@ -233,6 +247,7 @@ services:
       - API_KEY=${API_KEY}
       - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000003
+      - DESPLEGA_TELEMETRY_ENV=test
       - AGENT_ROLE=worker
       - AGENT_NAME=marketer
       - SYSTEM_PROMPT=You are the swarm's marketer. You turn analysis and data into crisp, compelling copy. Keep outputs short and punchy.

@@ -86,10 +86,10 @@ describe("boot retro-sweep", () => {
     const db = getDbClient();
     // Every UPDATE on a swept table lands here: proves untouched rows saw no write.
     await db.run("CREATE TABLE scrub_write_audit (tbl TEXT NOT NULL, id TEXT NOT NULL)");
-    for (const { table } of BOOT_SCRUB_TARGETS) {
+    for (const { table, idColumn } of BOOT_SCRUB_TARGETS) {
       await db.run(
         `CREATE TRIGGER audit_${table} AFTER UPDATE ON ${table}
-         BEGIN INSERT INTO scrub_write_audit (tbl, id) VALUES ('${table}', NEW.id); END`,
+         BEGIN INSERT INTO scrub_write_audit (tbl, id) VALUES ('${table}', NEW.${idColumn ?? "id"}); END`,
       );
     }
 
@@ -428,7 +428,7 @@ describe("boot retro-sweep upgrade from v8", () => {
       ).toBe(`credential echo: [REDACTED:${name}]`);
       expect(
         await db.get("SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
-          bootScrubDoneKey(9),
+          bootScrubDoneKey(SCRUBBER_RULES_VERSION),
         ]),
       ).not.toBeNull();
       expect(await runBootScrubSweep({ reembed: false })).toBeNull();

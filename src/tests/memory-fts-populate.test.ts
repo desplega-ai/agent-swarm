@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, getDbClient, initDb } from "../be/db";
 import {
-  FTS_DELETE_EXTRA_SQL,
-  FTS_MISSING_IDS_SQL,
+  FTS_SCAN_BATCH_SQL,
+  MEMORY_ID_BATCH_SQL,
   SqliteMemoryStore,
 } from "../be/memory/providers/sqlite-store";
 
@@ -62,16 +62,18 @@ describe("memory_fts boot backfill", () => {
     // Positive control: the old anti-join scans memory_fts once per memory.
     expect(planOf(QUADRATIC_BACKFILL_SQL).join(" | ")).toContain("CORRELATED");
 
-    for (const sql of [FTS_MISSING_IDS_SQL, FTS_DELETE_EXTRA_SQL]) {
-      const plan = planOf(sql).join(" | ");
-      expect(plan).not.toContain("CORRELATED");
-      // Exactly one pass over memory_fts per statement.
-      expect(plan.match(/SCAN memory_fts/g)?.length).toBe(1);
-    }
+    // Each batch seeks a rowid range of one table. The orphan check is a
+    // lookup on the agent_memory primary key, never a scan of memory_fts.
+    const scan = planOf(FTS_SCAN_BATCH_SQL.replace(/\?/g, "0")).join(" | ");
+    expect(scan).toMatch(/SCAN memory_fts VIRTUAL TABLE INDEX \d+:>/);
+    expect(scan.match(/memory_fts/g)?.length).toBe(1);
+    expect(scan).toContain("SEARCH m USING COVERING INDEX sqlite_autoindex_agent_memory_1 (id=?)");
+    const ids = planOf(MEMORY_ID_BATCH_SQL.replace(/\?/g, "0")).join(" | ");
+    expect(ids).toContain("SEARCH agent_memory USING INTEGER PRIMARY KEY (rowid>?)");
   });
 
   test("a new store backfills missing rows across batches and drops orphans", async () => {
-    const total = 1050; // crosses two 500-row batch boundaries
+    const total = 1050; // crosses two 500-row insert batches and one 1000-row scan batch
     const seed = await store.store({
       agentId,
       scope: "agent",

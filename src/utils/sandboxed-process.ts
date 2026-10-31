@@ -2,9 +2,9 @@
  * Shared sandbox for every code path that spawns a subprocess to run
  * user-supplied or attacker-influenceable source (inline scripts, durable
  * script workflow runs, workflow `script` nodes). One helper so the sandbox
- * posture — resource ulimits, a clean minimal environment, no raw secrets in
- * the child's env — is enforced identically everywhere instead of being
- * re-implemented (and re-forgotten) per call site.
+ * posture — resource ulimits and an explicitly selected environment — is
+ * enforced here instead of being re-implemented per call site. Runtime
+ * credentials use stdin; workflow-authored env can use the opt-in spawn mode.
  *
  * Mirrors the ulimit values CLAUDE.md documents for the inline scripts
  * runtime (`ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`) and the
@@ -95,16 +95,17 @@ function withBunNoOrphans(innerCommand: readonly string[]): string[] {
 
 /**
  * Wrap `innerCommand` in a shell prelude that applies the resource
- * ulimits above, then `exec`s into a completely clean environment (`env -i`)
- * containing ONLY the entries in `env`. This is the enforcement point for
- * two invariants every spawn-user-code path must uphold:
+ * ulimits above, then `exec`s into the requested command. Inline mode supplies
+ * the clean env through env -i as before. Spawn mode leaves delivery to the
+ * caller's Bun.spawn `env` option and never embeds env values in argv.
+ * Every spawn-user-code path must uphold two invariants:
  *
  *  1. Resource limits actually apply to the child (and everything it forks).
  *  2. The child never inherits the parent process's full `process.env` —
  *     callers must pass every env var the child legitimately needs
- *     (PATH/HOME/etc.) explicitly. In particular, never put a raw bearer
- *     token / API key in `env`; pass secrets over stdin instead so they
- *     never appear in `/proc/<pid>/environ` or a child's `process.env`.
+ *     (PATH/HOME/etc.) explicitly. Runtime credentials still travel over stdin,
+ *     not env. Workflow-authored variables are also passed explicitly through
+ *     Bun.spawn, which avoids argv exposure but not environ access.
  *
  * Always uses Bash for the prelude, regardless of what `innerCommand` runs:
  * Ubuntu's (and Debian's) `/bin/sh` is dash, whose `ulimit` does not implement
@@ -115,18 +116,21 @@ function withBunNoOrphans(innerCommand: readonly string[]): string[] {
  * API image, macOS dev) ships bash, so this has no availability fallback to
  * degrade to. The interpreter resource floor (`applyInterpreterFloor`) stays
  * keyed on the inner command, independently of the shell choice. No-ops
- * (returns `innerCommand` unchanged) on win32, where `ulimit`/`env -i`
- * don't exist — matches the existing native.ts behavior. Because this no-op
- * means `env` is never applied on win32, callers MUST pass `env` itself
- * (not just `{ PATH }`) to `Bun.spawn` on that platform — use
- * `sandboxSpawnEnv(env)` for the `Bun.spawn` `env` option so both platforms
- * are handled correctly.
+ * (returns `innerCommand` unchanged) on win32, where `ulimit` does not exist —
+ * matches the existing native.ts behavior. For inline mode, sandboxSpawnEnv
+ * passes only PATH on POSIX and the full env on win32. Spawn mode requires the
+ * full explicit environment on every platform.
  */
+export type SandboxEnvironmentMode = {
+  kind: "inline" | "spawn";
+  env: Readonly<Record<string, string>>;
+};
+
 function buildSandboxedCommandCore(
   innerCommand: readonly string[],
-  env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits,
   profile: { useBashShell: boolean; applyInterpreterFloor: boolean },
+  environment: SandboxEnvironmentMode,
 ): string[] {
   if (process.platform === "win32") return [...innerCommand];
 
@@ -154,10 +158,26 @@ function buildSandboxedCommandCore(
     "ulimit -c 0 2>/dev/null || true",
   ].join("; ");
 
-  const envAssignments = Object.entries(env)
-    .map(([key, value]) => `${key}=${shellQuote(value)}`)
-    .join(" ");
+  const envAssignments =
+    environment.kind === "inline"
+      ? Object.entries(environment.env)
+          .map(([key, value]) => `${key}=${shellQuote(value)}`)
+          .join(" ")
+      : "";
   const quotedInner = withBunNoOrphans(innerCommand).map(shellQuote).join(" ");
+
+  if (environment.kind === "spawn") {
+    // -p ignores BASH_ENV and imported shell options/functions before ulimit.
+    // --noprofile/--norc alone do not disable BASH_ENV in a noninteractive shell.
+    return [
+      "bash",
+      "--noprofile",
+      "--norc",
+      "-p",
+      "-c",
+      `${ulimits}; exec env -u PWD -u SHLVL ${quotedInner}`,
+    ];
+  }
 
   return [
     useBashShell ? "bash" : "sh",
@@ -170,11 +190,17 @@ export function buildSandboxedCommand(
   innerCommand: readonly string[],
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
+  environmentKind: SandboxEnvironmentMode["kind"] = "inline",
 ): string[] {
-  return buildSandboxedCommandCore(innerCommand, env, limits, {
-    useBashShell: true,
-    applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
-  });
+  return buildSandboxedCommandCore(
+    innerCommand,
+    limits,
+    {
+      useBashShell: true,
+      applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
+    },
+    { kind: environmentKind, env },
+  );
 }
 
 /**
@@ -207,25 +233,22 @@ export function buildSandboxedCommandForNprocEnforcementTest(
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
 ): string[] {
-  return buildSandboxedCommandCore(innerCommand, env, limits, {
-    useBashShell: true,
-    applyInterpreterFloor: false,
-  });
+  return buildSandboxedCommandCore(
+    innerCommand,
+    limits,
+    {
+      useBashShell: true,
+      applyInterpreterFloor: false,
+    },
+    { kind: "inline", env },
+  );
 }
 
 /**
  * The env object callers should pass to `Bun.spawn`'s own `env` option,
- * alongside the command from `buildSandboxedCommand`.
- *
- * On POSIX, `buildSandboxedCommand` wraps the command in an `env -i` prelude
- * that injects `env` itself into the child — Bun.spawn only needs PATH to
- * locate the shell binary that runs the prelude.
- *
- * On win32, `buildSandboxedCommand` is a no-op (no `ulimit`/`env -i`), so
- * there is no prelude to inject `env` — it must go through Bun.spawn's own
- * `env` option directly, or the child gets none of it (every caller here
- * passes Bun.spawn only `{ PATH }` on the assumption the prelude supplies
- * the rest).
+ * alongside the inline-mode command from `buildSandboxedCommand`.
+ * On POSIX the wrapper's env -i sets the full env; on win32 there is no wrapper.
+ * Spawn mode must instead pass the full explicit env directly to Bun.spawn.
  */
 export function sandboxSpawnEnv(env: Readonly<Record<string, string>>): Record<string, string> {
   return process.platform === "win32" ? { ...env } : { PATH: env.PATH ?? "" };

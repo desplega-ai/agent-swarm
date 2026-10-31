@@ -8,7 +8,7 @@ import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { downloadFile, type SlackFile } from "@/slack/files";
 import { attachableTask, attachSlackFilesForAgent } from "@/slack/inbound-files";
-import { extractSlackMessageText } from "@/slack/message-text";
+import { collectSlackMessageFiles, extractSlackMessageText } from "@/slack/message-text";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentTask } from "@/types";
 
@@ -199,6 +199,7 @@ export const registerSlackReadTool = (server: McpServer) => {
             text?: string;
             title?: string;
             pretext?: string;
+            files?: RawFile[];
           }>;
           blocks?: unknown[];
         };
@@ -277,7 +278,9 @@ export const registerSlackReadTool = (server: McpServer) => {
         for (const m of rawMessages) {
           // Include messages with text, attachments, blocks, or files
           const extractedText = extractSlackMessageText(m);
-          if (!extractedText && (!m.files || m.files.length === 0)) continue;
+          // A shared/forwarded message keeps its files on attachments[].files.
+          const messageFiles = collectSlackMessageFiles(m);
+          if (!extractedText && messageFiles.length === 0) continue;
 
           const isBot =
             m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
@@ -292,9 +295,9 @@ export const registerSlackReadTool = (server: McpServer) => {
           // Extract file information if includeFiles is true
           let files: FileInfo[] | undefined;
 
-          if (includeFiles && m.files && m.files.length > 0) {
+          if (includeFiles && messageFiles.length > 0) {
             files = [];
-            for (const f of m.files) {
+            for (const f of messageFiles) {
               const fileInfo: FileInfo = {
                 id: f.id,
                 name: f.name,

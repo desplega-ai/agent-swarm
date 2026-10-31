@@ -36,7 +36,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. " +
         "Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: " +
         "inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. " +
-        "Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script).\n" +
+        "Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). " +
+        "Inline script nodes also accept config.env, an interpolated string-to-string map of environment variables that can be used alongside args.\n" +
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
         "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +

@@ -3,7 +3,13 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { AgentTask, SessionDetailResponse, SessionListItem } from "../api/types";
+import type {
+  AgentTask,
+  SessionDetailResponse,
+  SessionListItem,
+  SessionSectionCounts,
+  SessionTreeResponse,
+} from "../api/types";
 import { groupKeyOf } from "./session-groups";
 
 /**
@@ -327,4 +333,17 @@ export function itemFromDetail(
 /** The group of a session detail: the server's, else the key rule of older servers. */
 export function detailGroupKey(detail: SessionDetailResponse): string | undefined {
   return detail.groupKey ?? (detail.root.key ? groupKeyOf(detail.root.key) : undefined);
+}
+
+/**
+ * A count across every session in the tree: No group, every group, Later, and
+ * Done. The Inbox leaves out grouped sessions, so it cannot stand in for them.
+ */
+export function treeCount(
+  tree: SessionTreeResponse | undefined,
+  key: Exclude<keyof SessionSectionCounts, "total">,
+): number {
+  if (!tree) return 0;
+  const groups = tree.groups.reduce((sum, group) => sum + group[key], 0);
+  return tree.noGroup[key] + groups + tree.later[key] + tree.done[key];
 }

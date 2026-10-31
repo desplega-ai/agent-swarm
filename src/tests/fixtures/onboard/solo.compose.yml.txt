@@ -21,6 +21,8 @@ services:
       - API_KEY=${API_KEY}
       - INSTALL_METHOD=${INSTALL_METHOD}
       - INSTALL_PRESET=${INSTALL_PRESET:-}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}
       - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
@@ -30,7 +32,7 @@ services:
       - APP_URL=https://app.agent-swarm.dev
 
     ports:
-      - "3013:3013"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3013:3013"
 
     volumes:
       - swarm_data:/app/data
@@ -58,6 +60,8 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000001
       - AGENT_NAME=Coder
@@ -69,7 +73,7 @@ services:
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3201:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3201:3000"
 
     volumes:
       - swarm_logs:/logs

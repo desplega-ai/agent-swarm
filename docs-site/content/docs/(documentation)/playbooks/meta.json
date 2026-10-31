@@ -18,6 +18,7 @@
     "open-oncall",
     "pr-review",
     "linear-delivery-loop",
+    "slack-reply-gate",
     "---Hot patterns---",
     "patterns"
   ]

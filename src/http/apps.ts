@@ -63,13 +63,13 @@ import {
   snapshotApp,
 } from "../apps/version";
 import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
-import type { RbacPrincipal, RbacResource } from "../rbac";
+import type { RbacResource } from "../rbac";
 import { can } from "../rbac";
 import { AgentTaskStatusSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
-import { agentFirstPrincipal } from "./request-principal";
+import { agentFirstPrincipal, authUser, authUserId, requestPrincipal } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { denyParentAttach } from "./session-access";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
@@ -289,6 +289,11 @@ const listAppsRoute = route({
   pattern: ["api", "apps"],
   summary: "List apps",
   tags: ["Apps"],
+  query: z.object({
+    /** Matches the name or description anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+  }),
   responses: {
     200: {
       description: "App summaries without definitions",
@@ -680,28 +685,26 @@ async function authorizeAppCaller(
   resource: RbacResource,
 ): Promise<{ actor: string; caller: AppActionCaller } | null> {
   const auth = getRequestAuth(req);
-  let principal: RbacPrincipal;
+  const principal = await requestPrincipal(req, myAgentId, {
+    unauthenticatedFallback: "anonymous-agent",
+  });
   let actor: string;
   let caller: AppActionCaller;
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
+  if (principal.kind === "operator") {
     // Page sessions never act as an agent, even if a header names one.
-    const agent = myAgentId && !auth.page ? await getAgentById(myAgentId) : null;
+    const agent = myAgentId && !auth?.page ? await getAgentById(myAgentId) : null;
     actor = agent ? `agent:${agent.id}` : "operator";
     caller = agent
       ? { kind: "agent", id: agent.id, name: agent.name }
       : { kind: "operator", id: null };
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    actor = `user:${auth.userId}`;
-    caller = { kind: "user", id: auth.userId, name: auth.user.name };
-  } else if (auth?.kind === "guest" || auth?.kind === "controller") {
-    principal = { kind: "guest" };
+  } else if (principal.kind === "user") {
+    actor = `user:${principal.userId}`;
+    caller = { kind: "user", id: principal.userId, name: authUser(auth)?.name };
+  } else if (principal.kind === "guest") {
     actor = "guest";
     caller = { kind: "guest", id: null };
   } else {
     const agent = myAgentId ? await getAgentById(myAgentId) : null;
-    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
     actor = myAgentId ? `agent:${myAgentId}` : "agent";
     caller = { kind: "agent", id: myAgentId ?? null, name: agent?.name };
   }
@@ -1110,7 +1113,7 @@ export async function handleApps(
     const definition = await parseAppDefinition(parsed.body.definition, {
       resolveApp: getApp,
       writerAgentId: myAgentId ?? null,
-      writerIsUser: getRequestAuth(req)?.kind === "user",
+      writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
     });
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
@@ -1129,7 +1132,11 @@ export async function handleApps(
   }
 
   if (listAppsRoute.match(req.method, pathSegments)) {
-    listAppsRoute.respond(res, 200, { apps: await listApps() });
+    const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    listAppsRoute.respond(res, 200, {
+      apps: await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+    });
     return true;
   }
 
@@ -1177,7 +1184,7 @@ export async function handleApps(
         forceElementBreak: parsed.body.forceElementBreak,
         changedByAgentId: myAgentId,
         writerAgentId: myAgentId ?? null,
-        writerIsUser: getRequestAuth(req)?.kind === "user",
+        writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
       });
       rollbackAppRoute.respond(res, 200, { app: rolledBack.app, migration: rolledBack.migration });
     } catch (error) {
@@ -1496,7 +1503,7 @@ export async function handleApps(
           currentAppId: parsed.params.id,
           resolveApp: getApp,
           writerAgentId: myAgentId ?? null,
-          writerIsUser: getRequestAuth(req)?.kind === "user",
+          writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
           existingDefinition: existing.definition,
         });
         if (!definition.success) {
@@ -1582,7 +1589,7 @@ export async function handleApps(
             currentAppId: parsed.params.id,
             resolveApp: getApp,
             writerAgentId: myAgentId ?? null,
-            writerIsUser: getRequestAuth(req)?.kind === "user",
+            writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
             existingDefinition: existing.definition,
           });
           if (!parsedDefinition.success) {

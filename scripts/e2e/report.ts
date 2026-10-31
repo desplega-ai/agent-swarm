@@ -20,7 +20,8 @@ export type HarnessCost = {
   /** Distinct `costSource` values, comma-joined (harness, pricing-table, unpriced). */
   costSource: string;
 };
-export type HarnessFailureKind = "setup" | "timeout" | "credential" | "task";
+/** `auth-chain`: the codex CLI ran but its rotated OAuth chain could not be persisted. */
+export type HarnessFailureKind = "setup" | "timeout" | "credential" | "task" | "auth-chain";
 export type HarnessAttempt = {
   status: "pass" | "fail";
   durationMs: number;
@@ -83,7 +84,7 @@ export const helpText = `Usage: bun run e2e [options]
 
 Options:
   --harness p1,p2               Run real harness legs after the contract scenarios
-                                (claude, codex, pi, opencode, dsh, cursor, amp, grok, acp)
+                                (claude, codex, pi, opencode, dsh, cursor, amp, grok, fx, acp)
   --harness-attempts N          Run a failed harness leg again, N attempts in total
                                 (1 through 5, default: 1)
   --only name,name              Run only named contract scenarios
@@ -182,7 +183,7 @@ export function parseOptions(
   }
   for (const provider of options.harness) {
     if (
-      !["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "acp"].includes(
+      !["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "fx", "acp"].includes(
         provider,
       )
     ) {

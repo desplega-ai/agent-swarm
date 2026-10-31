@@ -418,10 +418,42 @@ Both executors emit the `success` port. To branch on a check, add a `validation`
 - `runtime` (required): `bash`, `ts`, or `python`.
 - `script` (required): inline source to execute.
 - `args`: optional string arguments passed to the script.
+- `env`: optional string-to-string map of application environment variables for this invocation. Values support normal workflow interpolation. Names must match `[A-Za-z_][A-Za-z0-9_]*`; values cannot contain NUL bytes. System and shell names below are reserved (case-insensitive) and rejected before spawning. All other variables must be explicitly supplied; the server's full environment is never inherited.
 - `cwd`: optional working directory.
 - `timeout`: optional wall-clock timeout in milliseconds, from `1000` through `300000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
 
-Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args`, which the script receives as argv. For `runtime: "bash"`, the engine runs `bash -c <script> ...args`, so `args: ["a", "b"]` gives `$0=a` and `$1=b`; for `runtime: "ts"`, it runs `bun -e <script> -- ...args`, so the same args give `Bun.argv[1]="a"` and `Bun.argv[2]="b"`. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
+Reserved `env` names:
+
+| Group | Rejected names |
+| --- | --- |
+| Built-in environment | `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `PWD`, `SHLVL`, `OLDPWD` |
+| Native loader / libc | All `LD_*` and `DYLD_*` names; `GCONV_PATH`, `GLIBC_TUNABLES`, `LOCPATH`, `NLSPATH`, `GETCONF_DIR` |
+| Shell controls / special variables | All `BASH_*` names; `BASH`, `BASHOPTS`, `BASHPID`, `ENV`, `SHELLOPTS`, `IFS`, `OPTIND`, `OPTERR`, `PS0`–`PS4`, `PPID`, `UID`, `EUID`, `LINENO`, `RANDOM`, `SRANDOM`, `SECONDS`, `EPOCHSECONDS`, `EPOCHREALTIME`, `HISTCMD`, `COMP_WORDBREAKS`, `_` |
+
+Loader controls could execute native code before the wrapper installs its resource limits. Shell controls can execute startup files or be rewritten by Bash, so they are not supported application variables. Use names such as `GITLAB_TOKEN`, `PROJECT_ID`, or `MY_SETTING` instead. This filter does not provide isolation from other same-UID processes.
+
+Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args` (argv) or `config.env` (environment). For `runtime: "bash"`, the engine runs `bash -c <script> ...args`, so `args: ["a", "b"]` gives `$0=a` and `$1=b`; for `runtime: "ts"`, it runs `bun -e <script> -- ...args`, so the same args give `Bun.argv[1]="a"` and `Bun.argv[2]="b"`. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
+
+Use `env` for credentials instead of positional arguments or shell wrappers:
+
+```json
+{
+  "id": "gitlab-check",
+  "type": "script",
+  "config": {
+    "runtime": "python",
+    "env": {
+      "GITLAB_TOKEN": "{{input.gitlabToken}}",
+      "PROJECT_ID": "{{input.projectId}}"
+    },
+    "script": "import os; token = os.environ['GITLAB_TOKEN']; project = os.environ['PROJECT_ID']"
+  }
+}
+```
+
+`env` values are passed through the process environment, not embedded in the intermediate shell's command line. Scripts read them through `$NAME` in Bash, `os.environ["NAME"]` in Python, or `process.env.NAME` in TypeScript. Existing workflows without `env` keep their previous behavior.
+
+Secret workflow inputs (`secret.NAME` references and sensitive `${ENV_VAR}` references) remain masked as `***REDACTED***` in persisted `step.input`; the executing script receives the real values. This is not general secret detection for arbitrary literals or upstream outputs. Do not embed credentials directly in script source or echo them into output. Environment variables still have OS size limits and can be readable by other processes with sufficient permissions, including same-UID processes; `env` is not per-run process isolation.
 
 ### `swarm-script` config
 
@@ -434,7 +466,17 @@ Inline executable source may interpolate only `input`, `workflow`, `swarm`, and 
 
 Catalog script source is never workflow-interpolated. If it contains a token rooted at a built-in workflow value or a declared input alias, the node fails with guidance to pass that value through `config.args`; unrelated mustache text remains literal script data.
 
-Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
+The node runs as the workflow's `createdByAgentId`. A workflow with no creator (seeded, or created without `X-Agent-ID`) runs as the agent the server stamped on the run (`workflow_runs.triggeredByAgentId`), never as `trigger.agentId`, which the caller controls:
+
+| Run started by | Principal |
+| --- | --- |
+| `trigger-workflow` MCP tool | the calling agent |
+| `POST /api/workflows/:id/trigger` | the request's `X-Agent-ID` |
+| A schedule with `targetType: workflow` | the schedule's `createdByAgentId` (not `targetAgentId`, which the creator picks) |
+| A `sub-workflow` node | the parent's principal (its creator, else its stamped agent); `agentId` in `inputs` is plain data |
+| Webhook or event trigger | none: the `workflow` sentinel with no agent token, global scripts only |
+
+Retries and resumes reuse the run row, so they keep its principal. `trigger.agentId` remains ordinary trigger data for interpolation. Agent-scoped lookup uses the same principal; with none, only global scripts resolve. A seeded workflow should pin `scope: "global"` on every node so the starting agent cannot swap a script for its own copy.
 
 `timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime deliberately keeps a separate 60s CPU-time ulimit, so an I/O-bound or waiting script can use the full 5-minute wall-clock window while a hot loop is still terminated after roughly 60 CPU seconds. Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject values outside the allowed range before saving.
 

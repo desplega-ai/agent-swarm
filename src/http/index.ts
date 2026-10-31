@@ -15,8 +15,10 @@ import {
   getSwarmConfigs,
   upsertSwarmConfig,
 } from "../be/db";
+import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -83,7 +85,7 @@ import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
-import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
@@ -530,6 +532,9 @@ async function shutdown() {
   // Stop the unified OAuth pending-session garbage collector (all flows)
   stopOAuthPendingGc();
 
+  // Stop the expired MCP overflow sweep
+  stopMcpOverflowSweep();
+
   // Stop memory expired-row garbage collector
   stopMemoryGc();
 
@@ -538,6 +543,9 @@ async function shutdown() {
 
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
+
+  // Stop the task search index backfill after its current batch.
+  await stopTaskSearchBackfill();
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
@@ -868,7 +876,10 @@ httpServer
     // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
     startOAuthPendingGc();
 
-    // Start expired-memory garbage collector (1-hour tick, immediate first run)
+    // Delete expired MCP overflow values (10-min tick, off the spill path)
+    startMcpOverflowSweep();
+
+    // Start expired-memory garbage collector (1-hour tick, first run 2 min after boot)
     await startMemoryGc();
 
     // Start the opt-in DB retention sweep after config hydration. Every key is
@@ -879,24 +890,23 @@ httpServer
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
 
+    // Index the task rows migration 256 left out, in batches. Task search
+    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    void startTaskSearchBackfill();
+
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 
-    // Background backfill: re-embed any agent_memory rows with wrong-dimension
-    // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
-    // when the DB is clean. See src/be/memory/boot-reembed.ts.
-    import("../be/memory/boot-reembed")
-      .then(({ runBootReembed }) => runBootReembed())
+    // Background embedding maintenance: re-embed every memory and script
+    // vector when the embedding space (endpoint, model, dimensions, document
+    // prefix) changed, then embed rows with a missing or wrong-length vector.
+    // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
+    import("../be/memory/embedding-space")
+      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
+        setDeploymentEnvReader(getDeploymentEnvValue);
+        return runEmbeddingMaintenance({ backfill: true });
+      })
       .catch((err) => {
-        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
-      });
-
-    // Background backfill: embed any scripts that were seeded without embeddings
-    // (scriptEmbeddingMode: "skip" during boot). Non-blocking, idempotent, no-op
-    // when every non-scratch script already has an embedding.
-    import("../be/scripts/boot-reembed")
-      .then(({ runBootReembedScripts }) => runBootReembedScripts())
-      .catch((err) => {
-        console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
+        console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored

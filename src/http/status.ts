@@ -45,6 +45,7 @@ import { getSlackConnectionState } from "../slack/connection-state";
 import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { resolveAppUrl } from "./config-values";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -116,6 +117,12 @@ export const StatusIdentitySchema = z.object({
    * cloud installs can be sliced server-side.
    */
   org_id: z.string().nullable(),
+  /**
+   * The swarm's public dashboard URL (`APP_URL`, then `DASHBOARD_URL`, with
+   * swarm_config precedence). Null when neither is set. The dashboard reads
+   * links to it in agent output as its own. Absent on older APIs.
+   */
+  dashboard_url: z.string().nullable().optional(),
 });
 export type StatusIdentity = z.infer<typeof StatusIdentitySchema>;
 
@@ -134,6 +141,8 @@ export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
 export const StatusCombSchema = z.object({
   enabled: z.boolean(),
+  /** What is missing when Comb is off (for example no browser-reachable agent-fs URL). Null when on. */
+  reason: z.string().nullable(),
   api_url: z.string().nullable(),
   live_url: z.string(),
   org_id: z.string().nullable(),
@@ -332,7 +341,7 @@ export async function rollupCredStatusForProvider(provider: string): Promise<Cre
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 
-function buildIdentity(): StatusIdentity {
+function buildIdentity(dashboardUrl: string | null): StatusIdentity {
   const cloudRaw = process.env.SWARM_CLOUD;
   const hideRaw = process.env.SWARM_HIDE_CLOUD_PROMO;
   return {
@@ -343,6 +352,7 @@ function buildIdentity(): StatusIdentity {
     marketing_url: process.env.SWARM_MARKETING_URL?.trim() || null,
     hide_cloud_promo: hideRaw === "true" || hideRaw === "1",
     org_id: process.env.SWARM_ORG_ID?.trim() || null,
+    dashboard_url: dashboardUrl,
   };
 }
 
@@ -757,7 +767,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
   const instance = await getInstanceFeedbackSignals();
   return {
     runtime_pools: { enabled: isRuntimePoolsEnabled(), supervisor: runtimeSupervisorStatus() },
-    identity: buildIdentity(),
+    identity: buildIdentity(await resolveAppUrl()),
     setup,
     activity: { ...activity, leads_ready: readyLeads },
     agent_fs: {
@@ -777,6 +787,7 @@ function getCombStatus(serviceUserId: string | null): StatusAgentFs["comb"] {
   const comb = getCombConfig();
   return {
     enabled: comb.enabled,
+    reason: comb.reason,
     api_url: comb.apiUrl,
     live_url: comb.liveUrl,
     org_id: comb.orgId,
@@ -811,7 +822,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

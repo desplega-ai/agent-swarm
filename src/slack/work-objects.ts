@@ -3,8 +3,10 @@ import type { EntityPresentDetailsArguments, WebClient } from "@slack/web-api";
 import { getAgentById, getTaskById } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getTaskUrl } from "./blocks";
+import { wasEventSeen } from "./event-dedup";
 import { shouldBlockChannel } from "./external-channel";
 import { isUserAllowed } from "./handlers";
+import { isAdmittedSlackDelivery } from "./inbound-dispatch";
 import { slackTaskOutput } from "./task-output";
 
 type DetailsEvent = SlackEventMiddlewareArgs<"entity_details_requested">["event"];
@@ -93,8 +95,10 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
 
 export function registerWorkObjectHandlers(app: App): void {
   // Bolt acknowledges Events API deliveries; the flexpane needs a separate API response.
-  app.event("entity_details_requested", async ({ event, client, logger }) => {
+  app.event("entity_details_requested", async ({ event, body, client, logger }) => {
     if (!isEnvFlagEnabled("SLACK_WORK_OBJECTS_ENABLED", false)) return;
+    // A redelivery after a tolerated socket ack failure must not present twice.
+    if (!isAdmittedSlackDelivery() && wasEventSeen(body?.event_id)) return;
 
     let details: Details;
     try {

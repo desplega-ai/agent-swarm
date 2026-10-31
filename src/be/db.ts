@@ -25,6 +25,7 @@ import type {
   AgentLogEventType,
   AgentMcpServer,
   AgentSkill,
+  AgentSlackIcon,
   AgentStatus,
   AgentTask,
   AgentTaskStatus,
@@ -127,6 +128,7 @@ import {
   CreateTaskOptionsSchema,
   isTerminalTaskStatus,
   type ModelTier,
+  OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
@@ -195,6 +197,7 @@ import {
   getLatestContextVersion,
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
+import { pageSearchSql } from "./db/page-search";
 import { getDb, getDbClient } from "./db/runtime";
 import {
   assertAssetKeyMovesAllowed,
@@ -310,7 +313,11 @@ export {
   getContextVersionHistory,
   getLatestContextVersion,
 } from "./db/context-versions";
-export { getScriptRunExecutionArgs } from "./db/script-runs";
+export {
+  getScriptRunExecutionArgs,
+  getScriptRunFollowUpGuard,
+  setScriptRunFollowUpGuard,
+} from "./db/script-runs";
 export {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -333,12 +340,14 @@ export {
 } from "./db/runtime";
 
 export {
+  countAgentDispatchesInThread,
   type ExistingTrackerContextWork,
   type ExistingTrackerContextWorkReason,
   findActiveTasksByVcs,
-  findCompletedTaskInThread,
+  findCompletedTasksInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
+  findRecentFailedTaskInThread,
   findTaskByGitHub,
   findTaskByVcs,
   getAgentCurrentTask,
@@ -2434,17 +2443,23 @@ async function findLatestRoutingCandidate(
 async function captureRoutingDecisionSnapshot(
   options: CreateTaskOptions,
 ): Promise<RoutingDecisionSnapshot> {
+  // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
+  // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
+  // over agentId/offeredTo that reads each agent's whole task history.
   const workerStatuses = await getDbClient().query<RoutingDecisionWorkerStatus>(
-    `SELECT agent.id AS agentId, agent.status,
+    `WITH open_task AS MATERIALIZED (
+         SELECT id, agentId, offeredTo, status FROM agent_tasks
+          WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
+       )
+       SELECT agent.id AS agentId, agent.status,
          COUNT(task.id) AS openTaskCount,
          SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
        FROM agents agent
-       LEFT JOIN agent_tasks task ON
-         (task.agentId = agent.id OR task.offeredTo = agent.id)
-         AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
        WHERE agent.isLead = 0
        GROUP BY agent.id, agent.status
        ORDER BY agent.id`,
+    [...OPEN_TASK_STATUSES],
   );
 
   const samePr =
@@ -3743,6 +3758,7 @@ export async function updateAgentProfile(
     heartbeatMd?: string;
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar?: AgentAvatar | null;
+    slackIcon?: AgentSlackIcon | null;
   },
   meta?: VersionMeta,
   guard?: {
@@ -3890,6 +3906,8 @@ export async function updateAgentProfile(
     // untouched) from "key present with value null" (reset).
     const avatarProvided = Object.hasOwn(updates, "avatar");
     const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
+    const slackIconProvided = Object.hasOwn(updates, "slackIcon");
+    const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
 
     const now = new Date().toISOString();
     const row = await tx.get<AgentRow>(
@@ -3905,6 +3923,7 @@ export async function updateAgentProfile(
           toolsMd = COALESCE(?, toolsMd),
           heartbeatMd = COALESCE(?, heartbeatMd),
           avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
+          slack_icon = CASE WHEN ? = 1 THEN ? ELSE slack_icon END,
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
       [
@@ -3920,6 +3939,8 @@ export async function updateAgentProfile(
         writable.heartbeatMd ?? null,
         avatarProvided ? 1 : 0,
         avatarJson,
+        slackIconProvided ? 1 : 0,
+        slackIconJson,
         now,
         id,
       ],
@@ -6063,6 +6084,8 @@ export interface ScheduledTaskFilters {
   lastRunStatus?: "failed" | "succeeded";
   key?: string;
   keyPrefix?: string;
+  /** At most this many rows, in list order. */
+  limit?: number;
 }
 
 /**
@@ -6144,6 +6167,10 @@ export async function getScheduledTasks(
   }
 
   query += " ORDER BY lastRunAt IS NULL ASC, lastRunAt DESC, lastUpdatedAt DESC";
+  if (filters?.limit !== undefined) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
 
   const rows = await getDbClient().query<ScheduledTaskRow>(query, params);
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
@@ -6262,7 +6289,7 @@ export interface UpdateScheduledTaskData {
   description?: string;
   cronExpression?: string | null;
   intervalMs?: number | null;
-  taskTemplate?: string;
+  taskTemplate?: string | null;
   taskType?: string;
   tags?: string[];
   priority?: number;
@@ -6428,9 +6455,36 @@ export async function updateScheduledTask(
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
   return await getDbClient().transaction(async (tx) => {
+    // An unfired deferral is the only continuation of a suppressed completion.
+    // Read under the delete's write lock so a concurrent wake cannot be missed.
+    const deferred = await tx.get<{ parentTaskId: string }>(
+      `SELECT parentTaskId FROM scheduled_tasks
+       WHERE id = ? AND taskType = 'deferred' AND parentTaskId IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM agent_tasks WHERE scheduleId = scheduled_tasks.id)`,
+      [id],
+    );
     // Favorites carry no FK to the entity; drop every user's star with it.
     await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
     const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+    if (result.changes > 0 && deferred) {
+      getDbClient().afterCommit(async () => {
+        try {
+          const parent = await getTaskById(deferred.parentTaskId);
+          if (!parent?.deferredAt) return;
+          const { createWorkerTaskFollowUp } = await import("../tasks/worker-follow-up");
+          await createWorkerTaskFollowUp({
+            task: parent,
+            status: "failed",
+            failureReason: "Deferred continuation schedule deleted before its wake-up",
+          });
+        } catch (error) {
+          console.error(
+            "[deleteScheduledTask] deferred deletion follow-up failed:",
+            scrubSecrets(error instanceof Error ? error.message : String(error)),
+          );
+        }
+      });
+    }
     return result.changes > 0;
   });
 }
@@ -7683,6 +7737,10 @@ export interface WorkflowFilters {
   consecutiveErrorsMin?: number;
   key?: string;
   keyPrefix?: string;
+  /** Matches the name, description or key anywhere, case-insensitive. */
+  q?: string;
+  /** At most this many rows, newest first. */
+  limit?: number;
 }
 
 export function listWorkflows(filters?: WorkflowFilters): Promise<Workflow[]>;
@@ -7728,7 +7786,16 @@ export async function listWorkflows(
     ) >= ?`;
     params.push(filters.consecutiveErrorsMin);
   }
+  if (filters?.q) {
+    const pattern = `%${literalPrefixPattern(filters.q)}`;
+    query += ` AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR "key" LIKE ? ESCAPE '\\')`;
+    params.push(pattern, pattern, pattern);
+  }
   query += " ORDER BY lastUpdatedAt DESC";
+  if (filters?.limit !== undefined) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
   const rows = await getDbClient().query<WorkflowRow>(query, params);
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
@@ -7904,10 +7971,12 @@ export async function createWorkflowRun(data: {
   parentStepId?: string;
   /** The parent step's `retryCount` when it started this run (migration 240). */
   parentStepAttempt?: number;
+  /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
+  triggeredByAgentId?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7917,6 +7986,7 @@ export async function createWorkflowRun(data: {
       data.createdBy ?? null,
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
+      data.triggeredByAgentId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -8253,6 +8323,10 @@ export interface StuckWorkflowRun {
 }
 
 export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
+  // CROSS JOIN fixes the join order: the few waiting steps drive, and each
+  // one seeks its task through idx_agent_tasks_workflowRunStepId, so `output`
+  // is read only for matched tasks. Driving from agent_tasks by status reads
+  // nearly every finished task.
   return getDbClient().query<StuckWorkflowRun>(
     `SELECT
         wr.id as runId,
@@ -8262,10 +8336,11 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
         at.status as taskStatus,
         at.output as taskOutput,
         wr.workflowId
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
-      JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
+      FROM workflow_run_steps wrs
+      CROSS JOIN workflow_runs wr ON wr.id = wrs.runId
+      CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
+      WHERE wrs.status = 'waiting'
+        AND wr.status = 'waiting'
         AND at.status IN ('completed', 'failed', 'cancelled')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );
@@ -8652,6 +8727,8 @@ export interface PageListOptions {
   slim?: boolean;
   key?: string;
   keyPrefix?: string;
+  /** Matches the title, slug or description anywhere, case-insensitive. */
+  q?: string;
 }
 
 export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Promise<Page[]>;
@@ -8682,6 +8759,7 @@ export async function listPagesByAgent(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(opts.keyPrefix));
   }
+  query += pageSearchSql(opts?.q, params);
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
   const rows = await getDbClient().query<PageRow>(query, params);
@@ -8713,6 +8791,7 @@ export async function listAllPages(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(opts.keyPrefix));
   }
+  query += pageSearchSql(opts?.q, params);
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
   const rows = await getDbClient().query<PageRow>(query, params);
@@ -8724,10 +8803,10 @@ export async function listAllPages(
  * pager so the UI shows the real count, not just the current page's length.
  */
 export async function countAllPages(
-  filters?: Pick<PageListOptions, "key" | "keyPrefix">,
+  filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE 1=1";
-  const params: string[] = [];
+  const params: (string | number)[] = [];
   if (filters?.key) {
     query += ' AND "key" = ?';
     params.push(normalizeAssetKey(filters.key));
@@ -8735,6 +8814,7 @@ export async function countAllPages(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
+  query += pageSearchSql(filters?.q, params);
   const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }
@@ -8742,10 +8822,10 @@ export async function countAllPages(
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
 export async function countPagesByAgent(
   agentId: string,
-  filters?: Pick<PageListOptions, "key" | "keyPrefix">,
+  filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE agentId = ?";
-  const params: string[] = [agentId];
+  const params: (string | number)[] = [agentId];
   if (filters?.key) {
     query += ' AND "key" = ?';
     params.push(normalizeAssetKey(filters.key));
@@ -8753,6 +8833,7 @@ export async function countPagesByAgent(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
+  query += pageSearchSql(filters?.q, params);
   const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }
@@ -12998,6 +13079,9 @@ export async function listRecentSessions(
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const query = sessionSummaryQuery(opts);
   const threadRoots = threadRootsSql();
+  const order = (a: string) =>
+    `${opts.triage === "later" ? `${a}.snoozeUntil ASC,` : ""}
+    ${a}.lastActivityAt DESC, ${a}.rootCreatedAt DESC, ${a}.root_id DESC`;
   const rootRows = await getDbClient().query<
     AgentTaskRow & {
       __chainCount: number;
@@ -13009,13 +13093,14 @@ export async function listRecentSessions(
       __threadRoots: number;
     }
   >(
+    // Page first on the summaries, then read agent_tasks for the page roots only.
     `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
       a.latestStatus AS __latestStatus, a.readState AS __readState,
       a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
       ${threadRoots.sql} AS __threadRoots
-    FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
-    ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
-      a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
+    FROM (SELECT * FROM (${query.sql}) page ORDER BY ${order("page")} LIMIT ? OFFSET ?) a
+    CROSS JOIN agent_tasks r ON r.id = a.root_id
+    ORDER BY ${order("a")}`,
     [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
   const fields = await sessionPageFields(
@@ -14037,6 +14122,7 @@ type ScriptRunRow = {
   last_heartbeat_at: string | null;
   idempotencyKey: string | null;
   requestedByUserId: string | null;
+  sourceTaskId: string | null;
   created_by: string | null;
   updated_by: string | null;
 };
@@ -14081,6 +14167,7 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
+    sourceTaskId: row.sourceTaskId ?? undefined,
   };
 }
 
@@ -14109,6 +14196,7 @@ export async function createScriptRun(data: {
   scriptName?: string;
   idempotencyKey?: string;
   requestedByUserId?: string;
+  sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
@@ -14123,8 +14211,9 @@ export async function createScriptRun(data: {
 
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
-        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
+         created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14137,6 +14226,7 @@ export async function createScriptRun(data: {
       sealJson(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
+      data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
     ],

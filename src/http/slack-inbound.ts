@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getSlackInboundDiagnostics } from "../slack/inbound-dispatch";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
-import { jsonError } from "./utils";
 
 // ─── Response schemas ────────────────────────────────────────────────────────
 
@@ -23,6 +22,7 @@ const OutcomeCountersSchema = z.object({
   ignored: z.number(),
   failed: z.number(),
   uncertain: z.number(),
+  ackNotReady: z.number(),
   lastOutcomeAt: z.string().nullable(),
   lastFailure: FailureSchema,
 });
@@ -96,8 +96,7 @@ export async function handleSlackInbound(
     // Receipt ids, Slack event ids and failure codes are operator telemetry.
     // `auth.apiKey` also admits user `aswt_` tokens, and verb-less GETs pass
     // RBAC admission, so gate on the principal kind here.
-    if (getRequestAuth(req)?.kind !== "operator") {
-      jsonError(res, "Operator access required", 403);
+    if (!requireAuthKind(req, res, ["operator"], "Operator access required")) {
       return true;
     }
     slackInboundDiagnosticsRoute.respond(res, 200, await getSlackInboundDiagnostics());

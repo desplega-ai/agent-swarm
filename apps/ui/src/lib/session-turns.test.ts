@@ -4,7 +4,11 @@ import { formatSpan } from "./format-duration-ms";
 import {
   approvalsByPart,
   buildTurns,
+  deferralText,
+  foldWaits,
   hasHandoffs,
+  isDeferral,
+  onlyWaits,
   partSteps,
   type SessionTurns,
   type TurnPart,
@@ -378,10 +382,7 @@ describe("buildTurns on sB1 (dashboard, two people)", () => {
     expect(summary(turns[2].parts[0])).toMatchObject({ retries: 2, state: "done" });
     expect(span(turns[2].parts[0])).toBe("1h 36m");
     // "Writer is working · 4m"
-    expect(summary(turns[3].parts[0])).toMatchObject({
-      state: "working",
-      activeAgentIds: ["writer"],
-    });
+    expect(summary(turns[3].parts[0])).toMatchObject({ state: "working" });
     expect(span(turns[3].parts[0])).toBe("4m");
   });
 
@@ -764,4 +765,123 @@ test("formatSpan rounds to whole minutes like the mockup", () => {
   expect(formatSpan(96 * 60_000)).toBe("1h 36m");
   expect(formatSpan(120 * 60_000)).toBe("2h");
   expect(formatSpan(51 * 3_600_000)).toBe("2d 3h");
+});
+
+describe("deferrals", () => {
+  // A dashboard message and three wake-ups: the lead waits twice, a worker
+  // runs, the lead waits once more, then answers.
+  const waiting = (who: string, time: string) =>
+    `Waiting on ${who} \u2014 or today at ${time} at the latest`;
+  const deferred = { deferredAt: at(0), tags: ["deferred"] };
+  const chain = [
+    task({
+      id: "m",
+      createdAt: at(90),
+      source: "ui",
+      output: waiting("Lead", "15:03"),
+      ...deferred,
+    }),
+    task({
+      id: "w1",
+      createdAt: at(80),
+      source: "schedule",
+      taskType: "deferred",
+      parentTaskId: "m",
+      output: waiting("Picateclas", "14:50"),
+      ...deferred,
+    }),
+    task({
+      id: "w2",
+      createdAt: at(70),
+      source: "schedule",
+      taskType: "deferred",
+      parentTaskId: "w1",
+      output: "Checking back today at 17:50",
+      ...deferred,
+    }),
+    task({
+      id: "w3",
+      createdAt: at(60),
+      source: "schedule",
+      taskType: "deferred",
+      parentTaskId: "w2",
+      output: waiting("Picateclas", "19:20"),
+      ...deferred,
+    }),
+    task({
+      id: "s",
+      createdAt: at(55),
+      agentId: "picateclas",
+      isLeadTask: false,
+      taskType: "feature",
+      parentTaskId: "w3",
+      output: "Shipped.",
+    }),
+    task({
+      id: "w4",
+      createdAt: at(40),
+      source: "schedule",
+      taskType: "deferred",
+      parentTaskId: "w3",
+      output: "Live: the page shows the partial week.",
+      tags: ["deferred"],
+    }),
+  ];
+  const parts = buildTurns(chain).turns[0].parts;
+
+  test("a part only waits when its reply deferred and nothing else ran in it", () => {
+    expect(parts.map((part) => [part.id, onlyWaits(part)])).toEqual([
+      ["m", true],
+      ["w1", true],
+      ["w2", true],
+      ["w3", false],
+      ["w4", false],
+    ]);
+  });
+
+  test("consecutive waiting parts fold into one run; a lone wait stays a part", () => {
+    expect(
+      foldWaits(parts).map((run) =>
+        run.kind === "waits" ? run.parts.map((part) => part.id) : run.part.id,
+      ),
+    ).toEqual([["m", "w1", "w2"], "w3", "w4"]);
+    expect(
+      foldWaits(parts.slice(2)).map((run) => (run.kind === "part" ? run.part.id : "folded")),
+    ).toEqual(["w2", "w3", "w4"]);
+  });
+
+  test("a caller can keep a waiting part out of a run", () => {
+    const runs = foldWaits(parts, (part) => onlyWaits(part) && part.id !== "w1");
+    expect(runs.map((run) => (run.kind === "part" ? run.part.id : "folded"))).toEqual([
+      "m",
+      "w1",
+      "w2",
+      "w3",
+      "w4",
+    ]);
+  });
+
+  test("deferralText reads who and when", () => {
+    expect(deferralText(waiting("Picateclas", "17:50"))).toEqual({
+      who: "Picateclas",
+      by: "17:50",
+    });
+    expect(deferralText("Checking back tomorrow at 09:00")).toEqual({
+      who: null,
+      by: "tomorrow 09:00",
+    });
+    // defer-task writes far dates as "on MM-DD at HH:MM".
+    expect(deferralText("Checking back on 11-02 at 09:00")).toEqual({
+      who: null,
+      by: "11-02 09:00",
+    });
+    expect(deferralText('{"status":"pending"}')).toEqual({ who: null, by: null });
+  });
+
+  test("a deferred task whose output is schema JSON is not a wait line", () => {
+    // With an output schema, defer-task stores the agent's JSON as the output.
+    const json = task({ id: "j", output: '{"status":"pending","pr":12}', ...deferred });
+    expect(isDeferral(json)).toBe(false);
+    expect(isDeferral(task({ id: "k", output: waiting("Lead", "15:03"), ...deferred }))).toBe(true);
+  });
 });

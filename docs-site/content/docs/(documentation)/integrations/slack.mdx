@@ -26,6 +26,8 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`, `member_joined_channel`, `channel_shared`, `channel_unshared`
 7. Install to your workspace and copy tokens
 
+`chat:write.customize` lets each agent post under its own name and [Slack icon](/docs/architecture/agents#slack-icon), including streamed replies. An agent set to the Slack app icon posts with no icon override, so Slack shows the app's avatar.
+
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
 
 The manifest's `oauth_config.redirect_urls` lists two generic placeholders (a hosted-cloud callback and a `web.localhost` dev callback). Replace or extend these with your own deployment's HTTPS callback URL(s) before installing — do not reuse another deployment's callback host.
@@ -114,6 +116,8 @@ When you @mention the bot in a thread where a worker is already handling a task,
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
 By default, thread follow-ups route automatically without requiring an @mention. That includes human replies to swarm-started root messages, even when no task row existed yet for the thread. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
+
+A thread reply that @mentions another user but not the bot (for example `@Alice wdyt?`) is addressed to that user, so the swarm ignores it. This applies to follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to make the swarm wake on these replies too. Each such reply then becomes a follow-up, so pair the flag with `ADDITIVE_SLACK=true` to batch side conversations into one task. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` takes precedence over this flag.
 
 #### Live steering instead of follow-up tasks
 
@@ -345,6 +349,14 @@ Limitations:
 - With `ADDITIVE_SLACK=true`, follow-ups that are buffered (rather than turned into a task right away) carry only the metadata line, marked as not attached, and the bot says so in the thread.
 - With thread steering enabled, a lead follow-up that includes files creates a follow-up task instead of steering the running session, because steering only carries text.
 - When the bot reads earlier messages of a thread for context, messages that contain only a file are skipped.
+
+## Leaving a thread
+
+An agent calls `slack-leave-thread` when a thread no longer needs the swarm: people are talking among themselves, someone tells the bot to stop, or the work is done. The swarm then ignores every message in that thread that does not @mention the bot. The check runs in code before the `slack.message` workflow event, buffering, routing, or any model call, so no workflow starts, no task is created and nothing is posted. Replies already buffered when the thread is left are dropped too. The next message that @mentions the bot clears the state and is handled as usual. Other threads are unaffected, and leaving posts nothing to Slack.
+
+A person can do the same without waiting for an agent: reply `!leave` in the thread (an @mention of the bot before it is allowed). The swarm leaves the thread in code, with no task, workflow event, or model call, and the `!leave` message is never buffered as a follow-up. Only the sender sees the confirmation, an ephemeral "Left this thread. @mention the swarm to bring it back." `!leave` works only in a thread the swarm is part of: one with a task, assigned or not, or one the swarm started. Elsewhere it is an ordinary message. It is a text command rather than a slash command because Slack does not allow [custom slash commands in threads](https://docs.slack.dev/interactivity/implementing-slash-commands), so no Slack app setup is needed.
+
+Set `SLACK_LEAVE_THREAD_DISABLE=true` to turn leaving off. `!leave` is then an ordinary message and `/agent-swarm-help` stops listing it. New agent sessions do not get the tool, and a session that already has it gets an error naming the flag when it calls it. Scripts always see the tool and get the same error while the flag is set. A global config change applies without a restart. Threads left before the flag was set stay left until someone @mentions the bot.
 
 ## File Handling
 

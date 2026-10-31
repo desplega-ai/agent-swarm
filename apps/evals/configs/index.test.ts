@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { harnessModelIds } from "@desplega/model-catalog";
+import {
+  harnessModelIds,
+  openAICompatibleProvider,
+  providerForModel,
+} from "@desplega/model-catalog";
 import snapshot from "../../../src/be/modelsdev-cache.json";
 import { configs, DEFAULT_CONFIG_IDS } from "./index.ts";
 
@@ -7,8 +11,8 @@ import { configs, DEFAULT_CONFIG_IDS } from "./index.ts";
 const NAMING_RE = /^(claude|pi|opencode|codex)-[a-z0-9][a-z0-9.-]*$/;
 
 describe("config catalog invariants (v6 §0.14 / §10)", () => {
-  test("catalog has exactly 84 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions + 14 round-11 June 2026 refresh + Claude Sonnet 5 + 3 GPT-5.6 Codex tiers + 31 round-12 September 2026 refresh + pi-latest-deepseek-v4 alias + Claude Sonnet 5.5 + codex-6.1-sol + codex-5.6)", () => {
-    expect(configs.length).toBe(119);
+  test("catalog has exactly 84 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions + 14 round-11 June 2026 refresh + Claude Sonnet 5 + 3 GPT-5.6 Codex tiers + 31 round-12 September 2026 refresh + pi-latest-deepseek-v4 alias + Claude Sonnet 5.5 + codex-6.1-sol + codex-5.6 + codex-6.1-terra + 5 Helmcode direct)", () => {
+    expect(configs.length).toBe(125);
   });
 
   test("every codex model the committed catalog lists since gpt-5.4 has a codex config", () => {
@@ -64,7 +68,7 @@ describe("config catalog invariants (v6 §0.14 / §10)", () => {
     }
   });
 
-  test("pi/opencode entries pin concrete openrouter/-prefixed models (or a moving alias)", () => {
+  test("pi/opencode entries pin concrete openrouter/- or registry-prefixed models (or a moving alias)", () => {
     for (const c of configs) {
       if (c.provider !== "pi" && c.provider !== "opencode") continue;
       if (c.modelAlias) {
@@ -72,7 +76,19 @@ describe("config catalog invariants (v6 §0.14 / §10)", () => {
         continue;
       }
       expect(c.model).toBeDefined();
-      expect(c.model?.startsWith("openrouter/")).toBe(true);
+      expect(c.model?.startsWith("openrouter/") || providerForModel(c.model) !== undefined).toBe(
+        true,
+      );
+    }
+  });
+
+  test("every helmcode/ config names a model in the Helmcode registry", () => {
+    const helmcode = configs.filter((c) => c.model?.startsWith("helmcode/"));
+    expect(helmcode.length).toBe(5);
+    const served = new Set(openAICompatibleProvider("helmcode")?.models.map((m) => m.id));
+    for (const c of helmcode) {
+      expect(c.provider).toBe("pi");
+      expect(served.has(c.model?.slice("helmcode/".length) ?? "")).toBe(true);
     }
   });
 

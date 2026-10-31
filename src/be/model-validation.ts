@@ -7,7 +7,8 @@
  *   - a `latest:<provider>/<family>` alias that is valid grammar and resolves to a catalog model;
  *   - a catalog id, bare (`claude-opus-5-5`, `gpt-5.6-sol`) or provider-qualified
  *     (`openrouter/deepseek/deepseek-v4.1-flash`, `amazon-bedrock/...`);
- *   - a Claude CLI shortname (`opus`, `sonnet`, ...), which the CLI resolves itself.
+ *   - a Claude CLI shortname (`opus`, `sonnet`, ...), which the CLI resolves itself;
+ *   - a ChatGPT subscription id `openai-codex/<id>` whose `<id>` is in the `openai` section.
  *
  * Escape hatch: `allowCustomModel: true` on the call (tools, REST bodies, workflow node
  * config, the agent runtime PATCH). Custom ids skip the check and are stored as given, for
@@ -23,6 +24,7 @@
  */
 import {
   buildClaudeShortnameMap,
+  chatgptSubscriptionModelId,
   type HarnessCatalogSections,
   harnessModelMismatch,
   isAlias,
@@ -55,6 +57,8 @@ function hasModel(catalog: CatalogSections, provider: string, modelId: string): 
 export function isKnownCatalogModel(model: string, catalog: CatalogSections): boolean {
   const id = model.trim().replace(CONTEXT_SUFFIX_RE, "");
   if (!id) return false;
+  const subscriptionId = chatgptSubscriptionModelId(id);
+  if (subscriptionId) return hasModel(catalog, "openai", subscriptionId);
   const slash = id.indexOf("/");
   if (slash > 0) {
     const provider = id.slice(0, slash);

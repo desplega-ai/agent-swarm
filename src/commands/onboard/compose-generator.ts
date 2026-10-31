@@ -14,12 +14,21 @@ const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
 // which moves on every commit to main; operators pin a release in .env.
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const IMAGE_TAG_EXPRESSION = "${AGENT_SWARM_VERSION:-latest}";
+// Host address for published ports, from AGENT_SWARM_BIND_ADDRESS in .env. Blank
+// publishes on every interface, as before. 127.0.0.1 keeps the ports behind a host
+// reverse proxy: Docker-published ports bypass host firewalls such as ufw.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const BIND_ADDRESS_PREFIX = "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_API_KEY = "      - API_KEY=${API_KEY}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_INSTALL_METHOD = "      - INSTALL_METHOD=${INSTALL_METHOD}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_INSTALL_PRESET = "      - INSTALL_PRESET=${INSTALL_PRESET:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_ANONYMIZED_TELEMETRY = "      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_TELEMETRY_ENV = "      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_BOT_TOKEN = "      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
@@ -231,6 +240,8 @@ export function generateCompose(state: OnboardState): string {
   lines.push(ENV_API_KEY);
   lines.push(ENV_INSTALL_METHOD);
   lines.push(ENV_INSTALL_PRESET);
+  lines.push(ENV_ANONYMIZED_TELEMETRY);
+  lines.push(ENV_TELEMETRY_ENV);
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
   lines.push("      - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}");
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
@@ -269,7 +280,7 @@ export function generateCompose(state: OnboardState): string {
 
   lines.push("");
   lines.push("    ports:");
-  lines.push(`      - "${port}:3013"`);
+  lines.push(`      - "${BIND_ADDRESS_PREFIX}${port}:3013"`);
   lines.push("");
   lines.push("    volumes:");
   lines.push("      - swarm_data:/app/data");
@@ -306,6 +317,8 @@ export function generateCompose(state: OnboardState): string {
     lines.push("    environment:");
     appendProviderEnvironment(lines, state, true);
     lines.push(ENV_API_KEY);
+    lines.push(ENV_ANONYMIZED_TELEMETRY);
+    lines.push(ENV_TELEMETRY_ENV);
     // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
     lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}");
     lines.push(`      - AGENT_ID=${svc.agentId}`);
@@ -345,7 +358,7 @@ export function generateCompose(state: OnboardState): string {
 
     lines.push("");
     lines.push("    ports:");
-    lines.push(`      - "${port}:3000"`);
+    lines.push(`      - "${BIND_ADDRESS_PREFIX}${port}:3000"`);
     lines.push("");
     lines.push("    volumes:");
     // Same targets as docker-compose.example.yml: the worker logs to /logs and

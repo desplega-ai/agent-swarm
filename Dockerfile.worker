@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.311
+ARG CLAUDE_CODE_VERSION=2.1.314
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.164.0
+ARG CODEX_VERSION=0.166.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.1.4
+ARG OPENCODE_VERSION=2.2.3
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -244,7 +244,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.9
+ARG AGENT_FS_VERSION=0.18.13
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -411,6 +411,7 @@ FROM worker-base AS worker-slim
 # Copy binary from builder.
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
+COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)
@@ -558,8 +559,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-rc.4
-ARG DSH_SHA512=f20c65eb33a2eafc75b03a251febe387db71ae96d70feb7be19d987d690406d477c4fd9812d9346db2e480b6519d84200f10a85e2b57c970ca9f9934fba897ae
+ARG DSH_VERSION=0.2.2-alpha.2
+ARG DSH_SHA512=99d729805f03d5e15057c1aedd3fec60b901c1fc3d87f2e2d2e3c8c57c9bcb55726c982b160f015352dee3416232737e85e2fb937cce32e0157bbb05abf24ee3
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +575,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793073650-g23dd39
-ARG AMP_SHA512_AMD64=5052e7e177ffb016bc3fe482e7494efb2b969bce93647c3f10460ab64d059e0952b9a598a90aded2b92b1324a612e2f821d8677aa46a4434d0b54e809ece5725
-ARG AMP_SHA512_ARM64=322cb99342276ae9ddddbc3b013c951506d1b919aba9279f9feab2d773fdd537d7c83d8c2935c3d0c873d0fda71b78e2d9ebae9425e35cac86c386ab64b909fa
+ARG AMP_VERSION=0.0.1793363705-g5c9ae5
+ARG AMP_SHA512_AMD64=825817ac7ef2c61ab1c944c87daebae5642fd311e9fe181351da2dc762aa826c9a39a45c039f353b7b6c2b5464a35f73f03b5925ec70cd000fa2ba583b8979ea
+ARG AMP_SHA512_ARM64=fbe7b998fe1c9612b7659462a8e3b33d242044189a34f4922d3074f4c8d8be8594c3b26c96e2aee8cc7ed5230520dbce156170b718ca954e68404a402f9eccfb
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -592,7 +593,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.1.0
+ARG CURSOR_SDK_VERSION=1.2.0
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -611,7 +612,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.65.0
+ARG GEMINI_CLI_VERSION=0.66.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -624,7 +625,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.104
+ARG COPILOT_CLI_VERSION=1.0.105
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -634,8 +635,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.1), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.1
+# scripts are not needed for ACP (verified on 0.26.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -645,9 +646,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.56.0
-ARG GOOSE_SHA256_AMD64=225a929b35b5130fb691eafdb50be236f2c0a150019b53973775938f8f19c281
-ARG GOOSE_SHA256_ARM64=26bcb7d3f55aac485a91d81cbdecd8d90e5af1acadeca6e580b4d58b64a888e4
+ARG GOOSE_VERSION=1.57.0
+ARG GOOSE_SHA256_AMD64=10eb96cb6a159b6e1d38eeedbef6ab64cd28168aad91948f1fa5c34eefdf98e3
+ARG GOOSE_SHA256_ARM64=c32605acfd560aeb2adbf17ec359cc0217e28022a7e647b35a6af5dcfca91749
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -664,9 +665,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.34.2
-ARG KIRO_CLI_SHA256_AMD64=b30a6873fac7e66467e9908cd346cd0f7c54d32eed17cd80f9b81df3c17a9d16
-ARG KIRO_CLI_SHA256_ARM64=dbfb5795f15b7db4e91b0f6860f8909ae0838f0ad7cd9a4daf0881d60b896043
+ARG KIRO_CLI_VERSION=2.36.0
+ARG KIRO_CLI_SHA256_AMD64=ede3772e2340b60758c45ba25fe0fed54aa4c3af87d038b1b70fa7ba2e139cb2
+ARG KIRO_CLI_SHA256_ARM64=7c9564c33a7423790566a953f8d5a27ca33fa6e7f4bc8bafa97ccd8c0c487502
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -699,6 +700,27 @@ RUN case "$TARGETARCH" in \
     && GROK_HOME=/tmp/grok-home GROK_DISABLE_AUTOUPDATER=1 /usr/local/bin/grok --version | grep -q "^grok ${GROK_VERSION} " \
     && rm -rf /tmp/grok.tgz /tmp/grok.br /tmp/grok-home /root/.cache /root/.grok
 
+# fx (Vercel Labs, Apache-2.0), the `fx` harness (`fx acp`): one static binary
+# from the release tarball, verified against the pinned SHA-512. Never use
+# fx.sh/setup.sh: it skips checksum verification. The adapter disables the
+# auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
+# by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
+# FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
+ARG FX_VERSION=0.0.16
+ARG FX_SHA512_AMD64=d5bb494d9f8fbbbf752f46db50ecb45232252dcdde30432f0b26702bed28037384f809a3facd98274a0b96501b2058cd7cea355c5b2a2a616290d84827817492
+ARG FX_SHA512_ARM64=e2fbfd4f35e979baac9a272eee6785a386df9d53990fe0722b3696adcb1c054f96a8c7771d9642c06b1b9422e2836efe5ab883f703741737cbed1900c3b7fb73
+RUN case "$TARGETARCH" in \
+      amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
+      arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
+      *) echo "Unsupported fx architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://releases.fx.sh/v${FX_VERSION}/fx-linux-${fx_arch}.tar.gz" -o /tmp/fx.tgz \
+    && echo "${fx_sha512}  /tmp/fx.tgz" | sha512sum -c - \
+    && tar -xzf /tmp/fx.tgz --no-same-owner -C /usr/local/bin fx \
+    && chmod 0755 /usr/local/bin/fx \
+    && HOME=/tmp/fx-home FX_AUTO_UPGRADE=0 /usr/local/bin/fx --version | grep -qx "${FX_VERSION}" \
+    && rm -rf /tmp/fx.tgz /tmp/fx-home
+
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
 # as worker-base (see that heredoc's comment).
@@ -717,7 +739,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.39.4",
+    "agent-browser": "0.41.0",
     "playwright": "1.58.0"
   },
   "overrides": {
@@ -829,6 +851,7 @@ FROM worker-full-base AS worker-full
 # Copy binary from builder.
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
+COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)

@@ -9,8 +9,9 @@
  * until the 071 migration renames it.
  */
 
+import { scrubSecrets } from "../../utils/secret-scrubber.js";
 import { deriveCodexKeySuffix } from "./auth-json.js";
-import { refreshAccessToken } from "./flow.js";
+import { redactTokens, refreshAccessToken } from "./flow.js";
 import type { CodexOAuthCredentials } from "./types.js";
 
 /** Legacy single-credential key — kept for backwards-compat fallback reads. */
@@ -103,6 +104,30 @@ export class CodexOAuthRefreshError extends Error {
 }
 
 /**
+ * Build the `failureReason` for a pool-slot OAuth revalidation failure
+ * (`resolveCodexAuthMode` in codex-adapter.ts, and the pi ChatGPT
+ * subscription path in `subscription.ts`).
+ *
+ * Wording matters: every variant carries `[auth-error]`, but the runner's
+ * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
+ * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
+ * refresh lock") and any other thrown error (refresh-lock HTTP or network
+ * failure, config-store persistence failure: "not a confirmed auth
+ * rejection") are excluded as transient, so an outage does NOT bench a
+ * healthy login.
+ */
+export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
+  if (err instanceof CodexOAuthRefreshError) {
+    if (err.reason === "lock_timeout") {
+      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
+    }
+    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${scrubSecrets(err.body ?? "")}) — credential likely revoked; re-run codex-login for this slot.`;
+  }
+  const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
+}
+
+/**
  * Acquire the cross-process refresh lock for a Codex OAuth slot via the API
  * server's `oauth_refresh_locks` table (migration 077). Worker-side code
  * can't reach that table directly (no `bun:sqlite`/`be/db` imports), so this
@@ -172,6 +197,7 @@ export function codexOAuthKeyForSlot(slot: number): string {
 /**
  * Load all stored Codex OAuth credential slots from the config store.
  * Returns slots sorted by slot index (ascending).
+ * HTTP and network failures return an empty pool unless `throwOnError` is set.
  *
  * Backwards-compat: during a rolling upgrade the control plane may still
  * only expose the legacy single-row `codex_oauth` key (pre-071-migration).
@@ -188,17 +214,24 @@ export function codexOAuthKeyForSlot(slot: number): string {
 export async function loadAllCodexOAuthSlots(
   apiUrl: string,
   apiKey: string,
+  options: { throwOnError?: boolean } = {},
 ): Promise<Array<{ slot: number; creds: CodexOAuthCredentials }>> {
   let res: Response;
   try {
     res = await fetch(`${apiUrl}/api/config/resolved?includeSecrets=true`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-  } catch {
+  } catch (err) {
+    if (options.throwOnError) throw err;
     return [];
   }
 
-  if (!res.ok) return [];
+  if (!res.ok) {
+    if (options.throwOnError) {
+      throw new Error(`Failed to load Codex OAuth slots: HTTP ${res.status}`);
+    }
+    return [];
+  }
 
   const data = (await res.json()) as { configs: Array<{ key: string; value: string }> };
   const slotPattern = /^codex_oauth_(\d+)$/;
@@ -238,23 +271,33 @@ export async function storeCodexOAuth(
   slot = 0,
 ): Promise<void> {
   const key = codexOAuthKeyForSlot(slot);
-  const res = await fetch(`${apiUrl}/api/config`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      scope: "global",
-      key,
-      value: JSON.stringify(creds),
-      isSecret: true,
-      description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by codex-login)`,
-    }),
-  });
+  // The request carries the tokens, so a transport error or the store's reply
+  // may echo them. Every error leaving here is rebuilt from redacted text,
+  // with no `cause` pointing back at the raw one.
+  const redact = (text: string) => redactTokens(text, [creds.access, creds.refresh]);
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}/api/config`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        scope: "global",
+        key,
+        value: JSON.stringify(creds),
+        isSecret: true,
+        description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by codex-login)`,
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to store ${key} config: ${redact(message)}`);
+  }
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = redact(await res.text().catch(() => ""));
     throw new Error(`Failed to store ${key} config: HTTP ${res.status} ${text}`);
   }
 }
@@ -335,7 +378,11 @@ export async function persistCodexOAuth(
   try {
     await storeCodexOAuth(apiUrl, apiKey, creds, slot);
   } catch (err) {
-    console.error("[codex-oauth] persistCodexOAuth failed (non-fatal):", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      "[codex-oauth] persistCodexOAuth failed (non-fatal):",
+      redactTokens(message, [creds.access, creds.refresh]),
+    );
   }
 }
 

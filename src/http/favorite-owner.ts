@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { findUserById } from "../be/users";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 
 export type FavoriteOwner = {
   scope: string;
@@ -43,10 +43,11 @@ export async function resolveHttpFavoriteOwner(
   opts: { dashboardUser?: boolean } = {},
 ): Promise<FavoriteOwner | null> {
   const auth = getRequestAuth(req);
-  if (auth?.kind === "user") {
-    return { scope: `user:${auth.userId}`, userId: auth.userId, actorId: auth.userId };
+  const requestUserId = authUserId(auth);
+  if (requestUserId) {
+    return { scope: `user:${requestUserId}`, userId: requestUserId, actorId: requestUserId };
   }
-  if (auth?.kind === "operator" && !callerAgentId) {
+  if (isOperatorAuth(auth) && !callerAgentId) {
     const pickedUserId =
       opts.dashboardUser === false || auth.page ? null : dashboardUserIdHeader(req);
     if (pickedUserId) {

@@ -52,6 +52,7 @@ jobs:
       contents: read
     outputs:
       found: ${{ steps.pr.outputs.found }}
+      has_files: ${{ steps.staged.outputs.has_files }}
       pr_number: ${{ steps.pr.outputs.pr_number }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
 
@@ -150,8 +151,19 @@ jobs:
         if: steps.pr.outputs.found == 'true'
         run: bash scripts/e2e/visuals-stage.sh visuals staged
 
-      - name: Upload staged visuals
+      - name: Check staged visuals
+        id: staged
         if: steps.pr.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "$(find staged -type f -print -quit)" ]; then
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload staged visuals
+        if: steps.pr.outputs.found == 'true' && steps.staged.outputs.has_files == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: slack-visuals-staged
@@ -160,7 +172,7 @@ jobs:
 
   publish:
     needs: validate
-    if: needs.validate.outputs.found == 'true'
+    if: needs.validate.outputs.found == 'true' && needs.validate.outputs.has_files == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

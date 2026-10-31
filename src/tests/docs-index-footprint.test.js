@@ -78,7 +78,7 @@ describe("docs API index footprint", () => {
     expect(tasks).toContain('"path":"/api/task-templates","method":"get"');
   });
 
-  test("OpenAPI and generated pages keep all 468 operations", async () => {
+  test("OpenAPI and generated pages keep all 469 operations", async () => {
     const spec = await Bun.file(resolve(repoRoot, "openapi.json")).json();
     const operationKeys = [];
     const tags = new Set();
@@ -103,8 +103,8 @@ describe("docs API index footprint", () => {
     expect(spec.paths["/api/agents/{id}/runtime"]?.get).toBeDefined();
 
     const generatedKeys = await generatedOperationKeys();
-    expect(operationKeys).toHaveLength(468);
-    expect(generatedKeys).toHaveLength(468);
+    expect(operationKeys).toHaveLength(469);
+    expect(generatedKeys).toHaveLength(469);
     expect(new Set(generatedKeys)).toEqual(new Set(operationKeys));
   });
 

@@ -87,7 +87,7 @@ interface NavItem {
   newTag?: { tooltip: string; minVersion: string };
   /**
    * Runtime switch: the item renders only when the named feature is on.
-   * `comb` reads `/status` `agent_fs.comb.enabled` (COMB_ENABLED + agent-fs).
+   * `comb` reads `/status` `agent_fs.comb.enabled` (agent-fs set up, browser-reachable, COMB_ENABLED not false).
    */
   requires?: "comb";
   /**

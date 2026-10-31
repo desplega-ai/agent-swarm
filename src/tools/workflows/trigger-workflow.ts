@@ -114,6 +114,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         try {
           runId = await startWorkflowExecution(workflow, triggerData ?? {}, getExecutorRegistry(), {
             triggerType: "manual",
+            triggeredByAgentId: requestInfo.agentId,
             requestedByUserId:
               (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
               undefined,

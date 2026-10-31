@@ -19,6 +19,7 @@ import { AgentAppearancePicker } from "@/components/shared/agent-appearance-pick
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
+import { AgentSlackIconField } from "@/components/shared/agent-slack-icon-field";
 import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
@@ -454,6 +455,9 @@ export default function AgentDetailPage() {
                       )}
                       <InfoRow label="Runtime">
                         <AgentRuntimeSettings agent={agent} />
+                      </InfoRow>
+                      <InfoRow label="Slack icon">
+                        <AgentSlackIconField agent={agent} />
                       </InfoRow>
                       {runtimePools.open && (
                         <InfoRow

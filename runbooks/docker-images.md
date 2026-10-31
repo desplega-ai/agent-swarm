@@ -38,6 +38,16 @@ Placement rules:
 - New heavy tool? Decide slim-vs-full deliberately: `worker-base` if the entrypoint or a harness needs it to boot, `worker-full-base` otherwise. If a tool is full-only and the entrypoint references it, guard the entrypoint with `command -v` (see the glab / postgres / redis guards in `docker-entrypoint.sh`).
 - Full-only npm globals go in `/opt/global-deps-full` (separate staging dir) — never extend the base `/opt/global-deps` from `worker-full-base`, that rewrites its node_modules into a duplicate layer.
 
+### Worker boot helpers
+
+The API-readiness step is a standalone Bun module,
+`src/commands/entrypoint-api-readiness.ts`. Both leaf stages copy it to
+`/usr/local/lib/agent-swarm/entrypoint-api-readiness.ts`; the shell entrypoint
+calls it with `/usr/local/bin/bun` from `worker-base`, independent of the worker's
+writable PATH entries. It needs no npm packages
+or compiled CLI initialization. Keep this code-dependent COPY in both leaf
+blocks. Custom worker images ship the helper and shell entrypoint together.
+
 ## Skills: `npx skills`, not plugin marketplaces
 
 Only the CLI-coupled `agent-fs` skill (worker-base) is installed by a pinned

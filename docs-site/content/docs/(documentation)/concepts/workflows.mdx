@@ -41,6 +41,31 @@ The engine includes 15 built-in executor types:
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 
+### Inline script environment
+
+An inline `script` node can pass an optional `config.env` map to its Bash, Python, or TypeScript process. Values are strings and support workflow interpolation, just like `args`:
+
+```json
+{
+  "id": "gitlab-check",
+  "type": "script",
+  "config": {
+    "runtime": "python",
+    "env": {
+      "GITLAB_TOKEN": "{{input.gitlabToken}}",
+      "PROJECT_ID": "{{input.projectId}}"
+    },
+    "script": "import os; token = os.environ['GITLAB_TOKEN']; project = os.environ['PROJECT_ID']"
+  }
+}
+```
+
+Read variables with `$NAME` in Bash, `os.environ["NAME"]` in Python, or `process.env.NAME` in TypeScript. Names must match `[A-Za-z_][A-Za-z0-9_]*`, and values cannot contain NUL bytes. The names `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `PWD`, `SHLVL`, and `OLDPWD` are reserved and cannot be set through `env` (case-insensitive). Native loader controls (`LD_*`, `DYLD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`, `LOCPATH`, `NLSPATH`, `GETCONF_DIR`) and shell controls / special variables (including `BASH_*`, `BASH`, `BASHOPTS`, `BASHPID`, `ENV`, `SHELLOPTS`, `IFS`, `OPTIND`, `OPTERR`, `PS0`–`PS4`, `EPOCHSECONDS`, and `EPOCHREALTIME`) are also rejected before spawning: they can execute code before resource limits or be rewritten by the shell. See the [complete reserved-name list](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/workflows.md#script-config). Use application names such as `GITLAB_TOKEN`, `PROJECT_ID`, and `MY_SETTING`. The process receives only the built-in environment plus the explicitly supplied variables, never all of the server's environment. Omitting `env` keeps existing behavior; `args` remains supported.
+
+Use secret input references rather than literal tokens. Secret workflow inputs stay masked as `***REDACTED***` in saved step inputs while the script receives the real values. Values passed through `env` are not inserted into the script or intermediate shell's command-line arguments. This does not isolate secrets from other processes with permission to read their environment, and environment size limits still apply. Avoid printing credentials or embedding them in executable source. The separate `swarm-script` node does not use this field.
+
+### Catalog scripts
+
 `swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `300000` (5 minutes), and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 For `config.args`, values written as an **exact single token** such as `{{input.payload}}` preserve the resolved JSON type, so objects, arrays, numbers, and booleans reach the script as native values. If you wrap a token with surrounding text, such as `"prefix-{{input.id}}"`, interpolation falls back to string output. Raw-token resolution is scoped to the node's local interpolation context, including any explicit `inputs` mapping on that node.
@@ -408,7 +433,7 @@ Workflows support a cooldown period to prevent rapid re-triggering:
 }
 ```
 
-A second trigger within the cooldown window results in a run with `skipped` status.
+A second trigger within the cooldown window results in a run with `skipped` status. The window runs from the last run start (any status but `skipped`) and, by default, also from the last successful run's finish. Set `"from": "start"` to count from starts only, so a long run never pushes out the next trigger of a fixed-time schedule. Simultaneous triggers start at most one run.
 
 ### Safe retries (`Idempotency-Key`)
 
@@ -578,7 +603,7 @@ By default, upstream step outputs are **not** available for interpolation. Built
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
 - Without `inputs`, ordinary templates referencing upstream nodes resolve to empty strings and report the token in run diagnostics
 
-Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` so they arrive as argv instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
+Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` or `config.env` so they arrive as data instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
 
 ### Structured Output (`outputSchema`)
 

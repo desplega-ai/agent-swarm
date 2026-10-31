@@ -37,7 +37,7 @@ import {
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
 import { pageSessionSetCookies } from "../utils/page-session";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { resolveTaskRequester } from "./tasks";
@@ -310,6 +310,8 @@ const listPagesRoute = route({
     agentId: z.string().min(1).optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
+    /** Matches the title, slug or description anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
     offset: z.coerce.number().int().min(0).optional(),
     /** `full` restores the legacy shape (includes `body`); default is slim. */
@@ -668,7 +670,11 @@ export async function handlePages(
     const offset = parsed.query.offset ?? 0;
     // List responses default to slim (no `body`); `?fields=full` restores it.
     const full = parsed.query.fields === "full";
-    const keyFilters = { key: parsed.query.key, keyPrefix: parsed.query.keyPrefix };
+    const keyFilters = {
+      key: parsed.query.key,
+      keyPrefix: parsed.query.keyPrefix,
+      q: parsed.query.q,
+    };
     let pages: Array<Page | PageSummary>;
     let total: number;
     if (parsed.query.agentId) {
@@ -975,12 +981,12 @@ export async function handlePages(
     // user identity when a user-bound bearer launched it. Operator sessions
     // receive a guest handle, while password sessions remain anonymous.
     const auth = getRequestAuth(req);
-    const identity =
-      auth?.kind === "user"
-        ? { uid: auth.userId, name: auth.user.name }
-        : auth?.kind === "operator"
-          ? { name: `guest-${randomUUID().slice(0, 8)}`, op: true as const }
-          : undefined;
+    const user = authUser(auth);
+    const identity = user
+      ? { uid: user.id, name: user.name }
+      : isOperatorAuth(auth)
+        ? { name: `guest-${randomUUID().slice(0, 8)}`, op: true as const }
+        : undefined;
     const cookies = await pageSessionSetCookies(req, page.id, {
       dev: isDevRequest(req),
       ...identity,

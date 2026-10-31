@@ -475,6 +475,27 @@ describe("db-client slow statement warning", () => {
     }
   });
 
+  test("does not count a slow database open against the first statement", async () => {
+    // The first call opens the database (and applies migrations) through the
+    // client's getter. That cost is boot work, not the statement's.
+    let opened = false;
+    const lazy = createBunSqliteClient(() => {
+      if (!opened) {
+        opened = true;
+        Bun.sleepSync(150);
+      }
+      return raw;
+    });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await lazy.query("SELECT name FROM items");
+      expect(opened).toBe(true);
+      expect(slowWarnings(warn)).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("does not log fast statements", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {

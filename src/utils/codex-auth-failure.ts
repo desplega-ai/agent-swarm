@@ -32,3 +32,33 @@ export function isCodexAuthFailureReason(failureReason: string | undefined | nul
   const lower = failureReason.toLowerCase();
   return !TRANSIENT_AUTH_ERROR_MARKERS.some((m) => lower.includes(m));
 }
+
+/**
+ * Turn-level texts of a rejected ChatGPT/Codex credential: a bad API key, or
+ * a pool login revoked while its access token is unexpired. That death mode
+ * never enters `getValidCodexOAuth` (the token looks fresh), so this error is
+ * its only artifact. The adapters tag a match `[auth-error]`.
+ */
+const REJECTED_ACCESS_PATTERNS = [
+  "unauthorized",
+  "http 401",
+  " 401 ",
+  "invalid api key",
+  "invalid_api_key",
+  "missing api key",
+  "no api key",
+  "authentication failed",
+  "failed to refresh token",
+  "invalid 'refresh_token'",
+  // ChatGPT backend 401 bodies (pi on the subscription surfaces them as-is).
+  "token_invalidated",
+  "authentication token has been invalidated",
+  "authentication token is expired",
+  "refresh token was revoked",
+  "could not parse your authentication token",
+];
+
+export function isCodexRejectedAccessError(text: string): boolean {
+  const lower = text.toLowerCase();
+  return REJECTED_ACCESS_PATTERNS.some((p) => lower.includes(p));
+}

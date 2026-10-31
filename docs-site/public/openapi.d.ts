@@ -726,7 +726,10 @@ export interface paths {
         /** List apps */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    q?: string;
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -2253,6 +2256,8 @@ export interface paths {
             parameters: {
                 query?: {
                     include?: "tasks";
+                    q?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -2303,9 +2308,9 @@ export interface paths {
                         capabilities?: string[];
                         maxTasks?: number;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         /** @enum {string} */
-                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         runtimeInstanceId?: string;
                         modelTierOverrides?: {
                             [key: string]: {
@@ -2392,7 +2397,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     };
                 };
             };
@@ -2512,7 +2517,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         model?: string | null;
                         /** @default false */
                         allow_custom_model?: boolean;
@@ -2865,6 +2870,7 @@ export interface paths {
                             icon: string;
                             color?: string;
                         } | null;
+                        slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
                         changedByAgentId?: string;
                         changeReason?: string;
@@ -3060,9 +3066,9 @@ export interface paths {
                             status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                             missing: string[];
                             /** @enum {string|null} */
-                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                             /** @enum {string|null} */
-                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                             credStatus: components["schemas"]["AgentCredStatus"] | null;
                             lastCheckedAt: string;
                         };
@@ -3179,9 +3185,9 @@ export interface paths {
                                 status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                                 missing: string[];
                                 /** @enum {string|null} */
-                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                                 /** @enum {string|null} */
-                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                                 credStatus: components["schemas"]["AgentCredStatus"] | null;
                                 lastCheckedAt: string;
                             }[];
@@ -8705,6 +8711,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/slack/app-icon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The Slack app's own avatar, shown on posts with no icon override */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description `imageUrl` is null when Slack is off or the lookup fails. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            imageUrl: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/chat/status": {
         parameters: {
             query?: never;
@@ -11030,7 +11074,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                 };
                 header?: never;
                 path?: never;
@@ -11049,7 +11093,7 @@ export interface paths {
                                 id: string;
                                 name: string;
                                 /** @enum {string} */
-                                harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 model: string;
                                 /** @enum {string|null} */
                                 effort: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -11081,7 +11125,7 @@ export interface paths {
                     "application/json": {
                         name: string;
                         /** @enum {string} */
-                        harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         model: string;
                         /** @enum {string|null} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -11102,7 +11146,7 @@ export interface paths {
                             id: string;
                             name: string;
                             /** @enum {string} */
-                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                             model: string;
                             /** @enum {string|null} */
                             effort: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -11178,7 +11222,7 @@ export interface paths {
                             id: string;
                             name: string;
                             /** @enum {string} */
-                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                             model: string;
                             /** @enum {string|null} */
                             effort: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -11296,7 +11340,7 @@ export interface paths {
                             id: string;
                             name: string;
                             /** @enum {string} */
-                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                             model: string;
                             /** @enum {string|null} */
                             effort: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -11439,7 +11483,7 @@ export interface paths {
                         "application/json": {
                             tiers: {
                                 /** @enum {string} */
-                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 /** @enum {string} */
                                 tier: "smol" | "regular" | "smart" | "ultra";
                                 key: string;
@@ -12432,7 +12476,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
          */
         get: {
             parameters: {
@@ -12462,6 +12506,7 @@ export interface paths {
                                 marketing_url: string | null;
                                 hide_cloud_promo: boolean;
                                 org_id: string | null;
+                                dashboard_url?: string | null;
                             };
                             setup: {
                                 /** @enum {string} */
@@ -12472,10 +12517,10 @@ export interface paths {
                                 hint?: string;
                                 action_url?: string;
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 providers?: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -12496,6 +12541,7 @@ export interface paths {
                                 };
                                 comb: {
                                     enabled: boolean;
+                                    reason: string | null;
                                     api_url: string | null;
                                     live_url: string;
                                     org_id: string | null;
@@ -12585,7 +12631,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     };
                 };
             };
@@ -12754,7 +12800,7 @@ export interface paths {
                             signals: {
                                 providers: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -12994,7 +13040,7 @@ export interface paths {
                             signals: {
                                 providers: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -13746,6 +13792,7 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    /** @description Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. */
                     search?: string;
                     includeHeartbeat?: "true" | "false";
                     createdAfter?: string;
@@ -13810,7 +13857,7 @@ export interface paths {
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
                                 progress?: string;
                                 /** Format: date-time */
@@ -14042,7 +14089,7 @@ export interface paths {
                     } | {
                         claudeSessionId: string;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         model?: string;
                         /** @enum {string|null} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -14742,7 +14789,7 @@ export interface paths {
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
                                 progress?: string;
                                 /** Format: date-time */
@@ -14880,7 +14927,7 @@ export interface paths {
                         failureReason?: string;
                         force?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     };
                 };
             };
@@ -15370,6 +15417,7 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    q?: string;
                     limit?: number;
                     offset?: number | null;
                     fields?: "full" | "slim";
@@ -16894,7 +16942,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -16922,7 +16970,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -16985,7 +17033,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -17037,7 +17085,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                     effectiveFrom: string;
@@ -19706,7 +19754,7 @@ export interface paths {
                         }[];
                         isError?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                         createdAt?: number;
                     };
                 };
@@ -20199,7 +20247,7 @@ export interface paths {
                                     /** @enum {string} */
                                     effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                     /** @enum {string} */
-                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                     requestedByUserId?: string;
                                     progress?: string;
                                     /** Format: date-time */
@@ -21972,6 +22020,7 @@ export interface paths {
                                     ignored: number;
                                     failed: number;
                                     uncertain: number;
+                                    ackNotReady: number;
                                     lastOutcomeAt: string | null;
                                     lastFailure: {
                                         code: string;
@@ -21983,6 +22032,7 @@ export interface paths {
                                     ignored: number;
                                     failed: number;
                                     uncertain: number;
+                                    ackNotReady: number;
                                     lastOutcomeAt: string | null;
                                     lastFailure: {
                                         code: string;
@@ -22909,6 +22959,7 @@ export interface paths {
                     targetType?: "agent-task" | "workflow" | "script";
                     workflowId?: string;
                     scriptName?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -26397,6 +26448,8 @@ export interface paths {
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
+                    q?: string;
+                    limit?: number;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -26525,6 +26578,8 @@ export interface paths {
                             hours?: number;
                             minutes?: number;
                             seconds?: number;
+                            /** @enum {string} */
+                            from?: "finish" | "start";
                         };
                         input?: {
                             [key: string]: string;
@@ -26715,6 +26770,8 @@ export interface paths {
                             hours?: number;
                             minutes?: number;
                             seconds?: number;
+                            /** @enum {string} */
+                            from?: "finish" | "start";
                         } | null;
                         input?: {
                             [key: string]: string;
@@ -26881,7 +26938,7 @@ export interface paths {
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -26891,7 +26948,7 @@ export interface paths {
                         };
                         validation?: components["schemas"]["StepValidationConfig"];
                         retry?: components["schemas"]["RetryPolicy"];
-                        /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
+                        /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables. */
                         inputs?: {
                             [key: string]: string;
                         };
@@ -27994,7 +28051,7 @@ export interface components {
             requestedByUserId?: string;
             swarmVersion?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
             providerMeta?: {
                 [key: string]: unknown;
             };
@@ -28015,7 +28072,7 @@ export interface components {
             sourceAgentId?: string;
             role?: string;
             /** @enum {string} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
             /** @default [] */
             capabilities: string[];
             leadOnly?: boolean;
@@ -28073,7 +28130,7 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             reportedAt: number;
             /** @enum {string} */
             reasoningEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -28132,6 +28189,19 @@ export interface components {
             })[];
             reportedAt: number;
         } | null;
+        AgentSlackIcon: {
+            /** @enum {string} */
+            type: "emoji";
+            emoji: string;
+        } | {
+            /** @enum {string} */
+            type: "url";
+            /** Format: uri */
+            url: string;
+        } | {
+            /** @enum {string} */
+            type: "app";
+        };
         Agent: {
             id: string;
             name: string;
@@ -28157,9 +28227,9 @@ export interface components {
             /** Format: date-time */
             lastActivityAt?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
             /** @enum {string|null} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             credentialMissing?: string[] | null;
             credStatus?: components["schemas"]["AgentCredStatus"] | null;
             avatar?: {
@@ -28168,6 +28238,7 @@ export interface components {
                 icon: string;
                 color?: string;
             };
+            slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -28736,7 +28807,7 @@ export interface components {
         };
         PricingRow: {
             /** @enum {string} */
-            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
             model: string;
             /** @enum {string} */
             tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
@@ -28832,6 +28903,7 @@ export interface components {
             lastHeartbeatAt?: string;
             idempotencyKey?: string;
             requestedByUserId?: string;
+            sourceTaskId?: string;
         };
         ScriptRunJournalEntry: {
             /** Format: uuid */
@@ -29108,7 +29180,7 @@ export interface components {
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -29118,7 +29190,7 @@ export interface components {
             };
             validation?: components["schemas"]["StepValidationConfig"];
             retry?: components["schemas"]["RetryPolicy"];
-            /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
+            /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables. */
             inputs?: {
                 [key: string]: string;
             };
@@ -29231,6 +29303,8 @@ export interface components {
                 hours?: number;
                 minutes?: number;
                 seconds?: number;
+                /** @enum {string} */
+                from?: "finish" | "start";
             };
             input?: {
                 [key: string]: string;
@@ -29269,7 +29343,7 @@ export interface components {
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -29279,7 +29353,7 @@ export interface components {
                     };
                     validation?: components["schemas"]["StepValidationConfig"];
                     retry?: components["schemas"]["RetryPolicy"];
-                    /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
+                    /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables. */
                     inputs?: {
                         [key: string]: string;
                     };
@@ -29479,6 +29553,8 @@ export interface components {
                 hours?: number;
                 minutes?: number;
                 seconds?: number;
+                /** @enum {string} */
+                from?: "finish" | "start";
             };
             input?: {
                 [key: string]: string;
@@ -29498,7 +29574,7 @@ export interface components {
         RuntimePool: {
             name: string;
             /** @enum {string} */
-            kind: "static" | "docker" | "e2b" | "k8s";
+            kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
             placements: string[];
             image?: string | null;
             /**
@@ -29527,6 +29603,10 @@ export interface components {
             resources: {
                 cpu?: number;
                 memoryMb?: number;
+            } | null;
+            /** @default null */
+            cache: {
+                mountPath: string;
             } | null;
             /** @default null */
             ttlSec: number | null;
@@ -29575,7 +29655,7 @@ export interface components {
         RuntimeController: {
             name: string;
             /** @enum {string} */
-            kind: "static" | "docker" | "e2b" | "k8s";
+            kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
             /**
              * @default remote
              * @enum {string}
@@ -32355,6 +32435,7 @@ export interface operations {
                     outputSchema?: {
                         [key: string]: unknown;
                     };
+                    allowRedelegation?: boolean;
                 };
             };
         };
@@ -32384,8 +32465,35 @@ export interface operations {
                     };
                 };
             };
+            /** @description Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Script run not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent task failed, was cancelled, or was superseded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blocked by the follow-up re-delegation guard */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33536,7 +33644,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @enum {string} */
-                    kind: "static" | "docker" | "e2b" | "k8s";
+                    kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     placements: string[];
                     image?: string | null;
                     /**
@@ -33565,6 +33673,10 @@ export interface operations {
                     resources?: {
                         cpu?: number;
                         memoryMb?: number;
+                    } | null;
+                    /** @default null */
+                    cache?: {
+                        mountPath: string;
                     } | null;
                     /** @default null */
                     ttlSec?: number | null;
@@ -33752,7 +33864,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     /** @enum {string} */
-                    kind?: "static" | "docker" | "e2b" | "k8s";
+                    kind?: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     placements?: string[];
                     image?: string | null;
                     /** @enum {string} */
@@ -33769,6 +33881,9 @@ export interface operations {
                     resources?: {
                         cpu?: number;
                         memoryMb?: number;
+                    } | null;
+                    cache?: {
+                        mountPath: string;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;
@@ -33891,7 +34006,7 @@ export interface operations {
                     name: string;
                     isLead?: boolean;
                     /** @enum {string} */
-                    harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                    harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                     maxTasks?: number;
                     templateId?: string;
                 };
@@ -34008,7 +34123,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @enum {string} */
-                    kind: "static" | "docker" | "e2b" | "k8s";
+                    kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     /**
                      * @default remote
                      * @enum {string}
@@ -34200,7 +34315,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     /** @enum {string} */
-                    kind?: "static" | "docker" | "e2b" | "k8s";
+                    kind?: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     /** @enum {string} */
                     placement?: "builtin" | "remote";
                     config?: {

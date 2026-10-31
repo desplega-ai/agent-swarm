@@ -43,7 +43,7 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 
 1. Read `/review/rules.md` on the shared agent-fs drive. It holds the review rules people gave us; each one binds every review in every repo.
 2. Read the repo's `REVIEW.md` when it has one. It holds the repo-specific checks.
-3. Set the effort from the PR body's `Risk:` line. `low`: a quick pass that still covers CI, tests and the security read. `medium` or no line: the full list below. `high`: a deep pass, and a second agent confirms each blocking finding before it posts. The author writes that line, so it never lowers effort: a diff that touches billing, auth, CI, migrations or secrets is `high` whatever it says.
+3. Set the effort from the PR body's `Risk:` line. `low`: a quick pass that still covers CI, tests and the security read. `medium` or no line: the full list below. `high`: a deep pass, and a second agent on a different model provider than the PR author confirms each blocking finding before it posts. When no such agent is available, say so in the review body; never substitute a same-provider agent silently. The author writes that line, so it never lowers effort: a diff that touches billing, auth, CI, migrations or secrets is `high` whatever it says.
 4. Re-review check. If you reviewed this PR before, compare `gh pr view <number> --json headRefOid --jq .headRefOid` with the `commit_id` of your last review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`). Same SHA: reuse that verdict, link it and stop, unless the PR gained evidence that answers an open non-code blocker (a UI recording, a screenshot, a log). Then verify only that evidence, reuse the earlier code checks, and post one updated verdict that names the evidence. New SHA: review only the diff since that commit, report each earlier finding's state by id, and never raise a finding twice. Re-run each earlier repro on the new head. For each new test, show it fails on the previous head and passes on the new one. Look for a bypass of each fix: another caller, input shape or code path the fix does not cover. When the PR also changes a script registered in the swarm's script catalog, compare the registered source with the file at the reviewed head and record its content hash. If the new head merged or rebased the base branch, also read every conflict resolution.
 5. Round cap. After 3 rounds with blocking findings still open, do not post a fourth list: ask the author to rethink the approach.
 
@@ -67,6 +67,8 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 ### Tag each finding
 
 - **Blocking** (`B1`, `B2`): red or unexecuted CI, a missing or non-failing regression test, a correctness, security or data-loss bug, or a spec miss. Nothing else blocks.
+
+  A correctness finding blocks when the intended case is wrong or callers hit the bug inside the PR's goal. A bug on another path, a rare input, a small performance cost or extra compatibility is a nit or a follow-up named in the review body. This narrows what blocks, not how a block is fixed: a blocking bug inside the goal still gets the failure-class sweep of "Before you push" step 6.
 - **Nit** (`N1`): a small fix the author may skip. Never blocks. At most 3 per review.
 - **Pre-existing** (`P1`): a real problem this PR did not introduce. Never blocks.
 

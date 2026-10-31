@@ -122,20 +122,37 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     id: "weekly-matrix",
     label: "Weekly matrix",
     description:
-      "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash on the whole suite (solo baselines and held-out included), 5 repeats, $37 metered cap.",
+      "Canary configs + Sonnet 5.5 + Codex 6.1 sol + Codex 6.1 terra + DeepSeek V4.1 Flash on the whole suite (solo baselines and held-out included), 5 repeats, $25 metered cap.",
     // Claude and Codex run on subscription, so the cap is mostly E2B time and the
-    // judge: 400 attempts x $0.063 (suite-balanced, measured 2026-09-28..10-10) +
-    // DeepSeek tokens ~$1 = ~$26; at the canary's $0.0685 it is ~$27.4. Both fit
-    // with 20% to spare. With Codex metered (EVALS_SWARM_API_URL/KEY unset) astra
-    // and sol tokens alone add ~$135 and this cap stops the run early.
+    // judge. Weekly metered $ per config (measured on the 2026-10-25 matrix and the
+    // 2026-10-27 quick matrix; terra estimated from codex overhead): opus 3.79,
+    // sonnet ~2.95, sol 3.40, terra ~3.2, luna 2.77, DeepSeek 4.57 (tokens
+    // included) = ~$20.7; the cap is that plus 20%. With Codex metered
+    // (EVALS_SWARM_API_URL/KEY unset) Codex tokens alone exceed it and this cap
+    // stops the run early.
     configIds: [
       "claude-opus-5.5",
+      "claude-sonnet-5.5",
       "codex-6.1-sol",
+      "codex-6.1-terra",
       "codex-6-luna",
-      "codex-6-astra",
       "pi-deepseek-v4.1-flash",
     ],
-    runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 37 },
+    runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 25 },
+  },
+  {
+    id: "helmcode",
+    label: "Helmcode",
+    description:
+      "The five Helmcode-served models on the pi harness, reached direct (HELMCODE_API_KEY), whole suite, 3 repeats, $20 metered cap.",
+    configIds: [
+      "pi-helmcode-deepseek-v4-flash",
+      "pi-helmcode-glm5.3",
+      "pi-helmcode-glm5.3-flash",
+      "pi-helmcode-qwen3.6",
+      "pi-helmcode-gemma4",
+    ],
+    runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 20 },
   },
 ];
 

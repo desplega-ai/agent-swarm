@@ -185,6 +185,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "grok-4.6",
     ultra: "grok-4.7",
   },
+  // fx runs these on its `openrouter` custom connection (OPENROUTER_API_KEY),
+  // pi's tested OpenRouter set; each ran under fx 0.0.15 (2026-10-29 probe).
+  fx: {
+    smol: "openrouter/deepseek/deepseek-v4.1-flash",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash",
+    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    ultra: "openrouter/anthropic/claude-opus-5.5",
+  },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
   // config option with a target-specific startup fallback.
@@ -335,6 +343,16 @@ export function isTerminalTaskStatus(status: string): status is TerminalTaskStat
   return (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Every status that is not terminal, derived so a new status lands here unless
+ * it is added to `TERMINAL_TASK_STATUSES`. Open tasks are a handful of rows,
+ * so hot queries filter `status IN (open)` (an index seek) rather than
+ * `status NOT IN (terminal)` (a scan of every finished task).
+ */
+export const OPEN_TASK_STATUSES = AgentTaskStatusSchema.options.filter(
+  (status) => !isTerminalTaskStatus(status),
+) as Exclude<AgentTaskStatus, TerminalTaskStatus>[];
+
 // ============================================================================
 // Lead Inbox Types
 // ============================================================================
@@ -426,6 +444,7 @@ export const ProviderNameSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -586,6 +605,10 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // Grok runs on the ACP client: one `session/prompt` turn, interrupted only
   // by `session/cancel`. No Grok surface (ACP or headless) exposes a steer.
   grok: [],
+  // `fx acp` steers natively: a `session/prompt` with `_meta.fx.steer` during a
+  // running turn lands at the next tool boundary without cancelling it (fx
+  // 0.0.15 probe, 2026-10-29). Queue is not measured, so it is not advertised.
+  fx: ["steer"],
 };
 
 export type DevinProviderMeta = {
@@ -609,6 +632,7 @@ export type ProviderMetaMap = {
   amp: NoProviderMeta;
   cursor: NoProviderMeta;
   grok: NoProviderMeta;
+  fx: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -1248,6 +1272,37 @@ export const AgentAvatarSchema = z.discriminatedUnion("type", [
 ]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
+// Separate from `avatar` so an agent can keep its lucide disc and still post
+// to Slack with its own emoji or image.
+export const AgentSlackIconSchema = z
+  .discriminatedUnion("type", [
+    z.object({
+      type: z.literal("emoji"),
+      emoji: z
+        .string()
+        .max(102)
+        .regex(/^:[a-z0-9_+'-]+:$/),
+    }),
+    z.object({
+      type: z.literal("url"),
+      url: z
+        .url({ protocol: /^https$/ })
+        .max(2048)
+        .refine((value) => {
+          try {
+            const parsed = new URL(value);
+            return !parsed.username && !parsed.password;
+          } catch {
+            return false;
+          }
+        }, "URL must be valid and contain no credentials"),
+    }),
+    // No icon override: Slack shows the app's own avatar.
+    z.object({ type: z.literal("app") }),
+  ])
+  .openapi("AgentSlackIcon");
+export type AgentSlackIcon = z.infer<typeof AgentSlackIconSchema>;
+
 export const AgentSchema = z
   .object({
     // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
@@ -1318,6 +1373,12 @@ export const AgentSchema = z
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z
       .lazy(() => AgentAvatarSchema)
+      .nullable()
+      .optional(),
+
+    // Null/missing = the default emoji (getAgentEmoji).
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
       .nullable()
       .optional(),
 
@@ -2108,7 +2169,7 @@ export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisi
  * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
  * paths reject it until its adapter exists.
  */
-export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "k8s"]);
+export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "boxd", "k8s"]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
 
 export const DeliveryModeSchema = z.enum(["poll", "push"]);
@@ -2151,6 +2212,39 @@ export const RuntimeControllerSchema = RuntimeControllerCreateSchema.omit({ secr
   .openapi("RuntimeController");
 export type RuntimeController = z.infer<typeof RuntimeControllerSchema>;
 
+export const RuntimePoolCacheSchema = z
+  .object({
+    mountPath: z
+      .string()
+      .min(2)
+      .refine((path) => {
+        const parts = path.split("/").filter(Boolean);
+        const normalized = `/${parts.join("/")}`;
+        const protectedPaths = [
+          "/workspace/personal",
+          "/workspace/shared",
+          ...["/home/worker", "/root"].flatMap((home) =>
+            [".ssh", ".codex", ".claude", ".claude.json", ".pi", ".config", ".local"].map(
+              (directory) => `${home}/${directory}`,
+            ),
+          ),
+        ];
+        return (
+          path.startsWith("/") &&
+          parts.length > 0 &&
+          !path.includes("\0") &&
+          !parts.some((part) => part === "." || part === "..") &&
+          !protectedPaths.some(
+            (protectedPath) =>
+              protectedPath === normalized ||
+              protectedPath.startsWith(`${normalized}/`) ||
+              normalized.startsWith(`${protectedPath}/`),
+          )
+        );
+      }, "Cache mountPath must be absolute, without . or .., and must not cover worker homes, workspaces or credential directories"),
+  })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2165,6 +2259,7 @@ export const RuntimePoolCreateSchema = z
     delivery: DeliveryModeSchema.nullable().default(null),
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
+    cache: RuntimePoolCacheSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2178,6 +2273,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   delivery: DeliveryModeSchema.nullable().optional(),
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
+  cache: RuntimePoolCacheSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -2339,13 +2435,13 @@ export const WorkflowNodeSchema = z
       .record(z.string(), z.unknown())
       .describe(
         "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. " +
-          "For script: { runtime, script, args?, timeout? }. " +
+          "For script: { runtime, script, args?, env?, timeout? }; env is a string-to-string map of environment variables with interpolated values and can be used alongside args. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
           "For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. " +
           "For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
           "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
-          'Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). ' +
+          'Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). Inline script nodes also accept config.env for environment variables. ' +
           "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
           "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
       ),
@@ -2367,7 +2463,7 @@ export const WorkflowNodeSchema = z
           'Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. ' +
           'For trigger data: { "pr": "trigger.pullRequest" }. ' +
           "This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. " +
-          "Route those dynamic values through config.args (argv for inline scripts) instead.",
+          "Route those dynamic values through config.args (argv for inline scripts) instead; inline script nodes also accept config.env for environment variables.",
       ),
     inputSchema: z
       .record(z.string(), z.unknown())
@@ -2559,6 +2655,10 @@ export const CooldownConfigSchema = z
     hours: z.number().min(0).optional(),
     minutes: z.number().min(0).optional(),
     seconds: z.number().min(0).optional(),
+    // "finish" (default): also wait out the window after the last successful
+    // run finished. "start": count only from run starts, so a long run never
+    // pushes the next fixed-time trigger out.
+    from: z.enum(["finish", "start"]).optional(),
   })
   .refine((v) => v.hours !== undefined || v.minutes !== undefined || v.seconds !== undefined, {
     message: "At least one of hours, minutes, or seconds is required",
@@ -3049,6 +3149,8 @@ export const ScriptRunSchema = z
     lastHeartbeatAt: z.string().optional(),
     idempotencyKey: z.string().optional(),
     requestedByUserId: z.string().optional(),
+    /** Task whose session launched the run; the follow-up re-delegation guard reads it. */
+    sourceTaskId: z.string().optional(),
   })
   .openapi("ScriptRun");
 export type ScriptRun = z.infer<typeof ScriptRunSchema>;
@@ -3057,6 +3159,7 @@ export const ScriptRunListItemSchema = ScriptRunSchema.omit({
   source: true,
   args: true,
   output: true,
+  sourceTaskId: true,
 });
 export type ScriptRunListItem = z.infer<typeof ScriptRunListItemSchema>;
 
@@ -3849,6 +3952,7 @@ export const PricingProviderSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

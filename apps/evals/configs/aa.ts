@@ -416,6 +416,13 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "pi-owl-alpha": "no Owl Alpha row — AA does not benchmark the OpenRouter stealth model",
   "opencode-owl-alpha": "no Owl Alpha row — AA does not benchmark the OpenRouter stealth model",
   // Round-11 June 2026 refresh.
+  // Helmcode direct: same weights as the OpenRouter rows, but a different route
+  // and endpoint, so no AA row is borrowed for them.
+  "pi-helmcode-deepseek-v4-flash": "Helmcode route; AA does not benchmark it",
+  "pi-helmcode-glm5.3": "Helmcode route; AA does not benchmark it",
+  "pi-helmcode-glm5.3-flash": "Helmcode route; AA does not benchmark it",
+  "pi-helmcode-qwen3.6": "Helmcode route; AA does not benchmark it",
+  "pi-helmcode-gemma4": "Helmcode route; AA does not benchmark it",
   "pi-glm-5.2": "no GLM-5.2 row in the 2026-06-12 snapshot",
   "opencode-glm-5.2": "no GLM-5.2 row in the 2026-06-12 snapshot",
   "pi-kimi-k2.7-code": "no Kimi K2.7 Code row in the 2026-06-12 snapshot",
@@ -458,6 +465,7 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "codex-6-luna": "released after the 2026-06-12 AA snapshot",
   "codex-6.1-sol": "released after the 2026-06-12 AA snapshot",
   "codex-5.6": "released after the 2026-06-12 AA snapshot",
+  "codex-6.1-terra": "released after the 2026-06-12 AA snapshot",
 };
 
 /** Joined blocks, built eagerly so a mapping → missing-row typo fails at import. */

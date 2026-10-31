@@ -256,16 +256,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.311)
+# Override the pinned Claude Code version (default: 2.1.314)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.311`
+- `CLAUDE_CODE_VERSION=2.1.314`
 - `PI_CODING_AGENT_VERSION=1.4.0`
-- `CODEX_VERSION=0.164.0`
-- `OPENCODE_VERSION=2.1.4` (installs `@opencode/cli` and `@opencode/sdk`)
+- `CODEX_VERSION=0.166.0`
+- `OPENCODE_VERSION=2.2.3` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -523,7 +523,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.9. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.13. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -693,6 +693,9 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # Optional: Require @mention for thread follow-up routing (default: false)
 # By default, replies to swarm-started thread roots also auto-route as follow-ups.
 # SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
+
+# Optional: Wake on thread replies that @mention another user, not the bot (default: false)
+# SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true
 
 # Steer an in-progress task from Slack thread replies (default: lead).
 # Values: off | lead | all. Explicit off preserves normal follow-up task routing.

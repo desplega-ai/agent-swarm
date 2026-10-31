@@ -8,7 +8,7 @@ import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
-import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 
 type ChatUpdatePayload = ChatUpdateArguments & {
   unfurl_links: false;
@@ -153,7 +153,7 @@ export function registerActionHandlers(app: App): void {
         text: `💬 Follow-up sent to *${agentName}* (${taskLink})`,
         unfurl_links: false,
         unfurl_media: false,
-        ...(lead ? { username: getAgentDisplayName(lead), icon_emoji: getAgentEmoji(lead) } : {}),
+        ...(lead ? { username: getAgentDisplayName(lead), ...getAgentSlackIcon(lead) } : {}),
       });
     } catch (error) {
       console.error("[Slack] Failed to post follow-up confirmation:", error);

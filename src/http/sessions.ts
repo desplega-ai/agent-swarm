@@ -75,7 +75,8 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
-import { agentFirstPrincipal } from "./request-principal";
+import { createListTotalCache } from "./list-total-cache";
+import { agentFirstPrincipal, authUserId, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import {
   deniesNonOwnerTaskWrite,
@@ -376,11 +377,13 @@ async function ensureAgentTokenManager(
   res: ServerResponse,
   agentId: string,
 ): Promise<boolean> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind !== "operator" && auth?.kind !== "user") {
-    jsonError(res, "Worker tokens require operator or user credentials", 403);
-    return false;
-  }
+  const auth = requireAuthKind(
+    req,
+    res,
+    ["operator", "user"],
+    "Worker tokens require operator or user credentials",
+  );
+  if (!auth) return false;
   const header = req.headers["x-agent-id"];
   const decision = can({
     principal: await agentFirstPrincipal(req, Array.isArray(header) ? header[0] : header),
@@ -396,8 +399,9 @@ async function ensureAgentTokenManager(
   // agent's resolved config, global secrets included. A user without a
   // grant-all role must already hold both, and may not manage the token of an
   // agent that may itself act on any agent (a lead).
-  if (auth.kind === "user" && isRbacEnabled()) {
-    const grant = await getUserGrant(auth.userId);
+  const userId = authUserId(auth);
+  if (userId && isRbacEnabled()) {
+    const grant = await getUserGrant(userId);
     if (!grant.grantsAll) {
       const target = await getAgentById(agentId);
       const targetActsOnAny = can({
@@ -534,6 +538,8 @@ const SessionShowSourceSchema = z
   .describe(
     "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source.",
   );
+
+const sessionTotals = createListTotalCache();
 
 const listSessions = route({
   method: "get",
@@ -1014,8 +1020,12 @@ export async function handleSessions(
         ? await listRecentSessions(baseOpts)
         : await listRecentSessions({ ...baseOpts, slim: true });
     // Filter-aware total: same WHERE as the list query, so the UI pager
-    // reflects the filtered result set.
-    const total = await countSessions(filterOpts);
+    // reflects the filtered result set. Page 1 counts; later pages reuse it
+    // for 30 s (keyed without the request clock).
+    const { now: _now, ...totalKey } = filterOpts;
+    const total = await sessionTotals.get(totalKey, parsed.query.offset, () =>
+      countSessions(filterOpts),
+    );
     listSessions.respond(res, 200, {
       sessions,
       total,
@@ -1254,17 +1264,10 @@ export async function handleSessions(
   if (putSessionShares.match(req.method, pathSegments)) {
     const parsed = await putSessionShares.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const auth = getRequestAuth(req);
     const actor = await resolveSessionActor(req, myAgentId);
     // Sharing is a dashboard action: a person, or the operator key itself.
-    const principal =
-      auth?.kind === "user"
-        ? ({ kind: "user", userId: auth.userId } as const)
-        : auth?.kind === "operator" && !myAgentId
-          ? ({ kind: "operator" } as const)
-          : null;
+    const principal = await agentFirstPrincipal(req, myAgentId);
     if (
-      !principal ||
       !can({ principal, verb: "session.share", resource: { kind: "none" }, source: "http" }).allow
     ) {
       jsonError(res, "Only the session owner can share it", 403);

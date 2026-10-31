@@ -43,7 +43,25 @@ export default async function main(args, ctx) {
 }
 ```
 
-`ctx.step.agentTask` blocks until the dispatched task reaches a terminal status (default `waitForCompletion: true`, default `timeoutMs` 2h) and journals its real output — a sequential `plan → implement → review` chain will not fan out. Pass `waitForCompletion: false` for the legacy fire-and-poll-yourself shape, or `failOnTaskFailure: false` to receive `{taskId, status: "failed", error}` instead of a throw when the task fails/is cancelled.
+`ctx.step.agentTask` blocks until the dispatched task reaches a terminal status (default `waitForCompletion: true`, default `timeoutMs` 2h) and journals its real output — a sequential `plan → implement → review` chain will not fan out. Pass `failOnTaskFailure: false` to receive `{taskId, status: "failed", error}` instead of a throw when the task fails/is cancelled.
+
+A run launched from a `follow-up` task in a Slack thread passes the same re-delegation guard as `send-task`, decided once for the whole run at its first new step: a step that repeats completed thread work, or a run past the thread's dispatch cap (a run counts once), throws with the rule's message, and every later new step of that run throws too. Pass `allowRedelegation: true` on a step only for a deliberate re-run. Do not wrap a single dispatch in a durable run; use `send-task`.
+
+`waitForCompletion: false` does not return right after dispatch. The first call still waits up to ~30s while the server polls the task, then returns one of three shapes:
+
+- The task finished in that window: its output string or `null`, as on success.
+- The task failed or was cancelled in that window: a throw, or `{taskId, status: "failed", error}` with `failOnTaskFailure: false`.
+- The task is still running: `{taskId, status}`.
+
+On success, `ctx.step.agentTask` resolves to the worker's output string (JSON text under `outputSchema`, so parse it yourself; `null` when the task stored none), not a task record. On a string, `step.taskId` and `step.status` are undefined, so a guard such as `step.status !== "completed"` or `step?.taskId ?? "unknown"` silently misfires. On `null`, `step.taskId` throws a TypeError. Only `failOnTaskFailure: false` with a failed or cancelled task returns `{taskId, status: "failed", error}`, and only `waitForCompletion: false` on a task still running returns `{taskId, status}`. To get a step's task id, query by its context key (the label is the step label you passed):
+
+```sql
+SELECT id, status, output FROM agent_tasks
+WHERE contextKey = 'script-run:<runId>:<label>' AND taskType = 'script-run-step'
+ORDER BY createdAt DESC, rowid DESC LIMIT 1
+```
+
+Inside the run, `<runId>` is `ctx.run.id`.
 
 ## Label Rules
 

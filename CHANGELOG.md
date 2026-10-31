@@ -6,6 +6,111 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.6] - 2026-10-31
+
+### Added
+- Slack: people can type `!leave` in a thread to make the swarm stop following it, with no agent turn needed (#2585).
+- Runtime pools: Docker pools can share one optional persistent cache across their runtimes, configured through the pool API (#2577).
+- Script runs: `ctx.step.agentTask` now applies the same follow-up re-delegation guard as `send-task`; migration 266 records the launching session's task (#2596).
+- UI: the Sessions page and task details share one transcript, with tool calls summarized per run and a live working timer (#2587).
+- UI: worker step rows, inline tool details and a single task details card; dev-only in-page review notes behind `DEV_NOTES=1` (#2595).
+
+### Changed
+- Performance: synchronous SQLite work (session visibility, task counts, memory GC and FTS reconcile) yields the API event loop instead of starving it (#2588).
+- Entrypoint: API readiness polling moved from shell into Bun, with a per-request timeout (#2581).
+- Worker image: claude-code 2.1.314, codex 0.166.0, opencode 2.2.3, amp, kiro 2.36.0, fx 0.0.16 and ACP SDK 2.2.0 (#2583, #2591).
+
+### Fixed
+- send-task: follow-up sessions can dispatch distinct next steps; the guard only blocks re-sending the same work (#2589).
+- Script runs: a step's `parentTaskId` now requires `task.parent.attach`, so a script cannot parent a step on a foreign task (#2597).
+- Runtime pools: built-in boxd environment settings are honored (#2594).
+- Task failure audit: model output limits are classified separately from credential errors (#2592).
+- UI: a follow-up composer reads the promoted task's status before reporting that it started (#2590).
+
+## [2.7.5] - 2026-10-30
+
+### Added
+- Providers: fx (Vercel Labs' terminal coding agent) as a native ACP harness provider, with mid-turn steering, session resume and a loopback MCP forwarder (#2576).
+- pi: `openai-codex/<id>` models run on the codex_oauth ChatGPT subscription pool, with no `OPENAI_API_KEY` needed (#2574).
+- Slack: agents can call `slack-leave-thread` to stop receiving a thread's messages until the next @mention (#2570).
+- Seed: schedule templates declare a `targetType` (agent-task, workflow or script); `dreaming-daily` now fires the dreaming workflow directly instead of spending a worker session (#2572).
+
+### Changed
+- Sessions: the session list, count and tree read from `session_summaries`; migration 259 adds open-task counts and indexes (#2569).
+- Worker image: amp and qwen bumps, qwen to 0.26.4 (#2573).
+
+### Fixed
+- Extensions: `pre.task.steer` hooks can block and rewrite task steering (#2575).
+
+## [2.7.4] - 2026-10-29
+
+### Added
+- Runtime pools: boxd microVMs as a runtime provider, configured with `BOXD_API_KEY` (#2354).
+- Workflows: inline script nodes accept per-run environment variables (#2560).
+- Sessions: groups sit under the Inbox, filed sessions no longer show twice, and finished sessions move to Done on their own (#2566).
+- Comb: the file header copy button copies the file's contents; the path moves to a hover card (#2555).
+
+### Changed
+- Worker image: agent-fs pins 0.18.13, agent-browser 0.41.0 (#2565) and harness bumps for acp, amp, qwen, opencode and goose (#2557).
+- Repo: TLA+ heartbeat spec synced with main (#2564).
+
+### Fixed
+- Tasks: the task search backfill paces itself and keeps resuming through a locked database (#2556).
+- Slack: inbound messages keep table rows and files inside shared messages (#2561).
+- Tasks: deferred worker completions no longer trigger completion review or `onCompleted` follow-ups early (#2558).
+- MCP docs: generated tool descriptions show resolved constant values (#2563).
+- UI: setup waits for saved model configs before leaving (#2559).
+
+## [2.7.3] - 2026-10-29
+
+### Added
+- Agents: each agent can post to Slack under its own icon (an emoji, an image URL, or the Slack app's icon) through `update-profile` `slackIcon`; `slack-update` keeps the icon a message was posted with (#2551).
+- Deploy: one-click deploy from a cloud-init paste on any VPS, plus DigitalOcean image and Railway template options (#2528).
+- Comb: Files turns on by default when a browser can reach agent-fs; `COMB_ENABLED` overrides and `AGENT_FS_PUBLIC_URL` sets the browser URL (#2544).
+- Evals: pi runs against Helmcode direct with a `helmcode` preset (#2548).
+- Docs: dreaming loop guide (#2552).
+
+### Changed
+- Tasks: `get-tasks` `search` runs through an FTS5 token index. It matches words or phrases with a prefix match on the last word, or a task id by prefix; it is no longer a substring match (#2553).
+- Performance: slow queries from the query audit are indexed and rewritten (#2531); session chain summaries live in trigger-kept tables (#2534); sidebar lists load with the tree and refetch less (#2535).
+- Release notes show the pinned agent-fs version (#2550).
+- Worker image: agent-fs pins 0.18.12 (#2549), agent-browser 0.40.0 (#2540) and harness bumps (#2538).
+- Repo: `glama.json` for the Glama MCP directory (#2546); TLA+ specs synced with main (#2541).
+
+### Fixed
+- Slack: an event whose socket ack fails because the client is not ready is still processed (#2490).
+- Comb: Files-page sends are attributed to the comment author and show in sessions (#2545).
+- Runner: the default lead profile is saved on first boot (#2537).
+- UI: setup prepares the first session before leaving (#2542); Home uses a neutral greeting (#2539).
+- Nightly E2E: the Codex chain save is gated on an in-container file check (#2554).
+
+## [2.7.2] - 2026-10-28
+
+### Added
+- Install: `curl -fsSL https://agent-swarm.dev/install.sh | bash` is the short install URL, and the installer opens a tunnel by default (`--no-tunnel` or `AGENT_SWARM_TUNNEL=0` turns it off) (#2498).
+- Memory: a change of embedding endpoint, model, dimensions or document prefix re-embeds stored memory and script vectors in the background (#2487).
+- UI: Cmd+K is built from the route table and searches through per-entity providers (#2514); task titles match and results are keyed by swarm and user (#2519).
+- Seed: the dreaming loop ships as seeded scripts, a workflow and a daily schedule (#2443).
+- Skills: new `modernize-pr` skill and tighter code-quality review rules (#2500, #2512).
+- Evals: the benchmark publishes as dated snapshots (#2491); onboarding QA gains a record mode for demo takes (#2530).
+
+### Changed
+- HTTP request auth resolves through one principal-resolution path (#2503).
+- Scripts: the native script executor starts faster per run (#2484).
+- Worker and UI images: agent-fs pins 0.18.11 (#2529, #2532), opencode, amp and qwen bumps (#2504), nginx-unprivileged and docker/login-action bumps (#2526, #2527).
+- Docs: Slack Reply Gate playbook (#2492, #2495) and the onboarding demo as the README hero video (#2515); `.env.example` describes how embedding prefix changes apply.
+
+### Fixed
+- Telemetry: test, demo and scripts-only compose swarms stay out of production telemetry (#2499, #2501).
+- Onboarding: the first-task step finishes when its task tree settles (#2497); a fresh tab refetches env presence for the org-name gate (#2511).
+- Codex: app-server threads persist so sub-agent spawns can fork context (#2506); a login that duplicates an existing account warns (#2508); the nightly E2E carries the OAuth refresh chain (#2516).
+- Sessions: every user can read schedule-run sessions (#2493).
+- Dreaming: a manually triggered run finds the previous night (#2505); the dreaming workflow declares its gallery metadata (#2510).
+- Database: `workflow_run_steps` is indexed on `(runId, status)` (#2489).
+- Prompts: worker prompts cap auto-stash entries (#2520).
+- Seed scripts: `gh-pr-snapshot` grades CI against the ruleset's required checks (#2507).
+- Slack: visuals publish skips an empty staging dir (#2488) and CI bounds the optional ffmpeg install (#2502).
+
 ## [2.7.1] - 2026-10-27
 
 ### Added

@@ -84,7 +84,13 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { rejectGuest } from "./request-principal";
+import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
+import {
+  agentFirstPrincipal,
+  authUserId,
+  rejectGuest,
+  requestPrincipal,
+} from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
@@ -218,6 +224,10 @@ const SupersedeTaskResponseSchema = z.object({
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
+// The task list total scans every visible task, and only the pager shows it,
+// so page 1 polls reuse a total younger than 15 s.
+const taskTotals = createListTotalCache(LIST_TOTAL_TTL_MS, 15_000);
+
 const listTasks = route({
   method: "get",
   path: "/api/tasks",
@@ -235,7 +245,12 @@ const listTasks = route({
     workflowRunId: z.string().uuid().optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
-    search: z.string().optional(),
+    search: z
+      .string()
+      .optional()
+      .describe(
+        "Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards.",
+      ),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
     /** ISO 8601 — return only tasks created on/after this timestamp. */
     createdAfter: z.string().datetime().optional(),
@@ -794,36 +809,20 @@ async function canSteerTask(
   task: AgentTask,
   sessionAccess: SessionAccess = "none",
 ): Promise<boolean> {
-  const auth = getRequestAuth(req);
+  const userId = authUserId(getRequestAuth(req));
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
     // A user with a write share steers as if the session were their own; the
     // verb gate (and any role grant) still applies. Only an actual share
     // counts: `owner` from an ownerless root must not widen steering.
-    requestedByUserId:
-      auth?.kind === "user" && sessionAccess === "write" ? auth.userId : task.requestedByUserId,
+    requestedByUserId: userId && sessionAccess === "write" ? userId : task.requestedByUserId,
     creatorAgentId: task.creatorAgentId,
     agentId: task.agentId,
   };
-  let principal: RbacPrincipal;
-  let verb: "task.steer.any" | "task.steer.own";
-
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-    verb = "task.steer.own";
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    verb = "task.steer.own";
-  } else if (auth?.kind === "guest") {
-    return false;
-  } else {
-    if (!myAgentId) return false;
-    const agent = await getAgentById(myAgentId);
-    if (!agent) return false;
-    principal = { kind: "agent", agentId: myAgentId, isLead: agent.isLead };
-    verb = "task.steer.any";
-  }
+  const principal = await requestPrincipal(req, myAgentId, { requireRegisteredAgent: true });
+  if (!principal) return false;
+  const verb = principal.kind === "agent" ? "task.steer.any" : "task.steer.own";
 
   return can({ principal, verb, resource, source: "http" }).allow;
 }
@@ -847,21 +846,8 @@ async function canActOnOwnTask(
     creatorAgentId: task.creatorAgentId,
     agentId: task.agentId,
   };
-  let principal: RbacPrincipal;
-
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-  } else if (auth?.kind === "guest") {
-    return false;
-  } else {
-    if (!myAgentId) return false;
-    const agent = await getAgentById(myAgentId);
-    if (!agent) return false;
-    principal = { kind: "agent", agentId: myAgentId, isLead: agent.isLead };
-  }
+  const principal = await requestPrincipal(req, myAgentId, { requireRegisteredAgent: true });
+  if (!principal) return false;
 
   return can({ principal, verb: "task.action.own", resource, source: "http" }).allow;
 }
@@ -876,13 +862,7 @@ async function resolveTaskWritePrincipal(
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): Promise<RbacPrincipal> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
-  if (!agentId) return { kind: "operator" };
-  const agent = await getAgentById(agentId);
-  return { kind: "agent", agentId, isLead: agent?.isLead === true };
+  return agentFirstPrincipal(req, myAgentId);
 }
 
 /**
@@ -1045,8 +1025,10 @@ export async function handleTasks(
           ? await getAllTasks(filters, { fields: "timeline" })
           : await getAllTasks(filters, { slim: true });
     // The COUNT(*) re-scans every matching row, so only pagers pay for it.
+    // Page 1 counts; later pages reuse that count for 30 s.
     if (parsed.query.includeTotal === "true") {
-      const total = await getTasksCount(filters);
+      const { limit: _limit, offset: _offset, orderBy: _orderBy, ...totalKey } = filters;
+      const total = await taskTotals.get(totalKey, filters.offset, () => getTasksCount(filters));
       listTasks.respond(res, 200, { tasks, total });
     } else {
       listTasks.respond(res, 200, { tasks });
@@ -1430,11 +1412,7 @@ export async function handleTasks(
         onUnsupported: parsed.body.onUnsupported,
         source: parsed.body.source ?? "api",
         createdByKind:
-          auth?.kind === "user" || requestedByUserId
-            ? "user"
-            : createdByAgentId
-              ? "agent"
-              : "system",
+          authUserId(auth) || requestedByUserId ? "user" : createdByAgentId ? "agent" : "system",
         createdByAgentId,
         createdByUserId: requestedByUserId,
       });

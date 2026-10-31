@@ -71,7 +71,9 @@ const cases: {
     params: [],
     ids: ["a"],
   },
-  { name: "search", filters: { search: "b" }, params: ["%b%", "%b%"], ids: ["b"] },
+  // Search terms bind in the agent_tasks_fts candidate lookup; the page and
+  // count read the few candidates by rowid, so they bind no search params.
+  { name: "search", filters: { search: "b" }, params: [], ids: ["b"] },
   {
     name: "combined ordering",
     filters: {
@@ -82,16 +84,7 @@ const cases: {
       source: ["api"],
       requestedByUserId: "requester",
     },
-    params: [
-      "pending",
-      "completed",
-      "%needle%",
-      "%needle%",
-      "feature",
-      '%"blue"%',
-      "api",
-      "requester",
-    ],
+    params: ["pending", "completed", "feature", '%"blue"%', "api", "requester"],
     ids: ["c", "b"],
   },
   {
@@ -123,8 +116,10 @@ for (const { name, filters, params, ids, total } of cases) {
     const countSpy = spyOn(client, "get");
     try {
       expect((await db.getAllTasks(filters)).map((task) => task.id)).toEqual(ids);
-      expect(listSpy.mock.calls[0]?.[1]).toEqual(params);
-      const sql = listSpy.mock.calls[0]?.[0] ?? "";
+      // A search runs its candidate lookup first; pick the page query by shape.
+      const listCall = listSpy.mock.calls.find(([query]) => query.includes(" OFFSET "));
+      expect(listCall?.[1]).toEqual(params);
+      const sql = listCall?.[0] ?? "";
       expect(sql).toContain(`LIMIT ${filters.limit ?? 25} OFFSET ${filters.offset ?? 0}`);
       expect(sql).toContain(
         filters.orderBy === "createdAt"
@@ -132,7 +127,8 @@ for (const { name, filters, params, ids, total } of cases) {
           : "ORDER BY lastUpdatedAt DESC, priority DESC",
       );
       expect(await db.getTasksCount(filters)).toBe(total ?? ids.length);
-      expect(countSpy.mock.calls[0]?.[1]).toEqual(params);
+      const countCall = countSpy.mock.calls.find(([query]) => query.includes("COUNT"));
+      expect(countCall?.[1]).toEqual(params);
       expect((await db.getAllTasks({ ...filters, limit: 100, offset: 0 })).length).toBe(
         await db.getTasksCount(filters),
       );
@@ -143,6 +139,19 @@ for (const { name, filters, params, ids, total } of cases) {
     }
   });
 }
+
+test("search matches the title as well as the prompt and id", async () => {
+  await db
+    .getDbClient()
+    .run("UPDATE agent_tasks SET title = 'Deploy', task = 'Investigate database' WHERE id = 'b'");
+  for (const search of ["Deploy", "database"]) {
+    expect((await db.getAllTasks({ search })).map((task) => task.id)).toEqual(["b"]);
+    expect((await db.getAllTasks({ search }, { slim: true })).map((task) => task.id)).toEqual([
+      "b",
+    ]);
+    expect(await db.getTasksCount({ search })).toBe(1);
+  }
+});
 
 test("facade dependency callback preserves post-pagination readiness and propagates errors", async () => {
   await db.getDbClient().run("UPDATE agent_tasks SET dependsOn = '[\"a\"]' WHERE id = 'c'");

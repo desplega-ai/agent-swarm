@@ -201,25 +201,35 @@ function bootOpenedDb(
         .all()
         .map((column) => `"${column.name.replaceAll('"', '""')}"`)
         .join(", ");
+      // Triggers on other tables that read agent_tasks (the session summary
+      // recompute, migration 253) would fail the rename's schema check while
+      // agent_tasks is dropped, so they are dropped and re-created too.
       const schemaObjects = database
-        .prepare<{ sql: string }, []>(
-          `SELECT sql FROM sqlite_master
-           WHERE tbl_name = 'agent_tasks'
-             AND type IN ('index', 'trigger')
+        .prepare<{ name: string; tbl_name: string; sql: string }, []>(
+          `SELECT name, tbl_name, sql FROM sqlite_master
+           WHERE type IN ('index', 'trigger')
              AND sql IS NOT NULL
+             AND (tbl_name = 'agent_tasks' OR (type = 'trigger' AND sql LIKE '%agent_tasks%'))
            ORDER BY type, name`,
         )
-        .all()
-        .map((row) => row.sql);
+        .all();
 
-      database.transaction(() => {
-        database.run("DROP TABLE IF EXISTS agent_tasks_new");
-        database.run(rebuiltSchemaSql);
-        database.run(`INSERT INTO agent_tasks_new (${columns}) SELECT ${columns} FROM agent_tasks`);
-        database.run("DROP TABLE agent_tasks");
-        database.run("ALTER TABLE agent_tasks_new RENAME TO agent_tasks");
-        for (const sql of schemaObjects) database.run(sql);
-      })();
+      database
+        .transaction(() => {
+          database.run("DROP TABLE IF EXISTS agent_tasks_new");
+          database.run(rebuiltSchemaSql);
+          // Copy rowids too: agent_tasks_fts (migration 256) is keyed by them.
+          database.run(
+            `INSERT INTO agent_tasks_new (rowid, ${columns}) SELECT rowid, ${columns} FROM agent_tasks`,
+          );
+          for (const object of schemaObjects) {
+            if (object.tbl_name !== "agent_tasks") database.run(`DROP TRIGGER "${object.name}"`);
+          }
+          database.run("DROP TABLE agent_tasks");
+          database.run("ALTER TABLE agent_tasks_new RENAME TO agent_tasks");
+          for (const object of schemaObjects) database.run(object.sql);
+        })
+        .immediate();
 
       database.run("PRAGMA foreign_keys=on");
       console.log("[Migration] Successfully removed CHECK constraint on agent_tasks.status");

@@ -314,6 +314,7 @@ The engine posts the thread tree and the outcome card. You post at most one mess
 The outcome card publishes your \`output\` verbatim. Keep free-text \`output\` under 120 words by default, with the exceptions in How you write.
 A Slack task from an unknown user: register them with \`manage-user\` first.
 You MUST use the \`slack-interaction\` skill before you post to Slack.
+Call \`slack-leave-thread\` with your taskId when a thread no longer needs you: people are talking among themselves, someone tells you to stop or back off, or the thread's work is done. The swarm then ignores the thread until someone @mentions it. Leave quietly, with no goodbye message.
 `,
   variables: [],
   category: "system",
@@ -398,6 +399,21 @@ registerTemplate({
 });
 
 /**
+ * Last line of an fx system prompt that exceeds the 64 KiB `systemPrompt` cap.
+ * The adapter sends the first part and writes the whole prompt to a file.
+ */
+registerTemplate({
+  eventType: "system.agent.fx.system_prompt_file",
+  header: "",
+  defaultBody:
+    "These instructions are cut short. Read {{path}} before you start: it holds the complete swarm instructions, of which the text above is only the first part.",
+  variables: [
+    { name: "path", description: "Absolute path of the file with the full system prompt" },
+  ],
+  category: "system",
+});
+
+/**
  * First message of a cursor session on the first-message path. Cursor keeps
  * its own system prompt there, so the swarm's rides on top of the task prompt.
  */
@@ -444,6 +460,15 @@ registerTemplate({
   header: "",
   defaultBody:
     'Swarm tools are not in your tool list. Reach them through `tool_search` and `code_exec`. Their names use underscores, so `store-progress` is `store_progress`. Find one with `tool_search`, then call it from `code_exec`: `import { store_progress } from "agent-swarm"; text(JSON.stringify(await store_progress({ ... })));`. Pass the tool\'s arguments as one object.',
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.fx",
+  header: "",
+  defaultBody:
+    "Most swarm tools are deferred behind `capability_search`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool you know by that name directly. To find one, use `capability_search`.",
   variables: [],
   category: "system",
 });
@@ -574,6 +599,7 @@ registerTemplate({
 ## Slack (scripts-only)
 
 This task originated from Slack (channel: \`{{slackChannelId}}\`). The engine maintains the thread tree and publishes the top-level outcome card. Post at most one distinct agent-authored message per task, concrete, sized to what the user asked for. Progress, start, completion, failure, acknowledgment messages, and relayed raw task output stay out of Slack. Named Slack tools are not exposed in scripts-only mode, so use \`script-run\` with inline source calling \`ctx.swarm.slack_reply({ taskId, message })\` (your taskId carries the thread context).
+When the thread no longer needs you (people are talking among themselves, someone tells you to stop, or the work is done), call \`ctx.swarm.slack_leaveThread({ taskId })\` the same way. The swarm then ignores the thread until someone @mentions it. Leave quietly, with no goodbye message.
 The outcome card publishes your \`output\` verbatim. Keep free-text \`output\` under 120 words by default, with the exceptions in How you write.
 `,
   variables: [

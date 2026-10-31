@@ -4,6 +4,7 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
 } from "../be/db";
+import { SteeringBlockedError } from "../be/steering";
 import { findUserByExternalId } from "../be/users";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
@@ -21,9 +22,10 @@ import {
   fetchSlackFiles,
   notifySlackFileFailures,
 } from "./inbound-files";
+import { isSlackThreadLeft } from "./left-threads";
 import { extractSlackMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
-import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
 
@@ -164,6 +166,12 @@ async function slackFlush(
     return;
   }
   const { channelId, threadTs } = split;
+  // The thread was left (slack-leave-thread) while these replies waited. Only
+  // non-mentions are buffered, so none of them rejoins it.
+  if (await isSlackThreadLeft(channelId, threadTs)) {
+    console.log(`[Slack] Buffer flush: dropping ${items.length} message(s) in left thread ${key}`);
+    return;
+  }
   // Buffer is guaranteed to have at least one item — the first carries the
   // original requester's userId (same semantics as the pre-refactor version).
   const originalRequesterId = items[0]!.userId;
@@ -226,22 +234,38 @@ async function slackFlush(
 
   // Steering carries text only. As on the mention path, files need a follow-up
   // task so its attachments exist before a worker can claim it.
-  const steering =
-    files.length === 0
-      ? await requestSlackThreadSteering({
-          channelId,
-          threadTs,
-          message:
-            nextSenderIndex === -1
-              ? combinedText
-              : await rewriteSlackMentions(
-                  steeringItems.map((item) => item.text).join("\n---\n"),
-                  botUserId,
-                ),
-          messageTimestamps: steeringItems.map((item) => item.ts),
-          requestedByUserId,
-        })
-      : null;
+  let steering: Awaited<ReturnType<typeof requestSlackThreadSteering>>;
+  try {
+    steering =
+      files.length === 0
+        ? await requestSlackThreadSteering({
+            channelId,
+            threadTs,
+            message:
+              nextSenderIndex === -1
+                ? combinedText
+                : await rewriteSlackMentions(
+                    steeringItems.map((item) => item.text).join("\n---\n"),
+                    botUserId,
+                  ),
+            messageTimestamps: steeringItems.map((item) => item.ts),
+            requestedByUserId,
+            slackUserId: originalRequesterId,
+          })
+        : null;
+  } catch (error) {
+    if (!(error instanceof SteeringBlockedError)) throw error;
+    console.info("[Slack] pre.task.steer blocked:", error.extension.name, error.reason);
+    if (app) {
+      for (const item of steeringItems) {
+        await ackSlackMessage(app.client, channelId, item.ts, "no_entry");
+      }
+    }
+    if (nextSenderIndex !== -1) {
+      await slackFlush(items.slice(nextSenderIndex), key, immediate);
+    }
+    return;
+  }
   if (steering) {
     console.log(
       `[Slack] Buffer flushed → steering ${steering.result.outcome} for task ${steering.task.id}`,
@@ -257,9 +281,7 @@ async function slackFlush(
             text: formatSlackSteeringAck(steering.result),
             unfurl_links: false,
             unfurl_media: false,
-            ...(agent
-              ? { username: getAgentDisplayName(agent), icon_emoji: getAgentEmoji(agent) }
-              : {}),
+            ...(agent ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) } : {}),
           });
         } catch (error) {
           console.error("[Slack] Failed to post steering feedback:", error);
@@ -363,7 +385,7 @@ async function slackFlush(
         text: fallbackText,
         unfurl_links: false,
         unfurl_media: false,
-        ...(lead ? { username: getAgentDisplayName(lead), icon_emoji: getAgentEmoji(lead) } : {}),
+        ...(lead ? { username: getAgentDisplayName(lead), ...getAgentSlackIcon(lead) } : {}),
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

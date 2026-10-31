@@ -73,7 +73,7 @@ import { isRbacEnabled } from "../rbac";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
 import { DEFAULT_APP_URL } from "../utils/constants";
 import { assertUrlSafe } from "../utils/egress-guard";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getRequestAuth } from "../utils/request-auth-context";
 import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
@@ -821,16 +821,13 @@ export async function handleUsers(
   if (whoamiRoute.match(req.method, pathSegments)) {
     const parsed = await whoamiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const auth = getRequestAuth(req);
-    if (auth?.kind === "user") {
-      const [grant, roles] = await Promise.all([
-        getUserGrant(auth.user.id),
-        listUserRoles(auth.user.id),
-      ]);
+    const user = authUser(getRequestAuth(req));
+    if (user) {
+      const [grant, roles] = await Promise.all([getUserGrant(user.id), listUserRoles(user.id)]);
       const grantsAll = !isRbacEnabled() || grant.grantsAll;
       whoamiRoute.respond(res, 200, {
         kind: "user",
-        user: auth.user,
+        user,
         grants: {
           grantsAll,
           verbs: grantsAll ? [] : [...grant.verbs].sort(),

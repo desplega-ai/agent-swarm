@@ -20,7 +20,7 @@
  *     deprecated; new code should use `computeContextUsedUnified`.
  */
 
-import { buildClaudeShortnameMap } from "@desplega/model-catalog";
+import { buildClaudeShortnameMap, chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import { runtimeCatalogModel, runtimeCatalogSection } from "./runtime-model-catalog";
 
 /**
@@ -73,6 +73,9 @@ export function getContextWindowSize(model: string): number {
 /** {@link getContextWindowSize} without the fallback: undefined when the catalog has no window. */
 export function getKnownContextWindowSize(model: string | undefined): number | undefined {
   if (!model) return undefined;
+  // `openai-codex/<id>` (pi on the ChatGPT subscription) is the OpenAI `<id>`.
+  const subscriptionId = chatgptSubscriptionModelId(model);
+  if (subscriptionId) return catalogContext("openai", subscriptionId);
   const slash = model.indexOf("/");
   if (slash > 0) {
     const scoped = catalogContext(model.slice(0, slash), model.slice(slash + 1));

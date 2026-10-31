@@ -679,6 +679,114 @@ describe("Slack ingress with files", () => {
     expect(await getTaskAttachments(task!.id)).toHaveLength(1);
   });
 
+  test("a shared message keeps the image it carries on attachments[].files", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+
+    const { task } = await sendAssistantDm({
+      subtype: undefined,
+      text: "look at this",
+      files: null,
+      attachments: [{ is_share: true, is_msg_unfurl: true, files: [slackFile()] }],
+    });
+
+    expect(task!.task).toContain("[File: screenshot.png (image/png, 11 B) id=F0SHOT0001]");
+    expect(await readStoredBytes(task!.id)).toEqual([PNG_BYTES]);
+  });
+
+  test("a pasted table reaches the task text after the line that introduces it", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+    const lead = "here are the slugs:";
+
+    const { task } = await sendAssistantDm({
+      subtype: undefined,
+      text: lead,
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [{ type: "rich_text_section", elements: [{ type: "text", text: lead }] }],
+        },
+        {
+          type: "table",
+          rows: [
+            [
+              { type: "raw_text", text: "Acme" },
+              { type: "raw_text", text: "/casos-de-exito/acme" },
+            ],
+            [
+              { type: "raw_text", text: "Globex" },
+              { type: "raw_text", text: "/casos-de-exito/globex" },
+            ],
+          ],
+        },
+      ],
+    });
+
+    expect(task!.task).toContain(
+      `${lead}\n| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |`,
+    );
+  });
+
+  test("a mention with a table keeps a bot mention in a cell", async () => {
+    await createAgent({ name: "lead", isLead: true, status: "idle" });
+    seq += 1;
+    const ts = `1850000000.${String(seq).padStart(6, "0")}`;
+    const text = "<@U_SWARM_BOT> owners:";
+    await channelMessage({
+      event: {
+        type: "message",
+        channel: "C0MENTION1",
+        ts,
+        user: "U_HUMAN",
+        text,
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "user", user_id: "U_SWARM_BOT" },
+                  { type: "text", text: " owners:" },
+                ],
+              },
+            ],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Owner" },
+                { type: "raw_text", text: "Page" },
+              ],
+              [
+                {
+                  type: "rich_text",
+                  elements: [
+                    {
+                      type: "rich_text_section",
+                      elements: [{ type: "user", user_id: "U_SWARM_BOT" }],
+                    },
+                  ],
+                },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+            ],
+          },
+        ],
+      },
+      body: { event_id: `evt_inbound_files_${seq}` },
+      client: slackClient(),
+      say: mock(async () => ({})),
+    });
+    const row = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM agent_tasks WHERE slackTriggerMessageTs = ?",
+      [ts],
+    );
+    const task = await getTaskById(row!.id);
+    expect(task!.task).toMatch(/^owners:/);
+    expect(task!.task).toMatch(/\| <@U_SWARM_BOT[|>][^\n]* \| \/casos-de-exito\/acme \|/);
+  });
+
   test("a file that cannot be downloaded is flagged to the agent and to the user", async () => {
     await createAgent({ name: "lead", isLead: true, status: "idle" });
     const file = slackFile({ url_private_download: `${slackFiles.url}forbidden/x.png` });
@@ -769,7 +877,7 @@ describe("Slack ingress with files", () => {
 
     afterAll(() => getApp.mockRestore());
 
-    async function sendBuffered(text: string, files: SlackFile[] = []) {
+    async function sendBuffered(text: string, files: SlackFile[] = [], blocks?: unknown[]) {
       seq += 1;
       const ts = `1950000001.${String(seq).padStart(6, "0")}`;
       await channelMessage({
@@ -782,6 +890,7 @@ describe("Slack ingress with files", () => {
           user: "U_HUMAN",
           text,
           files,
+          blocks,
         },
         body: { event_id: `evt_inbound_files_${seq}` },
         client,
@@ -898,6 +1007,114 @@ describe("Slack ingress with files", () => {
         expect(failureNotices()).toEqual([]);
       });
     }
+
+    test("!now with only a table buffers the table rows", async () => {
+      process.env.SLACK_THREAD_STEERING = "off";
+      await sendBuffered(
+        "!now",
+        [],
+        [
+          {
+            type: "rich_text",
+            elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "!now" }] }],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Acme" },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+              [
+                { type: "raw_text", text: "Globex" },
+                { type: "raw_text", text: "/casos-de-exito/globex" },
+              ],
+            ],
+          },
+        ],
+      );
+      const task = await followUp();
+      expect(task.task).toContain(
+        "| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |",
+      );
+      expect(task.task).not.toContain("!now");
+    });
+
+    test("!now with a table keeps a user mention in a cell", async () => {
+      process.env.SLACK_THREAD_STEERING = "off";
+      await sendBuffered(
+        "!now",
+        [],
+        [
+          {
+            type: "rich_text",
+            elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "!now" }] }],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Owner" },
+                { type: "raw_text", text: "Page" },
+              ],
+              [
+                {
+                  type: "rich_text",
+                  elements: [
+                    {
+                      type: "rich_text_section",
+                      elements: [{ type: "user", user_id: "U0CELLUSER1" }],
+                    },
+                  ],
+                },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+            ],
+          },
+        ],
+      );
+      const task = await followUp();
+      expect(task.task).toMatch(/\| <@U0CELLUSER1[|>][^\n]* \| \/casos-de-exito\/acme \|/);
+      expect(task.task).not.toContain("!now");
+    });
+
+    test("!now with a table keeps a bot mention in a cell", async () => {
+      process.env.SLACK_THREAD_STEERING = "off";
+      await sendBuffered(
+        "!now",
+        [],
+        [
+          {
+            type: "rich_text",
+            elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "!now" }] }],
+          },
+          {
+            type: "table",
+            rows: [
+              [
+                { type: "raw_text", text: "Owner" },
+                { type: "raw_text", text: "Page" },
+              ],
+              [
+                {
+                  type: "rich_text",
+                  elements: [
+                    {
+                      type: "rich_text_section",
+                      elements: [{ type: "user", user_id: "U_SWARM_BOT" }],
+                    },
+                  ],
+                },
+                { type: "raw_text", text: "/casos-de-exito/acme" },
+              ],
+            ],
+          },
+        ],
+      );
+      const task = await followUp();
+      expect(task.task).toMatch(/\| <@U_SWARM_BOT[|>][^\n]* \| \/casos-de-exito\/acme \|/);
+      expect(task.task).not.toContain("!now");
+    });
 
     test("text-only follow-ups still steer the running task", async () => {
       await sendBuffered("!now use the safer approach");

@@ -78,12 +78,15 @@ const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"
 /**
  * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
  * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
- * with its own call shape, so the generic lines are wrong for them.
+ * with its own call shape, and fx defers them behind `capability_search` under
+ * `mcp_<server>_<tool>` names, so the generic lines are wrong for them.
  */
 function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
   switch (provider) {
     case "amp":
       return "system.agent.tool_discovery.amp";
+    case "fx":
+      return "system.agent.tool_discovery.fx";
     case "codex":
       return "system.agent.tool_discovery.codex";
     case "opencode":
@@ -587,8 +590,14 @@ function renderRepositoryVars(
   }
 
   if (ctx.hasLocalEnv && repo.autoStashes && repo.autoStashes.length > 0) {
-    const stashes = repo.autoStashes.map((stash) => `- ${stash.ref}: ${stash.message}`).join("\n");
-    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+    const stashes = repo.autoStashes.slice(0, 5).map((stash) => `- ${stash.ref}: ${stash.message}`);
+    const olderCount = repo.autoStashes.length - stashes.length;
+    if (olderCount > 0) {
+      stashes.push(
+        `- ...and ${olderCount} older swarm-autostash entries (run git stash list to see all)`,
+      );
+    }
+    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes.join("\n")}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
   }
 
   let section = "";

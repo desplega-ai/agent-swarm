@@ -76,16 +76,17 @@ describe("buildTreeRows", () => {
     const { rows, containers } = build(
       tree([group("shared/a/", 2)], { inbox: counts(3), later: counts(0), noGroup: counts(1) }),
     );
+    // Inbox, then the groups (ongoing work), then Later and Done.
     expect(keys(rows)).toEqual([
       "box:inbox",
       "loading:inbox",
-      "box:later",
-      "empty:later",
-      "box:done",
-      "box:nogroup",
       "section:mine",
       "group:shared/a/",
       "add:group",
+      "box:nogroup",
+      "box:later",
+      "empty:later",
+      "box:done",
     ]);
     // Later is open but empty, No group and the group are folded.
     expect(containers).toEqual(["inbox"]);
@@ -139,7 +140,7 @@ describe("buildTreeRows", () => {
       open: { inbox: false, later: false, "shared/a/": true, "shared/x/": true },
       lists: { "shared/a/": { data: page(1), failed: false } },
     });
-    expect(keys(rows).slice(4)).toEqual([
+    expect(keys(rows).slice(1, -3)).toEqual([
       "section:mine",
       "group:shared/a/",
       "group:shared/a/b/",
@@ -156,7 +157,11 @@ describe("buildTreeRows", () => {
     const row = build(tree()).rows.find((r) => r.key === "empty:groups");
     expect(row).toMatchObject({ kind: "groups", parentKey: "section:mine" });
     // "New group" stays a row the keys reach, after the invite.
-    expect(keys(build(tree()).rows).slice(-2)).toEqual(["empty:groups", "add:group"]);
+    const all = keys(build(tree()).rows);
+    expect(all.slice(all.indexOf("empty:groups"), all.indexOf("empty:groups") + 2)).toEqual([
+      "empty:groups",
+      "add:group",
+    ]);
   });
 
   test("a new group's name field takes the place of New group, or sits under its parent", () => {
@@ -171,7 +176,7 @@ describe("buildTreeRows", () => {
           lists: new Map(),
           creating,
         }).rows,
-      ).slice(-3);
+      ).slice(-6, -3);
     expect(top("shared/")).toEqual(["section:mine", "group:shared/a/", "create:shared/"]);
     expect(top("shared/a/")).toEqual(["group:shared/a/", "create:shared/a/", "add:group"]);
     // With no groups yet, the field replaces the first-run invite.
@@ -184,7 +189,7 @@ describe("buildTreeRows", () => {
       creating: "shared/",
     }).rows;
     expect(none.some((r) => r.key === "empty:groups")).toBe(false);
-    expect(none.at(-1)?.type).toBe("create");
+    expect(none.at(-4)?.type).toBe("create");
   });
 
   test("a group that lives only in this browser invites a move", () => {
@@ -225,10 +230,10 @@ describe("buildTreeRows", () => {
     const { rows } = build(tree([], { inbox: counts(1) }));
     expect(rows.filter(isNavRow).map((row) => row.type)).toEqual([
       "box",
-      "box",
-      "box",
-      "box",
       "add",
+      "box",
+      "box",
+      "box",
     ]);
   });
 
@@ -263,7 +268,7 @@ describe("source sections (sources Phase 5)", () => {
 
   test("sections follow Shared with me in source order, folded by default", () => {
     const { rows, containers } = build(t, { open: { inbox: false, later: false } });
-    expect(keys(rows).slice(4)).toEqual([
+    expect(keys(rows).slice(1, -3)).toEqual([
       "section:mine",
       "group:shared/a/",
       "add:group",
@@ -294,6 +299,9 @@ describe("source sections (sources Phase 5)", () => {
       "loading:shared/slack/c0eng00001/",
       "group:shared/slack/d0dm000001/",
       "source:telegram",
+      "box:nogroup",
+      "box:later",
+      "box:done",
     ]);
     expect(slack[1]).toMatchObject({ type: "group", level: 1, readOnly: true, open: true });
     expect(slack[3]).toMatchObject({ type: "group", level: 1, readOnly: true, open: false });

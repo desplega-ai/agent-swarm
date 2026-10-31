@@ -24,6 +24,7 @@ import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
 import { getDbClient } from "../runtime";
+import { taskSearchCondition } from "./search-index";
 
 type TaskReadDependencies = {
   checkDependencies: (taskId: string) => Promise<{ ready: boolean; blockedBy: string[] }>;
@@ -830,8 +831,8 @@ export interface TaskFilters {
 /**
  * The SQL twin of `sessionAccessForRoot` (../../session-shares). A session's
  * root is its topmost existing task; the session is hidden when the root has
- * an owner other than the user and no active share names the user or
- * everyone. Descending from hidden roots is linear in their tasks at any chain
+ * an owner other than the user, is not a schedule run (`scheduleId`), and no
+ * active share names the user or everyone. Descending from hidden roots is linear in their tasks at any chain
  * depth, and as a WHERE term it keeps paging and `COUNT(*)` on the same rows.
  * `parentTaskId` is fixed at insert to an existing task, so no parent cycle
  * (which would have no root) can form.
@@ -854,6 +855,7 @@ export function readableSessionCondition(
         WHERE (r.parentTaskId IS NULL
             OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r.parentTaskId))
           AND ${otherOwner}
+          AND r.scheduleId IS NULL
           AND NOT EXISTS (SELECT 1 FROM session_shares s
             WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND ${shareMatch})
         UNION ALL
@@ -864,6 +866,52 @@ export function readableSessionCondition(
   return {
     sql: opts.nullable ? `(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden,
     params: userId ? [userId, userId] : [],
+  };
+}
+
+/** Parent hops the row-at-a-time walk takes before it falls back to the set form. */
+const READABLE_WALK_MAX_DEPTH = 64;
+
+/**
+ * The row-at-a-time form of {@link readableSessionCondition}, for a query that
+ * stops at a LIMIT. It walks up from each row it tests to the root, so a page
+ * costs a few key lookups per row instead of the set of every hidden task,
+ * which on a large DB took hundreds of milliseconds per request. The rule is
+ * the same: the root is the first task whose parent is null or missing. A row
+ * whose walk finds no root within {@link READABLE_WALK_MAX_DEPTH} hops (a very
+ * deep chain, or a parent cycle written before migration 253) falls back to
+ * the set form, which SQLite then builds once for the statement. A count reads
+ * every row, so it keeps the set form.
+ */
+function readableSessionRowCondition(
+  userId: string | null,
+  taskIdColumn = "agent_tasks.id",
+): { sql: string; params: string[] } {
+  const otherOwner = userId
+    ? "up.requestedByUserId IS NOT NULL AND up.requestedByUserId != ?"
+    : "up.requestedByUserId IS NOT NULL";
+  const shareMatch = userId ? "(s.userId IS NULL OR s.userId = ?)" : "s.userId IS NULL";
+  const set = readableSessionCondition(userId, taskIdColumn);
+  return {
+    sql: `(CASE (
+      WITH RECURSIVE up(id, parentTaskId, requestedByUserId, scheduleId, depth) AS (
+        SELECT u.id, u.parentTaskId, u.requestedByUserId, u.scheduleId, 0
+        FROM agent_tasks u WHERE u.id = ${taskIdColumn}
+        UNION ALL
+        SELECT p.id, p.parentTaskId, p.requestedByUserId, p.scheduleId, up.depth + 1
+        FROM up JOIN agent_tasks p ON p.id = up.parentTaskId
+        WHERE up.depth < ${READABLE_WALK_MAX_DEPTH}
+      )
+      SELECT CASE WHEN ${otherOwner} AND up.scheduleId IS NULL
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s.rootTaskId = up.id AND s.revokedAt IS NULL AND ${shareMatch})
+        THEN 1 ELSE 0 END
+      FROM up
+      WHERE up.parentTaskId IS NULL
+        OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = up.parentTaskId)
+      LIMIT 1
+    ) WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE ${set.sql} END)`,
+    params: [...(userId ? [userId, userId] : []), ...set.params],
   };
 }
 
@@ -905,8 +953,9 @@ export async function getAllTasks(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
+    const search = await taskSearchCondition(filters.search, "page");
+    conditions.push(search.sql);
+    params.push(...search.params);
   }
 
   // New filters
@@ -985,7 +1034,8 @@ export async function getAllTasks(
   }
 
   if (filters?.readableBy) {
-    const readable = readableSessionCondition(filters.readableBy.userId);
+    // The page stops at LIMIT, so test only the rows it reads.
+    const readable = readableSessionRowCondition(filters.readableBy.userId);
     conditions.push(readable.sql);
     params.push(...readable.params);
   }
@@ -1078,8 +1128,9 @@ export async function getTasksCount(
   }
 
   if (filters?.search) {
-    conditions.push("(task LIKE ? OR id LIKE ?)");
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
+    const search = await taskSearchCondition(filters.search, "count");
+    conditions.push(search.sql);
+    params.push(...search.params);
   }
 
   if (filters?.unassigned) {
@@ -1861,7 +1912,44 @@ export async function getMostRecentTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function findCompletedTaskInThread(
+/**
+ * One page of completed tasks in a Slack thread, most recent first. Lead
+ * `follow-up` sessions are excluded: they coordinate the work, they are not the
+ * work, so they never count as "the request was already handled". The caller
+ * matches descriptions in JS, so it pages through the whole window with the
+ * `before` keyset cursor (the last row of the previous page) instead of
+ * loading every row in one query.
+ */
+export async function findCompletedTasksInThread(
+  channelId: string,
+  threadTs: string,
+  windowMinutes: number,
+  limit = 200,
+  before?: { lastUpdatedAt: string; id: string },
+): Promise<AgentTask[]> {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const cursorSql = before ? "AND (lastUpdatedAt < ? OR (lastUpdatedAt = ? AND id < ?))" : "";
+  const cursorParams = before ? [before.lastUpdatedAt, before.lastUpdatedAt, before.id] : [];
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND status = 'completed'
+       AND COALESCE(taskType, '') != 'follow-up'
+       AND lastUpdatedAt > ?
+       ${cursorSql}
+       ORDER BY lastUpdatedAt DESC, id DESC
+       LIMIT ?`,
+    [channelId, threadTs, since, ...cursorParams, limit],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
+ * Most recent FAILED task in a Slack thread. A failure more recent than a
+ * completion means the follow-up re-delegation guard must let a retry through.
+ */
+export async function findRecentFailedTaskInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
@@ -1871,13 +1959,48 @@ export async function findCompletedTaskInThread(
     `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
-       AND status = 'completed'
+       AND status = 'failed'
        AND lastUpdatedAt > ?
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
     [channelId, threadTs, since],
   );
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Count the dispatches one agent made into a Slack thread since the window
+ * start: each `send-task` task counts once, and each durable script run counts
+ * once however many `ctx.step.agentTask` steps it created (step tasks share the
+ * `script-run:<runId>:` contextKey prefix). A run is dated by its first step,
+ * the dispatch the guard checked, so a run that started before the window does
+ * not count again for steps it adds later. The follow-up re-delegation loop cap
+ * reads this.
+ */
+export async function countAgentDispatchesInThread(
+  channelId: string,
+  threadTs: string,
+  creatorAgentId: string,
+  windowMinutes: number,
+): Promise<number> {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const row = await getDbClient().get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM (
+       SELECT MIN(createdAt) AS firstAt FROM agent_tasks
+         WHERE slackChannelId = ?
+         AND slackThreadTs = ?
+         AND creatorAgentId = ?
+         AND source = 'mcp'
+         AND (createdAt > ? OR taskType = 'script-run-step')
+         GROUP BY CASE
+           WHEN taskType = 'script-run-step' AND contextKey LIKE 'script-run:%:%'
+             THEN substr(contextKey, 1, instr(substr(contextKey, 12), ':') + 10)
+           ELSE id
+         END
+     ) WHERE firstAt > ?`,
+    [channelId, threadTs, creatorAgentId, since, since],
+  );
+  return row?.c ?? 0;
 }
 
 /**

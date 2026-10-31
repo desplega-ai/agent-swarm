@@ -61,6 +61,7 @@ import {
   AgentCredStatusSchema,
   AgentLatestModelSchema,
   AgentSchema,
+  AgentSlackIconSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
   DeliveryModeSchema,
@@ -222,6 +223,7 @@ const LocalHarnessProviderSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 const AcpRuntimeConfigSchema = z
   .object({
@@ -375,6 +377,26 @@ const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
   claudeTransport: ClaudeTransportSchema.optional(),
 });
 
+/**
+ * The agents whose name, role or id contains `q` (case-insensitive), at most
+ * `limit` of them. A swarm has tens of agents, so filtering loaded rows is cheap.
+ */
+export function searchAgents<T extends { id: string; name: string; role?: string | null }>(
+  agents: T[],
+  q: string | undefined,
+  limit: number | undefined,
+): T[] {
+  const needle = q?.toLowerCase();
+  const matching = needle
+    ? agents.filter((agent) =>
+        [agent.name, agent.role ?? "", agent.id].some((field) =>
+          field.toLowerCase().includes(needle),
+        ),
+      )
+    : agents;
+  return limit === undefined ? matching : matching.slice(0, limit);
+}
+
 const listAgents = route({
   method: "get",
   path: "/api/agents",
@@ -385,6 +407,9 @@ const listAgents = route({
   tags: ["Agents"],
   query: z.object({
     include: z.enum(["tasks"]).optional(),
+    /** Matches the name, role or id anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `full` restores the legacy shape (includes identity markdown); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -507,6 +532,11 @@ const updateAgentProfileRoute = route({
     heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
+    // z.lazy keeps `| null` in the OpenAPI body: a named schema's $ref drops it.
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
+      .nullable()
+      .optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -853,12 +883,14 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks
+    const allAgents = includeTasks
       ? await getAllAgentsWithTasks({
           slim,
           readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
         })
       : await getAllAgents({ slim });
+    // Filtered before the per-agent capacity lookups.
+    const agents = searchAgents(allAgents, parsed.query.q, parsed.query.limit);
     const [agentsWithCapacity, transports] = await Promise.all([
       Promise.all(agents.map(agentWithCapacity)),
       resolveListClaudeTransports(agents),
@@ -951,11 +983,12 @@ export async function handleAgentsRest(
       body.setupScript === undefined &&
       body.toolsMd === undefined &&
       body.heartbeatMd === undefined &&
-      body.avatar === undefined
+      body.avatar === undefined &&
+      body.slackIcon === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, avatar, or slackIcon) must be provided",
         400,
       );
       return true;
@@ -992,6 +1025,7 @@ export async function handleAgentsRest(
           // Only include the key when the client sent it, so `null` (reset)
           // is distinguishable from "not provided" (leave untouched).
           ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+          ...(body.slackIcon !== undefined ? { slackIcon: body.slackIcon } : {}),
         },
         versionMeta,
         {

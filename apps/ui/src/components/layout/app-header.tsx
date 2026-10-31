@@ -1,4 +1,4 @@
-import { Github } from "lucide-react";
+import { Github, Search } from "lucide-react";
 import { useHealth, useStats } from "@/api/hooks/use-stats";
 import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
@@ -6,13 +6,16 @@ import { MoonIcon } from "@/components/icons/moon";
 import { SunIcon } from "@/components/icons/sun";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SetupPill } from "@/components/onboarding/setup-pill";
+import { useOpenCommandMenu } from "@/components/shared/command-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
 import { useTheme } from "@/hooks/use-theme";
+import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "./breadcrumbs";
@@ -24,6 +27,7 @@ export function AppHeader() {
   const stats = useStats();
   const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
+  const openCommandMenu = useOpenCommandMenu();
 
   const isHealthy = health && !isError;
   // Both `/status` and `/health` share the same failure (unreachable host, bad
@@ -87,6 +91,21 @@ export function AppHeader() {
         )}
 
         <SetupPill />
+        {/* Cmd+K's visible door: the only one on a phone. */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={openCommandMenu}
+          aria-label="Search"
+          aria-keyshortcuts="Meta+K Control+K"
+          className="h-8 gap-2 px-2 text-muted-foreground max-sm:size-8 sm:w-44 sm:justify-start"
+        >
+          <Search className="size-4" />
+          <span className="max-sm:hidden">Search</span>
+          <Kbd aria-hidden className="ml-auto max-sm:hidden">
+            {modKeyLabel()}K
+          </Kbd>
+        </Button>
         <NotificationBell />
         <ContextPanelToggle />
 

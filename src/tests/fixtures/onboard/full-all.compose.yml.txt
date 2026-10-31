@@ -21,6 +21,8 @@ services:
       - API_KEY=${API_KEY}
       - INSTALL_METHOD=${INSTALL_METHOD}
       - INSTALL_PRESET=${INSTALL_PRESET:-}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}
       - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
@@ -34,7 +36,7 @@ services:
       - GITHUB_DISABLE=false
 
     ports:
-      - "3999:3013"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3999:3013"
 
     volumes:
       - swarm_data:/app/data
@@ -67,6 +69,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000001
       - AGENT_NAME=Lead
@@ -85,7 +89,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3201:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3201:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -114,6 +118,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000002
       - AGENT_NAME=Coder
@@ -132,7 +138,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3202:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3202:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -161,6 +167,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000003
       - AGENT_NAME=Content Reviewer
@@ -179,7 +187,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3203:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3203:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -208,6 +216,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000004
       - AGENT_NAME=Content Strategist
@@ -226,7 +236,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3204:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3204:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -255,6 +265,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000005
       - AGENT_NAME=Content Writer
@@ -273,7 +285,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3205:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3205:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -302,6 +314,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000006
       - AGENT_NAME=Discoverability Optimizer
@@ -320,7 +334,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3206:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3206:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -349,6 +363,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000007
       - AGENT_NAME=Forward Deployed Engineer
@@ -367,7 +383,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3207:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3207:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -396,6 +412,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000008
       - AGENT_NAME=Researcher
@@ -414,7 +432,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3208:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3208:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -443,6 +461,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000009
       - AGENT_NAME=Reviewer
@@ -461,7 +481,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3209:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3209:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -490,6 +510,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000010
       - AGENT_NAME=Tester
@@ -508,7 +530,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3210:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3210:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -537,6 +559,8 @@ services:
       - MODEL_OVERRIDE=${MODEL_OVERRIDE}
       - AWS_PROFILE=${AWS_PROFILE}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000011
       - AGENT_NAME=UX Principles Agent
@@ -555,7 +579,7 @@ services:
       - SENTRY_ORG=${SENTRY_ORG}
 
     ports:
-      - "3211:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3211:3000"
 
     volumes:
       - swarm_logs:/logs

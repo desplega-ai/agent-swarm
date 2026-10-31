@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  createWorkflow,
   getScheduledTaskByName,
   getScheduledTasks,
   initDb,
@@ -13,6 +14,7 @@ import {
   loadSeedSchedules,
   type ScheduleTemplateSource,
 } from "../be/seed/schedules-seeder";
+import { createWorkflowsSeeder } from "../be/seed/workflows-seeder";
 
 const TEST_DB_PATH = "./test-seed-schedules.sqlite";
 
@@ -72,6 +74,31 @@ function zeroConfigScheduleSource(opts?: {
   } satisfies ScheduleTemplateSource;
 }
 
+/** A schedule template with an explicit target block and an optional task prompt. */
+function targetScheduleSource(target: Record<string, unknown>, prompt?: string) {
+  return {
+    config: JSON.stringify({
+      name: "test-target-schedule",
+      title: "Test target schedule",
+      description: "Seeded schedule with a target.",
+      placeholders: [],
+      requires: [],
+      runAllSeedersCandidate: true,
+      autoEnableCandidate: true,
+    }),
+    content: `# Test\n\n## Schedule\n\n\`\`\`json\n${JSON.stringify({
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      enabled: true,
+      ...target,
+    })}\n\`\`\`\n${prompt === undefined ? "" : `\n## Scheduled Task\n\n${prompt}`}`,
+  } satisfies ScheduleTemplateSource;
+}
+
+async function makeWorkflow(name: string) {
+  return createWorkflow({ name, definition: { nodes: [] } });
+}
+
 const ORIGINAL_SEED_AUTOMATIONS_ENABLED = process.env.SEED_AUTOMATIONS_ENABLED;
 
 beforeEach(async () => {
@@ -91,9 +118,9 @@ afterEach(async () => {
 });
 
 describe("schedules seeder", () => {
-  test("loads all eleven schedule templates, including the unfenced schedule block", () => {
+  test("loads all twelve schedule templates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(11);
+    expect(schedules).toHaveLength(12);
     // Zero-config, requires:[], placeholders:[], template enabled:true -> auto-enabled
     // under the default (unset -> on) SEED_AUTOMATIONS_ENABLED switch.
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
@@ -120,25 +147,33 @@ describe("schedules seeder", () => {
       schedules.filter((schedule) => schedule.enabled).map((schedule) => schedule.name),
     ).toEqual([
       "daily-blocker-digest",
-      "daily-compounding-reflection",
       "daily-status-report",
       "daily-swarm-update-check",
       "daily-workflow-health-audit",
+      "dreaming-daily",
     ]);
+    // dreaming replaces Daily Evolution, which seeds off even though it is zero-config.
+    expect(
+      schedules.find((schedule) => schedule.name === "daily-compounding-reflection"),
+    ).toMatchObject({ enabled: false });
   });
 
   test("SEED_AUTOMATIONS_ENABLED=false still seeds all schedules disabled", async () => {
     process.env.SEED_AUTOMATIONS_ENABLED = "false";
+    // dreaming-daily targets the seeded dreaming workflow.
+    await runSeeder(createWorkflowsSeeder(), { quiet: true });
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 11, failed: [] });
+    expect(result).toMatchObject({ created: 12, failed: [] });
     const schedules = await getScheduledTasks();
-    expect(schedules).toHaveLength(11);
+    expect(schedules).toHaveLength(12);
     expect(schedules.every((schedule) => schedule.enabled === false)).toBe(true);
   });
 
   test("seeds a disabled schedule whose timezone still needs setup", async () => {
+    // dreaming-daily targets the seeded dreaming workflow.
+    await runSeeder(createWorkflowsSeeder(), { quiet: true });
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 11, failed: [] });
+    expect(result).toMatchObject({ created: 12, failed: [] });
     expect(await getScheduledTaskByName("weekly-dependabot-triage")).toMatchObject({
       cronExpression: "40 3 * * 0",
       timezone: "{{TIMEZONE}}",
@@ -239,6 +274,113 @@ describe("schedules seeder", () => {
     expect((await getScheduledTaskByName("test-seeded-schedule"))?.cronExpression).toBe(
       "30 9 * * *",
     );
+  });
+
+  test("dreaming-daily is a workflow schedule with no task prompt", async () => {
+    await runSeeder(createWorkflowsSeeder(), { quiet: true });
+    const dreaming = loadSeedSchedules().find((schedule) => schedule.name === "dreaming-daily");
+    expect(dreaming).toMatchObject({
+      targetType: "workflow",
+      workflow: "dreaming",
+      taskTemplate: "",
+    });
+    // Agent-task templates carry no target keys, so their seed hash is unchanged.
+    const digest = loadSeedSchedules().find((schedule) => schedule.name === "daily-blocker-digest");
+    expect(digest && "targetType" in digest).toBe(false);
+  });
+
+  test("seeds a workflow target by name and re-runs as a no-op", async () => {
+    const workflow = await makeWorkflow("test-target-workflow");
+    const seeder = createSchedulesSeeder([
+      targetScheduleSource({ targetType: "workflow", workflow: "test-target-workflow" }),
+    ]);
+    expect(await runSeeder(seeder, { quiet: true })).toMatchObject({ created: 1, failed: [] });
+    const row = await getScheduledTaskByName("test-target-schedule");
+    expect(row).toMatchObject({ targetType: "workflow", workflowId: workflow.id });
+    expect(row?.taskTemplate).toBeUndefined();
+    expect(await runSeeder(seeder, { quiet: true })).toMatchObject({
+      skippedUnchanged: 1,
+      updated: 0,
+    });
+  });
+
+  test("seeds a script target and fails on a missing script", async () => {
+    const seeder = createSchedulesSeeder([
+      targetScheduleSource({ targetType: "script", scriptName: "no-such-script", scriptArgs: {} }),
+    ]);
+    const result = await runSeeder(seeder, { quiet: true });
+    expect(result.created).toBe(0);
+    expect(result.failed[0]?.error).toContain('Global script "no-such-script" not found');
+  });
+
+  test("fails a workflow target whose workflow does not exist, without creating a row", async () => {
+    const result = await runSeeder(
+      createSchedulesSeeder([
+        targetScheduleSource({ targetType: "workflow", workflow: "missing" }),
+      ]),
+      { quiet: true },
+    );
+    expect(result.created).toBe(0);
+    expect(result.failed[0]?.error).toContain('Workflow "missing" not found');
+    expect(await getScheduledTaskByName("test-target-schedule")).toBeNull();
+  });
+
+  test("rejects target blocks that ship fields or prompts the target ignores", () => {
+    const cases: [Record<string, unknown>, string | undefined, string][] = [
+      [{ targetType: "workflow", workflow: "w" }, "Do it.", "ships a ## Scheduled Task prompt"],
+      [{ targetType: "script", scriptName: "s" }, "Do it.", "ships a ## Scheduled Task prompt"],
+      [{ targetType: "workflow" }, undefined, "has no workflow name"],
+      [{ targetType: "script" }, undefined, "has no scriptName"],
+      [{ targetType: "workflow", workflow: "w", scriptName: "s" }, undefined, "sets scriptName"],
+      [{ workflow: "w" }, "Do it.", "(targetType agent-task) sets workflow"],
+      [{ targetType: "lambda" }, undefined, 'unknown targetType "lambda"'],
+    ];
+    for (const [target, prompt, message] of cases) {
+      expect(() => loadSeedSchedules([targetScheduleSource(target, prompt)])).toThrow(message);
+    }
+  });
+
+  test("migrates a pristine agent-task schedule to a workflow target and clears its prompt", async () => {
+    const workflow = await makeWorkflow("test-target-workflow");
+    await runSeeder(createSchedulesSeeder([targetScheduleSource({}, "Trigger the workflow.")]), {
+      quiet: true,
+    });
+    expect(await getScheduledTaskByName("test-target-schedule")).toMatchObject({
+      targetType: "agent-task",
+      taskTemplate: "Trigger the workflow.",
+    });
+
+    const result = await runSeeder(
+      createSchedulesSeeder([
+        targetScheduleSource({ targetType: "workflow", workflow: "test-target-workflow" }),
+      ]),
+      { quiet: true },
+    );
+    expect(result).toMatchObject({ updated: 1, failed: [] });
+    const row = await getScheduledTaskByName("test-target-schedule");
+    expect(row).toMatchObject({ targetType: "workflow", workflowId: workflow.id });
+    expect(row?.taskTemplate).toBeUndefined();
+  });
+
+  test("preserves an operator-edited agent-task schedule when its template moves to a workflow", async () => {
+    await makeWorkflow("test-target-workflow");
+    await runSeeder(createSchedulesSeeder([targetScheduleSource({}, "Trigger the workflow.")]), {
+      quiet: true,
+    });
+    const seeded = await getScheduledTaskByName("test-target-schedule");
+    await updateScheduledTask(seeded!.id, { taskTemplate: "My own prompt." });
+
+    const result = await runSeeder(
+      createSchedulesSeeder([
+        targetScheduleSource({ targetType: "workflow", workflow: "test-target-workflow" }),
+      ]),
+      { quiet: true },
+    );
+    expect(result.skippedUserModified).toBe(1);
+    expect(await getScheduledTaskByName("test-target-schedule")).toMatchObject({
+      targetType: "agent-task",
+      taskTemplate: "My own prompt.",
+    });
   });
 
   test("reports an invalid cron without creating a row", async () => {

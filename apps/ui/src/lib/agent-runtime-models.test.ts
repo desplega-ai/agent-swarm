@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { reasoningLevelsFor } from "@desplega/model-catalog";
 import type { SwarmConfig } from "../api/types";
 import {
   effortAfterChange,
@@ -7,6 +8,7 @@ import {
   type LiveModelsCatalog,
   modelGroupsForHarness,
   modelGroupsForSchedule,
+  pickDefaultModelForHarness,
 } from "./agent-runtime-models";
 import { getAgentModelPresentation } from "./agents-list-model-display";
 import { modelVendor } from "./model-vendor";
@@ -73,9 +75,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
 
   test("Pi and Opencode read <provider>/<id>, the id may hold more slashes", () => {
     const openrouter = "openrouter/deepseek/deepseek-v4.1-flash";
-    // pi and opencode pass the model's own effort values through.
-    expect(effortLevelsFor("pi", openrouter)).toEqual(["low", "high", "max"]);
-    expect(effortLevelsFor("opencode", openrouter)).toEqual(["low", "high", "max"]);
+    // pi and opencode pass the model's own effort values through (`none` is off).
+    expect(effortLevelsFor("pi", openrouter)).toEqual(["off", "low", "high", "max"]);
+    expect(effortLevelsFor("opencode", openrouter)).toEqual(["off", "low", "high", "max"]);
     // A bare id names no provider: unknown.
     expect(effortLevelsFor("pi", "deepseek-v4-flash")).toEqual([]);
   });
@@ -104,9 +106,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
       "high",
       "max",
     ]);
-    expect(effortLevelsFor("dsh", "deepseek-v4-pro")).toEqual(["off", "high", "max"]);
-    // dsh's own id for V4.1 Flash is not in the catalog: no level is claimed for it.
-    expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual([]);
+    expect(effortLevelsFor("dsh", "deepseek-v4-pro")).toEqual(["off", "low", "high", "max"]);
+    // dsh's own id for V4.1 Flash reads its `deepseek` section row.
+    expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual(["off", "low", "high", "max"]);
   });
 
   test("amp: a mode names no model, so only a pinned provider/model takes effort", () => {
@@ -551,5 +553,69 @@ describe("OpenCode Go on the opencode harness", () => {
         false,
       );
     }
+  });
+});
+
+describe("fx harness models", () => {
+  const thing = {
+    name: "Acme Thing",
+    reasoning: true,
+    reasoning_options: effort(["low", "high"]),
+  };
+  const catalog = live({
+    openrouter: { "acme/thing": thing },
+    openai: { "gpt-5-mini": { name: "GPT-5 Mini", reasoning: true, release_date: "2025-08-07" } },
+    vercel: { "acme/thing": thing },
+  });
+
+  test("one group per route, each behind the key that route bills", () => {
+    const groups = modelGroupsForHarness("fx", [], { OPENAI_API_KEY: true }, null, catalog);
+    expect(groups.map((g) => [g.provider, g.requiredKey, g.enabled])).toEqual([
+      ["OpenRouter", "OPENROUTER_API_KEY", false],
+      ["OpenAI", "OPENAI_API_KEY", true],
+      ["Vercel AI Gateway", "AI_GATEWAY_API_KEY", false],
+    ]);
+    const ids = groups.map((g) => g.models.map((m) => m.id));
+    expect(ids[0]).toContain("openrouter/acme/thing");
+    expect(ids[1]).toContain("gpt-5-mini");
+    expect(ids[1]?.every((id) => !id.includes("/"))).toBe(true);
+    expect(ids[2]).toContain("vercel/acme/thing");
+  });
+
+  test("no NaN, Helmcode or Anthropic group: fx cannot use those keys", () => {
+    const groups = modelGroupsForHarness(
+      "fx",
+      [],
+      { NAN_API_KEY: true, HELMCODE_API_KEY: true, ANTHROPIC_API_KEY: true },
+      null,
+      catalog,
+    );
+    expect(groups.every((g) => !g.enabled)).toBe(true);
+    expect(
+      groups.flatMap((g) => g.models).some((m) => /^(nan|helmcode|anthropic)\//.test(m.id)),
+    ).toBe(false);
+  });
+
+  test("effort only on the AI Gateway route", () => {
+    const groups = modelGroupsForHarness("fx", [], {}, null, catalog);
+    expect(
+      groups[0]?.models.find((m) => m.id === "openrouter/acme/thing")?.reasoningLevels,
+    ).toEqual([]);
+    expect(groups[1]?.models.find((m) => m.id === "gpt-5-mini")?.reasoningLevels).toEqual([]);
+    expect(effortLevelsFor("fx", "openrouter/acme/thing", catalog)).toEqual([]);
+    expect(effortLevelsFor("fx", "gpt-5-mini", catalog)).toEqual([]);
+    // The gateway route follows the shared rule in @desplega/model-catalog.
+    const gateway = groups[2]?.models.find((m) => m.id === "vercel/acme/thing");
+    expect(effortLevelsFor("fx", "vercel/acme/thing", catalog)).toEqual(
+      reasoningLevelsFor("fx", "acme/thing", thing),
+    );
+    expect(gateway?.reasoningLevels).toEqual(reasoningLevelsFor("fx", "acme/thing", thing));
+  });
+
+  test("the default is the regular-tier model when OpenRouter is enabled", () => {
+    const groups = modelGroupsForHarness("fx", [], { OPENROUTER_API_KEY: true });
+    expect(pickDefaultModelForHarness("fx", groups)).toBe(
+      "openrouter/deepseek/deepseek-v4.1-flash",
+    );
   });
 });

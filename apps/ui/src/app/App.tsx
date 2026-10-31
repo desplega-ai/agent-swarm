@@ -1,5 +1,6 @@
 import { RouterProvider } from "react-router-dom";
 import { AppUpdateWatcher } from "@/components/shared/app-update-prompt";
+import { CommandMenuRoutesProvider } from "@/components/shared/command-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { isDemoMode } from "@/lib/deployment-config";
 import { Providers } from "./providers";
@@ -8,7 +9,9 @@ import { router } from "./router";
 export default function App() {
   return (
     <Providers>
-      <RouterProvider router={router} />
+      <CommandMenuRoutesProvider routes={router.routes}>
+        <RouterProvider router={router} />
+      </CommandMenuRoutesProvider>
       {isDemoMode ? (
         <aside
           aria-label="Live demo environment"
@@ -19,7 +22,13 @@ export default function App() {
           </div>
         </aside>
       ) : null}
-      <Toaster position="bottom-right" />
+      {/* Lifted clear of the message box pinned to the bottom of Task
+          details and Sessions, so a toast never covers Send. */}
+      <Toaster
+        position="bottom-right"
+        offset={{ bottom: "10rem" }}
+        mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 8rem)" }}
+      />
       <AppUpdateWatcher />
     </Providers>
   );

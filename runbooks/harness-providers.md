@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, grok, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, grok, fx, future).
 
 ## Supported providers
 
@@ -9,7 +9,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary, plus NaN (`nan/*`) and Helmcode (`helmcode/*`); agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) and [NaN and Helmcode](#nan-and-helmcode-pi-opencode) below |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below), or the ChatGPT subscription pool (`openai-codex/*`, see [Codex OAuth § Using the pool from pi](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini`, `copilot`, `qwen`, `kiro` and `goose` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
@@ -17,6 +17,27 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
+| fx | `fx` | `FxAdapter` | Vercel Labs' fx as an ACP server (`fx acp`) on the shared ACP client; `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` by model route. See [fx](#fx-fx) below |
+
+## Worker API readiness
+
+Before any provider restores configuration, `docker-entrypoint.sh` calls the
+standalone `src/commands/entrypoint-api-readiness.ts` step. It runs in the
+entrypoint's existing root phase. It performs an unauthenticated `GET /health`,
+writes no files and receives no API key argument.
+
+`WORKER_API_READY_TIMEOUT_SECONDS` remains a positive integer with a 90-second
+default, including when the environment value is empty. Failures retry once per
+second. Each Bun fetch, including its response body, is bounded by three seconds
+or the remaining overall deadline, whichever is shorter. Redirects count as
+success without being followed, matching the previous `curl -f` behavior.
+Timeout and invalid configuration retain the `[entrypoint] FATAL:` messages and
+nonzero exit status, so provider initialization never continues after failure.
+
+The step injects its HTTP probe, clock, sleep and logger for unit tests.
+`src/tests/entrypoint-api-readiness.test.ts` also runs the real Bash shim and Bun
+module against local HTTP servers. This is the first per-step migration from
+Bash tracked in #2047; the remaining boot stages still run in the shell.
 
 ## Tool-schema cost on harness bumps
 
@@ -129,6 +150,87 @@ Not covered: the SuperGrok OAuth pool (`grok login --device-auth`), which needs
 the CLI's `auth.json` refresh behaviour measured first. The adapter tests replay
 a recorded live session (`src/tests/fixtures/grok/`).
 
+## fx (`fx`)
+
+Set `HARNESS_PROVIDER=fx` and one of `OPENROUTER_API_KEY`, `OPENAI_API_KEY`
+or `AI_GATEWAY_API_KEY`. fx is Vercel Labs' Apache-2.0 coding agent
+(`github.com/vercel-labs/fx`, a static Zig binary). `fx acp` is a spec ACP
+server, so `FxAdapter` wraps `ACPAdapter` with a fixed `fx` target profile
+(`fxTargetProfile` in `src/providers/acp-targets.ts`), as grok does. `fx` is
+not an operator `ACP_TARGET`. Operator guide:
+[Provider Auth: fx](/docs/guides/provider-auth/fx).
+
+The full worker image installs the pinned release binary at
+`/usr/local/bin/fx` (`FX_VERSION` in `Dockerfile.worker`, SHA-512 verified per
+arch, never `fx.sh/setup.sh`, which skips verification). The slim image has
+none: the entrypoint fails when `fx` is absent and logs `fx --version` when it
+is present.
+
+- **Spawn.** `fx acp --model <fxModel> --log-file <tmp>/fx-<taskId>/acp.log`
+  with `FX_PROVIDER`, `FX_PERMISSION_MODE=full-access`, `FX_AUTO_UPGRADE=0`,
+  `FX_NO_OPEN_BROWSER=1` and only the key the route needs. Never send
+  `session/set_mode` or a `mode`/`provider` config option: fx saves them to
+  `~/.fx/settings.json` for every later process. fx's `auto` mode is unusable
+  headless: its reviewer held a plain swarm MCP call without ever sending
+  `session/request_permission`.
+- **Routing** (`resolveFxRoute` in `src/utils/fx-models.ts`):
+  `openrouter/<vendor>/<id>` runs on the `openrouter` custom connection,
+  `vercel/<vendor>/<id>` on the built-in `gateway` provider, a bare id on the
+  `openai` custom connection. `nan/`, `helmcode/` and direct `anthropic` ids
+  are refused at create and claim.
+- **Settings.** No config-dir override exists, so `HOME` stays put (skills,
+  git and `gh` keep working) and `ensureFxSettings()` merges the swarm-owned
+  keys into `~/.fx/settings.json` atomically (temp file + rename), keeping
+  every other key: `providers.openrouter`, `providers.openai` (env-var names
+  only, never values), `auto_upgrade: false`, `session_titles: false`.
+- **Sessions on disk.** fx keeps sessions under `~/.fx`
+  (`/home/worker/.fx`), with no relocation variable. They accumulate per
+  worker and nothing prunes them yet; workspace-retention and disk cleanup
+  must include that path.
+- **MCP.** The swarm server goes in `session/new` as Streamable HTTP. fx
+  rejects a non-HTTPS, non-loopback URL (`-32602 "MCP server url must be a
+  valid HTTPS or explicit loopback HTTP endpoint"`), so with a plain
+  `http://api:3013` the adapter starts the `127.0.0.1` forwarder
+  (`src/providers/mcp-loopback-proxy.ts`) per session and stops it in
+  `finish()`. SSE servers are dropped with a warning. Tools are named
+  `mcp_<server>_<tool>`; the swarm tool schemas exceed fx's 64 KiB
+  always-loaded budget, so fx defers them behind `capability_search`. Keep
+  that deferral on: turning it off took turn input from 89.5k to 162.8k
+  tokens on the same prompt.
+- **System prompt.** ACP `systemPrompt` (append mode), capped by fx at 64 KiB.
+  Over 60 KiB, the full prompt goes to `<tmp>/fx-<taskId>/SYSTEM.md` and fx
+  gets the first 56 KiB plus a line to read that file first. The
+  `[context] ...` notice fx streams as an `agent_message_chunk` becomes a
+  `custom` `fx_context_notice` event and never reaches task output.
+- **Steering, resume, cancel.** Native steer (above). `session/resume` in a
+  new `fx acp` process restores history and the appended prompt; the runner
+  still uses the context preamble for follow-ups (see
+  [Native session resume is deprecated](#native-session-resume-is-deprecated-2026-05-28)).
+  `session/cancel` stops the running tool and returns usage; the adapter kills
+  the process tree.
+- **Cost.** `usage { inputTokens, outputTokens }` per prompt and
+  `usage_update { used, size }` for context. No USD and no cache split, and
+  sub-agent and helper-model calls are excluded, so rows are a
+  `pricing-table` estimate. `session_init` carries `agentInfo.version`.
+- **Effort.** Only on the `gateway` route, when fx advertises an `effort`
+  option. Custom connections have no reasoning controls.
+
+Not covered: NaN (every model fails with `InconsistentFinishReason` in fx
+0.0.16: NaN's trailing usage chunk has a choice with no `finish_reason`),
+Anthropic keys (no Messages protocol, no custom-header auth), fx's Codex and
+Grok subscription logins, `fx ask`, Ultrafast and `auto` mode. The AI Gateway
+route has not run live.
+
+**Bumping fx.** Change `FX_VERSION` and both `FX_SHA512_*` pins in
+`Dockerfile.worker` and `FX_PINNED_VERSION` in `src/providers/fx-adapter.ts`
+together (a unit test asserts the two versions match). Get each pin with
+`curl -fsSL https://releases.fx.sh/v<version>/fx-linux-<x86_64|aarch64>.tar.gz | sha512sum`.
+Then build `worker-full` and run `bun run e2e --only health --harness fx`
+in it with `OPENROUTER_API_KEY` set, plus
+`bun run test:root -- src/tests/fx-adapter.test.ts`. fx is pre-1.0 and has
+renamed modes and changed ACP shapes between patch releases, so never skip
+the e2e run.
+
 ## Amp (`amp`)
 
 Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY`. Amp is a proprietary CLI and a hosted
@@ -219,7 +321,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.1-rc.4` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.2-alpha.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -284,7 +386,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.1.0`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.2.0`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -462,6 +564,7 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
 | `claude` | No | Conditional | Both transports queue input at a turn boundary. CLI uses the version gate below. SDK enables queueing unless explicitly disabled. |
 | `codex` | Native `turn/steer` | Adapter queue | The per-task app-server receives steering over JSON-RPC. `steer` interrupts the active turn. `queue` starts after that turn ends. See below. |
+| `fx` | Native `_meta.fx.steer` prompt | No | A second `session/prompt` with `_meta.fx.steer: true`, absorbed at the next tool boundary without cancelling. Only `_meta.fx.steering: "absorbed"` counts as delivered; anything else is undeliverable and is promoted to a follow-up. Advertises `["steer"]`. |
 | `acp` | No | No | ACP has one in-flight `session/prompt` and no queue primitive; `session/cancel` is a full abort, not an interrupt. Advertises `[]`. |
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
@@ -498,6 +601,8 @@ Production Codex sessions start a fresh `codex app-server` inside the existing i
 - `abort()` sends the native turn interrupt request. If it cannot complete within the bounded grace period, the runner terminates the task process group.
 
 The adapter creates no shared app-server daemon and never resumes a native Codex thread. Task continuity still uses the swarm context preamble.
+
+The adapter starts each thread with `ephemeral: false`. Do not switch it back to `true`: codex's `spawn_agent` tool forks the parent thread's context (`fork_context`) by reading the parent rollout, and an ephemeral thread has none, so every such spawn fails with `collab spawn failed: ... no rollout found for thread id` (the code-quality skill's confirming-agent spawn hit this). Rollouts land in `$CODEX_HOME/sessions` (default `~/.codex/sessions`). Nothing resumes them, so `pruneCodexRollouts` (`src/providers/codex-rollouts.ts`) deletes those older than 7 days when a session starts.
 
 ### Codex hook delivery for legacy exec sessions
 

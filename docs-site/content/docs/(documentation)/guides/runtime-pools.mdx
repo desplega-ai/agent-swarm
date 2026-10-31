@@ -15,7 +15,7 @@ With pools disabled, existing workers keep their registration and poll behavior.
 | --- | --- |
 | Agent | Durable identity, profile, credentials, task queue, and logical `maxTasks` limit. |
 | Pool | Infrastructure kind, controller placement, worker image, delivery mode, lifecycle, and capacity limits. |
-| Controller | Starts and stops runtimes through Docker or E2B. A built-in controller runs inside the API. A remote controller runs elsewhere. |
+| Controller | Starts and stops runtimes through Docker, E2B, or boxd. A built-in controller runs inside the API. A remote controller runs elsewhere. |
 | Runtime | One worker process serving an agent. It has its own identity, slots, liveness record, and scoped credential. |
 
 An agent binds to one pool. A pool has one controller placement in this release.
@@ -25,7 +25,7 @@ Workspace files remain local to each runtime. Save durable results in Git, share
 ## Recommended topology
 
 Keep one Lead on a `static` pool with `delivery: "poll"`. Operators manage static workers themselves.
-Put coding agents on a `docker` or `e2b` pool with `delivery: "push"` and on-demand capacity.
+Put coding agents on a `docker`, `e2b`, or `boxd` pool with `delivery: "push"` and on-demand capacity.
 Use `minRuntimes: 0` to permit an agent to sleep when no work remains.
 
 The router first selects an eligible live worker with free capacity.
@@ -77,6 +77,58 @@ The API returns `200` for pool and controller writes. Task creation returns `201
 Pool and controller writes require operator credentials or a user account.
 A pool selects the image that receives a runtime token, so agents cannot create, change, or delete pools.
 A Lead can list pools, create an agent in an existing pool, and bind an agent to a pool.
+
+## Persistent caches
+
+Docker pools can share one persistent cache across their runtimes. Caching is off
+by default. Configure it through the pool API:
+
+```bash
+curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"cache":{"mountPath":"/home/worker/.cache"},"env":{"BUN_INSTALL_CACHE_DIR":"/home/worker/.cache/bun","npm_config_cache":"/home/worker/.cache/npm"}}'
+```
+
+The `env` object replaces the pool's environment settings, so include any values
+you already use. Make the mount writable for your image's worker user through
+your image or root setup script. Cache configuration mounts storage; the package
+manager environment variables select where tools put their caches.
+
+The swarm chooses the volume name, `swarm-cache-<poolId>-<generation>`. Every runtime in that
+pool on the same controller target shares the current generation, while its working disk remains
+ephemeral. Only use caches that support concurrent writers. Keep working trees,
+credentials and runtime state outside the shared cache.
+Mount paths cannot overlap workspace roots (`/workspace/personal` and
+`/workspace/shared`) or credential and harness state directories: the directory
+itself, its ancestors and its descendants are rejected. Entire worker homes are
+also rejected. Use a cache directory outside these protected trees, such as
+`/home/worker/.cache`, `/root/.cache`, `/workspace/cache`, or `/cache`.
+
+Terminating a runtime preserves its cache. Set `"cache": null` to stop mounting it
+in new runtimes and schedule automatic cleanup. Existing runtimes keep their
+mounts until they stop; cleanup waits for them, without waiting for new runtimes
+that do not use the cache. Deleting a pool or moving its placement also schedules
+cleanup on the old controller. Setting `"enabled": false` retains the configured
+cache for when the pool is enabled again.
+
+Cleanup survives API restarts and retries when the controller is offline or the
+volume is still in use. Docker verifies ownership and never forces removal.
+Re-enabling cache starts a fresh generation while the retired generation is
+cleaned up. A delayed or timed-out deletion cannot remove the new cache.
+Ordinary pool edits retain its generation. Abandoned cleanup claims retry after
+five minutes following an API restart. Disable caches and wait for cleanup before changing a
+controller's target, placement or credentials, or deleting the controller.
+Deferred cleanup errors appear in the API logs and
+`runtime_cache_releases.last_error`; upgrade older controllers to complete cleanup.
+
+Static, E2B and boxd pools currently reject this setting. Controllers declare
+`persistentCache` separately from `ephemeralDisk`; an older Docker controller
+starts without the cache and reports the reason in the pool's `lastError`.
+A failed volume preparation also falls back without cache and reports a warning.
+A mount failure during container creation or start retries once without the
+cache, after removing any failed-start container. Other failures still fail the
+provision.
+The API never adopts a volume labeled for another swarm or pool.
 
 ## Push and poll delivery
 
@@ -137,6 +189,35 @@ The supervisor drains runtimes before the continuous limit and permits replaceme
 Busy runtimes finish their tasks while draining. Tasks longer than the limit can still need crash recovery.
 Automatic idle pause is not available in this release.
 Use an idle lifecycle or warm floor to reduce repeated sandbox boot cost for frequent tasks.
+
+## boxd pools
+
+Choose `kind: "boxd"` with a boxd controller and an HTTPS API URL reachable by the machine.
+Each runtime is one isolated [boxd](https://boxd.sh) microVM that runs the pool `image` in its own Docker daemon.
+Use the same worker images as Docker pools.
+Set `BOXD_API_KEY` on the API and restart it to seed an online `builtin-boxd` controller. Other controllers store the key in their encrypted secret configuration.
+An org API key selects its org. Set `BOXD_ORG` in controller configuration for a personal key.
+
+| Controller setting | Behavior |
+| --- | --- |
+| `BOXD_SNAPSHOT` | Restore this snapshot instead of booting a fresh machine. The snapshot's size applies. |
+| `BOXD_DELETE_AFTER_SEC` | Delete each machine this many seconds after creation, in any state. A safety net for per-task pools. |
+| `BOXD_BASE_URL` | Another boxd API endpoint. |
+| `BOXD_START_TIMEOUT_SEC` | Seconds `docker run` may take to start the worker, image pull included. Default 600. |
+| `BOXD_STATUS_TIMEOUT_SEC` | Seconds a status check waits for `docker inspect`. Default 15. |
+| `BOXD_TEARDOWN_TIMEOUT_SEC` | Seconds terminate waits for boxd to confirm the machine is gone. Default 30. |
+
+Pool `resources` select the smallest size that covers them: 1 vCPU and 4 GiB, 2 and 8, 4 and 16, or 8 and 32.
+Machines have no lease. They run until the supervisor terminates them, so keep the API running or set `BOXD_DELETE_AFTER_SEC`.
+A fresh machine pulls the image on each provision. With the slim worker image, provision took about 40 seconds.
+A snapshot with the image already pulled provisions in about 3 seconds. Bake one and set `BOXD_SNAPSHOT`:
+
+```bash
+boxd machine new swarm-base --isolated
+boxd machine exec swarm-base -- docker pull ghcr.io/desplega-ai/agent-swarm-worker:slim
+boxd snapshots save swarm-base swarm-worker-slim
+boxd machine remove swarm-base --confirm
+```
 
 ## Remote controllers
 
@@ -205,6 +286,7 @@ docker compose logs -f swarm-controller
 ```
 
 For an E2B controller, set `--kind e2b`, remove the Docker flags and the socket volume, and add `E2B_API_KEY` to `environment`.
+For a boxd controller, set `--kind boxd` and add `BOXD_API_KEY` instead. Like E2B, the controller checks for an HTTPS worker URL in its own environment, so also set `MCP_BASE_URL` to the public API URL.
 
 **systemd.** Run the CLI with Bun under a dedicated user in the `docker` group.
 Membership in the `docker` group gives root-equivalent access to the host, so keep this user for the controller only.

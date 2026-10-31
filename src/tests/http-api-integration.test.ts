@@ -308,6 +308,37 @@ describe("Agents", () => {
     expect(rejected.status).toBe(400);
   });
 
+  test("PUT /api/agents/:id/profile — sets, validates and resets slackIcon", async () => {
+    const path = `/api/agents/${ids.workerAgent}/profile`;
+    const owl = { type: "url", url: "https://example.com/owl.png" };
+    const set = await put(path, { body: { slackIcon: owl } });
+    expect(set.status).toBe(200);
+    expect(set.body.slackIcon).toEqual(owl);
+
+    for (const slackIcon of [
+      { type: "emoji", emoji: "owl" },
+      { type: "url", url: "http://example.com/owl.png" },
+      { type: "url", url: "https://user:pass@example.com/owl.png" },
+      { type: "url", url: "https://" },
+    ]) {
+      expect((await put(path, { body: { slackIcon } })).status).toBe(400);
+    }
+
+    const app = await put(path, { body: { slackIcon: { type: "app" } } });
+    expect(app.status).toBe(200);
+    expect(app.body.slackIcon).toEqual({ type: "app" });
+
+    const reset = await put(path, { body: { slackIcon: null } });
+    expect(reset.status).toBe(200);
+    expect(reset.body.slackIcon).toBeNull();
+  });
+
+  test("GET /api/integrations/slack/app-icon — null with Slack off", async () => {
+    const { status, body } = await get("/api/integrations/slack/app-icon");
+    expect(status).toBe(200);
+    expect(body).toEqual({ imageUrl: null });
+  });
+
   test("PUT /api/agents/:id/profile — persists structured filesystem sync rejections", async () => {
     const current = "s".repeat(SOUL_MD_MAX_CHARS);
     const accepted = await put(`/api/agents/${ids.workerAgent}/profile`, {

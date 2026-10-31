@@ -39,36 +39,10 @@ fi
 # cleanly. Bounded so a dead API never blocks boot forever. Timeout is
 # operator-tunable via WORKER_API_READY_TIMEOUT_SECONDS — see
 # apps/ui/src/lib/configuration-catalog.ts.
-# BEGIN wait_for_api_ready (extracted verbatim by src/tests/entrypoint-api-readiness.test.ts — keep markers stable)
+# BEGIN wait_for_api_ready (shell shim exercised by src/tests/entrypoint-api-readiness.test.ts)
 wait_for_api_ready() {
-    local base_url="$1"
-    local url="${base_url%/}/health"
-    local timeout_raw="${WORKER_API_READY_TIMEOUT_SECONDS:-90}"
-
-    case "$timeout_raw" in
-        ''|*[!0-9]*)
-            echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
-            exit 1
-            ;;
-    esac
-    if [ "$timeout_raw" -le 0 ]; then
-        echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
-        exit 1
-    fi
-
-    local deadline=$(( $(date +%s) + timeout_raw ))
-    echo "[entrypoint] Waiting for API readiness at ${url} (timeout ${timeout_raw}s)..."
-    while true; do
-        if curl -sf --connect-timeout 2 --max-time 3 -o /dev/null "$url"; then
-            echo "[entrypoint] API ready at ${url}"
-            return 0
-        fi
-        if [ "$(date +%s)" -ge "$deadline" ]; then
-            echo "[entrypoint] FATAL: API readiness timed out after ${timeout_raw}s waiting for ${url}; exiting."
-            exit 1
-        fi
-        sleep 1
-    done
+    /usr/local/bin/bun --no-orphans /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts \
+        "$1" "${WORKER_API_READY_TIMEOUT_SECONDS:-90}"
 }
 # END wait_for_api_ready
 
@@ -102,6 +76,13 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
 elif [ "$HARNESS_PROVIDER" = "grok" ]; then
     if [ -z "$XAI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
         echo "Warning: grok provider has no credentials yet (XAI_API_KEY or OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    fi
+elif [ "$HARNESS_PROVIDER" = "fx" ]; then
+    # fx reaches models through OpenRouter (openrouter/<vendor>/<id>), OpenAI
+    # (a bare id) or Vercel AI Gateway (vercel/<vendor>/<id>). It cannot use
+    # ANTHROPIC_API_KEY: fx has no Anthropic Messages protocol.
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "${AI_GATEWAY_API_KEY:-}" ]; then
+        echo "Warning: fx provider has no credentials yet (OPENROUTER_API_KEY / OPENAI_API_KEY / AI_GATEWAY_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     if [ -z "$CURSOR_API_KEY" ]; then
@@ -350,7 +331,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.4 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.2-alpha.2 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
@@ -368,6 +349,14 @@ elif [ "$HARNESS_PROVIDER" = "grok" ]; then
         exit 1
     fi
     echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
+elif [ "$HARNESS_PROVIDER" = "fx" ]; then
+    # fx ships only in worker-full (Dockerfile.worker FX_VERSION, SHA-512 pinned).
+    FX_BIN="${FX_BINARY:-fx}"
+    if ! command -v "$FX_BIN" >/dev/null 2>&1; then
+        echo "FATAL: fx CLI not found: '$FX_BIN'. Use worker-full, or install the pinned fx release binary (Dockerfile.worker FX_VERSION) during image provisioning."
+        exit 1
+    fi
+    echo "fx CLI: $(command -v "$FX_BIN") ($(FX_AUTO_UPGRADE=0 "$FX_BIN" --version 2>/dev/null))"
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     # @cursor/sdk runs in-process inside the worker binary; its ripgrep comes
     # from the platform package installed in worker-full (CURSOR_RIPGREP_PATH).

@@ -76,7 +76,12 @@ import {
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
-import { type AgentTask, SUPERSEDED_WORKFLOW_TASK_REASON, TERMINAL_TASK_STATUSES } from "../types";
+import {
+  type AgentTask,
+  OPEN_TASK_STATUSES,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
+  TERMINAL_TASK_STATUSES,
+} from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
@@ -1800,14 +1805,16 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
-  // Dedup: skip if lead already has an active heartbeat-checklist task
+  // Dedup: skip if lead already has an active heartbeat-checklist task.
+  // Unary + keeps agentId/taskType off their indexes, so the seek runs on
+  // status over the few open tasks instead of every past checklist task.
   const existing = await getDbClient().get<{ id: string }>(
     `SELECT id FROM agent_tasks
-       WHERE agentId = ?
-         AND taskType = 'heartbeat-checklist'
-         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
+       WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
+         AND +agentId = ?
+         AND +taskType = 'heartbeat-checklist'
        LIMIT 1`,
-    [lead.id, ...TERMINAL_TASK_STATUSES],
+    [...OPEN_TASK_STATUSES, lead.id],
   );
   if (existing) return;
 

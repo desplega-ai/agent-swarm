@@ -184,6 +184,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [slack-download-file](#slack-download-file)
   - [slack-delete](#slack-delete)
   - [slack-update](#slack-update)
+  - [slack-leave-thread](#slack-leave-thread)
 - [Prompt Templates Tools](#prompt-templates-tools)
   - [list-prompt-templates](#list-prompt-templates)
   - [get-prompt-template](#get-prompt-template)
@@ -270,7 +271,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | `readyOnly` | `boolean` | No | - | Only return tasks whose dependencies are met. |
 | `taskType` | `string` | No | - | Filter by task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Filter by any matching tag. |
-| `search` | `string` | No | - | Search in task description. |
+| `search` | `string` | No | - | Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. |
 | `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
 | `workflowRunId` | `string` | No | - | Filter by workflow run ID to find the tasks of a single run. |
 | `key` | `unknown` | No | - | Filter by exact logical namespace. |
@@ -315,7 +316,8 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
-| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
+| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. Does not bypass the follow-up re-delegation guard; see allowRedelegation. |
+| `allowRedelegation` | `boolean` | No | false | Only matters when you call send-task from a follow-up task in a Slack thread. Such a dispatch is blocked when it repeats a task already completed in that thread (same-work rule, unless a task there was cancelled or failed after that completion), or when you already dispatched 10 tasks into the thread in the last 6 hours (loop-cap rule). Set true to dispatch anyway; the override is logged. Use it only for deliberate re-runs or long chains, never to retry a block you have not read. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
@@ -332,7 +334,7 @@ List model profiles: named harness + model + effort combinations. Pass a profile
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok \| fx` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
 
 ### get-task-details
 
@@ -458,7 +460,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex and cursor; claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex, cursor and fx (fx supports steer only); claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1007,6 +1009,7 @@ Updates an agent's profile information (name, description, role, capabilities). 
 | `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Synced to /workspace/TOOLS.md. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory. |
 | `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
 | `avatar` | `unknown` | No | - | Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color. |
+| `slackIcon` | `unknown` | No | - | Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }, or { type: 'app' } for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default. |
 
 ### context-history
 
@@ -1394,7 +1397,7 @@ Capability: `workflows` (enabled by default)
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). Inline script nodes also accept config.env, an interpolated string-to-string map of environment variables that can be used alongside args. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2259,13 +2262,25 @@ Deletes a Slack message that THIS bot authored (e.g. a message previously posted
 
 **Edit a Slack message**
 
-Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
+Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Editing keeps the icon the message was posted with. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
 | `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
 | `message` | `string` | Yes | - | The new message content. |
+
+### slack-leave-thread
+
+**Leave a Slack thread**
+
+Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the thread of your Slack-originated task, or (lead only) channelId and threadTs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | No | - | A task whose Slack thread to leave. |
+| `channelId` | `string` | No | - | The Slack channel ID of the thread. |
+| `threadTs` | `string` | No | - | Timestamp of the thread root (dotted, 'p' deep-link, or full permalink URL). |
 
 ## Prompt Templates Tools
 
@@ -2457,7 +2472,7 @@ Read the most recent messages of a Chat SDK thread, oldest first. Every agent ca
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `threadId` | `string` | Yes | - | Full SDK thread id with the adapter prefix, such as telegram:12345. |
-| `limit` | `number` | No | - | Number of messages to return (default ${DEFAULT_LIMIT}). |
+| `limit` | `number` | No | - | Number of messages to return (default 30). |
 
 ### register-chat-channel
 
