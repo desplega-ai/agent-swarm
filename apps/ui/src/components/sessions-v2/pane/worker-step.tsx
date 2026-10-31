@@ -1,8 +1,8 @@
 import { ChevronDown, Maximize2 } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
+import { RelativeTime } from "@/components/shared/relative-time";
 import "streamdown/styles.css";
-import type { AgentTask } from "@/api/types";
 import { ChainOfThought } from "@/components/sessions/chain-of-thought";
 import { TaskDetailSheet } from "@/components/sessions/task-detail-sheet";
 import { TaskOutcome } from "@/components/sessions/task-outcome";
@@ -15,13 +15,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useRevealText } from "@/hooks/use-reveal-text";
 import { useTaskSheetParam } from "@/hooks/use-task-sheet-param";
 import { formatSpan } from "@/lib/format-duration-ms";
-import { type JsonContainer, parseJsonOutput } from "@/lib/json-output";
-import { markdownPreview } from "@/lib/markdown-preview";
-import { promptTitle } from "@/lib/prompt-display";
 import type { WorkerStep as Step } from "@/lib/session-turns";
-import { plural } from "@/lib/sessions-v2";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, normalizeNewlines } from "@/lib/utils";
+import { outcomePreview } from "./outcome-preview";
 import { MessageTime } from "./swarm-reply";
 
 const times = (n: number) => (n === 1 ? "once" : `${n} times`);
@@ -51,92 +48,6 @@ function statusText(step: Step): string {
     return before ? `${before}, then ${last.status}` : last.status;
   if (last.status === "in_progress") return before ? `${before}, running again` : "working";
   return before ? `${before}, queued again` : "queued";
-}
-
-/** Fields a person reads first in a structured output. */
-const LEAD_KEYS = ["summary", "result", "message", "status", "title"];
-
-/** A GitHub PR or issue URL as "PR #2589" or "Issue #12", another URL as its host and path tail. */
-function shortUrl(value: string): string | null {
-  if (!/^https?:\/\/\S+$/.test(value)) return null;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  const github = /^\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/.exec(url.pathname);
-  if (url.hostname === "github.com" && github) {
-    return `${github[1] === "pull" ? "PR" : "Issue"} #${github[2]}`;
-  }
-  const parts = url.pathname.split("/").filter(Boolean);
-  const tail = parts.at(-1);
-  if (!tail) return url.hostname;
-  return `${url.hostname}/${parts.length > 1 ? "…/" : ""}${tail}`;
-}
-
-/**
- * A structured output as "result: Approved · pr: PR #2589 · files: 3 items":
- * the human fields first, strings and array counts only. Empty when nothing
- * is left (`{}`, `[]`).
- */
-function jsonLine(data: JsonContainer): string {
-  if (Array.isArray(data)) return data.length > 0 ? plural(data.length, "item") : "";
-  const keys = Object.keys(data);
-  const ordered = [
-    ...LEAD_KEYS.filter((key) => keys.includes(key)),
-    ...keys.filter((key) => !LEAD_KEYS.includes(key)),
-  ];
-  const fields: string[] = [];
-  for (const key of ordered) {
-    const value = data[key];
-    if (Array.isArray(value)) fields.push(`${key}: ${plural(value.length, "item")}`);
-    else if (typeof value === "string" && value.trim()) {
-      fields.push(`${key}: ${shortUrl(value.trim()) ?? value.trim()}`);
-    }
-  }
-  return fields.join(" · ");
-}
-
-/** What the preview line reads. */
-type PreviewSource = Pick<AgentTask, "status" | "output" | "failureReason" | "progress" | "task">;
-
-/** The preview reads at most this much of a text: one line never needs more. */
-const PREVIEW_INPUT = 2048;
-
-/** The start of a text, trimmed and cut to `PREVIEW_INPUT`. */
-const head = (text: string | undefined) => text?.trim().slice(0, PREVIEW_INPUT) ?? "";
-
-/**
- * The outcome as one line: the output, the failure, or the progress of open
- * work. A JSON output that the cut breaks reads as text.
- */
-function outcomeLine(task: PreviewSource): string {
-  const text = head(
-    task.status === "completed"
-      ? task.output
-      : task.status === "failed" || task.status === "cancelled"
-        ? task.failureReason
-        : task.progress,
-  );
-  const json = parseJsonOutput(text);
-  return json ? jsonLine(json) : text;
-}
-
-/** A bare git SHA (40 or 64 hex digits) as its first 8. */
-const SHA = /\b([0-9a-f]{8})(?:[0-9a-f]{56}|[0-9a-f]{32})\b/gi;
-
-/**
- * The row's one plain line: the outcome, else the progress (an empty
- * structured output can leave the result there), else the task's first line.
- * An open row shows the task's first line: the outcome is in full below it.
- * Capped, so the button's accessible name stays short.
- */
-function preview(task: PreviewSource, open: boolean): string {
-  const line = open
-    ? promptTitle(task.task)
-    : outcomeLine(task) || head(task.progress) || promptTitle(task.task);
-  return markdownPreview(line).replace(SHA, "$1").slice(0, 300);
 }
 
 /**
@@ -169,7 +80,7 @@ export function WorkerStep({
   // The session polls every 5 s: parse and clean the outcome only when it changes.
   const { status, output, failureReason, progress, task } = last;
   const line = useMemo(
-    () => preview({ status, output, failureReason, progress, task }, open),
+    () => outcomePreview({ status, output, failureReason, progress, task }, open),
     [status, output, failureReason, progress, task, open],
   );
   // A running step's closed row reads its progress: new words reveal between polls.
@@ -219,12 +130,14 @@ export function WorkerStep({
           </span>
           <span className="truncate text-xs text-muted-foreground">{shownLine}</span>
         </span>
-        <span
-          title={`Started ${new Date(first.createdAt).toLocaleString()}`}
+        <RelativeTime
+          at={first.createdAt}
+          label="Started"
+          focusable={false}
           className="shrink-0 font-mono text-meta text-muted-foreground tabular-nums"
         >
           {formatSpan(end - Date.parse(first.createdAt))}
-        </span>
+        </RelativeTime>
         <ChevronDown
           aria-hidden
           className={cn(

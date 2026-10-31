@@ -21,6 +21,7 @@ import { type ReactNode, useMemo } from "react";
 import { defaultRehypePlugins, type ExtraProps, type StreamdownProps } from "streamdown";
 import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
+import { useOptionalStatusContext } from "@/app/status-context";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
@@ -114,14 +115,15 @@ function useLinkName(link: SwarmLink | null): string | undefined {
   return data?.trim() || undefined;
 }
 
-/** The origins this dashboard knows: its own, and the configured agent-fs ones. */
+/** The origins this dashboard knows: its own, the swarm's configured dashboard, and agent-fs. */
 export function useSwarmLinkOrigins(): SwarmLinkOrigins {
+  const configuredDashboard = useOptionalStatusContext()?.data?.identity.dashboard_url ?? null;
   const agentFs = useOptionalAgentFs();
   const agentFsLive = agentFs?.liveUrl ?? null;
   const agentFsApi = agentFs?.endpoint ?? null;
   return useMemo(
-    () => ({ dashboard: window.location.origin, agentFsLive, agentFsApi }),
-    [agentFsLive, agentFsApi],
+    () => ({ dashboard: window.location.origin, configuredDashboard, agentFsLive, agentFsApi }),
+    [configuredDashboard, agentFsLive, agentFsApi],
   );
 }
 

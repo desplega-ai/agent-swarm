@@ -30821,6 +30821,12 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "dashboard_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       },
                       "required": [

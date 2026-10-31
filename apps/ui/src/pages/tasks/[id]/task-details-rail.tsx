@@ -16,6 +16,7 @@ import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { EffortMark } from "@/components/shared/effort-mark";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { SessionId } from "@/components/shared/session-id";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
@@ -605,9 +606,7 @@ export function TaskDetailsRail({
             </RailRow>
           ) : null}
           <RailRow label={timeLabel} mono>
-            <span title={parseUTCDate(timeValue).toLocaleString()}>
-              {formatSmartTime(timeValue)}
-            </span>
+            <RelativeTime at={timeValue}>{formatSmartTime(timeValue)}</RelativeTime>
           </RailRow>
           {ran ? (
             <RailRow label="Duration" mono>
@@ -807,9 +806,7 @@ export function TaskDetailsRail({
           ) : null}
           {task.finishedAt ? (
             <RailRow label="Finished" mono>
-              <span title={parseUTCDate(task.finishedAt).toLocaleString()}>
-                {formatSmartTime(task.finishedAt)}
-              </span>
+              <RelativeTime at={task.finishedAt}>{formatSmartTime(task.finishedAt)}</RelativeTime>
             </RailRow>
           ) : null}
           {task.dir ? (

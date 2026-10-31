@@ -14,6 +14,9 @@ import type { SessionViewer } from "@/lib/session-presence";
 import {
   approvalsByPart,
   buildTurns,
+  foldWaits,
+  isDeferral,
+  onlyWaits,
   partSteps,
   type TurnPart,
   type WorkerSummary,
@@ -22,6 +25,7 @@ import {
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn } from "@/lib/utils";
 import { ApprovalLine } from "./approval-line";
+import { DeferralGroup, DeferralLine } from "./deferral-line";
 import { InternalLine } from "./internal-line";
 import { PersonBubble } from "./person-bubble";
 import { SwarmReply } from "./swarm-reply";
@@ -49,7 +53,8 @@ const REVEAL_MS = 200;
  * message, then its parts (a deferred wake-up starts a new part). A part
  * shows the swarm's reply, a row per worker step (two or more fold into a
  * group under one head), the swarm's latest answer, and a live line while the
- * lead works. Handoffs On shows the internal rows. Tasks that fit no turn
+ * lead works. A reply that only waits (a deferral) is one muted line, and
+ * waiting parts in a row fold into one. Handoffs On shows the internal rows. Tasks that fit no turn
  * render as plain task cards at the end. A typing person shows as a bubble
  * row in the flow, so it never covers a message.
  */
@@ -110,23 +115,35 @@ export function TurnTimeline({
       {turns.map((turn) => (
         <Fragment key={turn.id}>
           {turn.person ? <PersonBubble task={turn.person} rootSource={rootSource} /> : null}
-          {turn.parts.map((part, index) => (
-            <PartView
-              key={part.id}
-              part={part}
-              // A root no person wrote (a schedule, a workflow) keeps the task card, so its prompt shows.
-              card={index === 0 && !turn.person}
-              summary={workerSummary(part, now)}
-              approvals={placed.get(part.id) ?? []}
-              showHandoffs={showHandoffs}
-              open={blocks.isOpen(part.id)}
-              onToggle={() => toggle(part.id)}
-              onStepToggle={relayout}
-              stepsId={`${idPrefix}-steps-${part.id}`}
-              nameOf={nameOf}
-              now={now}
-            />
-          ))}
+          {/* Waits in a row fold into one line; a part with a card, an approval, or handoffs on screen stays whole. */}
+          {foldWaits(
+            turn.parts,
+            (part) =>
+              onlyWaits(part) &&
+              (part !== turn.parts[0] || !!turn.person) &&
+              !placed.get(part.id)?.length &&
+              !(showHandoffs && part.internal.length > 0),
+          ).map((run) =>
+            run.kind === "waits" ? (
+              <DeferralGroup key={run.parts[0].id} parts={run.parts} onToggle={relayout} />
+            ) : (
+              <PartView
+                key={run.part.id}
+                part={run.part}
+                // A root no person wrote (a schedule, a workflow) keeps the task card, so its prompt shows.
+                card={run.part === turn.parts[0] && !turn.person}
+                summary={workerSummary(run.part, now)}
+                approvals={placed.get(run.part.id) ?? []}
+                showHandoffs={showHandoffs}
+                open={blocks.isOpen(run.part.id)}
+                onToggle={() => toggle(run.part.id)}
+                onStepToggle={relayout}
+                stepsId={`${idPrefix}-steps-${run.part.id}`}
+                nameOf={nameOf}
+                now={now}
+              />
+            ),
+          )}
         </Fragment>
       ))}
       {placed.get(null)?.map((approval) => (
@@ -194,7 +211,11 @@ function PartView({
   );
   return (
     <div data-slot="swarm-turn" className="flex min-w-0 flex-col gap-2">
-      {card ? <TaskCard task={part.reply} className="pb-0" /> : <SwarmReply task={part.reply} />}
+      {card ? (
+        <TaskCard task={part.reply} className="pb-0" />
+      ) : (
+        <Reply task={part.reply} onToggle={onStepToggle} />
+      )}
       {summary && steps.length > 1 ? (
         <div className="flex min-w-0 flex-col gap-1">
           <WorkerSummaryLine
@@ -219,7 +240,7 @@ function PartView({
       ) : null}
       {part.result ? (
         <div className={rows.length > 0 ? "mt-3" : undefined}>
-          <SwarmReply task={part.result} />
+          <Reply task={part.result} onToggle={onStepToggle} />
         </div>
       ) : null}
       {/* The lead works again: a live line under the latest answer, never in its place. */}
@@ -228,6 +249,15 @@ function PartView({
         <ApprovalLine key={approval.id} approval={approval} />
       ))}
     </div>
+  );
+}
+
+/** A swarm reply, or one muted line when the reply only says the swarm waits. */
+function Reply({ task, onToggle }: { task: AgentTask; onToggle: () => void }) {
+  return isDeferral(task) ? (
+    <DeferralLine task={task} onToggle={onToggle} />
+  ) : (
+    <SwarmReply task={task} />
   );
 }
 

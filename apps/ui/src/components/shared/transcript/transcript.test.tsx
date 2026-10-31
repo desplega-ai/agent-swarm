@@ -16,8 +16,12 @@ afterAll(async () => {
 // real module, except the markdown renderer (Monaco) and the raw log viewer.
 const SRC = new URL("../../../", import.meta.url).pathname;
 for (const alias of [
+  "@/components/session-panel/model",
   "@/components/shared/copy-value-button",
   "@/components/shared/message-copy-button",
+  "@/components/shared/relative-time",
+  "@/lib/relative-time",
+  "@/components/shared/prompt-context",
   "@/components/shared/task-status-icon",
   "@/components/ui/button",
   "@/components/ui/collapsible",
@@ -26,15 +30,21 @@ for (const alias of [
   "@/hooks/use-copy-to-clipboard",
   "@/hooks/use-media-query",
   "@/hooks/use-reveal-text",
+  "@/lib/auto-review",
   "@/lib/json-value",
+  "@/lib/prompt-display",
   "@/lib/reveal-text",
   "@/lib/status-labels",
+  "@/lib/task-activity",
   "@/lib/task-title",
   "@/lib/utils",
 ]) {
   const path = Bun.resolveSync(`./${alias.slice(2)}`, SRC);
   mock.module(alias, () => require(path));
 }
+mock.module("@/api/hooks/use-users", () => ({
+  useUsers: () => ({ data: [{ id: "u1", name: "Taras" }] }),
+}));
 mock.module("@/components/shared/agent-avatar", () => ({
   AgentAvatar: ({ agentId }: { agentId: string }) => (
     <span data-testid="agent-avatar" data-agent-id={agentId} />
@@ -55,6 +65,7 @@ const { createRoot } = await import("react-dom/client");
 const { TooltipProvider } = await import("@/components/ui/tooltip");
 const { Transcript, TranscriptUserMessage } = await import("./transcript");
 const { buildTranscriptRows } = await import("./transcript-rows");
+const { TaskTranscript } = await import("./task-transcript");
 
 async function mount(node: React.ReactNode) {
   const container = document.createElement("div");
@@ -380,6 +391,90 @@ describe("Transcript fake streaming", () => {
     await rerender(<Transcript rows={rows} running />);
     await rerender(<Transcript rows={rows} running={false} />);
     expect(prose(container).at(-1)?.textContent).toBe(text);
+    await unmount();
+  });
+});
+
+describe("Transcript tasks this one started", () => {
+  const child = (id: string, extra: Partial<AgentTask>) =>
+    ({
+      id,
+      task: `Task ${id}`,
+      status: "completed",
+      agentId: "lead-1",
+      createdAt: "2026-10-31T00:09:34Z",
+      source: "mcp",
+      tags: [],
+      ...extra,
+    }) as AgentTask;
+  const parent = {
+    task: "Say hi",
+    status: "completed" as const,
+    createdAt: "2026-10-30T13:50:00Z",
+    acceptedAt: "2026-10-30T13:50:00Z",
+    finishedAt: "2026-10-30T13:51:00Z",
+  };
+
+  async function render(children: AgentTask[]) {
+    const rows = buildTranscriptRows({
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }],
+          iteration: 1,
+          timestamp: "2026-10-30T13:50:30Z",
+        },
+      ],
+      children: children.map((task) => ({ task, agentName: "Lead" })),
+    });
+    return mount(
+      <MemoryRouter>
+        <TaskTranscript
+          task={parent}
+          rows={rows}
+          scroller={null}
+          outcome={<p data-testid="outcome">Hi Taras. What do you need?</p>}
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  test("a person's follow-up after the run is their message, after the outcome", async () => {
+    const { container, unmount } = await render([
+      child("f1", { task: "asdf", source: "ui", status: "pending", requestedByUserId: "u1" }),
+    ]);
+    const transcript = container.querySelector('[data-slot="transcript"]') as HTMLElement;
+    const order = [...transcript.children].map(
+      (el) => el.getAttribute("data-testid") ?? el.getAttribute("aria-label"),
+    );
+    expect(order.slice(-2)).toEqual(["outcome", "Follow-up message"]);
+    const status = container.querySelector('[data-slot="transcript-follow-up-status"]');
+    expect(status?.textContent).toBe("Follow-up from Taras toLead · Pending");
+    expect(status?.getAttribute("href")).toBe("/tasks/f1");
+    await unmount();
+  });
+
+  test("a wake-up, a resume and the result sent to the lead are quiet lines", async () => {
+    const { container, unmount } = await render([
+      child("d1", { taskType: "deferred", source: "schedule" }),
+      child("r1", {
+        taskType: "resume",
+        source: "system",
+        tags: ["auto-resume", "reason:graceful_shutdown"],
+        createdAt: "2026-10-31T00:10:00Z",
+      }),
+      child("n1", { taskType: "follow-up", source: "system", createdAt: "2026-10-31T00:11:00Z" }),
+    ]);
+    const lines = [...container.querySelectorAll('[data-slot="transcript-child-line"]')].map(
+      (el) => el.textContent,
+    );
+    expect(lines[0]).toStartWith("Deferred until ");
+    expect(lines[0]).toEndWith("·Lead · Completed");
+    expect(lines.slice(1)).toEqual([
+      "Resumed after a shutdown ·Lead · Completed",
+      "Result sent toLead · Completed",
+    ]);
     await unmount();
   });
 });

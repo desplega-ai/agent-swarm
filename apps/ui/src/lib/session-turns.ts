@@ -367,3 +367,69 @@ export function approvalsByPart(
 export function hasHandoffs(turns: Turn[]): boolean {
   return turns.some((turn) => turn.parts.some((part) => part.internal.length > 0));
 }
+
+/**
+ * A task that ended in a deferral: `defer-task` sets `deferredAt`. Its output
+ * only says what the swarm waits for.
+ */
+export function isDeferral(task: AgentTask): boolean {
+  return typeof task.deferredAt === "string";
+}
+
+export interface DeferralText {
+  /** Who the swarm waits on. Null for a wake-up at a time only. */
+  who: string | null;
+  /** When it checks back at the latest: "17:50", "tomorrow 09:00", "Nov 2 09:00". */
+  by: string | null;
+}
+
+// `defer-task` writes "Waiting on <who>, or <when> at the latest" (with an em dash, U+2014,
+// where this comment has a comma) or "Checking back <when>".
+const WAITING_ON = /^Waiting on (.+?) \u2014 or (.+) at the latest$/;
+const CHECKING_BACK = /^Checking back (.+)$/;
+
+/** The parts of a deferral's text. Both null for an output in another shape (an outputSchema). */
+export function deferralText(output: string | undefined): DeferralText {
+  const text = output?.trim() ?? "";
+  const waiting = WAITING_ON.exec(text);
+  const when = waiting?.[2] ?? CHECKING_BACK.exec(text)?.[1] ?? null;
+  return {
+    who: waiting?.[1] ?? null,
+    by:
+      when
+        ?.replace(/^today at /, "")
+        .replace(/^on /, "")
+        .replace(" at ", " ") ?? null,
+  };
+}
+
+/** A part that only waits: its reply deferred, with no steps, later answer, or live work. */
+export function onlyWaits(part: TurnPart): boolean {
+  return isDeferral(part.reply) && part.workers.length === 0 && !part.result && !part.live;
+}
+
+export type PartRun = { kind: "part"; part: TurnPart } | { kind: "waits"; parts: TurnPart[] };
+
+/** A turn's parts in order, each run of two or more consecutive waiting parts folded into one. */
+export function foldWaits(
+  parts: TurnPart[],
+  waits: (part: TurnPart) => boolean = onlyWaits,
+): PartRun[] {
+  const runs: PartRun[] = [];
+  let run: TurnPart[] = [];
+  const flush = () => {
+    if (run.length > 1) runs.push({ kind: "waits", parts: run });
+    else for (const part of run) runs.push({ kind: "part", part });
+    run = [];
+  };
+  for (const part of parts) {
+    if (waits(part)) {
+      run.push(part);
+      continue;
+    }
+    flush();
+    runs.push({ kind: "part", part });
+  }
+  flush();
+  return runs;
+}

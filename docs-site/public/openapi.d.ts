@@ -12506,6 +12506,7 @@ export interface paths {
                                 marketing_url: string | null;
                                 hide_cloud_promo: boolean;
                                 org_id: string | null;
+                                dashboard_url?: string | null;
                             };
                             setup: {
                                 /** @enum {string} */

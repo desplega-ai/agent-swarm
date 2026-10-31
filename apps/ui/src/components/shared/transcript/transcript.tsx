@@ -12,9 +12,12 @@
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
  *
  * A steering message is the person's message too, right-aligned, with a
- * "Queued" mark until the agent gets it. A delegated task is one line
- * (agent, status, duration) that links to its own transcript. The task's
- * outcome comes last, as the final reply. A long run shows its newest
+ * "Queued" mark until the agent gets it. A task this one started links to
+ * its own transcript: a delegation is one line (agent, status, duration), a
+ * person's follow-up is their message with a status line, and a deferral's
+ * wake-up, a resume or the result sent to the lead is one quiet line. The
+ * task's outcome comes last, as the final reply, and the tasks started after
+ * the run ended (`later`) come after it. A long run shows its newest
  * `TRANSCRIPT_PAGE_ROWS` rows, with "Show older" above them, so a 1,000-row
  * run mounts a page at a time.
  *
@@ -24,6 +27,7 @@
  */
 
 import {
+  AlarmClock,
   ArrowDown,
   Bot,
   Brain,
@@ -35,6 +39,8 @@ import {
   Globe,
   type LucideIcon,
   Plug,
+  RotateCcw,
+  Send,
   Sparkles,
   Terminal,
   Wrench,
@@ -49,10 +55,14 @@ import {
   useState,
 } from "react";
 import { Link } from "react-router-dom";
+import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask } from "@/api/types";
+import { stripContextFooter } from "@/components/session-panel/model";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { MessageCopyButton, MessageRawToggle } from "@/components/shared/message-copy-button";
+import { PromptContext } from "@/components/shared/prompt-context";
+import { RelativeTime } from "@/components/shared/relative-time";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
@@ -67,12 +77,14 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { useRevealText } from "@/hooks/use-reveal-text";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { statusLabel } from "@/lib/status-labels";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatDuration, formatRelativeTime, parseUTCDate } from "@/lib/utils";
 import { MessageText } from "./message-text";
 import { ToolDetails } from "./tool-details";
 import {
+  childKind,
   entrySummary,
   foldedTurnRows,
   newestTime,
@@ -130,6 +142,8 @@ export interface TranscriptProps {
   prompt?: ReactNode;
   /** The task's outcome, after every row: the run's final reply. */
   outcome?: ReactNode;
+  /** Tasks started after the run ended (`rowsAfterEnd`), after the outcome. */
+  later?: TranscriptRow[];
   /**
    * The outcome's text. A folded run hides the agent's last message when it
    * says the same, so the answer shows once.
@@ -151,6 +165,7 @@ export function Transcript({
   running,
   prompt,
   outcome,
+  later,
   outcomeText,
   fold,
   workingSince,
@@ -198,6 +213,9 @@ export function Transcript({
         ))}
       </ArrivedAfter.Provider>
       {outcome}
+      {later?.map((row) => (
+        <TranscriptRowView key={row.id} row={row} live={false} />
+      ))}
       {running && rows.length === 0 && waitingLabel ? (
         <Trace aria-live="polite">
           <div>
@@ -241,8 +259,8 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
           }
         />
       );
-    case "delegation":
-      return <DelegationCard task={row.task} agentName={row.agentName} className={className} />;
+    case "child":
+      return <ChildRow task={row.task} agentName={row.agentName} className={className} />;
     case "work":
       return <WorkRow entries={row.entries} live={live} className={className} />;
   }
@@ -272,9 +290,104 @@ function AssistantMessage({ text, arrived }: { text: string; arrived: boolean })
   );
 }
 
+/** A task this one started, drawn by its kind (`childKind`). */
+function ChildRow({
+  task,
+  agentName,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  className?: string;
+}) {
+  switch (childKind(task)) {
+    case "person":
+      return <PersonFollowUp task={task} agentName={agentName} className={className} />;
+    case "deferred":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={AlarmClock}
+          label={`Deferred until ${shortDateTime(task.createdAt)} ·`}
+          className={className}
+        />
+      );
+    case "resume":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={RotateCcw}
+          label={`${resumeLabel(task.tags)} ·`}
+          className={className}
+        />
+      );
+    case "notify":
+      return (
+        <ChildLine
+          task={task}
+          agentName={agentName}
+          icon={Send}
+          label="Result sent to"
+          className={className}
+        />
+      );
+    case "delegation":
+      return <DelegationCard task={task} agentName={agentName} className={className} />;
+  }
+}
+
+/** "Oct 30, 17:15" in the reader's time zone. */
+function shortDateTime(at: string): string {
+  return parseUTCDate(at).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Why the server resumed the work (`ResumeReason`), from the resume's `reason:` tag. */
+const RESUME_REASONS: Record<string, string> = {
+  graceful_shutdown: "a shutdown",
+  context_limits: "a full context window",
+  manual_supersede: "a manual restart",
+  crash_recovery: "a crash",
+};
+
+function resumeLabel(tags: readonly string[] | undefined): string {
+  const reason = tags?.find((tag) => tag.startsWith("reason:"))?.slice("reason:".length);
+  if (!reason) return "Resumed";
+  return `Resumed after ${RESUME_REASONS[reason] ?? reason.replaceAll("_", " ")}`;
+}
+
+/** "[avatar] Lead · Completed · 1m 23s": who runs a task this one started, and how it went. */
+function ChildAgentStatus({ task, agentName }: { task: AgentTask; agentName: string | null }) {
+  const start = parseUTCDate(task.acceptedAt ?? task.createdAt).getTime();
+  const end = task.finishedAt ? parseUTCDate(task.finishedAt).getTime() : Number.NaN;
+  const ran = Number.isFinite(end - start) ? formatDuration(Math.max(0, end - start)) : null;
+  return (
+    <>
+      {task.agentId ? (
+        <AgentAvatar
+          agentId={task.agentId}
+          agentName={agentName}
+          size="xs"
+          className="size-4 shrink-0 shadow-none"
+        />
+      ) : null}
+      <span className="truncate">
+        {agentName ?? "an agent"} · {statusLabel(task.status)}
+        {ran ? ` · ${ran}` : ""}
+      </span>
+    </>
+  );
+}
+
 /**
- * A delegated task, one line: agent (avatar and name), status and duration,
- * linking to its own transcript.
+ * A delegated task, one line: its title, then the agent (avatar and name),
+ * status and duration, linking to its own transcript.
  */
 function DelegationCard({
   task,
@@ -285,9 +398,6 @@ function DelegationCard({
   agentName: string | null;
   className?: string;
 }) {
-  const start = parseUTCDate(task.acceptedAt ?? task.createdAt).getTime();
-  const end = task.finishedAt ? parseUTCDate(task.finishedAt).getTime() : Number.NaN;
-  const ran = Number.isFinite(end - start) ? formatDuration(Math.max(0, end - start)) : null;
   return (
     <Link
       to={`/tasks/${task.id}`}
@@ -302,22 +412,87 @@ function DelegationCard({
         <span className="block truncate">{taskListTitle(task)}</span>
         <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
           <span className="shrink-0">Delegated to</span>
-          {task.agentId ? (
-            <AgentAvatar
-              agentId={task.agentId}
-              agentName={agentName}
-              size="xs"
-              className="size-4 shrink-0 shadow-none"
-            />
-          ) : null}
-          <span className="truncate">
-            {agentName ?? "an agent"} · {statusLabel(task.status)}
-            {ran ? ` · ${ran}` : ""}
-          </span>
+          <ChildAgentStatus task={task} agentName={agentName} />
         </span>
       </span>
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
     </Link>
+  );
+}
+
+/**
+ * A task the server started (a deferral's wake-up, a resume, the result
+ * sent to the lead): one quiet line, its kind's icon and label, then the
+ * agent and status, linking to its own transcript.
+ */
+function ChildLine({
+  task,
+  agentName,
+  icon: Icon,
+  label,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  icon: LucideIcon;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <Link
+      to={`/tasks/${task.id}`}
+      data-slot="transcript-child-line"
+      className={cn(
+        "-mx-2 flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+        className,
+      )}
+    >
+      <Icon aria-hidden className="mr-1 size-3.5 shrink-0" />
+      <span className="shrink-0">{label}</span>
+      <ChildAgentStatus task={task} agentName={agentName} />
+      <ChevronRight aria-hidden className="ml-auto size-3.5 shrink-0" />
+    </Link>
+  );
+}
+
+/**
+ * A person's follow-up (from the dashboard, Slack or a chat): their message,
+ * as the prompt shows it, with a line under it that names them and links to
+ * the task it started.
+ */
+function PersonFollowUp({
+  task,
+  agentName,
+  className,
+}: {
+  task: AgentTask;
+  agentName: string | null;
+  className?: string;
+}) {
+  const { data: users } = useUsers();
+  const prompt = parsePromptDisplay(stripContextFooter(task.task));
+  const person =
+    (task.requestedByUserId
+      ? users?.find((user) => user.id === task.requestedByUserId)?.name
+      : undefined) ?? prompt.speaker;
+  return (
+    <TranscriptUserMessage
+      className={className}
+      text={prompt.ask}
+      header={<PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />}
+      label="Follow-up message"
+      footer={
+        <Link
+          to={`/tasks/${task.id}`}
+          data-slot="transcript-follow-up-status"
+          className="flex max-w-full min-w-0 items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <span className="shrink-0">Follow-up{person ? ` from ${person}` : ""} to</span>
+          <ChildAgentStatus task={task} agentName={agentName} />
+          <ChevronRight aria-hidden className="size-3.5 shrink-0" />
+        </Link>
+      }
+    />
   );
 }
 
@@ -492,11 +667,10 @@ function WorkRow({
 
 function EntryTime({ at }: { at: string }) {
   return (
-    <TraceDescription
-      className="font-mono text-[10px] text-muted-foreground/60"
-      title={new Date(at).toLocaleString()}
-    >
-      {formatRelativeTime(at)}
+    <TraceDescription className="font-mono text-[10px] text-muted-foreground/60">
+      <RelativeTime at={at} focusable={false}>
+        {formatRelativeTime(at)}
+      </RelativeTime>
     </TraceDescription>
   );
 }

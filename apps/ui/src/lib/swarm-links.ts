@@ -12,6 +12,11 @@ import { appUrlToCombPath, liveUrlToCombPath } from "./comb/links";
 export interface SwarmLinkOrigins {
   /** The dashboard's own origin (the address bar). Root-relative links resolve against it. */
   dashboard: string;
+  /**
+   * The swarm's configured public dashboard (`/status` `identity.dashboard_url`).
+   * Its links open the same path on this dashboard.
+   */
+  configuredDashboard: string | null;
   /** The agent-fs live UI (`/status` `agent_fs.comb.live_url`). */
   agentFsLive: string | null;
   /** The browser-facing agent-fs API (`agent_fs.comb.api_url`), which serves share links. */
@@ -41,7 +46,7 @@ export const DASHBOARD_ROUTES = {
 export type DashboardRoute = keyof typeof DASHBOARD_ROUTES;
 
 export type SwarmLink =
-  /** `path` is root-relative, for the router. */
+  /** `path` is root-relative, for the router: the same path on this dashboard. */
   | { type: "dashboard"; route: DashboardRoute; id: string; path: string; href: string }
   /** `path` is the decoded drive path. */
   | { type: "file"; name: string; path: string; folder: boolean; href: string }
@@ -86,7 +91,9 @@ export function parseSwarmLink(raw: string, origins: SwarmLinkOrigins): SwarmLin
   if (!/^(https?:\/\/|\/(?!\/))/i.test(href)) return null;
   const url = parseUrl(href, origins.dashboard);
   if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
-  const onDashboard = url.origin === originOf(origins.dashboard);
+  const onDashboard = [originOf(origins.dashboard), originOf(origins.configuredDashboard)].includes(
+    url.origin,
+  );
 
   // `comb/links` checks the raw href (dot segments, ids, names) before it builds a route.
   const comb =

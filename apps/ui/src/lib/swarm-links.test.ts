@@ -3,6 +3,7 @@ import { parseSwarmLink, type SwarmLinkOrigins } from "./swarm-links";
 
 const ORIGINS: SwarmLinkOrigins = {
   dashboard: "https://swarm.example.com",
+  configuredDashboard: "https://dash.example.com",
   agentFsLive: "https://fs.example.com",
   agentFsApi: "https://fs-api.example.com/agent-fs",
 };
@@ -27,6 +28,21 @@ describe("parseSwarmLink: dashboard", () => {
     expect(parse(`https://swarm.example.com/pages/${PAGE_ID}?mode=full#top`)).toMatchObject({
       path: `/pages/${PAGE_ID}?mode=full#top`,
     });
+  });
+
+  test("the configured dashboard: the same path on this dashboard", () => {
+    expect(parse(`https://dash.example.com/pages/${PAGE_ID}?mode=full`)).toMatchObject({
+      route: "pages",
+      id: PAGE_ID,
+      path: `/pages/${PAGE_ID}?mode=full`,
+    });
+    expect(parse("https://dash.example.com/file/~/org-1/drive-1/a.md")).toMatchObject({
+      type: "file",
+      name: "a.md",
+    });
+    expect(
+      parse(`https://dash.example.com/pages/${PAGE_ID}`, { ...ORIGINS, configuredDashboard: null }),
+    ).toBeNull();
   });
 
   test("a root-relative link and a sub-route", () => {

@@ -20,6 +20,7 @@ import { useCancelTask, usePauseTask, useResumeTask } from "@/api/hooks/use-task
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { PromptContext } from "@/components/shared/prompt-context";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ProgressRing } from "@/components/shared/task-status-icon";
 import {
@@ -170,12 +171,13 @@ export function TaskCard({
             <span aria-hidden="true" className="text-muted-foreground">
               ·
             </span>
-            <span
+            <RelativeTime
+              at={task.createdAt}
+              label="Started"
               className="text-muted-foreground whitespace-nowrap"
-              title={`Started ${new Date(task.createdAt).toLocaleString()}`}
             >
               {formatRelativeTime(task.createdAt)}
-            </span>
+            </RelativeTime>
             {/* Finish-time hint for terminal turns — chains can complete out
                 of chronological order (a parent's review aggregates after its
                 children finish), so the start time alone is misleading. */}
@@ -184,12 +186,13 @@ export function TaskCard({
                 <span aria-hidden="true" className="hidden sm:inline text-muted-foreground">
                   ·
                 </span>
-                <span
+                <RelativeTime
+                  at={task.lastUpdatedAt}
+                  label="Finished"
                   className="hidden sm:inline text-muted-foreground/70 whitespace-nowrap"
-                  title={`Finished ${new Date(task.lastUpdatedAt).toLocaleString()}`}
                 >
                   finished {formatRelativeTime(task.lastUpdatedAt)}
-                </span>
+                </RelativeTime>
               </>
             ) : null}
             {showPill ? <StatusBadge status={task.status} /> : null}

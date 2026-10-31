@@ -4,6 +4,7 @@ import type { AgentTask } from "@/api/types";
 import { ChainOfThought } from "@/components/sessions/chain-of-thought";
 import { outcomeCopyText, TaskOutcome } from "@/components/sessions/task-outcome";
 import { MessageCopyButton, messageActionClass } from "@/components/shared/message-copy-button";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,15 +35,15 @@ function MessageTaskLink({ taskId }: { taskId: string }) {
 }
 
 /** "29m ago" in the timeline's meta type, with the full time on hover. */
-export function MessageTime({ at }: { at: string }) {
+export function MessageTime({ at, focusable = true }: { at: string; focusable?: boolean }) {
   return (
-    <time
-      dateTime={at}
-      title={new Date(at).toLocaleString()}
+    <RelativeTime
+      at={at}
+      focusable={focusable}
       className="shrink-0 font-mono text-meta tracking-wider whitespace-nowrap uppercase"
     >
       {formatRelative(at)}
-    </time>
+    </RelativeTime>
   );
 }
 

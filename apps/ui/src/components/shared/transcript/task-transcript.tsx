@@ -1,9 +1,11 @@
 /**
  * One task's transcript: its prompt as the person's message, the run, then
- * its outcome as the final reply. The task page and the Sessions task sheet
- * both render this, so the two show the same transcript. A finished run folds behind "Worked for …" and
- * keeps the agent's last message in view; a live one follows the bottom of
- * the scroller. Mount it with `key={task.id}` so a new task folds again.
+ * its outcome as the final reply, then the tasks started after the run
+ * ended (a follow-up, a wake-up, a resume). The task page and the Sessions
+ * task sheet both render this, so the two show the same transcript. A
+ * finished run folds behind "Worked for …" and keeps the agent's last
+ * message in view; a live one follows the bottom of the scroller. Mount it
+ * with `key={task.id}` so a new task folds again.
  */
 
 import { type ReactNode, useState } from "react";
@@ -13,7 +15,7 @@ import { PromptContext } from "@/components/shared/prompt-context";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { Transcript, TranscriptUserMessage } from "./transcript";
-import { type TranscriptRow, workedForLabel } from "./transcript-rows";
+import { rowsAfterEnd, type TranscriptRow, workedForLabel } from "./transcript-rows";
 
 export interface TaskTranscriptProps {
   task: Pick<AgentTask, "task" | "status" | "createdAt" | "acceptedAt" | "finishedAt">;
@@ -36,9 +38,12 @@ export function TaskTranscript({
 }: TaskTranscriptProps) {
   const [runOpen, setRunOpen] = useState(false);
   const prompt = parsePromptDisplay(stripContextFooter(task.task));
+  const ended = TERMINAL_STATUSES.has(task.status);
+  const { during, after } = rowsAfterEnd(rows, ended ? task.finishedAt : undefined);
   return (
     <Transcript
-      rows={rows}
+      rows={during}
+      later={after}
       running={taskIsRunning(task.status) === true}
       outcome={outcome}
       outcomeText={outcomeText}
@@ -49,7 +54,7 @@ export function TaskTranscript({
         />
       }
       fold={
-        TERMINAL_STATUSES.has(task.status) && rows.length > 0
+        ended && during.length > 0
           ? {
               label: workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
               open: runOpen,

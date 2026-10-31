@@ -8,6 +8,7 @@ import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -23,7 +24,7 @@ import { statusLabel } from "@/lib/status-labels";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { taskDisplayEffort, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle, taskPromptPreview } from "@/lib/task-title";
-import { cn, formatElapsed, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 /** Statuses whose clock still runs. */
 const LIVE_STATUSES = new Set(["pending", "offered", "in_progress"]);
@@ -304,7 +305,7 @@ function CardBody({
           <CardRow label="Model">{modelTierLabel(task.modelTier)} tier</CardRow>
         ) : null}
         <CardRow label={task.acceptedAt ? "Started" : "Created"} mono>
-          <span title={parseUTCDate(start).toLocaleString()}>{formatSmartTime(start)}</span>
+          <RelativeTime at={start}>{formatSmartTime(start)}</RelativeTime>
           {duration ? <span className="text-muted-foreground"> · {duration}</span> : null}
         </CardRow>
         {cost != null ? (

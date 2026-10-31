@@ -87,6 +87,8 @@ const ENV_KEYS_TO_RESET = [
   "SWARM_BRAND_COLOR",
   "SWARM_MARKETING_URL",
   "SWARM_HIDE_CLOUD_PROMO",
+  "APP_URL",
+  "DASHBOARD_URL",
   "HARNESS_PROVIDER",
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
@@ -191,6 +193,7 @@ describe("buildStatusPayload — identity", () => {
       marketing_url: null,
       hide_cloud_promo: false,
       org_id: null,
+      dashboard_url: null,
     });
   });
 
@@ -212,7 +215,15 @@ describe("buildStatusPayload — identity", () => {
       marketing_url: "https://swarm.acme.example",
       hide_cloud_promo: true,
       org_id: "org_acme_123",
+      dashboard_url: null,
     });
+  });
+
+  test("reports the configured dashboard URL: the first APP_URL entry, else DASHBOARD_URL", async () => {
+    process.env.DASHBOARD_URL = "https://old.example.com";
+    expect((await buildStatusPayload()).identity.dashboard_url).toBe("https://old.example.com");
+    process.env.APP_URL = "https://swarm.example.com/, https://other.example.com";
+    expect((await buildStatusPayload()).identity.dashboard_url).toBe("https://swarm.example.com");
   });
 
   test("treats SWARM_CLOUD=1 the same as 'true'", async () => {
