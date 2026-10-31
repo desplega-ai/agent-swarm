@@ -32,7 +32,6 @@ import {
 } from "../pages/feedback-overlay";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
-import { getNodeEnv } from "../utils/node-env";
 import {
   extractAndVerifyCookie,
   isLocalDevPageRequest,
