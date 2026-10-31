@@ -1,0 +1,183 @@
+diff --git a/src/server.ts b/src/server.ts
+index 0679e13..c07d464 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -31,6 +31,7 @@ import {
+   SlackApiError,
+   Store,
+   type StoreOptions,
++  wireFile,
+   wireMessage,
+ } from "./store.ts";
+ import type { ApiCall, Change, SlackChannel, SlackMessage, SlackUser } from "./types.ts";
+@@ -112,6 +113,15 @@ export interface PostMessageInput {
+   thread_ts?: string;
+   blocks?: unknown[];
+   files?: Array<{ name: string; content: string | Uint8Array; title?: string; mimetype?: string }>;
++  /**
++   * Legacy attachments. A shared/forwarded message is `{ is_share: true, text, files: [...] }`:
++   * its `files` take the same shape as `files` above and are stored so they can be downloaded.
++   */
++  attachments?: Array<
++    Record<string, unknown> & {
++      files?: Array<{ name: string; content: string | Uint8Array; title?: string; mimetype?: string }>;
++    }
++  >;
+   reply_broadcast?: boolean;
+ }
+ 
+@@ -870,6 +880,22 @@ export class SlackMock {
+       }),
+     );
+     for (const f of files ?? []) f.channels.push(channel.id);
++    const attachments = input.attachments?.map((a) => {
++      if (!a.files) return a;
++      const stored = a.files.map((f) => {
++        const file = this.store.addFile({
++          name: f.name,
++          title: f.title,
++          mimetype: f.mimetype,
++          user: user.id,
++          bytes: typeof f.content === "string" ? new TextEncoder().encode(f.content) : f.content,
++          baseUrl: this.baseUrl,
++        });
++        file.channels.push(channel.id);
++        return wireFile(file);
++      });
++      return { ...a, files: stored };
++    });
+     const before = new Set(this.inflight);
+     const message = this.store.addMessage({
+       channel: channel.id,
+@@ -879,6 +905,7 @@ export class SlackMock {
+       ...(input.thread_ts ? { thread_ts: input.thread_ts } : {}),
+       ...(input.reply_broadcast && input.thread_ts ? { subtype: "thread_broadcast" } : {}),
+       ...(input.blocks ? { blocks: input.blocks } : {}),
++      ...(attachments?.length ? { attachments } : {}),
+       ...(files?.length ? { files, subtype: "file_share" } : {}),
+     });
+     await Promise.allSettled([...this.inflight].filter((p) => !before.has(p)));
+@@ -1259,6 +1286,11 @@ export class SlackMock {
+     return this.hub.waitForConnection(timeoutMs);
+   }
+ 
++  /** See SocketModeHub.dropSocketBeforeAck. */
++  dropSocketBeforeAck(opts: { times?: number; name?: string; mode?: "disconnect" | "terminate" } = {}): void {
++    this.hub.dropSocketBeforeAck(opts);
++  }
++
+   disconnectSockets(reason?: Parameters<SocketModeHub["disconnectAll"]>[0]): void {
+     this.hub.disconnectAll(reason);
+   }
+diff --git a/src/socket-mode.ts b/src/socket-mode.ts
+index 5e10bd9..60d9b33 100644
+--- a/src/socket-mode.ts
++++ b/src/socket-mode.ts
+@@ -77,6 +77,9 @@ export class SocketModeHub {
+   readonly tickets = new Set<string>();
+   /** Every envelope ever sent, in order, with its ack status. */
+   readonly history: DeliveryRecord[] = [];
++  /** Test hook: kill the app's socket right after an envelope is written, before the app can ack it. */
++  private dropBeforeAck: { remaining: number; name?: string; mode: "disconnect" | "terminate" } | null =
++    null;
+   readonly opts: Required<Omit<SocketModeOptions, "log">> & { log: (msg: string) => void };
+ 
+   constructor(opts: SocketModeOptions) {
+@@ -89,6 +92,16 @@ export class SocketModeHub {
+     };
+   }
+ 
++  /**
++   * Drop the app's connection right after writing the next `times`
++   * envelopes (optionally only those named `name`, an event type), so the app cannot ack them (mode "disconnect", default: a Slack disconnect frame follows the envelope
++   * in the same tick, then close; "terminate": abrupt TCP drop). They
++   * are redelivered after the ack timeout with retry_attempt >= 1, once the app reconnects.
++   */
++  dropSocketBeforeAck(opts: { times?: number; name?: string; mode?: "disconnect" | "terminate" } = {}): void {
++    this.dropBeforeAck = { remaining: opts.times ?? 1, name: opts.name, mode: opts.mode ?? "disconnect" };
++  }
++
+   get connectionCount(): number {
+     return this.connections.size;
+   }
+@@ -194,6 +207,11 @@ export class SocketModeHub {
+ 
+   private attempt(p: Pending): void {
+     const ws = this.pickConnection();
++    if (!ws && p.attempts > 0 && p.attempts <= this.opts.maxRetries) {
++      // A redelivery while the app is reconnecting: try again after the ack timeout, like Slack.
++      p.timer = setTimeout(() => this.attempt(p), this.opts.ackTimeoutMs);
++      return;
++    }
+     if (!ws) {
+       this.pending.delete(p.envelope.envelope_id);
+       p.reject(new SocketModeClosedError("no Socket Mode connection; is the app running?"));
+@@ -206,7 +224,26 @@ export class SocketModeHub {
+       wire.retry_attempt = p.attempts - 1;
+       wire.retry_reason = "timeout";
+     }
++    const drop = this.dropBeforeAck;
++    const dropNow = !!drop && drop.remaining > 0 && (!drop.name || drop.name === p.record.name);
++    if (dropNow && drop) {
++      drop.remaining -= 1;
++      if (drop.remaining === 0) this.dropBeforeAck = null;
++      this.opts.log(`dropping socket ${ws.data.id} before ack of ${p.envelope.envelope_id}`);
++      if (drop.mode === "disconnect") {
++        // The disconnect frame goes out first: the client starts closing as soon as it reads it, so
++        // the envelope that follows arrives on a closing socket and the app's ack fails with
++        // "client is not ready", as when a stalled event loop delays the ack past a reconnect.
++        ws.send(
++          JSON.stringify({ type: "disconnect", reason: "refresh_requested", debug_info: { host: "slack-mock" } }),
++        );
++      }
++    }
+     ws.send(JSON.stringify(wire));
++    if (dropNow && drop) {
++      if (drop.mode === "terminate") ws.terminate();
++      else setTimeout(() => ws.close(1000, "refresh_requested"), 200);
++    }
+     p.timer = setTimeout(() => {
+       if (p.attempts > this.opts.maxRetries) {
+         this.pending.delete(p.envelope.envelope_id);
+diff --git a/src/store.ts b/src/store.ts
+index 53a2ebf..da53583 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -36,6 +36,7 @@ export interface StoreOptions {
+   botToken?: string;
+   appToken?: string;
+   userToken?: string;
++  appIconUrl?: string;
+ }
+ 
+ export interface AddUserInput {
+@@ -102,6 +103,8 @@ export function parseJournal(text: string, source = "journal"): JournalEntry[] {
+ export class Store {
+   readonly team: { id: string; name: string; domain: string };
+   readonly app: { id: string; name: string };
++  /** Image URL bots.info reports as the app's avatar (icons.image_72). Settable at runtime. */
++  appIconUrl?: string;
+   readonly bot: {
+     userId: string;
+     botId: string;
+@@ -138,6 +141,7 @@ export class Store {
+       name: opts.teamName ?? "Mock Workspace",
+       domain: opts.teamDomain ?? "mock",
+     };
++    this.appIconUrl = opts.appIconUrl;
+     this.app = { id: opts.appId ?? "A0MOCK0000", name: opts.appName ?? "mock-bot" };
+     this.bot = {
+       userId: opts.botUserId ?? "U0BOT00000",
+diff --git a/src/web-api.ts b/src/web-api.ts
+index fc0cf0e..3d54a44 100644
+--- a/src/web-api.ts
++++ b/src/web-api.ts
+@@ -147,7 +147,7 @@ export const handlers: Record<string, Handler> = {
+       updated: nowUnix(),
+       app_id: store.app.id,
+       user_id: store.bot.userId,
+-      icons: {},
++      icons: store.appIconUrl ? { image_72: store.appIconUrl } : {},
+     },
+   }),
+ 
