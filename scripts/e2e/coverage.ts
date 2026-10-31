@@ -1,18 +1,63 @@
 import type { ApiClient, HttpCall } from "./http";
 import { asRecord, expectStatus } from "./http";
+import type { ScenarioResult } from "./report";
 
 type Operation = { method: string; template: string; group: string; literalSegments: number };
 
+export type SurfaceCoverage = {
+  total: number;
+  covered: number;
+  /** Items the manifest excludes with a reason. Not part of `total`. */
+  excluded: number;
+  percent: number;
+  uncovered: string[];
+};
+
+export type LatencyStats = { count: number; p50: number; p95: number; max: number };
+
+export type FlowStatus = {
+  name: string;
+  description: string;
+  scenarios: string[];
+  /** `pass` when every named scenario passed; the first problem otherwise. */
+  status: "pass" | "fail";
+  detail?: string;
+};
+
 export type Coverage = {
-  routes: {
-    total: number;
-    covered: number;
-    percent: number;
+  routes: SurfaceCoverage & {
     byGroup: Record<string, { total: number; covered: number }>;
-    uncovered: string[];
     unknown: string[];
   };
-  mcpTools: { total: number; covered: number; percent: number; uncovered: string[] };
+  mcpTools: SurfaceCoverage;
+  nodeTypes: SurfaceCoverage;
+  flows: FlowStatus[];
+  /** Excluded items that were covered anyway. The exclusion is stale and must go. */
+  staleExclusions: string[];
+  /** Manifest entries that match nothing the server exposes. */
+  deadExclusions: string[];
+  /** Flow scenario names that no scenario file exports. */
+  unknownFlowScenarios: string[];
+  latency: { byGroup: Record<string, LatencyStats>; overall: LatencyStats };
+};
+
+/**
+ * scripts/e2e/coverage-manifest.json. Every exclusion names the item exactly as coverage
+ * reports it (`METHOD /template`, tool name, node type) and carries a reason a reviewer
+ * can check. `flows` pins scenario names that must exist and pass in a strict run.
+ */
+export type CoverageManifest = {
+  routes: Array<{ operation: string; reason: string }>;
+  mcpTools: Array<{ name: string; reason: string }>;
+  nodeTypes: Array<{ type: string; reason: string }>;
+  flows: Record<string, { description: string; scenarios: string[] }>;
+};
+
+export const EMPTY_MANIFEST: CoverageManifest = {
+  routes: [],
+  mcpTools: [],
+  nodeTypes: [],
+  flows: {},
 };
 
 const METHODS = new Set(["get", "post", "put", "patch", "delete"]);
@@ -34,7 +79,7 @@ function groupFor(template: string): string {
 }
 
 function percent(covered: number, total: number): number {
-  return total === 0 ? 0 : Math.round((covered / total) * 1000) / 10;
+  return total === 0 ? 100 : Math.round((covered / total) * 1000) / 10;
 }
 
 function readOperations(document: unknown): Operation[] {
@@ -66,52 +111,272 @@ function matchOperation(call: HttpCall, operations: Operation[]): Operation | un
     .sort((a, b) => b.literalSegments - a.literalSegments)[0];
 }
 
-export async function computeCoverage(
-  api: ApiClient,
-  calls: readonly HttpCall[],
-  toolUniverse: ReadonlySet<string>,
-  calledTools: ReadonlySet<string>,
-): Promise<Coverage> {
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
+  return Math.round((sorted[index] ?? 0) * 100) / 100;
+}
+
+function latencyStats(values: number[]): LatencyStats {
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    p50: quantile(sorted, 0.5),
+    p95: quantile(sorted, 0.95),
+    max: Math.round((sorted[sorted.length - 1] ?? 0) * 100) / 100,
+  };
+}
+
+function surface(
+  universe: Iterable<string>,
+  covered: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
+): SurfaceCoverage {
+  const items = [...universe];
+  const counted = items.filter((item) => !excluded.has(item));
+  const hit = counted.filter((item) => covered.has(item));
+  return {
+    total: counted.length,
+    covered: hit.length,
+    excluded: items.length - counted.length,
+    percent: percent(hit.length, counted.length),
+    uncovered: counted.filter((item) => !covered.has(item)).sort(),
+  };
+}
+
+export type CoverageInputs = {
+  calls: readonly HttpCall[];
+  toolUniverse: ReadonlySet<string>;
+  calledTools: ReadonlySet<string>;
+  /** Node types the engine executed during the run (distinct workflow_run_steps.nodeType). */
+  observedNodeTypes: ReadonlySet<string>;
+  scenarios: readonly ScenarioResult[];
+  /** Every scenario the registry knows, selected or not. */
+  knownScenarios: ReadonlySet<string>;
+  manifest: CoverageManifest;
+};
+
+export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): Promise<Coverage> {
   const response = await api("GET", "/openapi.json");
   expectStatus(response, [200], "fetch OpenAPI document");
   const operations = readOperations(response.json);
+  const executorTypes = await api("GET", "/api/executor-types");
+  expectStatus(executorTypes, [200], "fetch executor types");
+  const nodeTypeUniverse = new Set(
+    (asRecord(executorTypes.json).executorTypes as unknown[]).map((entry) =>
+      String(asRecord(entry).type),
+    ),
+  );
+
   const coveredKeys = new Set<string>();
   const unknown = new Set<string>();
-  for (const call of calls) {
+  const latencyByGroup = new Map<string, number[]>();
+  const allLatencies: number[] = [];
+  for (const call of inputs.calls) {
     const operation = matchOperation(call, operations);
-    if (operation) coveredKeys.add(`${operation.method} ${operation.template}`);
-    else unknown.add(`${call.method} ${call.path}`);
+    if (operation) {
+      coveredKeys.add(`${operation.method} ${operation.template}`);
+      const bucket = latencyByGroup.get(operation.group) ?? [];
+      bucket.push(call.durationMs);
+      latencyByGroup.set(operation.group, bucket);
+      allLatencies.push(call.durationMs);
+    } else {
+      unknown.add(`${call.method} ${call.path}`);
+    }
   }
+
+  const routeKeys = operations.map((operation) => `${operation.method} ${operation.template}`);
+  const routeUniverse = new Set(routeKeys);
+  const excludedRoutes = new Set(inputs.manifest.routes.map((entry) => entry.operation));
+  const excludedTools = new Set(inputs.manifest.mcpTools.map((entry) => entry.name));
+  const excludedNodeTypes = new Set(inputs.manifest.nodeTypes.map((entry) => entry.type));
 
   const byGroup: Record<string, { total: number; covered: number }> = {};
   for (const operation of operations) {
+    const key = `${operation.method} ${operation.template}`;
+    if (excludedRoutes.has(key)) continue;
     const group = byGroup[operation.group] ?? { total: 0, covered: 0 };
     byGroup[operation.group] = {
       total: group.total + 1,
-      covered:
-        group.covered + (coveredKeys.has(`${operation.method} ${operation.template}`) ? 1 : 0),
+      covered: group.covered + (coveredKeys.has(key) ? 1 : 0),
     };
   }
-  const uncovered = operations
-    .map((operation) => `${operation.method} ${operation.template}`)
-    .filter((key) => !coveredKeys.has(key))
-    .sort();
-  const uncoveredTools = [...toolUniverse].filter((name) => !calledTools.has(name)).sort();
-  const coveredTools = [...toolUniverse].filter((name) => calledTools.has(name)).length;
+
+  const staleExclusions = [
+    ...[...excludedRoutes].filter((key) => coveredKeys.has(key)).map((key) => `route ${key}`),
+    ...[...excludedTools]
+      .filter((name) => inputs.calledTools.has(name))
+      .map((name) => `mcp tool ${name}`),
+    ...[...excludedNodeTypes]
+      .filter((type) => inputs.observedNodeTypes.has(type))
+      .map((type) => `node type ${type}`),
+  ].sort();
+  const deadExclusions = [
+    ...[...excludedRoutes].filter((key) => !routeUniverse.has(key)).map((key) => `route ${key}`),
+    ...[...excludedTools]
+      .filter((name) => !inputs.toolUniverse.has(name))
+      .map((name) => `mcp tool ${name}`),
+    ...[...excludedNodeTypes]
+      .filter((type) => !nodeTypeUniverse.has(type))
+      .map((type) => `node type ${type}`),
+  ].sort();
+
+  const byName = new Map(inputs.scenarios.map((scenario) => [scenario.name, scenario]));
+  const unknownFlowScenarios = new Set<string>();
+  const flows: FlowStatus[] = Object.entries(inputs.manifest.flows).map(([name, flow]) => {
+    for (const scenario of flow.scenarios) {
+      if (!inputs.knownScenarios.has(scenario)) unknownFlowScenarios.add(scenario);
+    }
+    const missing = flow.scenarios.filter((scenario) => !byName.has(scenario));
+    const failed = flow.scenarios.filter((scenario) => byName.get(scenario)?.status !== "pass");
+    let detail: string | undefined;
+    if (missing.length > 0) detail = `not run: ${missing.join(", ")}`;
+    else if (failed.length > 0) detail = `not passing: ${failed.join(", ")}`;
+    return {
+      name,
+      description: flow.description,
+      scenarios: flow.scenarios,
+      status: detail ? "fail" : "pass",
+      detail,
+    };
+  });
+
+  const byGroupLatency: Record<string, LatencyStats> = {};
+  for (const [group, values] of latencyByGroup) byGroupLatency[group] = latencyStats(values);
+
   return {
     routes: {
-      total: operations.length,
-      covered: coveredKeys.size,
-      percent: percent(coveredKeys.size, operations.length),
+      ...surface(routeUniverse, coveredKeys, excludedRoutes),
       byGroup,
-      uncovered,
       unknown: [...unknown].sort(),
     },
-    mcpTools: {
-      total: toolUniverse.size,
-      covered: coveredTools,
-      percent: percent(coveredTools, toolUniverse.size),
-      uncovered: uncoveredTools,
-    },
+    mcpTools: surface(inputs.toolUniverse, inputs.calledTools, excludedTools),
+    nodeTypes: surface(nodeTypeUniverse, inputs.observedNodeTypes, excludedNodeTypes),
+    flows,
+    staleExclusions,
+    deadExclusions,
+    unknownFlowScenarios: [...unknownFlowScenarios].sort(),
+    latency: { byGroup: byGroupLatency, overall: latencyStats(allLatencies) },
   };
+}
+
+/**
+ * The strict contract: everything the server exposes is covered or deliberately
+ * excluded, no exclusion is stale or dead, and every pinned flow passed. Returns the
+ * reasons the contract fails, empty when it holds.
+ */
+export function strictFailures(coverage: Coverage): string[] {
+  const failures: string[] = [];
+  const list = (items: string[]) => items.map((item) => `  - ${item}`).join("\n");
+  if (coverage.routes.uncovered.length > 0) {
+    failures.push(
+      `${coverage.routes.uncovered.length} route operation(s) are neither covered nor excluded:\n${list(coverage.routes.uncovered)}`,
+    );
+  }
+  if (coverage.mcpTools.uncovered.length > 0) {
+    failures.push(
+      `${coverage.mcpTools.uncovered.length} MCP tool(s) are neither covered nor excluded:\n${list(coverage.mcpTools.uncovered)}`,
+    );
+  }
+  if (coverage.nodeTypes.uncovered.length > 0) {
+    failures.push(
+      `${coverage.nodeTypes.uncovered.length} workflow node type(s) never executed:\n${list(coverage.nodeTypes.uncovered)}`,
+    );
+  }
+  if (coverage.staleExclusions.length > 0) {
+    failures.push(
+      `${coverage.staleExclusions.length} manifest exclusion(s) are covered anyway, remove them:\n${list(coverage.staleExclusions)}`,
+    );
+  }
+  if (coverage.deadExclusions.length > 0) {
+    failures.push(
+      `${coverage.deadExclusions.length} manifest exclusion(s) match nothing the server exposes:\n${list(coverage.deadExclusions)}`,
+    );
+  }
+  if (coverage.unknownFlowScenarios.length > 0) {
+    failures.push(
+      `${coverage.unknownFlowScenarios.length} flow scenario name(s) match no scenario file:\n${list(coverage.unknownFlowScenarios)}`,
+    );
+  }
+  const failedFlows = coverage.flows.filter((flow) => flow.status === "fail");
+  if (failedFlows.length > 0) {
+    failures.push(
+      `${failedFlows.length} flow(s) did not pass:\n${list(failedFlows.map((flow) => `${flow.name}: ${flow.detail ?? "failed"}`))}`,
+    );
+  }
+  return failures;
+}
+
+export async function loadManifest(path: string): Promise<CoverageManifest> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return EMPTY_MANIFEST;
+  const raw = asRecord(await file.json());
+  const manifest: CoverageManifest = {
+    routes: Array.isArray(raw.routes) ? raw.routes.map(asRecord).map(routeEntry) : [],
+    mcpTools: Array.isArray(raw.mcpTools) ? raw.mcpTools.map(asRecord).map(toolEntry) : [],
+    nodeTypes: Array.isArray(raw.nodeTypes) ? raw.nodeTypes.map(asRecord).map(nodeEntry) : [],
+    flows: {},
+  };
+  for (const [name, value] of Object.entries(asRecord(raw.flows ?? {}))) {
+    const flow = asRecord(value);
+    const scenarios = flow.scenarios;
+    if (!Array.isArray(scenarios) || scenarios.some((item) => typeof item !== "string")) {
+      throw new Error(`coverage-manifest flow "${name}" needs a scenarios string array`);
+    }
+    manifest.flows[name] = {
+      description: typeof flow.description === "string" ? flow.description : "",
+      scenarios: scenarios as string[],
+    };
+  }
+  const duplicates = findDuplicates([
+    ...manifest.routes.map((entry) => `route ${entry.operation}`),
+    ...manifest.mcpTools.map((entry) => `mcp tool ${entry.name}`),
+    ...manifest.nodeTypes.map((entry) => `node type ${entry.type}`),
+  ]);
+  if (duplicates.length > 0) {
+    throw new Error(`coverage-manifest lists duplicates: ${duplicates.join(", ")}`);
+  }
+  return manifest;
+}
+
+function reasonOf(entry: Record<string, unknown>, label: string): string {
+  const reason = entry.reason;
+  if (typeof reason !== "string" || reason.trim().length < 10) {
+    throw new Error(`coverage-manifest ${label} needs a reason of at least 10 characters`);
+  }
+  return reason;
+}
+
+function routeEntry(entry: Record<string, unknown>) {
+  const operation = entry.operation;
+  if (typeof operation !== "string" || !/^(GET|POST|PUT|PATCH|DELETE) \//.test(operation)) {
+    throw new Error(`coverage-manifest route entry needs "METHOD /path": ${JSON.stringify(entry)}`);
+  }
+  return { operation, reason: reasonOf(entry, `route ${operation}`) };
+}
+
+function toolEntry(entry: Record<string, unknown>) {
+  const name = entry.name;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error(`coverage-manifest mcpTools entry needs a name: ${JSON.stringify(entry)}`);
+  }
+  return { name, reason: reasonOf(entry, `mcp tool ${name}`) };
+}
+
+function nodeEntry(entry: Record<string, unknown>) {
+  const type = entry.type;
+  if (typeof type !== "string" || type.length === 0) {
+    throw new Error(`coverage-manifest nodeTypes entry needs a type: ${JSON.stringify(entry)}`);
+  }
+  return { type, reason: reasonOf(entry, `node type ${type}`) };
+}
+
+function findDuplicates(items: string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item)) duplicates.add(item);
+    seen.add(item);
+  }
+  return [...duplicates];
 }
