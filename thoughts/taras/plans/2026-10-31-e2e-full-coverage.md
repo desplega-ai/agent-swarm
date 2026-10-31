@@ -54,11 +54,11 @@ as a performance benchmark base.
 ## Phases
 
 - [x] Phase 0: inventory + baseline
-- [ ] Phase 1: infra (mock LLM, agent-sim, strict coverage, latency, manifest, CI flag)
-- [ ] Phase 2: scenarios, fan-out by domain (agents work in parallel, each verifies its own)
-- [ ] Phase 3: docs (scripts/e2e/README.md, runbooks/e2e-blackbox.md, LOCAL_TESTING.md,
-  runbooks/testing.md, CLAUDE.md pointer)
-- [ ] Phase 4: full strict run green, lint, tsc, PR
+- [x] Phase 1: infra (mock LLM, agent-sim, strict coverage, latency, manifest, CI flag) — commit 6fd79d125
+- [x] Phase 2: scenarios, six domains, 91 scenarios, commits 998c605dc..cf647701e (authors: Sonnet 5.5, resumed after the weekly limit reset at 08:00 BCN)
+- [x] Phase 3: docs (scripts/e2e/README.md, runbooks/e2e-blackbox.md, LOCAL_TESTING.md,
+  runbooks/testing.md, runbooks/ci.md, CLAUDE.md pointer) — commit d859b19db
+- [ ] Phase 4: full strict run green, lint, tsc, PR (in progress 2026-10-31 11:40 BCN)
 
 ## Scenario domains (Phase 2)
 
@@ -89,3 +89,24 @@ bun run e2e --strict --keep              # inspect KEEP db/log paths on failure
 bun run e2e --list | wc -l               # scenario count
 bun scripts/e2e/bench.ts /tmp/e2e-a.json /tmp/e2e-b.json   # latency diff
 ```
+
+## Follow-ups (not in this PR)
+
+Runner / mock gaps the authors asked for, deferred because each needs a `src/` change or
+changes behaviour an existing scenario already pins:
+
+- `MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true` in the SUT env would let a loopback stand-in play the
+  MCP authorization server (discovery, DCR, token exchange, refresh 500). platform-mcp-servers
+  currently pins the private-host refusal, so flip both together.
+- A telemetry sink override (`TELEMETRY_ENDPOINT` in `src/telemetry.ts`) so
+  `POST /api/telemetry/enable` 200 and relayed ui events can be asserted against a mock.
+- A base-URL override for the Codex device login so start/poll outcomes can be asserted.
+- A mockable host for `system-one-extraction` (typesafe and Cloudflare URLs are hard-coded,
+  laya has no extract service): today only the node's config-validation failure path runs.
+- `HEARTBEAT_INTERVAL_MS` of a few seconds in the SUT so workflow approval-card timeouts route
+  inside a scenario instead of the 90 s sweep (check it does not reap simulated agents' tasks).
+- `slack-helpers.claim()` polls once as the assignee; a pending lead task from an earlier
+  scenario makes it time out. extensions now cancels its leftover task; keep that pattern.
+
+Product findings the suite surfaced (asserted as observed with `// FINDING` comments):
+see `/tmp/e2e-brief/findings-accumulated.md` while it exists, and the PR description.
