@@ -4,32 +4,41 @@
 
   No <script> import and no bundling: <swarm-diff>, <swarm-diff-jumps> and
   window.swarmUi.renderDiff are injected into every HTML page automatically.
-  Each hunk gets id="swarm-diff-<file-slug>-<old_start>" so <swarm-diff-jumps>
-  can build the jump list and external links can deep-link a specific hunk.
+
+  Each "text" is the code line WITHOUT its +, - or space marker: the
+  component draws the marker in its own column. old_lines counts the context
+  and deleted lines, and new_lines counts the context and added lines. Inside
+  the JSON, write < as \u003c and & as \u0026.
+
+  Each hunk gets id="swarm-diff-<slug>". The slug is <file>-<old_start> in
+  lowercase, with each run of characters other than a-z and 0-9 changed to
+  one "-". So src/foo.ts at old_start 10 gets id="swarm-diff-src-foo-ts-10".
+  <swarm-diff-jumps> builds its jump list from these ids, and external links
+  can deep-link a specific hunk.
 -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PR #1234 — console.log cleanup</title>
+  <title>PR #1234: console.log cleanup</title>
 </head>
 <body>
-  <h1>PR #1234 — cleanup raw <code>console.log</code> calls</h1>
+  <h1>PR #1234: cleanup raw <code>console.log</code> calls</h1>
   <p>Replaces ad-hoc logging with the project logger.</p>
 
   <swarm-diff-jumps></swarm-diff-jumps>
 
   <swarm-diff file="src/foo.ts" base-sha="abc123" head-sha="def456">
     { "hunks": [
-        { "old_start": 10, "old_lines": 3, "new_start": 10, "new_lines": 4,
+        { "old_start": 10, "old_lines": 2, "new_start": 10, "new_lines": 3,
           "lines": [
-            { "type": "context", "text": "  const x = 1;" },
-            { "type": "del",     "text": "- console.log(x);" },
-            { "type": "add",     "text": "+ logger.info({ x });" },
-            { "type": "add",     "text": "+ return x;" }
+            { "type": "context", "text": "export function load(id) {" },
+            { "type": "del",     "text": "  console.log(id);" },
+            { "type": "add",     "text": "  logger.info({ id });" },
+            { "type": "add",     "text": "  return cache.get(id);" }
           ],
           "annotations": [
-            { "line": 12, "severity": "warn", "text": "Avoid raw console.log" }
+            { "line": 12, "severity": "warn", "text": "Returns undefined on a cache miss" }
           ]
         }
     ] }
@@ -39,8 +48,8 @@
     { "hunks": [
         { "old_start": 5, "old_lines": 1, "new_start": 5, "new_lines": 1,
           "lines": [
-            { "type": "del", "text": "- console.error('boom');" },
-            { "type": "add", "text": "+ logger.error('boom');" }
+            { "type": "del", "text": "console.error('boom');" },
+            { "type": "add", "text": "logger.error('boom');" }
           ]
         }
     ] }

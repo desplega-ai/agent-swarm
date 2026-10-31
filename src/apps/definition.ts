@@ -446,11 +446,12 @@ export const AppElementsSchema = z.record(AppNameSchema, AppElementSchema);
 
 /**
  * Preset theme id applied to the app's rendered surface. The catalog of
- * presets lives in the dashboard (`apps/ui/src/lib/themes.ts`) — the server
- * validates shape only, and the renderer resolves unknown ids to its default
- * theme, so definitions stay portable across dashboard versions whose preset
- * catalogs differ. Viewers can override it per-user via the reserved
- * `$theme` user-config key (see `user-config.ts`).
+ * presets lives in `src/themes/presets.ts` (the dashboard re-exports it from
+ * `apps/ui/src/lib/themes.ts`). App definitions are validated by shape only,
+ * and the renderer resolves unknown ids to its default theme, so definitions
+ * stay portable across dashboard versions whose preset catalogs differ.
+ * Viewers can override it per-user via the reserved `$theme` user-config key
+ * (see `user-config.ts`).
  */
 export const AppThemeIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, {
   message: "must be a lowercase slug (letters, digits, dashes)",

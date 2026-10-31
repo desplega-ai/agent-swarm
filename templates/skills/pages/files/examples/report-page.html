@@ -1,12 +1,11 @@
 <!doctype html>
 <!--
-  Reference report page — minimalist taste baseline + report density layer.
+  Reference report page for the swarm design system (designVersion 2).
 
-  Copy this as the starting point for any dense report/dashboard page, then
-  replace the content. The CSS already encodes the baseline documented in the
-  `pages` skill: warm monochrome canvas, single-column 1120px spine, 8/12/16/
-  24/32/48/72 spacing scale, tabular numerals, flat bordered cards, table
-  horizontal scroll on mobile, and no decorative gradients or nested cards.
+  Copy this as the starting point for a dense report or dashboard page, then
+  replace the content. It uses only the swarm-* primitives, the theme tokens,
+  and a few Tailwind layout utilities. It has zero color literals, so it
+  follows the viewer's theme and dark mode inside the dashboard.
 
   Publish with:
     create_page({
@@ -23,133 +22,94 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Q2 SEO Performance</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f6f4f0;
-      --panel: #ffffff;
-      --ink: #18181b;
-      --muted: #62646a;
-      --line: #dedbd2;
-      --accent: #2563eb;
-      --danger: #b42318;
-      --warn: #b54708;
-      --ok: #067647;
-      --radius: 8px;
-      --shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--ink);
-      font-family: "SF Pro Display", "Geist Sans", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-      font-size: 16px;
-      line-height: 1.55;
-    }
-    main {
-      width: min(1120px, calc(100% - 32px));
-      margin: 0 auto;
-      padding: 48px 0 72px;
-    }
-    header { margin-bottom: 32px; }
-    .eyebrow {
-      margin: 0 0 8px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    h1 {
-      margin: 0;
-      max-width: 780px;
-      font-size: clamp(2rem, 4vw, 3rem);
-      line-height: 1.05;
-      letter-spacing: 0;
-    }
-    .lede {
-      max-width: 760px;
-      margin: 16px 0 0;
-      color: var(--muted);
-      font-size: 18px;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin: 32px 0;
-    }
-    .metric, .section {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-    }
-    .metric { padding: 18px; }
-    .metric strong {
-      display: block;
-      font-size: 32px;
-      line-height: 1;
-      font-variant-numeric: tabular-nums;
-    }
-    .metric span {
-      display: block;
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 650;
-    }
-    .section {
-      margin-top: 18px;
-      padding: 24px;
-    }
-    h2 { margin: 0 0 12px; font-size: 24px; line-height: 1.2; }
-    h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.3; }
-    p { margin: 0 0 12px; }
-    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
-    table { width: 100%; border-collapse: collapse; min-width: 640px; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
-    td { font-size: 14px; font-variant-numeric: tabular-nums; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    details { margin-top: 24px; }
-    summary { cursor: pointer; font-weight: 700; }
-    pre { overflow: auto; padding: 16px; background: #111827; color: #f9fafb; border-radius: var(--radius); }
-    @media (max-width: 760px) {
-      main { width: min(100% - 24px, 1120px); padding-top: 32px; }
-      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .section { padding: 18px; }
-    }
-    @media (max-width: 520px) {
-      .metrics { grid-template-columns: 1fr; }
-      .lede { font-size: 16px; }
-    }
-  </style>
 </head>
 <body>
-  <main>
+  <main class="swarm-page">
     <header>
-      <p class="eyebrow">Generated 2026-06-04</p>
+      <p class="swarm-eyebrow">Search Console · Generated 2026-06-04</p>
       <h1>Q2 SEO Performance</h1>
-      <p class="lede">Organic traffic grew sharply, but the next gains depend on fixing thin page metadata and publishing three high-intent pillar pages.</p>
+      <p class="swarm-lede">Organic clicks grew 50% this quarter. The next gains depend on fixing thin page metadata and on three high-intent pillar pages.</p>
+      <span class="swarm-badge" data-tone="success" data-dot>On track</span>
     </header>
 
-    <section class="metrics" aria-label="Key metrics">
-      <div class="metric"><strong>18.6k</strong><span>Organic clicks</span></div>
-      <div class="metric"><strong>+50%</strong><span>Quarter over quarter</span></div>
-      <div class="metric"><strong>23</strong><span>Metadata fixes</span></div>
-      <div class="metric"><strong>3</strong><span>Priority pages</span></div>
+    <section class="swarm-metrics" aria-label="Key metrics">
+      <div class="swarm-metric">
+        <div class="swarm-metric-value">18.6k</div>
+        <div class="swarm-metric-label">Organic clicks</div>
+      </div>
+      <div class="swarm-metric" data-tone="success">
+        <div class="swarm-metric-value">+50%</div>
+        <div class="swarm-metric-label">Quarter over quarter</div>
+      </div>
+      <div class="swarm-metric" data-tone="warning">
+        <div class="swarm-metric-value">23</div>
+        <div class="swarm-metric-label">Metadata fixes</div>
+      </div>
+      <div class="swarm-metric">
+        <div class="swarm-metric-value">3</div>
+        <div class="swarm-metric-label">Priority pages</div>
+      </div>
     </section>
 
-    <section class="section">
-      <h2>Summary</h2>
-      <p>Start with the conclusion. Add tables only after the reader understands what changed and what to do next.</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Metric</th><th>Q1</th><th>Q2</th><th>Change</th></tr></thead>
-          <tbody><tr><td>Organic clicks</td><td>12,400</td><td>18,600</td><td>+50%</td></tr></tbody>
+    <section class="swarm-section" aria-labelledby="findings-heading">
+      <h2 id="findings-heading">Findings</h2>
+      <div class="swarm-callout" data-tone="warning">
+        <strong>Thin metadata caps growth.</strong> 23 ranking pages share a generic title and description. Fix them before new content ships.
+      </div>
+      <div class="swarm-callout">
+        <strong>One post drives the growth.</strong> The agent swarms post brought about a quarter of the new clicks.
+      </div>
+    </section>
+
+    <section class="swarm-section" aria-labelledby="pages-heading">
+      <h2 id="pages-heading">Top pages</h2>
+      <div class="swarm-toolbar">
+        <input class="swarm-input" id="page-filter" type="search" placeholder="Filter pages" aria-label="Filter pages">
+        <div class="swarm-segmented" role="group" aria-label="Status">
+          <button type="button" data-status-filter="all" aria-pressed="true">All</button>
+          <button type="button" data-status-filter="fix" aria-pressed="false">Needs fix</button>
+        </div>
+        <button class="swarm-button" id="filter-reset" type="button">Reset</button>
+      </div>
+      <div class="swarm-table-wrap">
+        <table class="swarm-table" id="pages-table">
+          <thead>
+            <tr><th>Page</th><th>Status</th><th class="num">Q1 clicks</th><th class="num">Q2 clicks</th><th class="num">Change</th></tr>
+          </thead>
+          <tbody>
+            <tr data-status="ok"><td class="nowrap">/pricing</td><td><span class="swarm-badge" data-tone="success">Healthy</span></td><td class="num">4,100</td><td class="num">6,900</td><td class="num">+68%</td></tr>
+            <tr data-status="fix"><td class="nowrap">/docs/install</td><td><span class="swarm-badge" data-tone="warning">Thin title</span></td><td class="num">3,200</td><td class="num">3,350</td><td class="num">+5%</td></tr>
+            <tr data-status="ok"><td class="nowrap">/blog/agent-swarms</td><td><span class="swarm-badge" data-tone="success">Healthy</span></td><td class="num">1,500</td><td class="num">3,100</td><td class="num">+107%</td></tr>
+            <tr data-status="fix"><td class="nowrap">/integrations/slack</td><td><span class="swarm-badge" data-tone="error">No description</span></td><td class="num">1,900</td><td class="num">1,700</td><td class="num text-status-error-strong">-11%</td></tr>
+            <tr data-status="review"><td class="nowrap">/changelog</td><td><span class="swarm-badge">Not reviewed</span></td><td class="num">400</td><td class="num">1,150</td><td class="num">+188%</td></tr>
+          </tbody>
         </table>
+      </div>
+      <p class="text-muted-foreground" id="filter-empty" hidden>No pages match the filter.</p>
+    </section>
+
+    <section class="swarm-section" aria-labelledby="actions-heading">
+      <h2 id="actions-heading">Next actions</h2>
+      <div class="grid gap-4 md:grid-cols-2">
+        <article class="swarm-panel">
+          <h3>Fix thin metadata</h3>
+          <dl class="swarm-kv">
+            <dt>Owner</dt><dd>Content team</dd>
+            <dt>Pages</dt><dd>23</dd>
+            <dt>Due</dt><dd>2026-07-15</dd>
+          </dl>
+        </article>
+        <article class="swarm-panel">
+          <h3>Publish three pillar pages</h3>
+          <dl class="swarm-kv">
+            <dt>Owner</dt><dd>Growth team</dd>
+            <dt>Topics</dt><dd>Agent orchestration, task routing, swarm costs</dd>
+            <dt>Due</dt><dd>2026-08-01</dd>
+          </dl>
+        </article>
+      </div>
+      <div class="mt-4">
+        <a class="swarm-button" data-variant="primary" href="https://search.google.com/search-console">Open Search Console</a>
       </div>
     </section>
 
@@ -158,5 +118,46 @@
       <pre>{ "source": "search-console", "range": "2026-04-01/2026-06-30" }</pre>
     </details>
   </main>
+
+  <script>
+    (() => {
+      const filter = document.getElementById("page-filter");
+      const reset = document.getElementById("filter-reset");
+      const empty = document.getElementById("filter-empty");
+      const statusButtons = document.querySelectorAll("[data-status-filter]");
+      const rows = document.querySelectorAll("#pages-table tbody tr");
+      let status = "all";
+
+      function applyFilter() {
+        const query = filter.value.trim().toLowerCase();
+        let shown = 0;
+        for (const row of rows) {
+          const visible =
+            row.textContent.toLowerCase().includes(query) &&
+            (status === "all" || row.dataset.status === status);
+          row.style.display = visible ? "" : "none";
+          if (visible) shown += 1;
+        }
+        empty.hidden = shown > 0;
+      }
+
+      function setStatus(next) {
+        status = next;
+        for (const button of statusButtons) {
+          button.setAttribute("aria-pressed", String(button.dataset.statusFilter === next));
+        }
+        applyFilter();
+      }
+
+      for (const button of statusButtons) {
+        button.addEventListener("click", () => setStatus(button.dataset.statusFilter));
+      }
+      filter.addEventListener("input", applyFilter);
+      reset.addEventListener("click", () => {
+        filter.value = "";
+        setStatus("all");
+      });
+    })();
+  </script>
 </body>
 </html>

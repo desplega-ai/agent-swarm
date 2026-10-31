@@ -377,11 +377,23 @@ export const SWARM_UI_JS = `
     closeCursorRoomIfUnused(record);
   }
 
+  // Colors and fonts read the page theme tokens (designVersion 2). Each
+  // fallback is the original literal, so a designVersion 1 page, which has no
+  // tokens, renders exactly as before.
   var SEV_COLOR = {
-    error: '#ef4444',
-    warn:  '#f59e0b',
-    info:  '#3b82f6',
+    error: 'var(--color-status-error-strong, #ef4444)',
+    warn:  'var(--color-status-warning-strong, #f59e0b)',
+    info:  'var(--color-status-info-strong, #3b82f6)',
   };
+  var MUTED = 'var(--color-muted-foreground, #7c8aa6)';
+  var MONO = "var(--font-mono, 'Space Mono', ui-monospace, monospace)";
+
+  // A color at a lower alpha. Mixing with transparent keeps the color and
+  // scales its alpha, so tint('#ef4444', '13.33%') equals #ef444422 and
+  // tint('rgb(34,197,94)', '10%') equals rgba(34,197,94,0.10).
+  function tint(color, percent) {
+    return 'color-mix(in srgb, ' + color + ' ' + percent + ', transparent)';
+  }
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -416,7 +428,7 @@ export const SWARM_UI_JS = `
       '<span class="swarm-diff-annot no-print" '
       + 'style="display:inline-block;margin-left:8px;padding:1px 6px;'
       + 'border-radius:4px;font-size:11px;font-weight:600;'
-      + 'background:' + color + '22;color:' + color + ';border:1px solid ' + color + '55;">'
+      + 'background:' + tint(color, '13.33%') + ';color:' + color + ';border:1px solid ' + tint(color, '33.33%') + ';">'
       + esc((ann && ann.severity ? ann.severity.toUpperCase() : 'INFO')) + ' · ' + esc(ann && ann.text || '')
       + '</span>'
     );
@@ -448,12 +460,12 @@ export const SWARM_UI_JS = `
       var text = line.text == null ? '' : line.text;
       var bg, oldCell, newCell, sign;
       if (type === 'add') {
-        bg = 'rgba(34,197,94,0.10)';
+        bg = tint('var(--color-status-success, rgb(34,197,94))', '10%');
         oldCell = '';
         newCell = String(newN++);
         sign = '+';
       } else if (type === 'del') {
-        bg = 'rgba(239,68,68,0.10)';
+        bg = tint('var(--color-status-error, rgb(239,68,68))', '10%');
         oldCell = String(oldN++);
         newCell = '';
         sign = '-';
@@ -465,15 +477,17 @@ export const SWARM_UI_JS = `
       }
 
       var annHtml = '';
-      var anns = annByLine[Number(newCell)] || annByLine[Number(oldCell)] || [];
+      // Annotations name new-side lines. A deleted row has no new-side
+      // number, so only a deleted row matches on its old-side number.
+      var anns = annByLine[Number(type === 'del' ? oldCell : newCell)] || [];
       for (var k = 0; k < anns.length; k++) annHtml += renderAnnotation(anns[k]);
 
       rowsHtml += (
         '<tr style="background:' + bg + ';">'
-        + '<td class="swarm-diff-gutter" style="user-select:none;text-align:right;padding:0 8px;color:#7c8aa6;font-size:12px;width:48px;">' + esc(oldCell) + '</td>'
-        + '<td class="swarm-diff-gutter" style="user-select:none;text-align:right;padding:0 8px;color:#7c8aa6;font-size:12px;width:48px;">' + esc(newCell) + '</td>'
-        + '<td class="swarm-diff-sign" style="user-select:none;text-align:center;padding:0 4px;color:#7c8aa6;font-size:12px;width:18px;">' + esc(sign) + '</td>'
-        + '<td class="swarm-diff-code" style="padding:0 8px;white-space:pre-wrap;word-break:break-word;font-family:\\'Space Mono\\',ui-monospace,monospace;font-size:12px;">' + esc(text) + annHtml + '</td>'
+        + '<td class="swarm-diff-gutter" style="user-select:none;text-align:right;padding:0 8px;color:' + MUTED + ';font-size:12px;width:48px;">' + esc(oldCell) + '</td>'
+        + '<td class="swarm-diff-gutter" style="user-select:none;text-align:right;padding:0 8px;color:' + MUTED + ';font-size:12px;width:48px;">' + esc(newCell) + '</td>'
+        + '<td class="swarm-diff-sign" style="user-select:none;text-align:center;padding:0 4px;color:' + MUTED + ';font-size:12px;width:18px;">' + esc(sign) + '</td>'
+        + '<td class="swarm-diff-code" style="padding:0 8px;white-space:pre-wrap;word-break:break-word;font-family:' + MONO + ';font-size:12px;">' + esc(text) + annHtml + '</td>'
         + '</tr>'
       );
     }
@@ -485,8 +499,8 @@ export const SWARM_UI_JS = `
     );
 
     return (
-      '<a id="' + esc(anchorId) + '" class="swarm-diff-anchor" data-hunk="' + esc(anchorSlug) + '"></a>'
-      + '<div class="swarm-diff-hunk-header" style="padding:6px 12px;background:rgba(124,138,166,0.10);color:#7c8aa6;font-family:\\'Space Mono\\',ui-monospace,monospace;font-size:11px;border-top:1px solid var(--swarm-border,#22304a);">'
+      '<a id="' + esc(anchorId) + '" class="swarm-diff-anchor" data-hunk="' + esc(anchorSlug) + '" data-new-start="' + esc(newStart) + '"></a>'
+      + '<div class="swarm-diff-hunk-header" style="padding:6px 12px;background:' + tint('var(--color-muted-foreground, rgb(124,138,166))', '10%') + ';color:' + MUTED + ';font-family:' + MONO + ';font-size:11px;border-top:1px solid var(--swarm-border,#22304a);">'
       + esc(header)
       + '</div>'
       + '<table class="swarm-diff-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">'
@@ -503,7 +517,7 @@ export const SWARM_UI_JS = `
 
     var shaLine = '';
     if (baseSha || headSha) {
-      shaLine = '<span class="swarm-diff-sha" style="font-family:\\'Space Mono\\',ui-monospace,monospace;font-size:11px;color:#7c8aa6;">'
+      shaLine = '<span class="swarm-diff-sha" style="font-family:' + MONO + ';font-size:11px;color:' + MUTED + ';">'
         + esc(baseSha) + ' → ' + esc(headSha)
         + '</span>';
     }
@@ -515,8 +529,8 @@ export const SWARM_UI_JS = `
 
     rootEl.innerHTML = (
       '<div class="swarm-diff-root" style="border:1px solid var(--swarm-border,#22304a);border-radius:8px;background:var(--swarm-card,#121826);overflow:hidden;margin:12px 0;break-inside:avoid;">'
-      + '<div class="swarm-diff-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(59,130,246,0.10);border-bottom:1px solid var(--swarm-border,#22304a);">'
-      + '<span class="swarm-diff-file" style="font-family:\\'Space Mono\\',ui-monospace,monospace;font-size:13px;font-weight:700;color:var(--swarm-text,#e6eaf2);">' + esc(file || '(untitled)') + '</span>'
+      + '<div class="swarm-diff-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--color-surface, rgba(59,130,246,0.10));border-bottom:1px solid var(--swarm-border,#22304a);">'
+      + '<span class="swarm-diff-file" style="font-family:' + MONO + ';font-size:13px;font-weight:700;color:var(--swarm-text,#e6eaf2);">' + esc(file || '(untitled)') + '</span>'
       + shaLine
       + '</div>'
       + hunksHtml
@@ -580,21 +594,34 @@ export const SWARM_UI_JS = `
       var renderJumps = function() {
         var anchors = document.querySelectorAll('.swarm-diff-anchor[data-hunk]');
         if (!anchors.length) {
-          self.innerHTML = '<span class="no-print" style="color:#7c8aa6;font-size:12px;">No hunks yet.</span>';
+          self.innerHTML = '<span class="no-print" style="color:' + MUTED + ';font-size:12px;">No hunks yet.</span>';
           return;
         }
-        var items = '';
+        var labels = [];
+        var fileCounts = new Map();
         for (var i = 0; i < anchors.length; i++) {
           var a = anchors[i];
           var slug = a.getAttribute('data-hunk') || ('hunk-' + i);
           // Hunk title = nearest preceding diff's file attribute if available.
           var diff = a.closest && a.closest('swarm-diff');
           var file = (diff && diff.getAttribute('file')) || slug;
-          items += '<li style="margin:0;padding:2px 0;"><a href="#' + esc(a.id) + '" style="color:#3b82f6;text-decoration:none;font-family:\\'Space Mono\\',ui-monospace,monospace;font-size:12px;">' + esc(file) + '</a></li>';
+          labels.push(file);
+          fileCounts.set(file, (fileCounts.get(file) || 0) + 1);
+        }
+        var items = '';
+        for (var n = 0; n < anchors.length; n++) {
+          // A file with more than one hunk gets each hunk's new-side start
+          // line (src/x.ts:58), so its links differ.
+          var label = labels[n];
+          var newStart = anchors[n].getAttribute('data-new-start');
+          if (fileCounts.get(label) > 1 && newStart) label += ':' + newStart;
+          // target=_self: the page head sets <base target="_blank">, which would
+          // open these in-page anchors in a new tab.
+          items += '<li style="margin:0;padding:2px 0;"><a href="#' + esc(anchors[n].id) + '" target="_self" style="color:var(--color-primary, #3b82f6);text-decoration:none;font-family:' + MONO + ';font-size:12px;">' + esc(label) + '</a></li>';
         }
         self.innerHTML = (
-          '<nav class="swarm-diff-jumps no-print" style="padding:8px 12px;border:1px dashed var(--swarm-border,#22304a);border-radius:8px;background:rgba(124,138,166,0.05);">'
-          + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#7c8aa6;margin-bottom:4px;">Jump to</div>'
+          '<nav class="swarm-diff-jumps no-print" style="padding:8px 12px;border:1px dashed var(--swarm-border,#22304a);border-radius:8px;background:' + tint('var(--color-muted-foreground, rgb(124,138,166))', '5%') + ';">'
+          + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:' + MUTED + ';margin-bottom:4px;">Jump to</div>'
           + '<ul style="list-style:none;padding:0;margin:0;">' + items + '</ul>'
           + '</nav>'
         );

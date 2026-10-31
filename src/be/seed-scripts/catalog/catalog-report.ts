@@ -745,6 +745,8 @@ export async function publishCatalogReportPage(report: CatalogReport, ctx: any):
     description: report.description,
     contentType: "text/html",
     authMode: "authed",
+    // The report ships its own palette, written for the v1 page head.
+    designVersion: 1,
     body: renderCatalogReportPage(report),
   });
   const payload = response?.data ?? response;
