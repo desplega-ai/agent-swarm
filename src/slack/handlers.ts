@@ -52,7 +52,13 @@ import {
   leaveExternalChannel,
   shouldBlockChannel,
 } from "./external-channel";
-import { shouldSkipLeftSlackThread } from "./left-threads";
+import {
+  isSlackLeaveThreadCommand,
+  isSlackLeaveThreadDisabled,
+  leaveSlackThread,
+  SLACK_LEFT_THREAD_CONFIRMATION,
+  shouldSkipLeftSlackThread,
+} from "./left-threads";
 import {
   collectSlackMessageFiles,
   extractSlackMessageText,
@@ -491,7 +497,36 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!cachedBotUserId && !!msg.text?.includes(`<@${cachedBotUserId}>`);
 
-    // A thread the swarm left (slack-leave-thread) stays silent until someone
+    // `!leave` in a thread the swarm is in: a human makes the swarm leave it,
+    // in code, with no workflow event, buffering, task, or model call.
+    // Any task bound to the thread counts, assigned or not, as does a thread
+    // the swarm started. Checked before the left-thread gate so `@bot !leave`
+    // leaves rather than rejoining. The confirmation is ephemeral, to the
+    // sender only.
+    if (
+      msg.thread_ts &&
+      !isSlackLeaveThreadDisabled() &&
+      isSlackLeaveThreadCommand(msg.text, cachedBotUserId) &&
+      ((await getMostRecentTaskInThread(msg.channel, msg.thread_ts)) !== null ||
+        (await wasThreadStartedBySwarm(client, msg.channel, msg.thread_ts)))
+    ) {
+      noteSlackInboundSideEffect("thread_leave");
+      await leaveSlackThread(msg.channel, msg.thread_ts, { slackUserId: msg.user });
+      console.log(`[Slack] Left thread ${msg.channel}/${msg.thread_ts}: !leave from ${msg.user}`);
+      try {
+        await client.chat.postEphemeral({
+          channel: msg.channel,
+          user: msg.user,
+          thread_ts: msg.thread_ts,
+          text: SLACK_LEFT_THREAD_CONFIRMATION,
+        });
+      } catch (error) {
+        console.error("[Slack] Failed to confirm !leave:", error);
+      }
+      return;
+    }
+
+    // A thread the swarm left (slack-leave-thread or `!leave`) stays silent until someone
     // @mentions the bot. Checked before the workflow event, buffering, routing,
     // or any AI call.
     if (await shouldSkipLeftSlackThread(msg.channel, msg.thread_ts, botMentioned)) {

@@ -94,7 +94,7 @@ export const registerSlackLeaveThreadTool = (server: McpServer) => {
         return toolErr("No Slack thread context available.");
       }
 
-      await leaveSlackThread(slackChannelId, slackThreadTs, agent.id);
+      await leaveSlackThread(slackChannelId, slackThreadTs, { agentId: agent.id });
       return toolOk(
         `Left Slack thread ${slackChannelId}/${slackThreadTs}. Messages there are ignored until someone @mentions the bot.`,
         { data: { channelId: slackChannelId, threadTs: slackThreadTs } },

@@ -112,10 +112,15 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-async function api(method: string, path: string, body: unknown) {
+async function api(
+  method: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   const text = await res.text();
@@ -612,12 +617,13 @@ describe("harness compatibility at every create entry point", () => {
   test("internal script-run agent-task route: a cross-harness model is a 400", async () => {
     const runId = crypto.randomUUID();
     await createScriptRun({ id: runId, agentId: workerId, source: "inline", args: {} });
-    const res = await api("POST", `/api/internal/script-runs/${runId}/agent-task`, {
-      stepKey: "step-1",
-      task: "script step",
-      agentId: codexId,
-      model: "claude-opus-5-5",
-    });
+    // The run's own harness calls this route with the run's agent id.
+    const res = await api(
+      "POST",
+      `/api/internal/script-runs/${runId}/agent-task`,
+      { stepKey: "step-1", task: "script step", agentId: codexId, model: "claude-opus-5-5" },
+      { "X-Agent-ID": workerId },
+    );
     expect(res.status).toBe(400);
     expect(String(res.body.error)).toContain("does not run on the codex harness");
   });

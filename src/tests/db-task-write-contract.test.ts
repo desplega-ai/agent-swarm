@@ -167,6 +167,7 @@ value:completeApprovalCancellationNotificationClaim
 value:completeTask
 value:computeContentHash
 value:countActiveScriptRuns
+value:countAgentDispatchesInThread
 value:countAllMetrics
 value:countAllPages
 value:countKv
@@ -241,9 +242,10 @@ value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findRecentSimilarTasks
 value:findTaskByAgentMailThread
 value:findTaskByGitHub
@@ -392,6 +394,7 @@ value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
 value:getScriptRunExecutionArgs
+value:getScriptRunFollowUpGuard
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -584,6 +587,7 @@ value:setApiKeyName
 value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
+value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
 value:setUserFavorite
 value:settleSupersededTaskDependents

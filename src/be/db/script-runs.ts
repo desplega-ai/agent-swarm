@@ -13,3 +13,26 @@ export async function getScriptRunExecutionArgs(id: string): Promise<unknown> {
   );
   return row ? openSealedJson(row.args) : undefined;
 }
+
+/** A durable run's follow-up re-delegation guard decision (see migration 266). */
+export type ScriptRunFollowUpGuard = "passed" | "same-work" | "loop-cap";
+
+export async function getScriptRunFollowUpGuard(
+  runId: string,
+): Promise<ScriptRunFollowUpGuard | null> {
+  const row = await getDbClient().get<{ followUpGuard: ScriptRunFollowUpGuard | null }>(
+    "SELECT followUpGuard FROM script_runs WHERE id = ?",
+    [runId],
+  );
+  return row?.followUpGuard ?? null;
+}
+
+export async function setScriptRunFollowUpGuard(
+  runId: string,
+  decision: ScriptRunFollowUpGuard,
+): Promise<void> {
+  await getDbClient().run("UPDATE script_runs SET followUpGuard = ? WHERE id = ?", [
+    decision,
+    runId,
+  ]);
+}

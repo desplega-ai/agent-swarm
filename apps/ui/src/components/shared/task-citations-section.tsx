@@ -53,15 +53,7 @@ export function TaskCitationsSection({
   const rows = [...citations].sort((a, b) => a.index - b.index);
 
   return (
-    <CollapsibleSection
-      variant="card"
-      title={`Citations (${citations.length})`}
-      icon={Quote}
-      iconColor="text-muted-foreground"
-      borderColor="border-border"
-      bgColor="bg-muted/20"
-      defaultOpen
-    >
+    <CollapsibleSection title={`Citations (${citations.length})`} icon={Quote} defaultOpen>
       <ul className="space-y-2 text-sm">
         {rows.map((citation) => {
           const state = citationState(citation, used);

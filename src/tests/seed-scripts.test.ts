@@ -217,6 +217,32 @@ describe("seed-scripts catalog", () => {
     ).toHaveLength(200);
   });
 
+  test.each([
+    ["Incomplete response returned, reason: max_output_tokens", "output-limit"],
+    ["Stopped: max_tokens", "output-limit"],
+    ["Maximum output length exceeded", "output-limit"],
+    ["Output token limit reached", "output-limit"],
+    ["401 Unauthorized", "auth/credentials"],
+    ["invalid token", "auth/credentials"],
+    ["Resource not accessible by personal access token", "auth/credentials"],
+    ["Processed 100 tokens", "other"],
+    ["max_input_tokens exceeded", "other"],
+  ])("task-failure-audit classifies %s as %s", async (failureReason, expectedKey) => {
+    const result = await taskFailureAudit(
+      { publishPage: false },
+      {
+        swarm: {
+          async task_list() {
+            return { data: { tasks: [{ id: "failed-task", failureReason }] } };
+          },
+        },
+      },
+    );
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].key).toBe(expectedKey);
+  });
+
   test("task-failure-audit projects failure reasons into schedule-group samples", async () => {
     let projectionArgs: Record<string, unknown> | undefined;
     const result = await taskFailureAudit(

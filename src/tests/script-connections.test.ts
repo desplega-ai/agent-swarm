@@ -667,6 +667,17 @@ describe("script connections", () => {
       markMigrationApplied(database, "256_agent_slack_icon.sql");
       // 259 alters session_summaries, which 253 (skipped above) creates.
       markMigrationApplied(database, "259_session_summaries_open_tasks.sql");
+      // 260 alters runtime_pools and creates runtime_cache_releases. This
+      // migration-112-only fixture has neither runtime_pools nor runtime_controllers.
+      markMigrationApplied(database, "260_runtime_pool_cache.sql");
+      // 262 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
+      markMigrationApplied(database, "262_session_visibility_indexes.sql");
+      // 263 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
+      markMigrationApplied(database, "263_task_list_filter_index.sql");
+      // 264 indexes agent_tasks columns that this fixture's id-only agent_tasks lacks.
+      markMigrationApplied(database, "264_slack_thread_cover_index.sql");
+      // 266 alters script_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "266_script_runs_source_task.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

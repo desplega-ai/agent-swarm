@@ -21,9 +21,11 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 // The real grants hooks: outside a provider they answer "operator tab", so every control shows.
 mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/input", () => require("../ui/input"));
+mock.module("@/components/ui/kbd", () => require("../ui/kbd"));
 mock.module("@/components/ui/popover", () => require("../ui/popover"));
 mock.module("@/hooks/use-debounced-value", () => require("../../hooks/use-debounced-value"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));

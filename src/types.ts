@@ -2219,6 +2219,39 @@ export const RuntimeControllerSchema = RuntimeControllerCreateSchema.omit({ secr
   .openapi("RuntimeController");
 export type RuntimeController = z.infer<typeof RuntimeControllerSchema>;
 
+export const RuntimePoolCacheSchema = z
+  .object({
+    mountPath: z
+      .string()
+      .min(2)
+      .refine((path) => {
+        const parts = path.split("/").filter(Boolean);
+        const normalized = `/${parts.join("/")}`;
+        const protectedPaths = [
+          "/workspace/personal",
+          "/workspace/shared",
+          ...["/home/worker", "/root"].flatMap((home) =>
+            [".ssh", ".codex", ".claude", ".claude.json", ".pi", ".config", ".local"].map(
+              (directory) => `${home}/${directory}`,
+            ),
+          ),
+        ];
+        return (
+          path.startsWith("/") &&
+          parts.length > 0 &&
+          !path.includes("\0") &&
+          !parts.some((part) => part === "." || part === "..") &&
+          !protectedPaths.some(
+            (protectedPath) =>
+              protectedPath === normalized ||
+              protectedPath.startsWith(`${normalized}/`) ||
+              normalized.startsWith(`${protectedPath}/`),
+          )
+        );
+      }, "Cache mountPath must be absolute, without . or .., and must not cover worker homes, workspaces or credential directories"),
+  })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2233,6 +2266,7 @@ export const RuntimePoolCreateSchema = z
     delivery: DeliveryModeSchema.nullable().default(null),
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
+    cache: RuntimePoolCacheSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2246,6 +2280,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   delivery: DeliveryModeSchema.nullable().optional(),
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
+  cache: RuntimePoolCacheSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -3121,6 +3156,8 @@ export const ScriptRunSchema = z
     lastHeartbeatAt: z.string().optional(),
     idempotencyKey: z.string().optional(),
     requestedByUserId: z.string().optional(),
+    /** Task whose session launched the run; the follow-up re-delegation guard reads it. */
+    sourceTaskId: z.string().optional(),
   })
   .openapi("ScriptRun");
 export type ScriptRun = z.infer<typeof ScriptRunSchema>;
@@ -3129,6 +3166,7 @@ export const ScriptRunListItemSchema = ScriptRunSchema.omit({
   source: true,
   args: true,
   output: true,
+  sourceTaskId: true,
 });
 export type ScriptRunListItem = z.infer<typeof ScriptRunListItemSchema>;
 

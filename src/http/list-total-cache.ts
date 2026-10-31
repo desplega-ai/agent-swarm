@@ -3,8 +3,11 @@
  *
  * A list total is a COUNT over the same filters as the page, and on the large
  * tables behind the sessions and task lists it costs as much as the page
- * itself. Page 1 (offset 0) always counts, so a write (a new session, a
- * triage move) shows at once where the user looks first. Later pages reuse
+ * itself. By default page 1 (offset 0) always counts, so a write (a new
+ * session, a triage move) shows at once where the user looks first. A list
+ * whose count is expensive and whose total may lag can pass
+ * `firstPageTtlMs`: page 1 then reuses a count younger than that, so
+ * dashboard tabs that poll the same list share one count. Later pages reuse
  * that count for 30 s. A cold later page (deep link, expired entry) counts
  * too, so `total` is always set.
  */
@@ -13,7 +16,7 @@ export const LIST_TOTAL_TTL_MS = 30_000;
 const MAX_ENTRIES = 500;
 
 interface Entry {
-  expiresAt: number;
+  countedAt: number;
   total: Promise<number>;
 }
 
@@ -34,19 +37,23 @@ function filterKey(value: unknown): string {
   );
 }
 
-export function createListTotalCache(ttlMs = LIST_TOTAL_TTL_MS): ListTotalCache {
+export function createListTotalCache(
+  ttlMs = LIST_TOTAL_TTL_MS,
+  firstPageTtlMs = 0,
+): ListTotalCache {
   const entries = new Map<string, Entry>();
   return {
     get(filters, offset, compute) {
       const key = filterKey(filters);
       const now = Date.now();
       const hit = entries.get(key);
-      if (hit && hit.expiresAt > now && (offset ?? 0) > 0) return hit.total;
+      const maxAge = (offset ?? 0) > 0 ? ttlMs : Math.min(ttlMs, firstPageTtlMs);
+      if (hit && hit.countedAt + maxAge > now) return hit.total;
       if (hit) entries.delete(key);
 
-      // Cache the promise, so a later page that arrives mid-count shares it.
+      // Cache the promise, so a request that arrives mid-count shares it.
       const total = compute();
-      entries.set(key, { expiresAt: now + ttlMs, total });
+      entries.set(key, { countedAt: now, total });
       total.catch(() => {
         if (entries.get(key)?.total === total) entries.delete(key);
       });

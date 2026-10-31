@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   closeDb,
@@ -6,6 +7,7 @@ import {
   getDb,
   getDbClient,
   getResolvableDeferralOutcomes,
+  getSlackTreeMessages,
   initDb,
   recordSlackMessage,
 } from "../be/db";
@@ -93,12 +95,32 @@ describe("slack render-v2 watcher queries", () => {
     closeDb();
   });
 
+  test("the tree sweep tests thread tasks in the covering index, not task rows", async () => {
+    const sql = await capturedSql(() => getSlackTreeMessages());
+    const detail = plan(sql);
+    const uses = "SEARCH task USING COVERING INDEX idx_agent_tasks_slack_thread_cover";
+    expect(detail.split(uses).length - 1).toBe(3);
+    // Control: without migration 264 the same tests read the task rows.
+    const copy = Database.deserialize(getDb().serialize());
+    try {
+      copy.run("DROP INDEX idx_agent_tasks_slack_thread_cover");
+      const reverted = copy
+        .query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${sql}`)
+        .all()
+        .map((row) => row.detail)
+        .join("\n");
+      expect(reverted).not.toContain(uses);
+    } finally {
+      copy.close();
+    }
+  });
+
   test("deferral resolution drives from the chain, not from every task", async () => {
     const sql = await capturedSql(() => getResolvableDeferralOutcomes());
     const detail = plan(sql, [50]);
-    // Either parentTaskId-led index is a seek on the chain's children.
+    // Any parentTaskId-led index is a seek on the chain's children.
     expect(detail).toMatch(
-      /SEARCH wake USING INDEX idx_agent_tasks_parentTaskId(_source)? \(parentTaskId=\?\)/,
+      /SEARCH wake USING INDEX idx_agent_tasks_parentTaskId(_source|_id)? \(parentTaskId=\?\)/,
     );
     expect(detail).not.toContain("idx_agent_tasks_taskType");
     expect(detail).not.toContain("idx_agent_tasks_status_last_updated");

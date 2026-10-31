@@ -31,6 +31,7 @@ import {
   getRuntimePool,
 } from "../be/runtime-pools/db";
 import {
+  provisionRuntime,
   reconcileControllerOrphans,
   reconcileOnce,
   runtimeSupervisorStatus,
@@ -53,13 +54,19 @@ import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 class FakeRuntimeProvider implements RuntimeProvider {
   readonly kind = "docker" as const;
-  readonly traits = { canProvision: true, ephemeralDisk: true, supportsPause: false };
+  readonly traits: RuntimeProvider["traits"] = {
+    canProvision: true,
+    ephemeralDisk: true,
+    supportsPause: false,
+    persistentCache: true,
+  };
   requests: ProvisionRequest[] = [];
   targets: RuntimeTargetConfig[] = [];
   terminated: string[] = [];
   owners: string[] = [];
   runtimes = new Map<string, { handle: RuntimeHandle; owner: string; status: RuntimeStatus }>();
   failure: string | null = null;
+  cacheWarning: string | null = null;
   gate: Promise<void> | null = null;
   terminateFailures = new Map<string, string>();
   statusFailures = new Set<string>();
@@ -74,7 +81,11 @@ class FakeRuntimeProvider implements RuntimeProvider {
     if (this.failure) throw new Error(this.failure);
     if (this.provisionFailures.has(req.agentId))
       throw new Error(this.provisionFailures.get(req.agentId));
-    const handle: RuntimeHandle = { kind: "docker", externalId: crypto.randomUUID() };
+    const handle: RuntimeHandle = {
+      kind: "docker",
+      externalId: crypto.randomUUID(),
+      ...(this.cacheWarning ? { meta: { cacheWarning: this.cacheWarning } } : {}),
+    };
     this.runtimes.set(handle.externalId, { handle, owner: req.ownerId, status: "running" });
     return handle;
   }
@@ -183,6 +194,59 @@ async function activate(runtimeId: string, agentId: string, reportedSlots = 1) {
   // Exercise the supervisor's teardown state, rather than registration's separate reconciliation.
   await getDbClient().run("UPDATE agents SET status = 'idle' WHERE id = ?", [agentId]);
 }
+
+test("cache identity is stable across provisions of one pool and scoped away from other pools", async () => {
+  const { pool, agent } = await wake({ cache: { mountPath: "/cache" } });
+  const controller = await getControllerCommands(controllerId);
+  await provisionRuntime(pool, agent, controller, await ensureRuntimeOwnerId());
+  const other = await setup({ cache: { mountPath: "/cache" } });
+  await provisionRuntime(other.pool, other.agent, controller, await ensureRuntimeOwnerId());
+  const [first, second, third] = fake.requests.map((req) => req.cache!);
+  expect(first).toEqual({
+    key: expect.stringContaining(`swarm-cache-${pool.id}-`),
+    mountPath: "/cache",
+  });
+  expect(second).toEqual(first);
+  expect(third.key).toStartWith(`swarm-cache-${other.pool.id}-`);
+  expect(third.key).not.toBe(first.key);
+});
+
+test("an older controller boots without cache and surfaces a warning without failing the provision", async () => {
+  const { pool, agent } = await setup({ cache: { mountPath: "/cache" } });
+  delete fake.traits.persistentCache;
+  await provisionRuntime(
+    pool,
+    agent,
+    await getControllerCommands(controllerId),
+    await ensureRuntimeOwnerId(),
+  );
+  expect(fake.requests[0]?.cache).toBeUndefined();
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 0,
+    lastError: expect.stringContaining("Controller does not support persistent caches"),
+  });
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(0);
+});
+
+test("cache failure warnings clear after recovery without hiding unrelated provision errors", async () => {
+  fake.cacheWarning = "cache unavailable";
+  const { pool, agent } = await wake({ cache: { mountPath: "/cache" } });
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 0,
+    lastError: "Persistent cache: cache unavailable",
+  });
+  fake.cacheWarning = null;
+  const commands = await getControllerCommands(controllerId);
+  await provisionRuntime(pool, agent, commands, await ensureRuntimeOwnerId());
+  expect((await getRuntimePool(pool.id))?.lastError).toBeNull();
+  await getDbClient().run(
+    "UPDATE runtime_pools SET last_error = 'Existing provision error' WHERE id = ?",
+    [pool.id],
+  );
+  fake.cacheWarning = "another cache failure";
+  await provisionRuntime(pool, agent, commands, await ensureRuntimeOwnerId());
+  expect((await getRuntimePool(pool.id))?.lastError).toBe("Existing provision error");
+});
 
 test("pending task provisions once while registration is pending, with scoped env and owner labels", async () => {
   const { pool, agent, runtime } = await wake({

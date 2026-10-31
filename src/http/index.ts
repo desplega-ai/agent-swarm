@@ -877,7 +877,7 @@ httpServer
     // Delete expired MCP overflow values (10-min tick, off the spill path)
     startMcpOverflowSweep();
 
-    // Start expired-memory garbage collector (1-hour tick, immediate first run)
+    // Start expired-memory garbage collector (1-hour tick, first run 2 min after boot)
     await startMemoryGc();
 
     // Start the opt-in DB retention sweep after config hydration. Every key is

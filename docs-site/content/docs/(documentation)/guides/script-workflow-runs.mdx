@@ -365,6 +365,7 @@ Config options beyond the task-dispatch fields (`template`/`task`/`agentId`/`tag
 | `waitForCompletion` | `true` | `false` reverts to the legacy fire-and-forget shape: a single dispatch call that journals `{taskId, status}` immediately (usually `status: "pending"`). |
 | `timeoutMs` | 2 hours | Max time to wait for a terminal status before throwing. Checked with ~30s granularity (each poll round-trip already long-polls server-side). Only applies when `waitForCompletion` is true. |
 | `failOnTaskFailure` | `true` | When the task ends `failed`/`cancelled`/`superseded`: `true` throws so the failure surfaces to the workflow author; `false` resolves with `{taskId, status: "failed", error}` instead. |
+| `allowRedelegation` | `false` | Dispatch even when the follow-up re-delegation guard blocks the step. The guard applies only to a run launched from a `follow-up` task in a Slack thread, and decides once for the whole run, at its first new step: like `send-task`, it blocks a repeat of work already completed in the thread, or a dispatch past the thread's cap (10 per launching agent in 6 hours; a run counts once, dated by its first step). Every later new step follows that decision, so a blocked run dispatches nothing more until a step passes `allowRedelegation`. A blocked step throws with the rule's message. Replayed steps are never blocked. The run's steps are posted in the follow-up's thread. |
 
 ```ts
 const review = await ctx.step.agentTask("implement-fix", {

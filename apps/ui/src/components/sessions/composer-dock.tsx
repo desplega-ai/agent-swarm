@@ -2,16 +2,17 @@
  * Sessions surface: the shared floating composer dock.
  *
  * A rounded card-shaped input area inset from the panel edges with a slim
- * action row at the bottom: routing hint on the left, keyboard hints + circular
- * primary send button on the right. Used by both the new-session view and
+ * action row at the bottom: routing hint on the left, the actions and a round
+ * icon-only send button on the right. Used by both the new-session view and
  * the in-session composer so the bottom of the right pane is identical
  * regardless of state.
  * Enter sends, Shift+Enter inserts a new line, and Cmd/Ctrl+Enter also sends.
- * On a touch device with a soft keyboard (no hardware Enter key), plain
- * Enter inserts a newline instead, and the send button submits there.
+ * The send button's tooltip shows these keys. On a touch device with a soft
+ * keyboard (no hardware Enter key), plain Enter inserts a newline instead, the
+ * send button submits there, and the tooltip shows no keys.
  */
 
-import { ArrowUp, Eye, FileText, Paperclip, X } from "lucide-react";
+import { ArrowBigUp, ArrowUp, CornerDownLeft, Eye, FileText, Paperclip, X } from "lucide-react";
 import {
   type ChangeEvent,
   type ClipboardEvent,
@@ -21,9 +22,11 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useObjectUrl } from "@/hooks/use-object-url";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +123,12 @@ export interface ComposerDockProps {
   /** Routing label shown on the left of the action row. Defaults to "Routes to Lead". */
   routeLabel?: string;
   /**
+   * The task a send goes to, in a tooltip on the routing label ("Follows up
+   * #<id> Fix the parser…"). The label then takes focus, so a keyboard user
+   * can read it.
+   */
+  routeDetail?: string;
+  /**
    * Optional control rendered at the far left of the action row, before the
    * routing hint. Used by the steering composer for its Queue/Interrupt
    * segmented toggle so both surfaces get an identical dock.
@@ -127,7 +136,10 @@ export interface ComposerDockProps {
   modeControl?: React.ReactNode;
   /** Status label shown while submit/create/upload is pending. */
   pendingLabel?: string;
-  /** "Send" / "Start session" / etc. Used as button aria-label and tooltip. */
+  /**
+   * "Send" / "Start session" / "Follow up" / etc. The send button is an icon:
+   * this is its aria-label and the first line of its tooltip.
+   */
   sendLabel?: string;
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
@@ -141,7 +153,7 @@ export interface ComposerDockProps {
   autoFocus?: boolean;
   /**
    * Let the card span the full available width instead of the chat-style
-   * centered `max-w-3xl` column. Used by the task-detail steering dock, where
+   * centered chat column (`CHAT_COLUMN`). Used by the task-detail steering dock, where
    * the composer sits under a full-width log viewer, and by the `/setup`
    * first task, which spans the setup column.
    */
@@ -197,6 +209,37 @@ function useBoxEngaged(enabled: boolean, box: React.RefObject<HTMLFormElement | 
   return { engaged, handlers };
 }
 
+/** A keycap that reads on the tooltip's inverted fill. */
+const TOOLTIP_KBD = "border-background/25 bg-background/15 text-background";
+
+/**
+ * The send button's tooltip: its label, then the keys. A coarse pointer (a
+ * soft keyboard, where Enter inserts a new line) shows the label only.
+ */
+function SendTooltipContent({ label }: { label: string }) {
+  return (
+    <TooltipContent side="top" aria-label={`${label}. Enter sends, Shift+Enter adds a new line.`}>
+      <div className="grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-1">
+        <span>{label}</span>
+        <span className="flex justify-end pointer-coarse:hidden">
+          <Kbd className={TOOLTIP_KBD}>
+            <CornerDownLeft className="size-3" />
+          </Kbd>
+        </span>
+        <span className="pointer-coarse:hidden">New line</span>
+        <span className="flex justify-end gap-0.5 pointer-coarse:hidden">
+          <Kbd className={TOOLTIP_KBD}>
+            <ArrowBigUp className="size-3" />
+          </Kbd>
+          <Kbd className={TOOLTIP_KBD}>
+            <CornerDownLeft className="size-3" />
+          </Kbd>
+        </span>
+      </div>
+    </TooltipContent>
+  );
+}
+
 export function ComposerDock({
   value,
   onChange,
@@ -207,6 +250,7 @@ export function ComposerDock({
   placeholder,
   disabled,
   routeLabel = "Routes to Lead",
+  routeDetail,
   modeControl,
   pendingLabel = "Sending…",
   sendLabel = "Send",
@@ -309,12 +353,33 @@ export function ComposerDock({
     handleIncomingFiles(Array.from(e.dataTransfer.files ?? []));
   };
 
+  const routeLine = (
+    <div
+      // With a detail it is a tooltip trigger, so a keyboard can reach it.
+      tabIndex={routeDetail ? 0 : undefined}
+      className={cn(
+        "flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0",
+        modeControl ? null : "pl-1.5",
+        routeDetail && "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        // A phone bar with a mode control has no room for the route; progress still shows.
+        (bar || touch) && modeControl && !isPending && "hidden",
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-1.5 w-1.5 shrink-0 rounded-full",
+          isPending ? "bg-primary animate-pulse" : "bg-primary/70",
+        )}
+      />
+      <span className="truncate">{isPending ? pendingLabel : routeLabel}</span>
+    </div>
+  );
+
   return (
     <form
       ref={formRef}
-      // `@container`: the keyboard hint below hides by the dock's own width, so
-      // a narrow side panel drops it even on a wide screen.
-      className={cn("@container shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}
+      className={cn("shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}
       onSubmit={(e) => {
         e.preventDefault();
         if (canSubmit) onSubmit();
@@ -324,7 +389,7 @@ export function ComposerDock({
       <div
         className={cn(
           "relative",
-          !fullWidth && "max-w-3xl mx-auto",
+          !fullWidth && CHAT_COLUMN,
           "rounded-2xl border border-border bg-card shadow-sm transition",
           "focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15",
           disabled && "opacity-60",
@@ -355,7 +420,8 @@ export function ComposerDock({
           disabled={disabled || isPending}
           rows={1}
           className={cn(
-            "field-sizing-content border-0 shadow-none bg-transparent",
+            // `dark:` too: the Textarea's own dark fill would draw a band in the card.
+            "field-sizing-content border-0 shadow-none bg-transparent dark:bg-transparent",
             "focus-visible:ring-0 focus-visible:border-0",
             "max-h-[220px] resize-none px-4 text-base md:text-[15px]",
             folded ? "min-h-11 py-2.5" : "min-h-14 pt-3.5 pb-1.5",
@@ -415,23 +481,14 @@ export function ComposerDock({
         >
           <div className="flex items-center gap-2 min-w-0">
             {modeControl}
-            <div
-              className={cn(
-                "flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0",
-                modeControl ? null : "pl-1.5",
-                // A phone bar with a mode control has no room for the route; progress still shows.
-                touch && modeControl && !isPending && "hidden",
-              )}
-            >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "h-1.5 w-1.5 shrink-0 rounded-full",
-                  isPending ? "bg-primary animate-pulse" : "bg-primary/70",
-                )}
-              />
-              <span className="truncate">{isPending ? pendingLabel : routeLabel}</span>
-            </div>
+            {routeDetail ? (
+              <Tooltip>
+                <TooltipTrigger asChild>{routeLine}</TooltipTrigger>
+                <TooltipContent side="top">{routeDetail}</TooltipContent>
+              </Tooltip>
+            ) : (
+              routeLine
+            )}
           </div>
           <div className="flex items-center gap-2">
             {extraActions}
@@ -456,22 +513,30 @@ export function ComposerDock({
                 <TooltipContent>Attach files</TooltipContent>
               </Tooltip>
             ) : null}
-            <span className="text-meta font-mono text-muted-foreground tracking-wider whitespace-nowrap hidden @lg:inline">
-              ↵ send · ⇧↵ newline
-            </span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={!canSubmit}
+                  // In flight or no identity: `disabled`. An empty box only
+                  // blocks the send (`aria-disabled`, and the form's submit
+                  // checks `canSubmit`), so hover and focus still show the
+                  // tooltip with the keys.
+                  disabled={disabled || isPending}
+                  aria-disabled={canSubmit ? undefined : true}
                   aria-label={sendLabel}
-                  className={cn("rounded-full shadow-sm", bar || touch ? "size-11" : "h-8 w-8")}
+                  className={cn(
+                    "rounded-full shadow-sm",
+                    "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-primary aria-disabled:active:scale-100",
+                    // 44 px on touch: the bar's full size, or a 32 px circle
+                    // with a 44 px hit area on a coarse pointer.
+                    bar || touch ? "size-11" : "size-8 hit-area [--hit-size:44px]",
+                  )}
                 >
-                  <ArrowUp className="h-4 w-4" />
+                  <ArrowUp className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{sendLabel}</TooltipContent>
+              <SendTooltipContent label={sendLabel} />
             </Tooltip>
           </div>
         </div>
@@ -506,7 +571,7 @@ export function ComposerReadOnlyNotice({
     <div className={cn("shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}>
       <div
         className={cn(
-          !fullWidth && "max-w-3xl mx-auto",
+          !fullWidth && CHAT_COLUMN,
           "flex items-center gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3.5",
         )}
       >

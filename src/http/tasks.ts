@@ -86,7 +86,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { createListTotalCache } from "./list-total-cache";
+import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
   authUserId,
@@ -226,7 +226,9 @@ const SupersedeTaskResponseSchema = z.object({
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
-const taskTotals = createListTotalCache();
+// The task list total scans every visible task, and only the pager shows it,
+// so page 1 polls reuse a total younger than 15 s.
+const taskTotals = createListTotalCache(LIST_TOTAL_TTL_MS, 15_000);
 
 const listTasks = route({
   method: "get",

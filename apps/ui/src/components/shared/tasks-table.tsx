@@ -43,9 +43,9 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
-import { PromptContext } from "@/components/shared/prompt-context";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskHoverCard } from "@/components/shared/task-hover-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,7 +60,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { parsePromptDisplay } from "@/lib/prompt-display";
 import {
   describeModelResolution,
   taskDisplayEffort,
@@ -196,28 +195,17 @@ function StatusCell({ task }: { task: AgentTask }) {
 }
 
 /**
- * Description cell. A task's `title` is the short human-authored label; `task`
- * is the full prompt. Show the title when there is one — a row of truncated
- * prompt text is much harder to scan — and keep the full prompt in the tooltip
- * so nothing is hidden behind the shorter label.
+ * Description cell: the task's title, or the first real line of its prompt
+ * (most prompts open with the same "Repo: <url>." line, so every row read
+ * alike). Hovering shows the task card: details, the prompt and the outcome.
  */
-function DescriptionCell({ title, prompt }: { title?: string; prompt?: string }) {
-  // Most prompts open with the same "Repo: <url>." line, which made every row
-  // read alike. Show the title or the first real line; the tooltip keeps all.
-  const label = taskListTitle({ title, task: prompt ?? "" });
-  if (!label) return DASH;
-  const display = parsePromptDisplay(prompt ?? "");
-  const tooltipText = display.ask || prompt?.trim() || label;
+function DescriptionCell({ task }: { task: AgentTask | undefined }) {
+  const label = task ? taskListTitle(task) : "";
+  if (!task || !label) return DASH;
   return (
-    <Tooltip delayDuration={400}>
-      <TooltipTrigger asChild>
-        <span className="block truncate">{label}</span>
-      </TooltipTrigger>
-      <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
-        <PromptContext display={display} className="mb-2" />
-        <TooltipMarkdown text={tooltipText} />
-      </TooltipContent>
-    </Tooltip>
+    <TaskHoverCard task={task}>
+      <span className="block truncate">{label}</span>
+    </TaskHoverCard>
   );
 }
 
@@ -631,9 +619,7 @@ export function TasksTable({
         // Sort / filter / quick-search on the same string the cell displays,
         // otherwise a titled row sorts by a prompt the user can't see.
         valueGetter: (p) => (p.data ? taskListTitle(p.data) : ""),
-        cellRenderer: (p: { data?: AgentTask }) => (
-          <DescriptionCell title={p.data?.title} prompt={p.data?.task} />
-        ),
+        cellRenderer: (p: { data?: AgentTask }) => <DescriptionCell task={p.data} />,
       },
       {
         _id: "status",

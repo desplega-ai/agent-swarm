@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.5] - 2026-10-30
+
+### Added
+- Providers: fx (Vercel Labs' terminal coding agent) as a native ACP harness provider, with mid-turn steering, session resume and a loopback MCP forwarder (#2576).
+- pi: `openai-codex/<id>` models run on the codex_oauth ChatGPT subscription pool, with no `OPENAI_API_KEY` needed (#2574).
+- Slack: agents can call `slack-leave-thread` to stop receiving a thread's messages until the next @mention (#2570).
+- Seed: schedule templates declare a `targetType` (agent-task, workflow or script); `dreaming-daily` now fires the dreaming workflow directly instead of spending a worker session (#2572).
+
+### Changed
+- Sessions: the session list, count and tree read from `session_summaries`; migration 259 adds open-task counts and indexes (#2569).
+- Worker image: amp and qwen bumps, qwen to 0.26.4 (#2573).
+
+### Fixed
+- Extensions: `pre.task.steer` hooks can block and rewrite task steering (#2575).
+
 ## [2.7.4] - 2026-10-29
 
 ### Added
