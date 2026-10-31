@@ -410,14 +410,38 @@ export async function startMockLlm() {
       const answers: Record<string, unknown> = {};
       for (const [id, question] of Object.entries(questions)) {
         const spec = asRecord(question) ?? {};
+        // The server's validator wants a probability distribution that sums to 1 over
+        // the declared options, and laya's `answer_confidence` next to `confidence`.
+        const spread = (labels: string[]) =>
+          Object.fromEntries(
+            labels.map((label, index) => [
+              label,
+              index === 0 ? 0.9 : 0.1 / Math.max(1, labels.length - 1),
+            ]),
+          );
         if (spec.type === "noul") answers[id] = { type: "noul", noul: 0.9 };
         else if (spec.type === "choice") {
-          const criteria = asRecord(spec.criteria) ?? {};
-          const choice = Object.keys(criteria)[0] ?? "e2e";
-          answers[id] = { type: "choice", choice, confidence: 0.9 };
+          const labels = Array.isArray(spec.criteria)
+            ? spec.criteria.map(String)
+            : Object.keys(asRecord(spec.criteria) ?? {});
+          answers[id] = {
+            type: "choice",
+            choice: labels[0] ?? "e2e",
+            confidence: 0.9,
+            answer_confidence: 0.9,
+            probabilities: spread(labels),
+          };
         } else {
-          const min = typeof spec.min === "number" ? spec.min : 0;
-          answers[id] = { type: "score", score: min, confidence: 0.9 };
+          const levels = Array.isArray(spec.criteria) ? spec.criteria : [];
+          const indices = levels.map((_, index) => String(index));
+          answers[id] = {
+            type: "score",
+            score: 0,
+            confidence: 0.9,
+            answer_confidence: 0.9,
+            legend: Object.fromEntries(indices.map((key, index) => [key, levels[index]])),
+            probabilities: spread(indices),
+          };
         }
       }
       return { model, answers, usage };
