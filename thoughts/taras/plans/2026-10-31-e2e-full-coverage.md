@@ -39,8 +39,8 @@ as a performance benchmark base.
      "disabled" or "bad signature" contract and the reason is recorded in the manifest.
 3. Agents are simulated over the API (`scripts/e2e/agent-sim.ts`): register, poll
    `/api/poll`, act on triggers, finish over HTTP or MCP. No harness process, no LLM.
-4. The SUT boots with `CAPABILITIES` set to every known capability so every tool group
-   registers. The tool universe is the union of lead and worker `tools/list`.
+4. The SUT boots with every `CAPABILITIES` group and `CHAT_SDK_ENABLED=true`.
+   The initial worker `tools/list` probe includes all six Chat SDK tools.
 5. Coverage is a hard gate, not a percentage:
    - `scripts/e2e/coverage-manifest.json` lists every deliberate exclusion with a reason.
    - `--strict` (CI) fails when any route operation, MCP tool, or workflow node type is
@@ -121,9 +121,9 @@ reviewers checked standards and spec, zero blockers. Outcome:
 - Approval timeouts route deterministically: `workflow-approvals` drives the existing
   `POST /api/heartbeat/sweep` and asserts the run leaves on its `timeout` port. No change to
   `HEARTBEAT_INTERVAL_MS`.
-- `src/be/scripts/boot-args-schema.ts` re-extracts stored script args schemas at boot and
-  rewrites the stale ones in place (unit-tested, idempotent), so pre-fix scripts stop requiring
-  defaulted fields without a re-upsert.
+- `src/be/scripts/boot-args-schema.ts` normalizes stored schema JSON without executing source.
+  It removes defaulted fields from `required` and preserves versions and timestamps.
+  A second boot performs no writes.
 - CI: the E2E Contract job benchmarks each PR against main's last green run
   (`bun run e2e:bench`) in the job summary. The runbook explains how to read it and how to retire
   unit tests the suite already proves.
@@ -139,7 +139,7 @@ reviewers checked standards and spec, zero blockers. Outcome:
   states. Strict fails on a declared value never produced and on a database value outside the
   universe. Scenarios now park one row in each reachable terminal-ish state (offered, paused,
   backlog tasks; a waiting workflow run; aborted_limit and paused script runs).
-- Every scenario must belong to a flow; the manifest pins 67 flows covering all 92 scenarios.
+- Every scenario must belong to a flow. The manifest pins 68 flows covering all 93 scenarios.
 
 ## Fifth pass (same PR): per-engine roll-ups, retirement report, hermetic codex test
 

@@ -28,7 +28,7 @@ This file is the authoring guide.
 | Path | Role |
 |---|---|
 | `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, computes coverage, applies gates, writes reports. |
-| `sut.ts` | Spawns `bun run src/http.ts` with the test environment (`CAPABILITIES` = every group, integrations disabled, mocks wired). |
+| `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
 | `slack.ts` | `@desplega.ai/slack-mock` lifecycle. |
 | `mocks/llm.ts` | Mock inference host: OpenAI chat + responses + embeddings, SystemOne decisions and extraction. |
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
@@ -122,11 +122,15 @@ Rules, enforced by the registry, the boundary check, or review:
 | SystemOne decisions | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` answers each question. Script responses with `ctx.llm.setSystemOneResponder`. |
 | Cloudflare Clairic extraction | Deployment env `CLOUDFLARE_API_BASE_URL` = `ctx.llm.origin`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN`, node `provider: "cloudflare"` | The account path ends in `/ai/run/@cf/cloudflare/clairic`. The mock returns the Workers AI `{ success, errors, result }` envelope. Script responses with `ctx.llm.setSystemOneResponder`. |
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
+| Chat SDK Telegram | `CHAT_SDK_ENABLED=true`, deployment env `CHAT_SDK_API_URL_OVERRIDES`, and adapter config with fake credentials | `platform-chat-sdk` starts a loopback Telegram API. It checks tool discovery, permissions, channel mappings, messages, and thread history. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 
 `CLOUDFLARE_API_BASE_URL` is reserved for tests and cannot be stored in config.
 It accepts only a loopback HTTP origin when `NODE_ENV=test`.
 All other values use the production Cloudflare origin.
+
+Generate fake credentials separately from `ctx.nonce`.
+The secret scrubber remembers credentials and can redact reused markers in later scenarios.
 
 ## Coverage and the strict contract
 
@@ -134,7 +138,7 @@ After the scenarios, `coverage.ts`:
 
 1. Reads `GET /openapi.json` for the route universe and `GET /api/executor-types` for the
    node-type universe. The tool universe is `tools/list` for a worker registered before any
-   scenario, so `--only` cannot shrink it.
+   scenario, so `--only` cannot shrink it. `CHAT_SDK_ENABLED=true` includes the six Chat SDK tools.
 2. Matches every recorded HTTP call to its operation template and every MCP call to its
    tool. Node types come from `SELECT DISTINCT nodeType FROM workflow_run_steps`.
 3. Applies `coverage-manifest.json`: excluded items leave the denominator. An exclusion

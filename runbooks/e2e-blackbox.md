@@ -31,6 +31,7 @@ the mock cannot issue"), never "flaky" or "later".
 | SystemOne decisions | same mock, `/v1/systemone` | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
 | Cloudflare Clairic extraction | same mock, `/client/v4/accounts/<id>/ai/run/@cf/cloudflare/clairic`, with the Workers AI response envelope | deployment env `CLOUDFLARE_API_BASE_URL`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN` |
 | Slack | `@desplega.ai/slack-mock` over Socket Mode | `SLACK_*` from the mock |
+| Chat SDK Telegram | Loopback Telegram API in `platform-chat-sdk` | `CHAT_SDK_ENABLED=true`, `CHAT_SDK_API_URL_OVERRIDES`, and fake adapter credentials |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | none, disabled | `*_DISABLE=true` |
 | Harness workers | none in the contract run; `--harness` legs spawn real workers with real credentials | |
 
