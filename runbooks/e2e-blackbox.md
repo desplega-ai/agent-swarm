@@ -90,13 +90,10 @@ same machine, back to back.
 
 ### In CI
 
-On a pull request the **E2E Contract** job downloads main's last green `e2e-contract-results`
-artifact and appends a `bun run e2e:bench` table to the job summary: p50 and p95 per route
-group, before and after, with the delta. The step is informational. Read it like this:
-
-- p50 is stable to a hundredth of a millisecond between two runs of the same tree; a p50 move of
-  more than 20% on a group is a real change in server work per request.
-- p95 moves with runner load; treat a p95 move as noise unless p50 moved with it.
+The **E2E Contract** job uploads `e2e-results.json` in the `e2e-contract-results` artifact.
+Download two reports and compare them locally with `bun run e2e:bench`.
+Use runs from the same environment because timing depends on runner load.
+The job uses only `contents: read` permission.
 
 ## CI
 
