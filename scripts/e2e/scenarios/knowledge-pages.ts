@@ -271,9 +271,9 @@ export const knowledgePages: Scenario = {
         apiKey: null,
         headers: { Cookie: authedCookies },
       });
-      // FINDING: openapi documents 403 "Cookie does not match this page id", but a session for
-      // another page is ignored and the request answers 401.
-      expectStatus(response, [401], "a session cookie for a different page");
+      expectStatus(response, [403], "a session cookie for a different page");
+      response = await ctx.api("GET", `/p/${secondAuthed.id}`, { apiKey: null });
+      expectStatus(response, [401], "no session cookie at all");
       response = await ctx.api("POST", `/api/pages/${crypto.randomUUID()}/launch`);
       expectStatus(response, [404], "launch an unknown page");
 

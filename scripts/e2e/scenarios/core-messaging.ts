@@ -42,20 +42,17 @@ async function channels(
     name,
     description: `core messaging ${ctx.nonce}`,
   });
-  // FINDING: create-channel calls the async createChannel() without await, so the result carries
-  // `channel: {}` (a serialized Promise) instead of the row, and an insert failure would go
-  // unreported. The insert itself still lands, so read the row back from the database.
-  expect(
-    JSON.stringify(created.data.channel) === "{}",
-    `Expected the empty channel payload (FINDING), got ${JSON.stringify(created.data.channel)}`,
-  );
   expect(
     created.message === `Created channel "${name}".`,
     `create-channel message ${created.message}`,
   );
-  const landed = await pollUntil(() => channelRow(ctx, name) !== null, 5_000, 50);
-  expect(landed, "create-channel never inserted the channel");
   const row = channelRow(ctx, name);
+  expect(row !== null, "create-channel never inserted the channel");
+  const returned = asRecord(created.data.channel);
+  expect(
+    returned.id === row?.id && returned.name === name,
+    `create-channel returned the wrong channel: ${JSON.stringify(created.data.channel)}`,
+  );
   const channelId = String(row?.id);
   expect(
     UUID.test(channelId) && row?.type === "public" && row.createdBy === posterId,
@@ -71,8 +68,7 @@ async function channels(
     participants: [posterId, readerId],
   });
   expect(dm.message === `Created channel "${dmName}".`, `dm create message ${dm.message}`);
-  const dmLanded = await pollUntil(() => channelRow(ctx, dmName) !== null, 5_000, 50);
-  expect(dmLanded, "The dm channel was never inserted");
+  expect(channelRow(ctx, dmName) !== null, "The dm channel was never inserted");
   expect(channelRow(ctx, dmName)?.type === "dm", "create-channel ignored the dm type");
   expect(
     JSON.parse(channelRow(ctx, dmName)?.participants ?? "[]").includes(readerId),
@@ -135,14 +131,14 @@ async function mentionTrigger(ctx: ScenarioContext, readerId: string, channelId:
       100,
     );
     expect(woke, "The mentioned agent never received an unread_mentions trigger");
-    // Observed: mentionsCount reads 0 here because the inbox summary is recomputed after the
-    // claim has moved the mention to "processing". The claimed channel is what carries the signal.
     const trigger = asRecord(sim.triggers.find((entry) => entry.type === "unread_mentions"));
     expect(
-      typeof trigger.mentionsCount === "number" &&
-        Array.isArray(trigger.claimedChannels) &&
-        trigger.claimedChannels.includes(channelId),
-      `unread_mentions trigger ${JSON.stringify(trigger)}`,
+      Array.isArray(trigger.claimedChannels) && trigger.claimedChannels.includes(channelId),
+      `unread_mentions trigger lacks the claimed channel: ${JSON.stringify(trigger)}`,
+    );
+    expect(
+      typeof trigger.mentionsCount === "number" && trigger.mentionsCount >= 1,
+      `unread_mentions reports no mentions for a claimed channel: ${JSON.stringify(trigger)}`,
     );
     // The claim holds the mentions: a second poll must not repeat the trigger.
     const count = sim.triggers.filter((entry) => entry.type === "unread_mentions").length;

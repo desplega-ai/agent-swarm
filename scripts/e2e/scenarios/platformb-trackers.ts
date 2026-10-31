@@ -357,10 +357,9 @@ export const platformbTrackers: Scenario = {
         "sync status after unlink",
       );
       expect(outcome.data.count === 0, "Unlinked mapping still listed");
-      // FINDING: removing a mapping that is already gone answers success ("Removed tracker sync
-      // mapping ..."): the DELETE matches no row and the tool still reports it removed one.
-      expectToolOk(
+      expectToolError(
         await callTool(connection, "tracker-unlink", { syncId }),
+        `No tracker mapping ${syncId}`,
         "tracker-unlink of a removed mapping",
       );
       syncIds.length = 0;

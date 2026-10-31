@@ -46,7 +46,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
       }
 
       try {
-        const channel = createChannel(name, {
+        const channel = await createChannel(name, {
           description,
           type: type ?? "public",
           createdBy: requestInfo.agentId,

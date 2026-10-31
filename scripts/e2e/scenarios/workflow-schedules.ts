@@ -233,13 +233,14 @@ export const workflowSchedules: Scenario = {
         "a disabled schedule has no next run",
       );
 
-      // FINDING: a recurring schedule needs a cron or an interval, and the create-schedule
-      // tool answers that with a clear error. The REST create route has no such check, so the
-      // insert fails and the route answers 500 "Failed to create schedule" instead of 400.
       const noTiming = await ctx.api("POST", "/api/schedules", {
         body: { name: name("notiming"), taskTemplate: "x" },
       });
-      expectStatus(noTiming, [500], "a recurring schedule with no timing");
+      expectStatus(noTiming, [400], "a recurring schedule with no timing");
+      expect(
+        String(asRecord(noTiming.json).error).includes("cronExpression"),
+        "the refusal names the missing timing fields",
+      );
       const noTimingRows = ctx.db.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM scheduled_tasks WHERE name = ?",
         [name("notiming")],

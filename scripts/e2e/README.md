@@ -119,7 +119,7 @@ Rules, enforced by the registry, the boundary check, or review:
 | OpenAI-compatible chat (`workflow-llm`, `raw-llm`, memory rater, session summaries) | `OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY` | `/v1/chat/completions` and `/v1/responses`. Honors `response_format` / `text.format` JSON schemas (synthesizes a conforming object) and forced tool calls. Scenario can script the answer with `ctx.llm.setChatResponder`. |
 | Embeddings (memory, script search) | `EMBEDDING_API_BASE_URL` + `EMBEDDING_API_KEY` | `/v1/embeddings`, deterministic unit vectors; equal text gives equal vectors. |
 | Key probes | `OPENROUTER_BASE_URL` | `/v1/key`, `/v1/models` answer 200. |
-| SystemOne decisions and extraction | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` answers every question with a confident default. Script it with `ctx.llm.setSystemOneResponder`. |
+| SystemOne decisions and extraction | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` (decisions) and `/v1/clairic` (extraction) answer every question or field with a confident default. Script both with `ctx.llm.setSystemOneResponder`. |
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 

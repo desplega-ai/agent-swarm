@@ -538,7 +538,7 @@ describe("system-one-extraction config", () => {
   test("only Clairic models and extraction hosts are accepted", () => {
     expect(parse({ model: "clef" }).success).toBe(false);
     expect(parse({ provider: "typesafe" }).success).toBe(false);
-    expect(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).toEqual(["cloudflare"]);
+    expect(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).toEqual(["laya", "cloudflare"]);
     // The decision hosts are unchanged.
     expect(SYSTEM_ONE_PROVIDER_IDS).toEqual([
       "typesafe",

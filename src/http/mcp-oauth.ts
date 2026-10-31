@@ -239,6 +239,10 @@ const metadataRoute = route({
     },
     400: { description: "MCP has no URL / invalid transport" },
     404: { description: "MCP server not found" },
+    502: {
+      description:
+        "Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard",
+    },
   },
 });
 
@@ -347,6 +351,8 @@ const disconnectRoute = route({
   path: "/api/mcp-oauth/{mcpServerId}",
   pattern: ["api", "mcp-oauth", null],
   summary: "Revoke and delete the OAuth token for an MCP server",
+  description:
+    "Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.",
   tags: ["MCP OAuth"],
   auth: { apiKey: true },
   params: z.object({ mcpServerId: z.string() }),

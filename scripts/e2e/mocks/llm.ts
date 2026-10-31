@@ -6,8 +6,8 @@
 //     OPENROUTER_BASE_URL + OPENROUTER_API_KEY (workflow-llm, raw-llm, memory rater,
 //     session summaries, key probes) and EMBEDDING_API_BASE_URL + EMBEDDING_API_KEY
 //     (memory embeddings).
-//   - SystemOne decisions + extraction (`/v1/systemone`), reached through the `laya`
-//     provider's LAYA_URL global config row.
+//   - SystemOne decisions (`/v1/systemone`) + extraction (`/v1/clairic`), reached through the
+//     `laya` provider's LAYA_URL global config row.
 //
 // Every request is journaled so scenarios can assert what the server sent. Responses
 // are deterministic by default and scriptable per scenario through the responder hooks.
@@ -459,7 +459,7 @@ export async function startMockLlm() {
               : spec.type === "date"
                 ? "2026-01-01"
                 : "e2e";
-        answers[id] = { value, confidence: 0.9, spans: [] };
+        answers[id] = { type: spec.type, value, confidence: 0.9, spans: [] };
       }
       return { model, answers, truncated: false, usage };
     }
@@ -508,7 +508,7 @@ export async function startMockLlm() {
         if (method === "GET" && /\/(key|auth\/key)$/.test(path)) {
           return json(200, { data: { label: "e2e", usage: 0, limit: null, is_free_tier: false } });
         }
-        if (method === "POST" && /\/systemone$/.test(path)) {
+        if (method === "POST" && /\/(systemone|clairic)$/.test(path)) {
           const record = asRecord(body) ?? {};
           const answer = systemOneResponder
             ? await systemOneResponder(record)

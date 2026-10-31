@@ -90,9 +90,6 @@ export const platformbRepos: Scenario = {
       expect(urlRepo.defaultBranch === "main", "Default branch is not main");
       expect(urlRepo.autoClone === true, "autoClone does not default to true");
       expect(urlRepo.guidelines === null, "A repo created without guidelines has guidelines");
-      // FINDING: SwarmRepoSchema documents `hooks` as defaulting to { enabled: false } (and the
-      // update-repo tool text calls { enabled: true } an opt-in), but createSwarmRepo stores
-      // { enabled: true } when the body omits hooks.
       expect(asRecord(urlRepo.hooks).enabled === true, "Default hooks differ from enabled: true");
       expect(
         typeof urlRepo.createdAt === "string" && typeof urlRepo.lastUpdatedAt === "string",

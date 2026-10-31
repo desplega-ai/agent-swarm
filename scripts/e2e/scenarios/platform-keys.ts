@@ -920,9 +920,8 @@ export const platformCodexAccounts: Scenario = {
       );
 
       // ── device login ───────────────────────────────────────────────────────
-      // A started login calls auth.openai.com, which the suite cannot mock (the URL is fixed in
-      // the server), so a run never starts one: only the checks that precede the upstream call
-      // run here. The 200, 409 and 502 outcomes of the start route stay unverified.
+      // The checks that precede the upstream call run here. The start, poll and approved-login
+      // outcomes run against a loopback stand-in in platform-codex-device-login.
       expectStatus(
         await ctx.api("POST", "/api/codex-oauth/device", { apiKey: null, body: {} }),
         [401],

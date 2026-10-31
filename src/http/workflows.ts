@@ -430,6 +430,7 @@ const retryWorkflowRunRoute = route({
   responses: {
     200: { description: "Retry started", schema: SuccessResponseSchema },
     400: { description: "Cannot retry" },
+    404: { description: "Run not found" },
   },
 });
 
@@ -788,13 +789,12 @@ export async function handleWorkflows(
         res.end();
         return true;
       }
-      jsonError(
-        res,
-        result.reason === "patch"
-          ? result.errors.join("; ")
-          : `Invalid definition: ${result.errors.join("; ")}`,
-        400,
-      );
+      // The only patch operation here is one update, so a patch error means the node is absent.
+      if (result.reason === "patch") {
+        jsonError(res, result.errors.join("; "), 404);
+        return true;
+      }
+      jsonError(res, `Invalid definition: ${result.errors.join("; ")}`, 400);
       return true;
     }
     patchWorkflowNodeRoute.respond(res, 200, await withSaveWarnings(result.workflow));
@@ -1114,6 +1114,10 @@ export async function handleWorkflows(
   if (retryWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await retryWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!(await getWorkflowRunSummary(parsed.params.id))) {
+      jsonError(res, `Workflow run not found: ${parsed.params.id}`, 404);
+      return true;
+    }
     try {
       await retryFailedRun(parsed.params.id, getExecutorRegistry());
     } catch (err) {

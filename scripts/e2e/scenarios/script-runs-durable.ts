@@ -123,6 +123,10 @@ export const scriptRunsDurable: Scenario = {
         typeof finished.run.lastHeartbeatAt === "string",
       "the run row lost its identity, kind, finish time or heartbeat",
     );
+    expect(
+      /T.*Z$/.test(String(finished.run.startedAt)) && /T.*Z$/.test(String(finished.run.finishedAt)),
+      `startedAt and finishedAt must both be ISO 8601: ${String(finished.run.startedAt)} / ${String(finished.run.finishedAt)}`,
+    );
     const output = asRecord(finished.run.output);
     expect(output.runId === runId && output.runAgent === launcherId, "ctx.run is wrong");
     const llm = asRecord(output.llm);

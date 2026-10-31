@@ -255,15 +255,19 @@ export const platformbModels: Scenario = {
         "Custom-model profile lost its flag",
       );
 
-      // FINDING: the route says `model` must run on the profile's harness, and a Claude catalog id
-      // on codex is a 400 (above), but a Claude CLI shortname ("opus") on codex is stored: the
-      // shortname check is not harness aware.
-      const shortnameName = `e2e-prof-shortname-${ctx.nonce}`;
-      profileNames.push(shortnameName);
+      // A Claude CLI shortname is the same harness mismatch as the catalog id behind it.
       response = await ctx.api("POST", "/api/model-profiles", {
-        body: { name: shortnameName, harness: "codex", model: "opus" },
+        body: {
+          name: `e2e-prof-shortname-${ctx.nonce}`,
+          harness: "codex",
+          model: "opus",
+        },
       });
-      expectStatus(response, [201], "create a codex profile with the Claude shortname opus");
+      expectStatus(response, [400], "reject the Claude shortname opus on the codex harness");
+      expect(
+        String(asRecord(response.json).error).includes("does not run on the codex harness"),
+        `Shortname mismatch error is ${String(asRecord(response.json).error)}`,
+      );
 
       response = await ctx.api("PATCH", `/api/model-profiles/${profileName}`, {
         body: { model: "sonnet", effort: null, description: "changed" },
@@ -373,7 +377,7 @@ export const platformbModels: Scenario = {
         [200],
         "cancel the holder task",
       );
-      for (const name of [profileName, customName, shortnameName]) {
+      for (const name of [profileName, customName]) {
         response = await ctx.api("DELETE", `/api/model-profiles/${name}`);
         expectStatus(response, [200], `delete profile ${name}`);
         expect(asRecord(response.json).deleted === true, "Profile delete did not say deleted");
@@ -410,8 +414,6 @@ export const platformbModels: Scenario = {
           `Catalog provider ${id} is missing or empty`,
         );
       }
-      // FINDING: the route description says the catalog serves only openrouter, anthropic, openai
-      // and amazon-bedrock, but the live payload also carries other providers (opencode, vercel...).
 
       response = await ctx.api("GET", "/api/models-catalog/tiers");
       expectStatus(response, [200], "preview model tiers");
