@@ -6,6 +6,7 @@ import type { ParsedMessage } from "../../../logs-parser";
 // review-ack.test.tsx). Utils map to the real module; the log viewer (a deep
 // `@/` graph) is stubbed down to the tool classification the rows need.
 mock.module("@/lib/utils", () => require("../../../lib/utils"));
+mock.module("@/lib/auto-review", () => require("../../../lib/auto-review"));
 mock.module("@/components/shared/session-log-viewer", () => ({
   classifyTool: (name: string) => ({
     kind: name === "Bash" ? "bash" : "file",
@@ -18,6 +19,8 @@ mock.module("@/components/shared/session-log-viewer", () => ({
 
 const {
   buildTranscriptRows,
+  childKind,
+  rowsAfterEnd,
   foldedTurnRows,
   pagedRows,
   summarizeWork,
@@ -53,6 +56,7 @@ function tool(name: string, detail = "", status: "done" | "error" | "running" = 
     title: name,
     detail,
     status,
+    input: {},
   };
 }
 
@@ -79,6 +83,13 @@ describe("buildTranscriptRows", () => {
       "done",
       "error",
     ]);
+    // The details panel's data: the raw input, the result's text, and the
+    // time from the call's log line to the result's (one second apart here).
+    expect(work.entries[1]).toMatchObject({
+      input: { command: "ls" },
+      output: "boom",
+      durationMs: 1000,
+    });
   });
 
   test("leaves the harness's user turns and sub-agent messages out", () => {
@@ -95,7 +106,8 @@ describe("buildTranscriptRows", () => {
     const rows = buildTranscriptRows({
       messages: [msg("assistant", [{ type: "tool_use", id: "t9", name: "Grep", input: {} }])],
     });
-    expect(rows[0]?.kind === "work" && rows[0].entries[0]).toMatchObject({ status: "running" });
+    const entry = rows[0]?.kind === "work" ? rows[0].entries[0] : undefined;
+    expect(entry).toMatchObject({ status: "running", output: undefined, durationMs: undefined });
   });
 
   test("without messages, only work and steering remain; steering ends a run", () => {
@@ -311,7 +323,7 @@ describe("a long session with delegations", () => {
 
   test("a delegated task is a row at the time it was created", () => {
     expect(rows.length).toBe(1203);
-    const delegations = rows.filter((row) => row.kind === "delegation");
+    const delegations = rows.filter((row) => row.kind === "child");
     expect(delegations.map((row) => row.id)).toEqual(["child-c1", "child-c2", "child-c3"]);
     const c2 = rows.findIndex((row) => row.id === "child-c2");
     expect(rows[c2 - 1]).toMatchObject({ kind: "assistant", text: "Step 300." });
@@ -330,11 +342,38 @@ describe("a long session with delegations", () => {
 
   test("the closed fold keeps the delegations and the last message", () => {
     const folded = foldedTurnRows(rows, false);
-    expect(folded.map((row) => row.kind)).toEqual([
-      "delegation",
-      "delegation",
-      "delegation",
-      "assistant",
-    ]);
+    expect(folded.map((row) => row.kind)).toEqual(["child", "child", "child", "assistant"]);
+  });
+});
+
+describe("tasks this one started", () => {
+  const kindOf = (taskType: string | undefined, source: AgentTask["source"]) =>
+    childKind({ taskType, source });
+
+  test("each kind comes from the task's type and source, as the server sets them", () => {
+    expect(kindOf("resume", "system")).toBe("resume");
+    expect(kindOf("resume", "ui")).toBe("resume");
+    expect(kindOf("deferred", "schedule")).toBe("deferred");
+    expect(kindOf("follow-up", "system")).toBe("notify");
+    expect(kindOf(undefined, "ui")).toBe("person");
+    expect(kindOf("follow-up", "slack")).toBe("person");
+    expect(kindOf("research", "mcp")).toBe("delegation");
+    expect(kindOf("follow-up", "mcp")).toBe("delegation");
+  });
+
+  test("a task started after the run ended comes after it, in time order", () => {
+    const task = (id: string, createdAt: string) =>
+      ({ id, task: id, status: "pending", createdAt, source: "ui" }) as AgentTask;
+    const rows = buildTranscriptRows({
+      messages: [msg("assistant", [{ type: "text", text: "Hi Taras." }])],
+      children: [
+        { task: task("during", "2026-10-30T09:00:00Z"), agentName: "Worker" },
+        { task: task("later", "2026-10-31T00:09:34Z"), agentName: "Lead" },
+      ],
+    });
+    const { during, after } = rowsAfterEnd(rows, "2026-10-30T13:51:00Z");
+    expect(during.map((row) => row.id)).toEqual(["child-during", expect.stringMatching(/-0$/)]);
+    expect(after.map((row) => row.id)).toEqual(["child-later"]);
+    expect(rowsAfterEnd(rows, undefined)).toEqual({ during: rows, after: [] });
   });
 });

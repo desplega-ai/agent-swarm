@@ -74,7 +74,8 @@ export function InternalLine({ task }: { task: AgentTask }) {
         />
       ) : null}
       <span className="mt-0.5 shrink-0 pl-2 @max-[30rem]/turns:hidden">
-        <MessageTime at={task.createdAt} />
+        {/* Inside the row button: the row takes focus, the time only hovers. */}
+        <MessageTime at={task.createdAt} focusable={false} />
       </span>
     </>
   );

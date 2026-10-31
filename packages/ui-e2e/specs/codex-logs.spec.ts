@@ -216,7 +216,8 @@ test("a finished task's transcript folds its run behind the last message", async
   await page.goto(`/tasks/${seed!.tasks.completed}`);
 
   const visible = { visible: true } as const;
-  await expect(page.getByRole("radio", { name: "Transcript" }).filter(visible)).toBeChecked();
+  // Every task opens on its transcript. The raw log is a toggle in the More actions menu.
+  await expect(page.getByRole("region", { name: "Transcript" }).filter(visible)).toBeVisible();
   // The agent's last message stays in view; the rest of the run is folded.
   await expect(page.getByText(logs.secondMessage, { exact: true }).filter(visible)).toHaveCount(1);
   await expect(page.getByText(logs.firstMessage, { exact: true }).filter(visible)).toHaveCount(0);
@@ -229,10 +230,11 @@ test("a finished task's transcript folds its run behind the last message", async
   await expect(page.getByText(/e2e-mcp\.inspect/).filter(visible)).toHaveCount(1);
 
   // The raw log shows every event, and the pick survives a reload.
-  await page.getByRole("radio", { name: "Raw log" }).filter(visible).click();
+  await page.getByRole("button", { name: "More actions" }).filter(visible).click();
+  await page.getByRole("menuitem", { name: "Show raw log" }).click();
   await expect(page).toHaveURL(/[?&]log=raw/);
   await page.reload();
-  await expect(page.getByRole("radio", { name: "Raw log" }).filter(visible)).toBeChecked();
+  await expect(page.getByRole("region", { name: "Raw log" }).filter(visible)).toBeVisible();
   await expect(
     page.getByRole("button", { name: /e2e-mcp\.inspect/ }).filter(visible),
   ).toBeVisible();

@@ -20,9 +20,11 @@
  * `pending → in_progress` is enough). A draft owned by the outgoing child
  * would die with its unmount.
  *
- * The send button names the mode, "Steer" or "Follow up". With `showTarget`
- * the placeholder names the task the message goes to (Sessions, where the
- * target is not the page's own task): "Steer #<id> Fix the parser…".
+ * The send button is an arrow icon named for the mode, "Steer" or "Follow up"
+ * (its aria-label and tooltip). The placeholder stays short ("Follow up…",
+ * "Steer the task…"). With `showTarget` the routing label's tooltip names the
+ * task the message goes to (Sessions, where the target is not the page's own
+ * task): "Steers #<id> Fix the parser…".
  *
  * A follow-up with files is all or nothing. It is created as a draft, which
  * no worker claims. If any file fails to upload, the composer cancels the
@@ -78,7 +80,10 @@ export interface TaskComposerProps {
   followUpAgentId?: string;
   /** Follow-up placeholder. The steer box keeps its own. */
   placeholder?: string;
-  /** Name the target task in the placeholder ("Steer #<id> Fix the parser…"). */
+  /**
+   * Name the target task in the routing label's tooltip ("Steers #<id> Fix
+   * the parser…").
+   */
   showTarget?: boolean;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
@@ -122,26 +127,32 @@ export function composerMode(
     : "steer";
 }
 
-/** The send button's label: what a send does. */
+/** The send button's name (its aria-label and tooltip): what a send does. */
 export const COMPOSER_SEND_LABEL: Record<ComposerMode, string> = {
   steer: "Steer",
   "follow-up": "Follow up",
 };
 
-/** A target title longer than this is cut, so the placeholder stays one line. */
-const PLACEHOLDER_TITLE_CHARS = 60;
+/** The verb that names the target in the routing label's tooltip. */
+const TARGET_VERB: Record<ComposerMode, string> = {
+  steer: "Steers",
+  "follow-up": "Follows up",
+};
 
-/** The placeholder that names the target: "Steer #<id> Fix the parser…". */
-export function composerTargetPlaceholder(mode: ComposerMode, target: AgentTask): string {
+/** A target title longer than this is cut, so the tooltip stays short. */
+const TARGET_TITLE_CHARS = 60;
+
+/** The routing label's tooltip that names the target: "Steers #<id> Fix the parser…". */
+export function composerTargetLabel(mode: ComposerMode, target: AgentTask): string {
   const full = taskListTitle(target);
   // A cut title ends on a whole word.
   const cut =
-    full.length > PLACEHOLDER_TITLE_CHARS
-      ? full.slice(0, full.lastIndexOf(" ", PLACEHOLDER_TITLE_CHARS)) ||
-        full.slice(0, PLACEHOLDER_TITLE_CHARS)
+    full.length > TARGET_TITLE_CHARS
+      ? full.slice(0, full.lastIndexOf(" ", TARGET_TITLE_CHARS)) ||
+        full.slice(0, TARGET_TITLE_CHARS)
       : full;
   const title = cut.trimEnd().replace(/[.…:;,!?]+$/, "");
-  return `${COMPOSER_SEND_LABEL[mode]} #${target.id.slice(0, 8)} ${title}…`;
+  return `${TARGET_VERB[mode]} #${target.id.slice(0, 8)} ${title}…`;
 }
 
 const DRAFT_CALL_ATTEMPTS = 3;
@@ -221,7 +232,7 @@ export function TaskComposer({
   canSteer,
   rootTaskId,
   followUpAgentId,
-  placeholder = "Follow up on this task…",
+  placeholder = "Follow up…",
   showTarget = false,
   routeLabel,
   onCreated,
@@ -402,8 +413,7 @@ export function TaskComposer({
   const mode = composerMode(steerTarget);
   const sendLabel = COMPOSER_SEND_LABEL[mode];
   const shownTarget = showTarget ? (steerTarget ?? targetTask) : null;
-  const targetPlaceholder =
-    userId && shownTarget ? composerTargetPlaceholder(mode, shownTarget) : undefined;
+  const routeDetail = shownTarget ? composerTargetLabel(mode, shownTarget) : undefined;
 
   if (steerTarget) {
     return (
@@ -418,7 +428,7 @@ export function TaskComposer({
         fullWidth={fullWidth}
         bar={bar}
         sendLabel={sendLabel}
-        placeholder={targetPlaceholder}
+        routeDetail={routeDetail}
         className={className}
       />
     );
@@ -434,13 +444,11 @@ export function TaskComposer({
       isError={createTask.isError}
       errorMessage={createTask.error instanceof Error ? createTask.error.message : "Failed to send"}
       pendingLabel={pendingLabel}
-      placeholder={
-        userId ? (targetPlaceholder ?? placeholder) : "Pick an identity above to send messages."
-      }
+      placeholder={userId ? placeholder : "Pick an identity above to send messages."}
       disabled={!userId}
       routeLabel={routeLabel}
+      routeDetail={routeDetail}
       sendLabel={sendLabel}
-      labelledSend
       attachments={attachments}
       onAttachmentsChange={(files) => {
         setAttachments(files);

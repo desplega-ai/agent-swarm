@@ -19,15 +19,16 @@
  *
  * Polling cost is deliberately bounded: the transcript and steering fetches
  * are enabled only for tasks that are still active, or terminal tasks the
- * user has explicitly expanded — a long session's historical rows never fire
- * a request.
+ * user has explicitly expanded. A caller that passes the `task` row it holds
+ * also skips the task fetch until then, so a long session's historical rows
+ * never fire a request.
  */
 
 import { useMemo, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useTask, useTaskSessionLogs, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
-import type { AgentTaskStatus } from "@/api/types";
+import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { Transcript } from "@/components/shared/transcript/transcript";
 import {
   buildTranscriptRows,
@@ -49,16 +50,21 @@ const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
 export interface ChainOfThoughtProps {
   taskId: string;
   status: AgentTaskStatus;
+  /** The task row the caller already has (a session chain row): it labels a closed fold. */
+  task?: AgentTask;
   className?: string;
 }
 
-export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProps) {
+export function ChainOfThought({ taskId, status, task: known, className }: ChainOfThoughtProps) {
   const isActive = ACTIVE_STATUSES.has(status);
-  // Poll while the task is active so new activity rows flow in. Stop polling
-  // once the task reaches a terminal state.
-  const { data: task } = useTask(taskId, { refetchInterval: isActive ? 4000 : false });
-
   const [expanded, setExpanded] = useState(false);
+  // Poll while the task is active so new activity rows flow in. Stop polling
+  // once the task reaches a terminal state. A closed fold over a known row
+  // needs no fetch (an empty id disables the query).
+  const { data: fetched } = useTask(known && !isActive && !expanded ? "" : taskId, {
+    refetchInterval: isActive ? 4000 : false,
+  });
+  const task = fetched ?? known;
 
   // Same gate as everywhere else. Both hooks are react-query-cached globals
   // (`/health` version + `/stats`), so calling them per timeline row costs one
@@ -80,11 +86,11 @@ export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProp
     () =>
       buildTranscriptRows({
         messages: parseSessionLogs(sessionLogs ?? []),
-        logs: task?.logs,
+        logs: fetched?.logs,
         steering: steeringMessages,
         withMessages: false,
       }),
-    [sessionLogs, task?.logs, steeringMessages],
+    [sessionLogs, fetched?.logs, steeringMessages],
   );
 
   if (!isActive && !task) return null;

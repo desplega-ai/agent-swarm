@@ -393,6 +393,8 @@ export interface AgentTask {
   source: AgentTaskSource;
   routingReason?: RoutingReason;
   routingSource?: "declared" | "engine_default";
+  /** Set by `defer-task`: the task ended waiting on something else. */
+  deferredAt?: string;
   routingNote?: string;
   taskType?: string;
   tags: string[];
@@ -3377,6 +3379,8 @@ export interface StatusIdentity {
   hide_cloud_promo: boolean;
   /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
   org_id: string | null;
+  /** The swarm's public dashboard URL (`APP_URL`, else `DASHBOARD_URL`). Null when unset, absent on older APIs. */
+  dashboard_url?: string | null;
 }
 
 /** Effective telemetry opt-out state (`ANONYMIZED_TELEMETRY`) as reported by the API. */

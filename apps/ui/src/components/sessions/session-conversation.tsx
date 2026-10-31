@@ -237,7 +237,6 @@ export function SessionConversation({
             targetTask={latestLeafTask}
             canSteer={canSteer}
             showTarget
-            placeholder="Continue the session…"
             renderActions={renderComposerActions}
             bar={composerLayout?.bar}
             className={composerLayout?.className}

@@ -1695,6 +1695,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_deferred_wait_woke",
   // The lead follow-up was skipped because the woken waiter already carries the result
   "task_follow_up_suppressed",
+  // Shadow follow-up gate: what a verifier said about a gated run (never skips the follow-up)
+  "task_follow_up_gate_shadow",
   // store-progress refused a completion once because its citations were inaccurate
   "task_citation_check_refused",
   "channel_message",
