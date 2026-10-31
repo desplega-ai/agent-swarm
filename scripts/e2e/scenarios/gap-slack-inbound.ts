@@ -40,6 +40,9 @@ export const gapSlackInbound: Scenario = {
 async function gapRun(ctx: ScenarioContext): Promise<void> {
   await registerLead(ctx, "e2e-lead-gap-inbound");
   const bot = ctx.slack.bot.userId;
+  // Own user: the Slack handler rate-limits each user to 10 mentions a minute, and the other gap
+  // scenarios post as alice just before this one.
+  const poster = ctx.slack.addUser({ name: `gapinbound${ctx.nonce}` });
   const mention = `<@${bot}>`;
   const richText = (t: string) => ({
     type: "rich_text",
@@ -57,7 +60,7 @@ async function gapRun(ctx: ScenarioContext): Promise<void> {
   // --- table block ---
   const withTable = await ctx.slack.postMessage({
     channel: "general",
-    user: "alice",
+    user: poster.id,
     text: `${mention} summarise the sales`,
     blocks: [
       richText(" summarise the sales"),
@@ -83,7 +86,7 @@ async function gapRun(ctx: ScenarioContext): Promise<void> {
   // Negative control: same sentence without a table block carries no table.
   const noTable = await ctx.slack.postMessage({
     channel: "general",
-    user: "alice",
+    user: poster.id,
     text: `${mention} summarise the sales`,
     blocks: [richText(" summarise the sales")],
   });
@@ -96,7 +99,7 @@ async function gapRun(ctx: ScenarioContext): Promise<void> {
   // --- shared-message files ---
   const shared = await ctx.slack.postMessage({
     channel: "general",
-    user: "alice",
+    user: poster.id,
     text: `${mention} look at this forwarded image`,
     attachments: [
       {
@@ -132,7 +135,7 @@ async function gapRun(ctx: ScenarioContext): Promise<void> {
   // Negative control: attachment without files -> no task attachments.
   const plain = await ctx.slack.postMessage({
     channel: "general",
-    user: "alice",
+    user: poster.id,
     text: `${mention} look at this link`,
     attachments: [{ is_share: true, text: "original message, no file" }],
   });
@@ -146,7 +149,7 @@ async function gapRun(ctx: ScenarioContext): Promise<void> {
   // Distinct bytes on top-level and shared files: both are kept (identical bytes dedupe by sha256).
   const both = await ctx.slack.postMessage({
     channel: "general",
-    user: "alice",
+    user: poster.id,
     text: `${mention} two files`,
     files: [{ name: "top.png", content: PNG, mimetype: "image/png" }],
     attachments: [
