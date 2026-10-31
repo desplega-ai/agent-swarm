@@ -81,6 +81,16 @@ The suite runs with a fresh database and loopback networking, so the numbers are
 regression signal for server work per request, not a capacity figure. Run both sides on the
 same machine, back to back.
 
+### In CI
+
+On a pull request the **E2E Contract** job downloads main's last green `e2e-contract-results`
+artifact and appends a `bun run e2e:bench` table to the job summary: p50 and p95 per route
+group, before and after, with the delta. The step is informational. Read it like this:
+
+- p50 is stable to a hundredth of a millisecond between two runs of the same tree; a p50 move of
+  more than 20% on a group is a real change in server work per request.
+- p95 moves with runner load; treat a p95 move as noise unless p50 moved with it.
+
 ## CI
 
 `.github/workflows/merge-gate.yml` job **E2E Contract** runs `check-e2e-boundary.sh`,
@@ -93,3 +103,27 @@ The strict suite is the outer contract. Unit tests remain for logic that the bla
 reach with a deterministic input (parsers, scrubbers, scheduling math, migrations against
 fixtures). When a unit test only re-checks what a scenario already proves end to end, it is a
 candidate for deletion.
+
+### Retiring unit tests
+
+Retire in batches, one domain per PR, and only after the strict suite has been green on `main`
+for that domain. The method:
+
+1. Pick a unit test file. Find the flows in `coverage-manifest.json` that cover its subject
+   (`grep -l <route or tool> scripts/e2e/scenarios/*.ts`).
+2. For each `test(...)` in the file, ask: does a scenario assert this behaviour through the API
+   with a persisted effect? If yes, the test is redundant. If the test pins an internal detail
+   (a helper's return value, a SQL shape, an error class) that no API contract exposes, it stays.
+3. Delete the redundant tests, run `bun run e2e --strict` and the remaining unit tests of the
+   area, and note the deleted names in the PR so a reviewer can object.
+
+First batch (highest overlap; every one boots the real server and drives it over HTTP or MCP,
+which is exactly what the scenarios do): `src/tests/http-api-integration.test.ts`,
+`events-http.test.ts`, `agentfs-proxy.test.ts`, `kv-page-proxy.test.ts`, `page-proxy.test.ts`,
+`page-proxy-authed.test.ts`, `page-guest-session.test.ts`, `memory-rate-endpoint.test.ts`,
+`memory-edges.test.ts`, `realtime-transport.test.ts`, `rbac-wire-e2e.test.ts`,
+`scripts-mcp-e2e.test.ts`, `script-workflows-runtime-e2e.test.ts`, `workflow-e2e.test.ts`.
+
+Keep, whatever the overlap: migration tests, `secret-scrubber`, `db-client` transaction
+semantics, the model catalog and pricing math, prompt-template rendering, and anything that
+runs the harness adapters against fake providers (`claude-routes-e2e`, `fake-codex-app-server`).
