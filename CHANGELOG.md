@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.6] - 2026-10-31
+
+### Added
+- Slack: people can type `!leave` in a thread to make the swarm stop following it, with no agent turn needed (#2585).
+- Runtime pools: Docker pools can share one optional persistent cache across their runtimes, configured through the pool API (#2577).
+- Script runs: `ctx.step.agentTask` now applies the same follow-up re-delegation guard as `send-task`; migration 266 records the launching session's task (#2596).
+- UI: the Sessions page and task details share one transcript, with tool calls summarized per run and a live working timer (#2587).
+- UI: worker step rows, inline tool details and a single task details card; dev-only in-page review notes behind `DEV_NOTES=1` (#2595).
+
+### Changed
+- Performance: synchronous SQLite work (session visibility, task counts, memory GC and FTS reconcile) yields the API event loop instead of starving it (#2588).
+- Entrypoint: API readiness polling moved from shell into Bun, with a per-request timeout (#2581).
+- Worker image: claude-code 2.1.314, codex 0.166.0, opencode 2.2.3, amp, kiro 2.36.0, fx 0.0.16 and ACP SDK 2.2.0 (#2583, #2591).
+
+### Fixed
+- send-task: follow-up sessions can dispatch distinct next steps; the guard only blocks re-sending the same work (#2589).
+- Script runs: a step's `parentTaskId` now requires `task.parent.attach`, so a script cannot parent a step on a foreign task (#2597).
+- Runtime pools: built-in boxd environment settings are honored (#2594).
+- Task failure audit: model output limits are classified separately from credential errors (#2592).
+- UI: a follow-up composer reads the promoted task's status before reporting that it started (#2590).
+
 ## [2.7.5] - 2026-10-30
 
 ### Added
