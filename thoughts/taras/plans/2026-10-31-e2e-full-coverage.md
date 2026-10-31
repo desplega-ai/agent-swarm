@@ -1,7 +1,7 @@
 ---
 date: 2026-10-31T01:10:00Z
 topic: "Black-box E2E: full coverage of API, MCP, workflow engine, script engine"
-status: in-progress
+status: done
 branch: t3/267aec54
 ---
 
@@ -58,7 +58,7 @@ as a performance benchmark base.
 - [x] Phase 2: scenarios, six domains, 91 scenarios, commits 998c605dc..cf647701e (authors: Sonnet 5.5, resumed after the weekly limit reset at 08:00 BCN)
 - [x] Phase 3: docs (scripts/e2e/README.md, runbooks/e2e-blackbox.md, LOCAL_TESTING.md,
   runbooks/testing.md, runbooks/ci.md, CLAUDE.md pointer) — commit d859b19db
-- [ ] Phase 4: full strict run green, lint, tsc, PR (in progress 2026-10-31 11:40 BCN)
+- [x] Phase 4: full strict run green (91 pass, 467/467, 164/164, 15/15, 49 flows, 250 s), lint + tsc clean, PR #2605 opened 2026-10-31 12:10 BCN
 
 ## Scenario domains (Phase 2)
 
@@ -109,4 +109,4 @@ changes behaviour an existing scenario already pins:
   scenario makes it time out. extensions now cancels its leftover task; keep that pattern.
 
 Product findings the suite surfaced (asserted as observed with `// FINDING` comments):
-see `/tmp/e2e-brief/findings-accumulated.md` while it exists, and the PR description.
+see the PR description of #2605 (34 findings grouped by domain).
