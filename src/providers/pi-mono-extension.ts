@@ -15,6 +15,15 @@ import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import {
+  BUILTIN_TOOL_GROUP,
+  HookCompositionReporter,
+  type HookToolGroup,
+  measureHookRequest,
+  postHookComposition,
+  SWARM_TOOL_GROUP,
+  splitProviderPayload,
+} from "./request-composition-hook";
 
 export interface SwarmHooksConfig {
   apiUrl: string;
@@ -33,6 +42,11 @@ export interface SwarmHooksConfig {
    * pi's MCP extension on `session_start`, which connects them.
    */
   mcpServers?: Record<string, McpServerConfig>;
+  /**
+   * The runner's session id. Keys the harness-hook request composition
+   * manifest to the worker's manifest of the same session; unset, none posts.
+   */
+  runnerSessionId?: string;
 }
 
 /** Standard headers for swarm API requests */
@@ -470,6 +484,25 @@ function sendNudge(pi: Parameters<ExtensionFactory>[0], text: string): void {
   });
 }
 
+/** Tool name → schema group: swarm tools, other MCP servers, pi built-ins. */
+export function piToolGroups(
+  tools: ReadonlyArray<{ name: string; namespace?: { name: string } }>,
+): Map<string, HookToolGroup> {
+  const groups = new Map<string, HookToolGroup>();
+  for (const tool of tools) {
+    const namespace = tool.namespace?.name;
+    if (!namespace) continue;
+    groups.set(
+      tool.name,
+      // `SWARM_TOOL_NAMESPACE` in pi-mono-adapter.ts.
+      namespace === "agent-swarm"
+        ? SWARM_TOOL_GROUP
+        : { id: `mcp:${namespace}`, label: `${namespace} tool schemas` },
+    );
+  }
+  return groups;
+}
+
 /**
  * Create the swarm hooks extension factory for pi-mono.
  *
@@ -479,6 +512,44 @@ function sendNudge(pi: Parameters<ExtensionFactory>[0], text: string): void {
 export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFactory {
   return (pi) => {
     let lastContextPostTime = 0;
+
+    // === before_provider_request + message_end → request composition ===
+    // The payload is what pi sends, so its system prompt, tool declarations
+    // and messages are measured exactly. The call's usage then calibrates the
+    // server's chars-to-tokens ratio for pi.
+    if (config.taskId && config.runnerSessionId) {
+      const composition = new HookCompositionReporter(
+        { sessionId: config.runnerSessionId, provider: "pi" },
+        (body) =>
+          postHookComposition(
+            { apiUrl: config.apiUrl, taskId: config.taskId, headers: apiHeaders(config) },
+            body,
+          ),
+      );
+      pi.on("before_provider_request", (event) => {
+        try {
+          const request = splitProviderPayload(event.payload);
+          // Compaction summaries declare no tools; they are not agent calls.
+          if (request.tools.length === 0) return undefined;
+          const groups = piToolGroups(pi.getAllTools());
+          composition.observeRequest(
+            measureHookRequest({
+              ...request,
+              groupOf: (name) => groups.get(name) ?? BUILTIN_TOOL_GROUP,
+            }),
+          );
+        } catch (err) {
+          console.warn(`[pi] Request composition measure failed: ${err}`);
+        }
+        return undefined;
+      });
+      pi.on("message_end", (event, ctx) => {
+        const message = event.message;
+        if (message.role !== "assistant" || !message.usage) return;
+        const { input, cacheRead, cacheWrite } = message.usage;
+        composition.observeUsage(input + cacheRead + cacheWrite, ctx.model?.id);
+      });
+    }
 
     pi.on("before_provider_headers", (event, ctx) => {
       Object.assign(

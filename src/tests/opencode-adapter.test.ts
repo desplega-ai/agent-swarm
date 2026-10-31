@@ -18,6 +18,7 @@ import {
   applyProviderKeySplice,
   OpencodeAdapter,
   type OpencodeSession,
+  opencodeToolGroupOf,
   resolveOpencodeSdkSpecifier,
 } from "../providers/opencode-adapter";
 import { createSkillInvokeTracker, type SkillInvoke } from "../providers/skill-invoke";
@@ -307,6 +308,91 @@ describe("OpencodeAdapter — host and config wiring", () => {
     } finally {
       delete process.env.OPENCODE_SDK_PATH;
     }
+  });
+});
+
+describe("OpencodeSession — request composition from the context hook", () => {
+  const SYSTEM = "OpenCode base.\nbe helpful";
+  const contextEvent = (sessionID = SESSION_ID, system = SYSTEM) => ({
+    sessionID,
+    agent: "swarm",
+    system: [{ type: "text", text: system }],
+    messages: [{ role: "user", content: [{ type: "text", text: "do something" }] }],
+    tools: {
+      "swarm_store-progress": { description: "report", input: { type: "object" } },
+      read: { description: "read a file", input: { type: "object" } },
+    },
+    options: {},
+  });
+
+  async function withFetchSpy(run: (posts: () => any[]) => Promise<void>) {
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+    );
+    try {
+      await run(() =>
+        fetchSpy.mock.calls
+          .filter(([url]) => String(url).endsWith("/api/tasks/task-1/request-composition"))
+          .map(([, init]) => JSON.parse(String((init as RequestInit).body))),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }
+
+  test("posts one manifest per request shape, with the step's prompt tokens", async () => {
+    await withFetchSpy(async (posts) => {
+      const { host, session } = await startSession(
+        [],
+        testConfig({ runnerSessionId: "runner-session-oc" }),
+      );
+      const context = host.sessionHooks.context!.fn;
+      await context(contextEvent());
+      session.handleOpencodeEvent(
+        ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1000, 10, 200, 30) }),
+      );
+      // Same shape on the next step: nothing new to post.
+      await context(contextEvent());
+      session.handleOpencodeEvent(
+        ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(100, 10, 1300, 0) }),
+      );
+      // A subagent's child session shares the host; it is not this session.
+      await context(contextEvent("ses_child", "other"));
+
+      expect(posts().length).toBe(1);
+      const [body] = posts();
+      expect(body).toMatchObject({
+        sessionId: "runner-session-oc",
+        provider: "opencode",
+        source: "harness-hook",
+        harness: { systemChars: SYSTEM.length, promptTokens: 1230 },
+      });
+      expect(body.parts.map((part: { id: string }) => part.id).sort()).toEqual([
+        "harness:builtin",
+        "mcp:agent-swarm",
+      ]);
+      await session.abort();
+    });
+  });
+
+  test("no runner session id: no manifest", async () => {
+    await withFetchSpy(async (posts) => {
+      const { host, session } = await startSession([]);
+      await host.sessionHooks.context!.fn(contextEvent());
+      session.handleOpencodeEvent(
+        ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1000, 10) }),
+      );
+      expect(posts()).toEqual([]);
+      await session.abort();
+    });
+  });
+
+  test("tool groups follow the MCP server prefix", () => {
+    const groupOf = opencodeToolGroupOf(["swarm", "context-mode", "context"]);
+    expect(groupOf("swarm_store-progress").id).toBe("mcp:agent-swarm");
+    expect(groupOf("context-mode_ctx_execute").id).toBe("mcp:context-mode");
+    expect(groupOf("context_x").id).toBe("mcp:context");
+    expect(groupOf("bash").id).toBe("harness:builtin");
   });
 });
 

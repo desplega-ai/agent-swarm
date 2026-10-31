@@ -217,6 +217,49 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 
 `agent_tasks.contextWindowSize` is set on the FIRST snapshot that carries one, not gated on `eventType='completion'`. Subsequent snapshots leave it alone.
 
+## Request composition and cache-hit ratio
+
+### Cache-hit ratio per call
+
+The session log shows one chip per LLM call: `hit = cacheRead / promptTokens`. The session ratio is `Σ cacheRead / Σ promptTokens` over all calls. `promptTokens` is everything the call sent, cached or not:
+
+| Harness | Source line | `promptTokens` |
+|---|---|---|
+| claude | each `assistant` line's `message.usage`, deduped by `message.id` | `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
+| codex | `context.updated` → `last` | `input_tokens` (already includes cached input) |
+| opencode | `session.step.ended` → `tokens` | `input + cache.read + cache.write` (`input` excludes cache) |
+| pi | `call_usage` line from `message_end` | `input + cacheRead + cacheWrite` |
+
+### Composition manifest
+
+`POST /api/tasks/{id}/request-composition` stores one manifest per session (`request_composition`, seq 0) and a new seq only when the static parts change. Each part has `chars`, `estTokens = ceil(chars / 4)` and a fidelity:
+
+- `exact`: we measured the text that was sent. Our system-prompt sections, persona, CLAUDE.md, operator `SYSTEM_PROMPT`, task prompt and memories are always exact.
+- `estimate`: the server sized it. Swarm tool schemas on claude and codex, and the skills listing where the harness formats it.
+
+Two values are derived at read time and never stored. The **residual** (harness base, unattributed) is `max(0, P_first − Σ estTokens × tokenRatio)`, where `P_first` is the session's first main-thread call. **History** for call k is `P_k − Σ estTokens × tokenRatio − residual`.
+
+### Exact parts on pi and opencode
+
+Pi and OpenCode let an extension see the request before it is sent, so their sessions also post a `source: "harness-hook"` manifest (seq 1):
+
+- pi: `before_provider_request` gives the provider payload (Anthropic, OpenAI Chat, OpenAI Responses or Google shape).
+- opencode: the plugin's `context` hook gives `system`, `messages` and `tools`. OpenCode fires it once per agent-loop step (`SessionModelRequest.prepare("primary")` in `@opencode/core` 2.1.4), so every primary call is seen. Subagent child sessions are skipped.
+
+The worker measures the system prompt, each tool group (`mcp:agent-swarm`, other MCP servers, `harness:builtin`) and pi/OpenCode's own `<available_skills>` block. It posts after the call's usage arrives, and only when the system prompt or tool set changed. The server merges this with the session's worker manifest. Our parts carry over. The system-prompt chars they do not cover become an exact `harness:base` part. On the first call, message text beyond the task prompt becomes `harness:messages`. Measured tool groups replace the estimate. The residual of a hook manifest is near 0 by construction.
+
+### Token ratio calibration
+
+Each hook manifest yields `ratio_obs = promptTokens / (payloadChars / 4)`. The manifest keeps its own `ratio_obs` as `tokenRatio`. The server folds it into a per-provider EMA (α = 0.2, seeded by the first observation, bounded 0.5 to 2.0) in KV, namespace `swarm`, key `request-composition/token-ratio/<provider>`, value `{ ratio, samples }`. Every later manifest for that provider stores the current EMA as its `tokenRatio`. The ratio lives in KV because a global `swarm_config` write reloads every integration.
+
+Claude and codex have no payload hook, so their ratio stays 1.0 unless an operator sets the key (a bare number or `{ "ratio": 1.1 }`):
+
+```bash
+curl -X PUT "$MCP_BASE_URL/api/kv/_/swarm/request-composition%2Ftoken-ratio%2Fclaude" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H "X-Agent-ID: $AGENT_ID" \
+  -H "Content-Type: application/json" -d '{"value": {"ratio": 1.1}}'
+```
+
 ## Per-provider notes
 
 - **claude / claude-managed**: token rates from models.dev. claude-managed also has a per-session-hour runtime fee (`token_class='runtime_hour'`); the worker computes a preview locally via `claude-managed-pricing.ts`, and the API's recompute path overrides with the canonical value.

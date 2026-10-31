@@ -30,6 +30,22 @@ export interface OpencodeSwarmPluginOptions {
   onToolRegistry?: (listTools: OpencodeToolLister) => void;
   /** Receives every OpenRouter model response, for the billed cost. */
   onOpenRouterResponse?: (response: Response) => void;
+  /**
+   * Receives each primary model request's final context (system, messages,
+   * tools), after this plugin's own edits. OpenCode fires `context` once per
+   * agent-loop step, so this sees every primary call.
+   */
+  onContext?: (event: OpencodeRequestContext) => void;
+}
+
+/** The parts of OpenCode's `context` hook event the request measurement reads. */
+export interface OpencodeRequestContext {
+  readonly sessionID: string;
+  readonly system: ReadonlyArray<{ readonly text?: string }>;
+  readonly messages: ReadonlyArray<unknown>;
+  readonly tools: Readonly<
+    Record<string, { readonly description: string; readonly input: unknown }>
+  >;
 }
 
 /** Keys OpenCode sets on each shell call, on top of its base env. */
@@ -102,10 +118,13 @@ export function createOpencodeSwarmPlugin(
       });
 
       // Lead only: tell the model what other sessions are already handling.
+      // Then hand the final request to the composition measurement.
       await ctx.session.hook("context", async (event) => {
-        if (!config.isLead) return;
-        const concurrent = await fetchConcurrentContext(config);
-        if (concurrent) event.system.push({ type: "text", text: concurrent });
+        if (config.isLead) {
+          const concurrent = await fetchConcurrentContext(config);
+          if (concurrent) event.system.push({ type: "text", text: concurrent });
+        }
+        options.onContext?.(event);
       });
 
       // Nobody reads a headless session's title. Generating one is a second

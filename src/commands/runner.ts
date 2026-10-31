@@ -4538,6 +4538,7 @@ export async function spawnProviderProcess(
     additionalArgs: opts.additionalArgs,
     resumeSessionId: opts.resumeSessionId,
     iteration: opts.iteration,
+    runnerSessionId: opts.runnerSessionId,
     env: withHarnessTelemetryEnv(freshEnv) as Record<string, string>,
     // Propagate the selected OAuth slot so the adapter refreshes back to the
     // correct pool key. Undefined for non-codex providers and single-cred

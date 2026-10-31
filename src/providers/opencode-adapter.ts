@@ -44,7 +44,11 @@ import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { OpenRouterBilling } from "./opencode-billing";
-import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
+import {
+  createOpencodeSwarmPlugin,
+  type OpencodeRequestContext,
+  type OpencodeToolLister,
+} from "./opencode-swarm-plugin";
 import {
   apiHeaders,
   autoIndexMemoryFile,
@@ -54,6 +58,16 @@ import {
   syncIdentityFilesToServer,
 } from "./pi-mono-extension";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
+import {
+  BUILTIN_TOOL_GROUP,
+  HookCompositionReporter,
+  type HookRequestMeasure,
+  type HookToolGroup,
+  measureHookRequest,
+  postHookComposition,
+  SWARM_TOOL_GROUP,
+  textChars,
+} from "./request-composition-hook";
 import type {
   CostData,
   CredCheckOptions,
@@ -512,6 +526,40 @@ function toolResultText(content: ReadonlyArray<{ type: string; text?: string }> 
     .join("");
 }
 
+/**
+ * Tool name → schema group. OpenCode keys MCP tools `<server>_<tool>`; any
+ * other tool is an OpenCode built-in.
+ */
+export function opencodeToolGroupOf(
+  mcpServers: readonly string[],
+): (name: string) => HookToolGroup {
+  // Longest first, so `a_b` wins over `a` for a tool `a_b_x`.
+  const servers = [...mcpServers].sort((a, b) => b.length - a.length);
+  return (name) => {
+    const server = servers.find((candidate) => name.startsWith(`${candidate}_`));
+    if (!server) return BUILTIN_TOOL_GROUP;
+    if (server === SWARM_MCP_SERVER) return SWARM_TOOL_GROUP;
+    return { id: `mcp:${server}`, label: `${server} tool schemas` };
+  };
+}
+
+/** Measure one primary request from OpenCode's `context` hook event. */
+export function measureOpencodeContext(
+  event: OpencodeRequestContext,
+  groupOf: (name: string) => HookToolGroup,
+): HookRequestMeasure {
+  return measureHookRequest({
+    system: event.system.map((part) => part.text ?? "").join("\n"),
+    tools: Object.entries(event.tools).map(([name, tool]) => ({
+      name,
+      description: tool.description,
+      schema: tool.input,
+    })),
+    messageChars: textChars(event.messages),
+    groupOf,
+  });
+}
+
 export class OpencodeSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   // The runner attaches its listener after `createSession` resolves; buffer
@@ -535,6 +583,8 @@ export class OpencodeSession implements ProviderSession {
   // Assistant text by message, in part order; the runner keeps the last emit.
   private textByMessage = new Map<string, string[]>();
   private transcript: string[] = [];
+  /** Set when the session posts harness-hook request composition manifests. */
+  composition: HookCompositionReporter | undefined;
   /** Fed each step's prompt size; steers the one-time context-bound note. */
   private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
@@ -703,6 +753,7 @@ export class OpencodeSession implements ProviderSession {
         const t = ev.data.tokens;
         const contextUsed = t.input + t.cache.read + t.cache.write + t.output;
         void this.observeContextBound(t.input + t.cache.read + t.cache.write);
+        this.composition?.observeUsage(t.input + t.cache.read + t.cache.write, this.model);
         const contextTotal = getContextWindowSize(this.model || "default");
         if (contextTotal > 0 && contextUsed > 0) {
           this.emit({
@@ -1004,6 +1055,7 @@ export class OpencodeAdapter implements ProviderAdapter {
     };
     const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
     let listTools: OpencodeToolLister | undefined;
+    let onContext: ((event: OpencodeRequestContext) => void) | undefined;
     const billing = config.model.startsWith("openrouter/") ? new OpenRouterBilling() : undefined;
     // The config string carries the spliced provider key and the swarm MCP
     // bearer. It goes to the SDK only; nothing logs, writes, or uploads it,
@@ -1019,6 +1071,7 @@ export class OpencodeAdapter implements ProviderAdapter {
               listTools = lister;
             },
             ...(billing ? { onOpenRouterResponse: (response) => billing.observe(response) } : {}),
+            onContext: (event) => onContext?.(event),
           }),
         ],
         log: {
@@ -1052,6 +1105,24 @@ export class OpencodeAdapter implements ProviderAdapter {
       billing,
     );
     session.emitSessionInit(opencodeVersion ? { version: opencodeVersion } : undefined);
+    if (config.runnerSessionId && taskId) {
+      const composition = new HookCompositionReporter(
+        { sessionId: config.runnerSessionId, provider: "opencode" },
+        (body) =>
+          postHookComposition({ apiUrl: config.apiUrl, taskId, headers: apiHeaders(swarm) }, body),
+      );
+      session.composition = composition;
+      const groupOf = opencodeToolGroupOf(Object.keys(mcp));
+      onContext = (event) => {
+        // Subagent child sessions share the host; only the task session counts.
+        if (event.sessionID !== sessionId) return;
+        try {
+          composition.observeRequest(measureOpencodeContext(event, groupOf));
+        } catch (err) {
+          console.warn(`[opencode] Request composition measure failed: ${err}`);
+        }
+      };
+    }
 
     // Drive the session from the host's event stream. Closing the host ends
     // the stream; ending without a terminal event means the host died.

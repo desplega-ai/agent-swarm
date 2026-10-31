@@ -246,6 +246,10 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   fall back after rejecting the requested model, so that requested ID alone
   cannot justify a rate alias.
 
+## Request composition token ratio
+
+Request composition parts estimate tokens as `ceil(chars / 4)`. The per-provider correction lives in KV (namespace `swarm`, key `request-composition/token-ratio/<provider>`), not in the pricing table. Pi and opencode learn it from each harness-hook manifest: `promptTokens / (payloadChars / 4)`, folded into an EMA (α = 0.2, seeded by the first observation, bounded 0.5 to 2.0). Claude and codex stay at 1.0 unless an operator writes the key. Details: the cost-and-context guide, section "Request composition and cache-hit ratio".
+
 ## When a model is missing
 
 Cost POSTs accept an optional UUID `id`. The runner reuses it across retries. Repeated IDs return the stored record without changing its price.

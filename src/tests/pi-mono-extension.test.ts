@@ -25,10 +25,12 @@ import { clearToolHistory } from "../hooks/tool-loop-detection";
 import type { SummarizeSessionForPiDeps, SwarmHooksConfig } from "../providers/pi-mono-extension";
 import {
   createSwarmHooksExtension,
+  piToolGroups,
   SWARM_NUDGE_CUSTOM_TYPE,
   summarizeSessionForPi,
   summarizeTranscript,
 } from "../providers/pi-mono-extension";
+import { splitProviderPayload, textChars } from "../providers/request-composition-hook";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -561,5 +563,171 @@ describe("createSwarmHooksExtension nudges", () => {
     expect(texts()).toEqual([
       "🛑 TASK CANCELLED: lead stopped it. Stop working and use store-progress to acknowledge.",
     ]);
+  });
+});
+
+// ── request composition from the provider payload ────────────────────────────
+
+describe("request composition from before_provider_request", () => {
+  const SYSTEM = "You are pi.\n<available_skills>\n- a: does a\n</available_skills>\nSwarm rules.";
+  const anthropicPayload = (system = SYSTEM) => ({
+    model: "claude-x",
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: [{ type: "text", text: "do the task" }] }],
+    tools: [
+      { name: "store-progress", description: "report", input_schema: { type: "object" } },
+      { name: "read", description: "read a file", input_schema: { type: "object" } },
+    ],
+  });
+
+  function loadComposition(config: SwarmHooksConfig) {
+    const handlers = new Map<string, Handler>();
+    const pi = {
+      on: (event: string, handler: Handler) => {
+        handlers.set(event, handler);
+      },
+      sendMessage: () => {},
+      registerMcpServer: () => {},
+      getAllTools: () => [
+        { name: "store-progress", namespace: { name: "agent-swarm" } },
+        { name: "read" },
+      ],
+    };
+    createSwarmHooksExtension(config)(pi as unknown as Parameters<ExtensionFactory>[0]);
+    const ctx = { getContextUsage: () => undefined, model: { id: "claude-x" } };
+    const fire = (event: string, payload: Record<string, unknown>) => {
+      const handler = handlers.get(event);
+      if (!handler) throw new Error(`no handler for ${event}`);
+      return handler({ type: event, ...payload }, ctx);
+    };
+    const usage = (input: number, cacheRead = 0, cacheWrite = 0) =>
+      fire("message_end", {
+        message: { role: "assistant", usage: { input, output: 5, cacheRead, cacheWrite } },
+      });
+    const posts = () =>
+      fetchCalls
+        .filter((call) => call.url.endsWith("/request-composition"))
+        .map((call) => JSON.parse(String(call.init?.body)));
+    return { fire, usage, posts, handlers };
+  }
+
+  test("posts one harness-hook manifest per request shape, after the call's usage", async () => {
+    const config = { ...makeConfig(), runnerSessionId: "runner-session-1" };
+    const { fire, usage, posts } = loadComposition(config);
+
+    expect(await fire("before_provider_request", { payload: anthropicPayload() })).toBeUndefined();
+    expect(posts()).toEqual([]);
+    await usage(100, 900, 20);
+    await usage(100, 1500, 0);
+    await fire("before_provider_request", { payload: anthropicPayload() });
+    await usage(50, 2000, 0);
+
+    expect(posts().length).toBe(1);
+    const [body] = posts();
+    expect(body).toMatchObject({
+      sessionId: "runner-session-1",
+      provider: "pi",
+      model: "claude-x",
+      source: "harness-hook",
+      toolLoading: "none",
+      harness: {
+        systemChars: SYSTEM.length,
+        promptTokens: 1020,
+        firstMessageChars: "do the task".length,
+      },
+    });
+    const byId = Object.fromEntries(
+      body.parts.map((part: { id: string; chars: number }) => [part.id, part]),
+    );
+    expect(byId["mcp:agent-swarm"]).toMatchObject({ kind: "tool_schemas", fidelity: "exact" });
+    expect(byId["harness:builtin"]).toMatchObject({ kind: "tool_schemas", fidelity: "exact" });
+    expect(byId["harness:skills"].chars).toBe(
+      "<available_skills>\n- a: does a\n</available_skills>".length,
+    );
+    const toolChars = byId["mcp:agent-swarm"].chars + byId["harness:builtin"].chars;
+    expect(body.harness.payloadChars).toBe(SYSTEM.length + toolChars + "do the task".length);
+
+    // A new system prompt is a new shape: one more manifest on the next usage.
+    await fire("before_provider_request", { payload: anthropicPayload(`${SYSTEM} more`) });
+    await usage(10, 2100, 0);
+    expect(posts().length).toBe(2);
+    // Later shapes carry history in their messages: no first-message chars.
+    expect(posts()[1].harness.firstMessageChars).toBeUndefined();
+  });
+
+  test("ignores tool-less requests and posts nothing without a runner session", async () => {
+    const withSession = loadComposition({ ...makeConfig(), runnerSessionId: "runner-session-2" });
+    await withSession.fire("before_provider_request", {
+      payload: { ...anthropicPayload(), tools: [] },
+    });
+    await withSession.usage(100);
+    expect(withSession.posts()).toEqual([]);
+
+    const withoutSession = loadComposition(makeConfig());
+    expect(withoutSession.handlers.has("before_provider_request")).toBe(false);
+  });
+});
+
+describe("splitProviderPayload", () => {
+  test("OpenAI chat: system and developer messages are system text", () => {
+    const split = splitProviderPayload({
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "developer", content: [{ type: "text", text: "dev" }] },
+        { role: "user", content: "hello" },
+      ],
+      tools: [{ type: "function", function: { name: "t", description: "d", parameters: {} } }],
+    });
+    expect(split.system).toBe("sys\ndev");
+    expect(split.messageChars).toBe("hello".length);
+    expect(split.tools).toEqual([{ name: "t", description: "d", schema: {} }]);
+  });
+
+  test("OpenAI responses and Google shapes", () => {
+    const responses = splitProviderPayload({
+      instructions: "inst",
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      tools: [{ type: "function", name: "t", description: "", parameters: { a: 1 } }],
+    });
+    expect(responses).toEqual({
+      system: "inst",
+      tools: [{ name: "t", description: "", schema: { a: 1 } }],
+      messageChars: 2,
+    });
+    const google = splitProviderPayload({
+      contents: [{ role: "user", parts: [{ text: "abc" }] }],
+      config: {
+        systemInstruction: { parts: [{ text: "g-sys" }] },
+        tools: [{ functionDeclarations: [{ name: "f", description: "x", parameters: {} }] }],
+      },
+    });
+    expect(google.system).toBe("g-sys");
+    expect(google.messageChars).toBe(3);
+    expect(google.tools.map((tool) => tool.name)).toEqual(["f"]);
+  });
+
+  test("image data and thinking signatures are not prompt text", () => {
+    expect(
+      textChars([
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/png", data: "A".repeat(999) },
+        },
+        { type: "thinking", thinking: "why", signature: "S".repeat(999) },
+      ]),
+    ).toBe("why".length);
+  });
+});
+
+describe("piToolGroups", () => {
+  test("swarm, other MCP servers, and built-ins (absent)", () => {
+    const groups = piToolGroups([
+      { name: "store-progress", namespace: { name: "agent-swarm" } },
+      { name: "search", namespace: { name: "context7" } },
+      { name: "bash" },
+    ]);
+    expect(groups.get("store-progress")?.id).toBe("mcp:agent-swarm");
+    expect(groups.get("search")?.id).toBe("mcp:context7");
+    expect(groups.has("bash")).toBe(false);
   });
 });
