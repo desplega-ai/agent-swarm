@@ -130,6 +130,15 @@ reviewers checked standards and spec, zero blockers. Outcome:
   the doubled-`changes` tests pass; only `codex-gateway-route` still fails locally, and it fails
   on clean main too.
 
+## Security scan findings (Superagent, same PR)
+
+- P1: `CODEX_OAUTH_DEVICE_BASE_URL` was config-writable and unvalidated. Now an env-only reserved
+  key (with `DESPLEGA_TELEMETRY_ENDPOINT`), loopback-only; the runner fixes the stub port at
+  boot and exposes it as `ctx.sutEnv`.
+- P2: the benchmark step ran PR code with `GH_TOKEN`. Now a token-only download step and a
+  token-free bench step; the artifact is size-capped and shape-checked before use.
+- Also hardened: the args-schema extractor runs under `buildSandboxedCommand`.
+
 ## Follow-ups (not in this PR)
 
 - Retire the first batch of redundant unit tests (list in runbooks/e2e-blackbox.md), one domain
