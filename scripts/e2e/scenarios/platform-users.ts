@@ -99,12 +99,14 @@ export const platformUsersLifecycle: Scenario = {
       [400],
       "create with invalid email",
     );
-    // FINDING: the route documents 400/401 only, but a duplicate email surfaces the raw
-    // SQLite UNIQUE violation as a 500 instead of a 400/409.
     const duplicate = await ctx.api("POST", "/api/users", {
       body: { name: "Duplicate Email", email: `alice-${ctx.nonce}@example.com` },
     });
-    expectStatus(duplicate, [500], "create with a duplicate email");
+    expectStatus(duplicate, [409], "create with a duplicate email");
+    expect(
+      asRecord(duplicate.json).error === "user_exists" && !duplicate.text.includes("UNIQUE"),
+      `a duplicate email answers user_exists without SQLite text, got ${duplicate.text.slice(0, 200)}`,
+    );
 
     // ── list and get ─────────────────────────────────────────────────────────
     const listed = await ctx.api("GET", "/api/users");
@@ -117,11 +119,13 @@ export const platformUsersLifecycle: Scenario = {
     const quiet = await ctx.api("GET", "/api/users?recentEvents=0");
     expectStatus(quiet, [200], "list users with recentEvents=0");
     const quietAlice = asRecords(quiet.json, "users").find((u) => u.id === alice.id);
-    // FINDING: the query schema accepts recentEvents=0 (min 0), but the event reader clamps
-    // the limit to at least 1, so the list still carries one event per user instead of none.
     expect(
-      quietAlice && Array.isArray(quietAlice.recentEvents) && quietAlice.recentEvents.length === 1,
-      "recentEvents=0 still returns one event (clamped to a minimum of 1)",
+      quietAlice && Array.isArray(quietAlice.recentEvents) && quietAlice.recentEvents.length === 0,
+      "recentEvents=0 returns no events",
+    );
+    expect(
+      (await getUser(ctx, alice.id, "?recentEvents=0")).recentEvents.length === 0,
+      "get with recentEvents=0 returns no events",
     );
     expectStatus(
       await ctx.api("GET", "/api/users?recentEvents=51"),
@@ -224,20 +228,23 @@ export const platformUsersLifecycle: Scenario = {
       "link returns the updated identity list",
     );
     // Linking is not idempotent: the (kind, externalId) primary key collides even for the owner.
-    expectStatus(
-      await ctx.api("POST", `/api/users/${alice.id}/identities`, {
-        body: { kind: "linear", externalId: extraId },
-      }),
-      [400],
-      "re-linking an identity the user already holds",
+    // The collision answers 409 identity_taken, never the raw SQLite text.
+    const relinked = await ctx.api("POST", `/api/users/${alice.id}/identities`, {
+      body: { kind: "linear", externalId: extraId },
+    });
+    expectStatus(relinked, [409], "re-linking an identity the user already holds");
+    expect(
+      asRecord(relinked.json).error === "identity_taken" && !relinked.text.includes("UNIQUE"),
+      `a re-link answers identity_taken without SQLite text, got ${relinked.text.slice(0, 200)}`,
     );
     // An identity belongs to one user: linking it to another user is a PK collision.
-    expectStatus(
-      await ctx.api("POST", `/api/users/${bob.id}/identities`, {
-        body: { kind: "linear", externalId: extraId },
-      }),
-      [400],
-      "link an identity owned by another user",
+    const stolen = await ctx.api("POST", `/api/users/${bob.id}/identities`, {
+      body: { kind: "linear", externalId: extraId },
+    });
+    expectStatus(stolen, [409], "link an identity owned by another user");
+    expect(
+      asRecord(stolen.json).error === "identity_taken" && !stolen.text.includes("UNIQUE"),
+      `a cross-user link answers identity_taken without SQLite text, got ${stolen.text.slice(0, 200)}`,
     );
     expectStatus(
       await ctx.api("POST", `/api/users/${alice.id}/identities`, {

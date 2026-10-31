@@ -245,9 +245,8 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
     );
     expect(Number(endpointRuns?.n) >= 2, "endpoint calls must be recorded as runs");
 
-    // FINDING: a Zod `.default()` field is optional to the script but the stored args JSON
-    // schema marks it required (it is the *output* shape), so the public endpoint rejects a
-    // call that omits it with args_validation although the script would accept the call.
+    // A Zod `.default()` field is optional in the stored args JSON schema, so a call that
+    // omits it passes validation and the script applies the default.
     const defaulted = await upsertScript(ctx, ownerId, {
       name: `e2e-api-default-${ctx.nonce}`,
       source: `import { z } from "zod";
@@ -262,8 +261,8 @@ export default async function (args: z.infer<typeof argsSchema>) { return args.n
       body: { n: 3 },
     });
     expect(
-      omitted.body.ok === false && asRecord(omitted.body.error).type === "args_validation",
-      `FINDING changed: a defaulted field is no longer required by the endpoint: ${omitted.text}`,
+      omitted.body.ok === true && omitted.body.result === 6,
+      `a call that omits a defaulted field must run with the default: ${omitted.text}`,
     );
     const explicit = await callPublic(ctx, String(defaultedEndpoint.id), {
       token: String(defaultedEndpoint.token),

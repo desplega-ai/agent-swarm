@@ -260,9 +260,7 @@ export const knowledgePromptTemplates: Scenario = {
       response = await ctx.api("POST", `/api/prompt-templates/${overrideId}/checkout`, {
         body: { version: 99 },
       });
-      // FINDING: openapi documents 404 "Template or version not found" for checkout, but a missing
-      // version answers 400, because only the "Prompt template <id> not found" message maps to 404.
-      expectStatus(response, [400], "checkout of a missing version");
+      expectStatus(response, [404], "checkout of a missing version");
       response = await ctx.api("POST", `/api/prompt-templates/${crypto.randomUUID()}/checkout`, {
         body: { version: 1 },
       });

@@ -172,8 +172,7 @@ async function identityAndProfile(ctx: ScenarioContext): Promise<string> {
     "No profile_sync_conflict event for the dropped soulMd",
   );
 
-  // FINDING: PUT /api/agents/{id}/profile documents 200/400/404 only. A `changedByAgentId` that
-  // names no agent trips a FOREIGN KEY on context_versions and surfaces as a bare 500.
+  // A `changedByAgentId` that names no agent is a 404, not a FOREIGN KEY 500.
   response = await ctx.api("PUT", `/api/agents/${agentId}/profile`, {
     body: {
       soulMd: soulV1,
@@ -181,10 +180,10 @@ async function identityAndProfile(ctx: ScenarioContext): Promise<string> {
       changedByAgentId: `ghost-${ctx.nonce}`,
     },
   });
-  expectStatus(response, [500], "profile with an unknown changedByAgentId (FINDING: 500)");
+  expectStatus(response, [404], "profile with an unknown changedByAgentId");
   expect(
-    String(asRecord(response.json).error).includes("FOREIGN KEY"),
-    "Expected the FOREIGN KEY error text for the unknown changedByAgentId",
+    asRecord(response.json).error === "changed_by_agent_not_found",
+    `Unexpected error for the unknown changedByAgentId: ${JSON.stringify(response.json)}`,
   );
 
   // GET /api/agents/{id}/setup-script returns the profile script and the global one.

@@ -457,9 +457,7 @@ export const workflowDefinitions: Scenario = {
     const badNode = await ctx.api("PATCH", `/api/workflows/${id}/nodes/ghost`, {
       body: { label: "x" },
     });
-    // FINDING: the route documents 404 "Workflow or node not found"; an unknown node id
-    // fails the patch step ("Cannot update non-existent node") and answers 400.
-    expectStatus(badNode, [400], "patch a node that does not exist");
+    expectStatus(badNode, [404], "patch a node that does not exist");
     expect(
       String(asRecord(badNode.json).error).includes("Cannot update non-existent node"),
       "unknown node patch names the node",

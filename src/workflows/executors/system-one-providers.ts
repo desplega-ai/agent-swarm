@@ -1,6 +1,10 @@
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import type { ExecutorDependencies } from "./base";
-import { CLOUDFLARE_EXTRACT_WIRE, type SystemOneExtractWire } from "./system-one-extract-wire";
+import {
+  CLAIRIC_WIRE,
+  CLOUDFLARE_EXTRACT_WIRE,
+  type SystemOneExtractWire,
+} from "./system-one-extract-wire";
 import { OPENAI_DECISIONS_WIRE } from "./system-one-openai-wire";
 import { CLOUDFLARE_WIRE, type SystemOneWire } from "./system-one-wire";
 import { resolveWorkflowLlmConfig } from "./workflow-llm";
@@ -8,7 +12,7 @@ import { resolveWorkflowLlmConfig } from "./workflow-llm";
 /**
  * Hosts of System One models. One registry serves every capability: a host
  * declares what it serves (`decide` for typed decisions: Jev, laya, OpenAI
- * Decisions, Cloudflare Clef; `extract` for typed extraction: Cloudflare Clairic)
+ * Decisions, Cloudflare Clef; `extract` for typed extraction: laya, Cloudflare Clairic)
  * and, per capability, its endpoint, models, limits, and wire. The credential, the
  * deployment check, and every message are the host's, so a decision node and an
  * extraction node on the same host fail with the same sentence.
@@ -212,6 +216,11 @@ export const SYSTEM_ONE_HOSTS = {
       // ~0.15). `answer_confidence` is the top probability, the number a `noul` band
       // already uses, so one band means the same thing on every question type.
       confidenceField: "answer_confidence",
+    },
+    extract: {
+      endpoint: { configKey: LAYA_URL_KEY, path: "/v1/clairic" },
+      // No default model, as for `decide`: laya routes on the text.
+      wire: CLAIRIC_WIRE,
     },
   },
   openai: {

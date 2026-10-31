@@ -719,13 +719,25 @@ export const knowledgeSkills: Scenario = {
       response = await ctx.api("GET", `/api/skills/${missingSkill}/usage`);
       expectStatus(response, [404], "usage of an unknown skill");
 
-      // ── Filesystem sync: only the contract that is safe on a developer machine ──────────────
-      // FINDING: POST /api/skills/sync-filesystem writes the caller's system-default and
-      // swarm-scope skills into the SUT process's real $HOME (~/.claude/skills, ~/.codex/skills,
-      // ~/.agents/skills ...) because the runner forwards HOME. The 200 path is not exercised
-      // here for that reason. Without X-Agent-ID the handler refuses before any write.
+      // ── Filesystem sync ───────────────────────────────────────────────────────────────────
+      // The SUT runs with a per-run HOME (scripts/e2e/sut.ts), so the write path is safe to
+      // exercise: it lands under /tmp/e2e-home-*, never in the developer's home.
       response = await ctx.api("POST", "/api/skills/sync-filesystem", { body: {} });
       expectStatus(response, [400], "sync-filesystem without X-Agent-ID");
+      response = await ctx.api("POST", "/api/skills/sync-filesystem", {
+        agentId: owner,
+        body: {},
+      });
+      expectStatus(response, [200], "sync-filesystem as the owner agent");
+      const synced = asRecord(response.json);
+      expect(
+        typeof synced.synced === "number" && synced.synced >= 1,
+        `sync-filesystem synced ${String(synced.synced)} skills; expected at least one`,
+      );
+      expect(
+        Array.isArray(synced.errors) && synced.errors.length === 0,
+        `sync-filesystem reported errors: ${JSON.stringify(synced.errors)}`,
+      );
 
       // ── Delete ──────────────────────────────────────────────────────────────────────────────
       expectToolError(

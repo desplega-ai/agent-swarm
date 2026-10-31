@@ -838,17 +838,18 @@ export const workflowEngineControl: Scenario = {
         ) && outputOf(recovered, "c").stdout === "after",
         "the failed step ran again with the fixed config and released its successor",
       );
-      for (const [label, runId] of [
-        ["a completed run", failRun.runId],
-        ["an unknown run", crypto.randomUUID()],
-      ] as const) {
-        const refusal = await ctx.api("POST", `/api/workflow-runs/${runId}/retry`);
-        expectStatus(refusal, [400], `retry ${label}`);
-        expect(
-          String(asRecord(refusal.json).error).includes("not in failed state"),
-          `retry ${label} explains itself`,
-        );
-      }
+      const refusal = await ctx.api("POST", `/api/workflow-runs/${failRun.runId}/retry`);
+      expectStatus(refusal, [400], "retry a completed run");
+      expect(
+        String(asRecord(refusal.json).error).includes("not in failed state"),
+        "retry a completed run explains itself",
+      );
+      const retryUnknown = await ctx.api("POST", `/api/workflow-runs/${crypto.randomUUID()}/retry`);
+      expectStatus(retryUnknown, [404], "retry an unknown run");
+      expect(
+        String(asRecord(retryUnknown.json).error).includes("not found"),
+        "retry an unknown run says it is not found",
+      );
       const cancelDone = await ctx.api("POST", `/api/workflow-runs/${failRun.runId}/cancel`, {
         body: {},
       });
@@ -875,7 +876,12 @@ export const workflowEngineControl: Scenario = {
         { runId: failRun.runId },
         "not in failed state",
       );
-      await callToolErr(connection, "retry-workflow-run", { runId: crypto.randomUUID() });
+      await callToolErr(
+        connection,
+        "retry-workflow-run",
+        { runId: crypto.randomUUID() },
+        "not found",
+      );
       const fixExhaust = await ctx.api("PATCH", `/api/workflows/${exhaustId}/nodes/a`, {
         body: { config: { runtime: "bash", script: "echo healed" }, retry: { maxRetries: 0 } },
       });

@@ -27,7 +27,7 @@ the mock cannot issue"), never "flaky" or "later".
 |---|---|---|
 | Chat completions, structured output (`workflow-llm`, `raw-llm`, memory rater, session summaries) | `scripts/e2e/mocks/llm.ts`, OpenAI chat + Responses API | `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` |
 | Embeddings (memory, script search) | same mock, deterministic vectors | `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_KEY` |
-| SystemOne decisions and extraction | same mock, `/v1/systemone` | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
+| SystemOne decisions and extraction | same mock, `/v1/systemone` (decisions) and `/v1/clairic` (extraction) | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
 | Slack | `@desplega.ai/slack-mock` over Socket Mode | `SLACK_*` from the mock |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | none, disabled | `*_DISABLE=true` |
 | Harness workers | none in the contract run; `--harness` legs spawn real workers with real credentials | |

@@ -90,23 +90,31 @@ bun run e2e --list | wc -l               # scenario count
 bun scripts/e2e/bench.ts /tmp/e2e-a.json /tmp/e2e-b.json   # latency diff
 ```
 
+## Second pass (same PR): fix the findings instead of pinning them
+
+34 findings came back from the authors. Each got one decision (/tmp/e2e-fix/<domain>.md while
+it existed), six Sonnet fixers implemented them in parallel with file fences, six Sonnet
+reviewers checked standards and spec, zero blockers. Outcome:
+
+- Fixed in the product and the scenario now asserts the documented contract: profile PUT 404,
+  supersede status recompute, create-channel await, unread_mentions count, nodes PATCH 404,
+  approval `required` default + optional-answer validation, schedules 400, run retry 404,
+  prompt-template checkout 404, page foreign-cookie 403, defaulted args optional, script_runs
+  startedAt ISO, users duplicate 409, recentEvents=0, identities + mcp-server duplicate 409
+  with clean text, agentmail inbox ownership guard, model shortname harness check, tracker
+  unlink unknown id.
+- Documented instead of changed (behaviour kept on purpose): repo hooks default on, models
+  catalog provider list, steps journal write-once, mcp-oauth metadata 502, mcp-oauth DELETE
+  idempotent, config scopeId without existence check, config write restarts Slack, Jira 503
+  before 400.
+- Mock gaps closed: `laya` extraction host (`LAYA_URL` + `/v1/clairic`) so
+  system-one-extraction runs its success path; `MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true` in the SUT
+  with a loopback authorization server in platform-mcp; `CODEX_OAUTH_DEVICE_BASE_URL` for the
+  Codex device login; skills sync-filesystem 200 path now safe under the per-run HOME.
+
 ## Follow-ups (not in this PR)
 
-Runner / mock gaps the authors asked for, deferred because each needs a `src/` change or
-changes behaviour an existing scenario already pins:
-
-- `MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true` in the SUT env would let a loopback stand-in play the
-  MCP authorization server (discovery, DCR, token exchange, refresh 500). platform-mcp-servers
-  currently pins the private-host refusal, so flip both together.
-- A telemetry sink override (`TELEMETRY_ENDPOINT` in `src/telemetry.ts`) so
-  `POST /api/telemetry/enable` 200 and relayed ui events can be asserted against a mock.
-- A base-URL override for the Codex device login so start/poll outcomes can be asserted.
-- A mockable host for `system-one-extraction` (typesafe and Cloudflare URLs are hard-coded,
-  laya has no extract service): today only the node's config-validation failure path runs.
+- A telemetry sink override so `POST /api/telemetry/enable` 200 can be asserted against a mock.
 - `HEARTBEAT_INTERVAL_MS` of a few seconds in the SUT so workflow approval-card timeouts route
   inside a scenario instead of the 90 s sweep (check it does not reap simulated agents' tasks).
-- `slack-helpers.claim()` polls once as the assignee; a pending lead task from an earlier
-  scenario makes it time out. extensions now cancels its leftover task; keep that pattern.
-
-Product findings the suite surfaced (asserted as observed with `// FINDING` comments):
-see the PR description of #2605 (34 findings grouped by domain).
+- Stored scripts keep their old `required` args list until re-upserted (no backfill).

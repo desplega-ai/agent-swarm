@@ -91,22 +91,23 @@ export const workflowApprovals: Scenario = {
         );
       }
 
-      // FINDING: request-human-input documents `required` as "default: true", and the
-      // human-in-the-loop node defaults it to true, but the REST create route (and the tool,
-      // which stores what it is given) keeps `required` unset. An unset question is optional,
-      // so an answer with no responses at all approves the request.
+      // `required` defaults to true, so a question that does not set it must be answered.
       const lax = await createRequest(
         ctx,
         request({ questions: [{ id: "go", type: "approval", label: "Go?" }] }),
       );
-      expect(asRecords(lax, "questions")[0]?.required === undefined, "required stays unset");
-      const emptyAnswer = asRecord(
-        (await respondApproval(ctx, String(lax.id), {})).approvalRequest,
+      expect(asRecords(lax, "questions")[0]?.required === true, "required defaults to true");
+      const emptyAnswer = await respondApproval(ctx, String(lax.id), {}, 400);
+      expect(String(emptyAnswer.error).includes("go"), "an empty answer names the question");
+      expect(
+        asRecord(
+          asRecord((await ctx.api("GET", `/api/approval-requests/${String(lax.id)}`)).json)
+            .approvalRequest,
+        ).status === "pending",
+        "the rejected empty answer left the request pending",
       );
-      expect(emptyAnswer.status === "approved", "an empty answer approved the lax request");
 
-      // FINDING: only required questions are validated on answer. An optional single-select
-      // takes a value outside its options and the request stores it as given.
+      // An answered optional question is validated like a required one.
       const optionalSelect = await createRequest(
         ctx,
         request({
@@ -122,18 +123,21 @@ export const workflowApprovals: Scenario = {
           ],
         }),
       );
-      const storedOutOfRange = asRecord(
-        (
-          await respondApproval(ctx, String(optionalSelect.id), {
-            go: { approved: true },
-            color: "green",
-          })
-        ).approvalRequest,
+      const outOfRange = await respondApproval(
+        ctx,
+        String(optionalSelect.id),
+        { go: { approved: true }, color: "green" },
+        400,
       );
       expect(
-        asRecord(storedOutOfRange.responses).color === "green",
-        "an optional select answer outside its options was stored",
+        String(outOfRange.error).includes("color"),
+        "an optional select answer outside its options is refused",
       );
+      const unanswered = asRecord(
+        (await respondApproval(ctx, String(optionalSelect.id), { go: { approved: true } }))
+          .approvalRequest,
+      );
+      expect(unanswered.status === "approved", "an unanswered optional question stays allowed");
 
       const created = await createRequest(
         ctx,
@@ -629,18 +633,22 @@ export const workflowApprovals: Scenario = {
         ).sourceTaskId === null,
         "a detached request has no source task",
       );
-      // FINDING: the tool documents `required` as "default: true", yet a question sent
-      // without it is stored without it and an empty answer approves the request.
+      // The tool documents `required` as "default: true": an empty answer is refused.
       const laxTool = await callToolOk(connection, "request-human-input", {
         title: `Lax ${marker}`,
         questions: [{ id: "ok", type: "approval", label: "OK?" }],
         detached: true,
       });
-      const laxToolAnswer = asRecord(
-        (await respondApproval(ctx, asString(laxTool.structured.requestId, "lax tool request"), {}))
+      const laxToolId = asString(laxTool.structured.requestId, "lax tool request");
+      const laxToolRow = asRecord(
+        asRecord((await ctx.api("GET", `/api/approval-requests/${laxToolId}`)).json)
           .approvalRequest,
       );
-      expect(laxToolAnswer.status === "approved", "an empty answer approved the tool's request");
+      expect(
+        asRecords(laxToolRow, "questions")[0]?.required === true,
+        "the tool stores required as true when it is omitted",
+      );
+      await respondApproval(ctx, laxToolId, {}, 400);
       await callToolErr(connection, "request-human-input", {
         title: "bad",
         questions: [{ id: "k", type: "config" }],
@@ -886,7 +894,7 @@ export const workflowApprovals: Scenario = {
         (await approvalsForRun(ctx, timedRun.runId, "timeout")).length === 1,
         "the workflow card is stored as timeout",
       );
-      // FINDING (infra): the run itself routes on `timeout` at the next heartbeat sweep
+      // Suite-speed note: the run itself routes on `timeout` at the next heartbeat sweep
       // (HEARTBEAT_INTERVAL_MS, 90 s by default), too slow for this suite, so the run is
       // cancelled here instead of waiting for the sweep.
       expectStatus(

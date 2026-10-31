@@ -321,12 +321,11 @@ async function supersede(ctx: ScenarioContext, agentId: string, otherId: string)
   );
   expect(asRecord(result.task).status === "superseded", "Original task is not superseded");
   expect((await readTask(ctx, taskId)).status === "superseded", "superseded status not persisted");
-  // FINDING: cancel and finish recompute the agent's status from its capacity, supersede does not.
-  // After superseding its only running task the agent still reads "busy" with capacity.current 0.
+  // Like cancel and finish, supersede recomputes the agent's status from its capacity.
   const afterSupersede = asRecord((await ctx.api("GET", `/api/agents/${agentId}`)).json);
   expect(
-    asRecord(afterSupersede.capacity).current === 0 && afterSupersede.status === "busy",
-    `Expected the stale busy status after supersede (FINDING), got ${String(afterSupersede.status)}`,
+    asRecord(afterSupersede.capacity).current === 0 && afterSupersede.status === "idle",
+    `Expected the agent to be idle after its only task was superseded, got ${String(afterSupersede.status)}`,
   );
 
   const resumeId = result.resumeTaskId;

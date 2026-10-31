@@ -213,15 +213,17 @@ function rowToEvent(row: IdentityEventRow): IdentityEvent {
 }
 
 /**
- * Paginated event timeline for a user. `limit` is hard-capped at 200; `before`
- * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
- * passing back the last event's `createdAt`.
+ * Paginated event timeline for a user. `limit` is hard-capped at 200 and a
+ * limit of 0 returns no events (negatives clamp to 0); `before` is a cursor on
+ * `createdAt` (ISO string) so the caller can keep paging by passing back the
+ * last event's `createdAt`.
  */
 export async function listUserEvents(
   userId: string,
   opts: { limit?: number; before?: string } = {},
 ): Promise<IdentityEvent[]> {
-  const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+  const limit = Math.max(0, Math.min(opts.limit ?? 50, 200));
+  if (limit === 0) return [];
   const before = opts.before;
   const client = getDbClient();
   if (before) {

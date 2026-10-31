@@ -6,19 +6,118 @@ import {
   deleteConfig,
   expectToolError,
   expectToolOk,
+  jsonResponse,
+  type MockRequest,
   putConfig,
   registerAgent,
+  startMockServer,
 } from "./platform-helpers";
 
 // Remote MCP server definitions (HTTP) with their install lifecycle and the MCP OAuth
 // connection routes, then the same surface through the worker MCP tools and the script
-// bridge. Server URLs are never contacted except the SUT's own loopback address, which the
-// OAuth metadata probe refuses (private hosts are blocked unless explicitly allowed).
+// bridge. Server URLs are never contacted except a loopback authorization server the
+// scenario runs: the SUT boots with MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true, so discovery,
+// dynamic client registration, code exchange, refresh and revocation all reach it.
 
 type Server = Record<string, unknown> & { id: string; name: string };
 
 function serverOf(json: unknown): Server {
   return asRecord(asRecord(json).server) as Server;
+}
+
+type AuthorizationServer = ReturnType<typeof startAuthorizationServer>;
+
+/**
+ * A loopback MCP resource and authorization server in one origin: protected-resource and
+ * authorization-server metadata, dynamic client registration, the token endpoint (code
+ * exchange and refresh) and revocation. `state` scripts its failures.
+ */
+function startAuthorizationServer() {
+  const state = {
+    /** "down" makes the authorization-server metadata answer 503. */
+    metadata: "ok" as "ok" | "down",
+    /** How the next refresh grants answer. */
+    refresh: "ok" as "ok" | "server_error" | "invalid_client",
+    registered: 0,
+    issued: 0,
+  };
+  const server = startMockServer((request: MockRequest) => {
+    if (request.path === "/.well-known/oauth-protected-resource") {
+      return jsonResponse({
+        resource: `${server.origin}/mcp`,
+        authorization_servers: [server.origin],
+        scopes_supported: ["read", "write"],
+        bearer_methods_supported: ["header"],
+      });
+    }
+    if (request.path === "/.well-known/oauth-authorization-server") {
+      if (state.metadata === "down") return new Response("metadata down", { status: 503 });
+      return jsonResponse({
+        issuer: server.origin,
+        authorization_endpoint: `${server.origin}/authorize`,
+        token_endpoint: `${server.origin}/token`,
+        registration_endpoint: `${server.origin}/register`,
+        revocation_endpoint: `${server.origin}/revoke`,
+        scopes_supported: ["read", "write"],
+        token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+      });
+    }
+    if (request.path === "/register") {
+      state.registered += 1;
+      return jsonResponse(
+        {
+          client_id: `dcr-${state.registered}`,
+          client_secret: `dcr-secret-${state.registered}`,
+          token_endpoint_auth_method: "client_secret_basic",
+        },
+        201,
+      );
+    }
+    if (request.path === "/token") {
+      const grant = request.form.get("grant_type");
+      if (grant === "authorization_code") {
+        if (request.form.get("code") === "bad")
+          return jsonResponse({ error: "invalid_grant" }, 400);
+        state.issued += 1;
+        return jsonResponse({
+          access_token: `at-${state.issued}`,
+          refresh_token: `rt-${state.issued}`,
+          expires_in: 3600,
+          token_type: "bearer",
+          scope: "read write",
+        });
+      }
+      if (grant === "refresh_token") {
+        if (state.refresh === "server_error") return new Response("token down", { status: 500 });
+        if (state.refresh === "invalid_client") {
+          return jsonResponse({ error: "invalid_client" }, 401);
+        }
+        state.issued += 1;
+        return jsonResponse({
+          access_token: `at-${state.issued}`,
+          refresh_token: `rt-${state.issued}`,
+          expires_in: 3600,
+          token_type: "bearer",
+        });
+      }
+      return jsonResponse({ error: "unsupported_grant_type" }, 400);
+    }
+    if (request.path === "/revoke") return jsonResponse({});
+    return new Response("not found", { status: 404 });
+  });
+  return Object.assign(server, { state });
+}
+
+function tokenRequests(as: AuthorizationServer, grant: string): MockRequest[] {
+  return as.requests.filter((r) => r.path === "/token" && r.form.get("grant_type") === grant);
+}
+
+/** `client_id:client_secret` out of a Basic Authorization header, or null. */
+function basicCredentials(request: MockRequest | undefined): string | null {
+  const header = request?.headers.get("authorization") ?? "";
+  return header.startsWith("Basic ")
+    ? Buffer.from(header.slice("Basic ".length), "base64").toString()
+    : null;
 }
 
 export const platformMcpServers: Scenario = {
@@ -113,10 +212,6 @@ export const platformMcpServers: Scenario = {
           { name: `e2e-x-${ctx.nonce}`, transport: "http", url: "file:///etc/passwd" },
           "a non-http url",
         ],
-        [
-          { name: `e2e-http-${ctx.nonce}`, transport: "http", scope: "swarm", url: remote },
-          "a duplicate name in the same scope",
-        ],
       ];
       for (const [body, label] of invalid) {
         expectStatus(
@@ -125,6 +220,16 @@ export const platformMcpServers: Scenario = {
           `create with ${label}`,
         );
       }
+      // A duplicate name in the same scope answers 409 mcp_server_name_taken, never SQLite text.
+      const duplicateName = await ctx.api("POST", "/api/mcp-servers", {
+        body: { name: `e2e-http-${ctx.nonce}`, transport: "http", scope: "swarm", url: remote },
+      });
+      expectStatus(duplicateName, [409], "create with a duplicate name in the same scope");
+      expect(
+        asRecord(duplicateName.json).error === "mcp_server_name_taken" &&
+          !duplicateName.text.includes("UNIQUE"),
+        `a duplicate name answers mcp_server_name_taken without SQLite text, got ${duplicateName.text.slice(0, 200)}`,
+      );
 
       // ── list, get, filters ─────────────────────────────────────────────────
       const listed = await ctx.api("GET", "/api/mcp-servers");
@@ -374,8 +479,63 @@ export const platformMcpServers: Scenario = {
         "disconnect with no token",
       );
 
-      // The metadata probe of the SUT's own loopback MCP endpoint is refused: private hosts
-      // are blocked for OAuth discovery, and the route reports the probe failure.
+      // ── MCP OAuth against a loopback authorization server ──────────────────
+      // The SUT allows private hosts for OAuth discovery, so the success paths run for real:
+      // metadata, dynamic client registration, authorize url, callback, status, refresh,
+      // refresh failures and disconnect.
+      const as = startAuthorizationServer();
+      cleanup.add("stop the authorization server", async () => as.stop());
+      const oauthCreated = await ctx.api("POST", "/api/mcp-servers", {
+        body: {
+          name: `e2e-oauth-${ctx.nonce}`,
+          transport: "http",
+          scope: "swarm",
+          url: `${as.origin}/mcp`,
+        },
+      });
+      expectStatus(oauthCreated, [201], "register the loopback authorization server's resource");
+      const oauthServer = serverOf(oauthCreated.json);
+      cleanup.add("delete the oauth server", async () => {
+        await ctx.api("DELETE", `/api/mcp-servers/${oauthServer.id}`);
+      });
+      const oauthId = oauthServer.id;
+      const callbackSuffix = "/api/mcp-oauth/callback";
+
+      const metadata = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/metadata`);
+      expectStatus(metadata, [200], "oauth metadata of a loopback server");
+      const found = asRecord(metadata.json);
+      expect(
+        found.requiresOAuth === true &&
+          found.resourceUrl === `${as.origin}/mcp` &&
+          found.authorizationServerIssuer === as.origin &&
+          found.authorizeUrl === `${as.origin}/authorize` &&
+          found.tokenUrl === `${as.origin}/token` &&
+          found.revocationUrl === `${as.origin}/revoke` &&
+          found.registrationEndpoint === `${as.origin}/register` &&
+          found.dcrSupported === true &&
+          JSON.stringify(found.scopes) === JSON.stringify(["read", "write"]) &&
+          JSON.stringify(found.bearerMethodsSupported) === JSON.stringify(["header"]) &&
+          Array.isArray(found.tokenEndpointAuthMethodsSupported) &&
+          found.tokenEndpointAuthMethodsSupported.includes("client_secret_basic"),
+        `metadata reports the discovered endpoints: ${metadata.text.slice(0, 400)}`,
+      );
+
+      // A failed discovery is a 502 that names the failure; the server recovers afterwards.
+      as.state.metadata = "down";
+      const probe = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/metadata`);
+      expectStatus(probe, [502], "oauth metadata when the authorization server is down");
+      expect(
+        String(asRecord(probe.json).error).startsWith("Metadata discovery failed"),
+        "the 502 names the discovery failure",
+      );
+      as.state.metadata = "ok";
+      expectStatus(
+        await ctx.api("GET", `/api/mcp-oauth/${oauthId}/metadata`),
+        [200],
+        "oauth metadata after the authorization server recovers",
+      );
+
+      // The SUT's own MCP endpoint advertises no protected-resource metadata.
       const loopback = await ctx.api("POST", "/api/mcp-servers", {
         body: {
           name: `e2e-self-${ctx.nonce}`,
@@ -389,12 +549,280 @@ export const platformMcpServers: Scenario = {
       cleanup.add("delete the loopback server", async () => {
         await ctx.api("DELETE", `/api/mcp-servers/${self.id}`);
       });
-      const probe = await ctx.api("GET", `/api/mcp-oauth/${self.id}/metadata`);
-      // FINDING: the route documents 200/400/404 only, but a failed discovery answers 502.
-      expectStatus(probe, [502], "oauth metadata of a loopback server");
+      const selfMetadata = await ctx.api("GET", `/api/mcp-oauth/${self.id}/metadata`);
+      expectStatus(selfMetadata, [200], "oauth metadata of a server without OAuth");
       expect(
-        String(asRecord(probe.json).error).startsWith("Metadata discovery failed"),
-        "the 502 names the discovery failure",
+        asRecord(selfMetadata.json).requiresOAuth === false,
+        "a server that advertises no OAuth metadata reports requiresOAuth=false",
+      );
+
+      // Authorize: the authorization server supports DCR, so the first call registers a client.
+      const registeredClients = () => as.requests.filter((r) => r.path === "/register").length;
+      const doneUrl = "https://app.example.com/mcp-oauth-done";
+      const built = await ctx.api(
+        "GET",
+        `/api/mcp-oauth/${oauthId}/authorize-url?redirect=${encodeURIComponent(doneUrl)}`,
+      );
+      expectStatus(built, [200], "build the authorize url with dynamic client registration");
+      const dcrProvider = new URL(String(asRecord(built.json).providerUrl));
+      const dcrParams = dcrProvider.searchParams;
+      expect(
+        `${dcrProvider.origin}${dcrProvider.pathname}` === `${as.origin}/authorize` &&
+          dcrParams.get("client_id") === "dcr-1" &&
+          dcrParams.get("response_type") === "code" &&
+          dcrParams.get("scope") === "read write" &&
+          dcrParams.get("resource") === `${as.origin}/mcp` &&
+          dcrParams.get("code_challenge_method") === "S256" &&
+          (dcrParams.get("redirect_uri") ?? "").endsWith(callbackSuffix),
+        `the provider url carries the registered client, scopes, resource and PKCE: ${dcrProvider}`,
+      );
+      const registrations = as.requests.filter((r) => r.path === "/register");
+      const registration = asRecord(registrations[0]?.json);
+      expect(
+        registrations.length === 1 &&
+          registration.client_name === `agent-swarm (${oauthServer.name})` &&
+          registration.token_endpoint_auth_method === "client_secret_basic" &&
+          registration.scope === "read write" &&
+          Array.isArray(registration.grant_types) &&
+          registration.grant_types.includes("refresh_token") &&
+          Array.isArray(registration.redirect_uris) &&
+          String(registration.redirect_uris[0]).endsWith(callbackSuffix),
+        `the swarm registers itself with the discovered endpoint: ${registrations[0]?.text}`,
+      );
+      const beforeCallback = asRecord(
+        (await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`)).json,
+      );
+      expect(
+        beforeCallback.connected === false && beforeCallback.token === null,
+        "a started flow is not a connection until the callback",
+      );
+      // A second authorize call reuses the registered client instead of registering again.
+      const rebuilt = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/authorize-url`);
+      expectStatus(rebuilt, [200], "build the authorize url again");
+      const rebuiltParams = new URL(String(asRecord(rebuilt.json).providerUrl)).searchParams;
+      expect(
+        rebuiltParams.get("client_id") === "dcr-1" && registeredClients() === 1,
+        "a second authorize call reuses the registered client",
+      );
+
+      // Callback: the code is exchanged at the token endpoint with the client's credentials.
+      const goodState = String(dcrParams.get("state"));
+      const connected = await ctx.api(
+        "GET",
+        `/api/mcp-oauth/callback?state=${encodeURIComponent(goodState)}&code=code-${ctx.nonce}`,
+        { apiKey: null, redirect: "manual" },
+      );
+      expectStatus(connected, [302], "mcp callback with a valid code");
+      const connectedTarget = new URL(connected.headers.get("location") ?? "http://invalid");
+      expect(
+        `${connectedTarget.origin}${connectedTarget.pathname}` === doneUrl &&
+          connectedTarget.searchParams.get("oauth") === "success",
+        `a successful callback redirects back with oauth=success: ${connectedTarget}`,
+      );
+      const exchange = tokenRequests(as, "authorization_code");
+      expect(
+        exchange.length === 1 &&
+          exchange[0]?.form.get("code") === `code-${ctx.nonce}` &&
+          (exchange[0]?.form.get("code_verifier") ?? "").length >= 43 &&
+          exchange[0]?.form.get("resource") === `${as.origin}/mcp` &&
+          (exchange[0]?.form.get("redirect_uri") ?? "").endsWith(callbackSuffix) &&
+          basicCredentials(exchange[0]) === "dcr-1:dcr-secret-1",
+        `the code exchange sends the verifier, resource and the client's Basic credentials: ${exchange[0]?.text}`,
+      );
+      expectStatus(
+        await ctx.api(
+          "GET",
+          `/api/mcp-oauth/callback?state=${encodeURIComponent(goodState)}&code=again`,
+          { apiKey: null },
+        ),
+        [400],
+        "a consumed mcp state cannot be replayed",
+      );
+      // The user abandons the second attempt. A live pending attempt would keep offering its
+      // client for reuse, which the disowned-client step below must not meet.
+      expectStatus(
+        await ctx.api(
+          "GET",
+          `/api/mcp-oauth/callback?state=${encodeURIComponent(String(rebuiltParams.get("state")))}&error=access_denied`,
+          { apiKey: null, redirect: "manual" },
+        ),
+        [302],
+        "the abandoned second attempt is denied",
+      );
+
+      // Status with a live token never exposes the token or the client credentials.
+      const live = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`);
+      const liveStatus = asRecord(live.json);
+      const liveToken = asRecord(liveStatus.token);
+      expect(
+        liveStatus.connected === true &&
+          liveStatus.authMethod === "oauth" &&
+          liveToken.status === "connected" &&
+          liveToken.scope === "read write" &&
+          liveToken.clientSource === "dcr" &&
+          liveToken.hasRefreshToken === true &&
+          liveToken.authorizationServerIssuer === as.origin &&
+          liveToken.resourceUrl === `${as.origin}/mcp` &&
+          liveToken.lastErrorMessage === null &&
+          typeof liveToken.lastRefreshedAt === "string" &&
+          typeof liveToken.expiresAt === "string" &&
+          new Date(String(liveToken.expiresAt)).getTime() > Date.now(),
+        `a connected server reports a live token: ${live.text.slice(0, 500)}`,
+      );
+      expect(
+        !/at-\d|rt-\d|dcr-secret/.test(live.text),
+        "status never carries the tokens or the client secret",
+      );
+      const oauthAgent = await registerAgent(ctx, "mcp-oauth");
+      expectStatus(
+        await ctx.api("POST", `/api/mcp-servers/${oauthId}/install`, {
+          body: { agentId: oauthAgent },
+        }),
+        [200],
+        "install the oauth server for an agent",
+      );
+      const bearerOf = async (label: string) => {
+        const list = await ctx.api(
+          "GET",
+          `/api/agents/${oauthAgent}/mcp-servers?resolveSecrets=true`,
+        );
+        expectStatus(list, [200], label);
+        const row = asRecords(list.json, "servers").find((s) => s.id === oauthId);
+        return String(asRecord(row?.resolvedHeaders).Authorization);
+      };
+      expect(
+        (await bearerOf("resolve the oauth bearer")) === "Bearer at-1",
+        "the agent's resolved headers carry the connection's access token",
+      );
+
+      // Refresh rotates the access token.
+      const refreshed = await ctx.api("POST", `/api/mcp-oauth/${oauthId}/refresh`, { body: {} });
+      expectStatus(refreshed, [200], "refresh the connection");
+      const refreshBody = asRecord(refreshed.json);
+      expect(
+        refreshBody.ok === true &&
+          refreshBody.scope === "read write" &&
+          typeof refreshBody.expiresAt === "string",
+        `refresh answers ok with the expiry and scope: ${refreshed.text}`,
+      );
+      const refreshGrants = tokenRequests(as, "refresh_token");
+      expect(
+        refreshGrants.length === 1 &&
+          refreshGrants[0]?.form.get("refresh_token") === "rt-1" &&
+          refreshGrants[0]?.form.get("resource") === `${as.origin}/mcp` &&
+          basicCredentials(refreshGrants[0]) === "dcr-1:dcr-secret-1",
+        `the refresh sends the stored refresh token and client credentials: ${refreshGrants[0]?.text}`,
+      );
+      expect(
+        (await bearerOf("resolve the rotated bearer")) === "Bearer at-2",
+        "a refresh replaces the stored access token",
+      );
+
+      // A token endpoint failure is a 500 that names it, and the connection stays usable.
+      as.state.refresh = "server_error";
+      const failedRefresh = await ctx.api("POST", `/api/mcp-oauth/${oauthId}/refresh`, {
+        body: {},
+      });
+      expectStatus(failedRefresh, [500], "refresh when the token endpoint fails");
+      expect(
+        String(asRecord(failedRefresh.json).error).startsWith(
+          "Refresh failed: Token refresh failed (500)",
+        ),
+        `the 500 names the token endpoint failure: ${failedRefresh.text}`,
+      );
+      expect(
+        asRecord((await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`)).json).connected ===
+          true,
+        "a transient refresh failure leaves the connection connected",
+      );
+
+      // invalid_client means the provider disowned the client: the token is flagged as an error
+      // and the next authorize registers a fresh client.
+      as.state.refresh = "invalid_client";
+      const disowned = await ctx.api("POST", `/api/mcp-oauth/${oauthId}/refresh`, { body: {} });
+      expectStatus(disowned, [500], "refresh with a disowned client");
+      expect(
+        String(asRecord(disowned.json).error).includes("invalid_client"),
+        `the 500 names invalid_client: ${disowned.text}`,
+      );
+      const errored = asRecord((await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`)).json);
+      expect(
+        errored.connected === false &&
+          asRecord(errored.token).status === "error" &&
+          String(asRecord(errored.token).lastErrorMessage).includes("invalid_client"),
+        `a disowned client marks the token as an error: ${JSON.stringify(errored)}`,
+      );
+      as.state.refresh = "ok";
+      const reauthorized = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/authorize-url`);
+      expectStatus(reauthorized, [200], "authorize again after the client was disowned");
+      const reauthUrl = new URL(String(asRecord(reauthorized.json).providerUrl));
+      expect(
+        reauthUrl.searchParams.get("client_id") === "dcr-2" && registeredClients() === 2,
+        `a disowned client is replaced by a fresh registration: ${reauthUrl} after ${registeredClients()} registration(s)`,
+      );
+      const reconnected = await ctx.api(
+        "GET",
+        `/api/mcp-oauth/callback?state=${encodeURIComponent(String(reauthUrl.searchParams.get("state")))}&code=code2-${ctx.nonce}`,
+        { apiKey: null, redirect: "manual" },
+      );
+      expectStatus(reconnected, [302], "mcp callback after re-registering");
+      expect(
+        asRecord((await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`)).json).connected ===
+          true,
+        "the connection recovers after re-authorizing",
+      );
+
+      // A rejected code redirects back with the provider's error and connects nothing new.
+      const badAuthorize = await ctx.api("GET", `/api/mcp-oauth/${oauthId}/authorize-url`);
+      const badState = new URL(String(asRecord(badAuthorize.json).providerUrl)).searchParams.get(
+        "state",
+      );
+      const rejected = await ctx.api(
+        "GET",
+        `/api/mcp-oauth/callback?state=${encodeURIComponent(String(badState))}&code=bad`,
+        { apiKey: null, redirect: "manual" },
+      );
+      expectStatus(rejected, [302], "mcp callback with a rejected code");
+      const rejectedTarget = new URL(rejected.headers.get("location") ?? "http://invalid");
+      expect(
+        rejectedTarget.searchParams.get("oauth") === "error" &&
+          (rejectedTarget.searchParams.get("error_description") ?? "").includes(
+            "Token exchange failed (400)",
+          ),
+        `a rejected code redirects back with oauth=error: ${rejectedTarget}`,
+      );
+
+      // Disconnect revokes at the provider once. It is idempotent: the revoked row is kept.
+      const revokedBefore = as.requests.filter((r) => r.path === "/revoke").length;
+      expectStatus(
+        await ctx.api("DELETE", `/api/mcp-oauth/${oauthId}`),
+        [200],
+        "disconnect the oauth server",
+      );
+      const revocations = as.requests.filter((r) => r.path === "/revoke");
+      expect(
+        revocations.length === revokedBefore + 1 &&
+          /^at-\d+$/.test(revocations[revocations.length - 1]?.form.get("token") ?? "") &&
+          basicCredentials(revocations[revocations.length - 1]) === "dcr-2:dcr-secret-2",
+        "disconnect revokes the access token at the provider with the client's credentials",
+      );
+      const revokedStatus = asRecord(
+        (await ctx.api("GET", `/api/mcp-oauth/${oauthId}/status`)).json,
+      );
+      expect(
+        revokedStatus.connected === false &&
+          revokedStatus.authMethod === "static" &&
+          asRecord(revokedStatus.token).status === "revoked",
+        "disconnect keeps the row as revoked and returns the server to static auth",
+      );
+      expectStatus(
+        await ctx.api("DELETE", `/api/mcp-oauth/${oauthId}`),
+        [200],
+        "disconnect a revoked connection again",
+      );
+      expect(
+        as.requests.filter((r) => r.path === "/revoke").length === revokedBefore + 1,
+        "a repeat disconnect does not call the provider again",
       );
 
       // Pre-register a client (the DCR fallback) and walk the authorize flow up to the provider.

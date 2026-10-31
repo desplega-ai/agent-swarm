@@ -188,6 +188,8 @@ export async function startSut(
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,
     OAUTH_KEEPALIVE_DISABLE: "true",
+    // MCP OAuth discovery refuses private hosts by default; scenarios run a loopback authorization server.
+    MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",
     LINEAR_DISABLE: "true",
