@@ -290,19 +290,12 @@ async function harnessAndRuntime(ctx: ScenarioContext, agentId: string): Promise
   });
   expectStatus(response, [400], "unknown model");
   expect(String(asRecord(response.json).error).includes("model catalog"), "Model 400 lacks reason");
+  // A catalog model with a level that model supports.
   response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
-    body: {
-      harness_provider: "claude",
-      model: "core-custom-model",
-      allow_custom_model: true,
-      reasoning_effort: "high",
-    },
+    body: { harness_provider: "claude", model: "opus", reasoning_effort: "high" },
   });
-  expectStatus(response, [200], "custom model with allow_custom_model");
-  expect(
-    configValue(ctx, agentId, "MODEL_OVERRIDE") === "core-custom-model",
-    "No MODEL_OVERRIDE row",
-  );
+  expectStatus(response, [200], "catalog model with a supported effort");
+  expect(configValue(ctx, agentId, "MODEL_OVERRIDE") === "opus", "No MODEL_OVERRIDE row");
   expect(
     configValue(ctx, agentId, "REASONING_EFFORT_OVERRIDE") === "high",
     "No effort override row",
@@ -310,8 +303,31 @@ async function harnessAndRuntime(ctx: ScenarioContext, agentId: string): Promise
   response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
     body: { harness_provider: "claude", reasoning_effort: "off" },
   });
-  expectStatus(response, [400], "unsupported reasoning effort");
-  expect(Array.isArray(asRecord(response.json).allowed), "Effort 400 lacks the allowed levels");
+  expectStatus(response, [400], "effort the model does not support");
+  let allowed = asRecord(response.json).allowed;
+  expect(
+    Array.isArray(allowed) && allowed.includes("high") && !allowed.includes("off"),
+    `Effort 400 lists the wrong allowed levels: ${JSON.stringify(allowed)}`,
+  );
+  // A custom model is accepted with allow_custom_model. The capability table knows no levels
+  // for it, so an effort for it is refused: "must be one the harness and model support".
+  response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
+    body: { harness_provider: "claude", model: "core-custom-model", allow_custom_model: true },
+  });
+  expectStatus(response, [200], "custom model with allow_custom_model");
+  expect(
+    configValue(ctx, agentId, "MODEL_OVERRIDE") === "core-custom-model",
+    "No custom MODEL_OVERRIDE",
+  );
+  response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
+    body: { harness_provider: "claude", reasoning_effort: "high" },
+  });
+  expectStatus(response, [400], "effort for a custom model");
+  allowed = asRecord(response.json).allowed;
+  expect(
+    Array.isArray(allowed) && allowed.length === 0,
+    `A custom model should support no efforts, got ${JSON.stringify(allowed)}`,
+  );
   response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
     body: { harness_provider: "claude", model: "latest:anthropic/opus" },
   });
