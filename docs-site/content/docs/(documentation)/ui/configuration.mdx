@@ -397,9 +397,10 @@ schedule that needs no integration and no required param/placeholder — and who
 doesn't recommend staying off — arrives already enabled at boot, instead of disabled-but-inventoried.
 An item that needs a credential or a param this install doesn't have is unaffected either way.
 
-This includes `daily-swarm-update-check`, a zero-config schedule that calls the public GitHub
-releases API on a daily cron and posts to the configured admin channel when a newer
-`desplega-ai/agent-swarm` release is available — the only outbound network call and notification
+This includes `daily-swarm-update-check`, a zero-config schedule that runs the global
+`swarm-update-check` script on a daily cron. The script calls the public GitHub releases API and,
+only when a newer `desplega-ai/agent-swarm` release is available, asks the lead to post to the
+configured admin channel. That is the only outbound network call and notification
 this switch turns on by default. Turn the switch off, or disable that schedule individually from
 its details page, to stop it.
 

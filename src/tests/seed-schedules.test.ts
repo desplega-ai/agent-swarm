@@ -8,6 +8,7 @@ import {
   initDb,
   updateScheduledTask,
 } from "../be/db";
+import { upsertScriptByName } from "../be/scripts/db";
 import { runSeeder } from "../be/seed";
 import {
   createSchedulesSeeder,
@@ -15,6 +16,7 @@ import {
   type ScheduleTemplateSource,
 } from "../be/seed/schedules-seeder";
 import { createWorkflowsSeeder } from "../be/seed/workflows-seeder";
+import { SEED_SCRIPTS } from "../be/seed-scripts";
 
 const TEST_DB_PATH = "./test-seed-schedules.sqlite";
 
@@ -95,6 +97,23 @@ function targetScheduleSource(target: Record<string, unknown>, prompt?: string) 
   } satisfies ScheduleTemplateSource;
 }
 
+/** Stand-in for the catalog script daily-swarm-update-check targets; boot seeds the real one first. */
+async function seedUpdateCheckScript() {
+  await upsertScriptByName({
+    name: "swarm-update-check",
+    scope: "global",
+    scopeId: null,
+    source: "export default async function main() { return {}; }",
+    description: "test stand-in",
+    intent: "seed-schedules test fixture",
+    signatureJson: "{}",
+    fsMode: "none",
+    agentId: null,
+    isScratch: false,
+    typeChecked: true,
+  });
+}
+
 async function makeWorkflow(name: string) {
   return createWorkflow({ name, definition: { nodes: [] } });
 }
@@ -118,9 +137,9 @@ afterEach(async () => {
 });
 
 describe("schedules seeder", () => {
-  test("loads all twelve schedule templates, including the unfenced schedule block", () => {
+  test("loads all eleven schedule templates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(12);
+    expect(schedules).toHaveLength(11);
     // Zero-config, requires:[], placeholders:[], template enabled:true -> auto-enabled
     // under the default (unset -> on) SEED_AUTOMATIONS_ENABLED switch.
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
@@ -135,6 +154,11 @@ describe("schedules seeder", () => {
       enabled: true,
       requiredParams: [],
       requires: [],
+      // A script fire: no agent task, no prompt.
+      targetType: "script",
+      scriptName: "swarm-update-check",
+      scriptArgs: {},
+      taskTemplate: "",
     });
     expect(
       schedules.find((schedule) => schedule.name === "weekly-harness-upgrade-check"),
@@ -149,9 +173,10 @@ describe("schedules seeder", () => {
       "daily-blocker-digest",
       "daily-status-report",
       "daily-swarm-update-check",
-      "daily-workflow-health-audit",
       "dreaming-daily",
     ]);
+    // The status report absorbed the workflow-health audit's six queries.
+    expect(schedules.map((schedule) => schedule.name)).not.toContain("daily-workflow-health-audit");
     // dreaming replaces Daily Evolution, which seeds off even though it is zero-config.
     expect(
       schedules.find((schedule) => schedule.name === "daily-compounding-reflection"),
@@ -160,20 +185,22 @@ describe("schedules seeder", () => {
 
   test("SEED_AUTOMATIONS_ENABLED=false still seeds all schedules disabled", async () => {
     process.env.SEED_AUTOMATIONS_ENABLED = "false";
-    // dreaming-daily targets the seeded dreaming workflow.
+    // dreaming-daily targets the seeded dreaming workflow, daily-swarm-update-check a catalog script.
     await runSeeder(createWorkflowsSeeder(), { quiet: true });
+    await seedUpdateCheckScript();
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 12, failed: [] });
+    expect(result).toMatchObject({ created: 11, failed: [] });
     const schedules = await getScheduledTasks();
-    expect(schedules).toHaveLength(12);
+    expect(schedules).toHaveLength(11);
     expect(schedules.every((schedule) => schedule.enabled === false)).toBe(true);
   });
 
   test("seeds a disabled schedule whose timezone still needs setup", async () => {
-    // dreaming-daily targets the seeded dreaming workflow.
+    // dreaming-daily targets the seeded dreaming workflow, daily-swarm-update-check a catalog script.
     await runSeeder(createWorkflowsSeeder(), { quiet: true });
+    await seedUpdateCheckScript();
     const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
-    expect(result).toMatchObject({ created: 12, failed: [] });
+    expect(result).toMatchObject({ created: 11, failed: [] });
     expect(await getScheduledTaskByName("weekly-dependabot-triage")).toMatchObject({
       cronExpression: "40 3 * * 0",
       timezone: "{{TIMEZONE}}",
@@ -311,6 +338,32 @@ describe("schedules seeder", () => {
     const result = await runSeeder(seeder, { quiet: true });
     expect(result.created).toBe(0);
     expect(result.failed[0]?.error).toContain('Global script "no-such-script" not found');
+  });
+
+  test("daily-swarm-update-check runs the catalog's swarm-update-check script, no agent task", async () => {
+    // The scripts catalog ships the target, so boot's script seeder creates it first.
+    expect(SEED_SCRIPTS.map((script) => script.name)).toContain("swarm-update-check");
+    const updateCheck = loadSeedSchedules().filter(
+      (schedule) => schedule.name === "daily-swarm-update-check",
+    );
+    expect(updateCheck).toHaveLength(1);
+
+    // Control: without the script the item fails instead of seeding an agent task.
+    const seeder = createSchedulesSeeder();
+    const before = await runSeeder(seeder, { quiet: true });
+    expect(before.failed.map((failure) => failure.key)).toContain("daily-swarm-update-check");
+    expect(await getScheduledTaskByName("daily-swarm-update-check")).toBeNull();
+
+    await seedUpdateCheckScript();
+    await runSeeder(seeder, { quiet: true });
+    const row = await getScheduledTaskByName("daily-swarm-update-check");
+    expect(row).toMatchObject({
+      targetType: "script",
+      scriptName: "swarm-update-check",
+      scriptArgs: {},
+      enabled: true,
+    });
+    expect(row?.taskTemplate).toBeUndefined();
   });
 
   test("fails a workflow target whose workflow does not exist, without creating a row", async () => {
