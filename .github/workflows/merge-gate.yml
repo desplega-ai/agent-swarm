@@ -617,10 +617,8 @@ jobs:
     # other event) always runs it.
     if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
-    # actions: read lets the benchmark step download main's last e2e-results artifact.
     permissions:
       contents: read
-      actions: read
     timeout-minutes: 25
 
     steps:
@@ -648,51 +646,12 @@ jobs:
         if: always()
         run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      # Latency regression signal: diff this run against main's last green
-      # e2e-contract-results artifact (bun run e2e:bench). Informational, never
-      # blocks the gate; a missing or expired artifact just skips the table.
-      # Two steps on purpose: the token exists only in the download step, which
-      # runs no repository code; the bench step runs PR code with no token.
-      - name: Download main's benchmark baseline
-        id: baseline
-        if: always() && github.event_name == 'pull_request'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Only a push-event run on main is a trusted baseline (never a PR's run).
-          run_id=$(gh run list --workflow merge-gate.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-          if [ -z "$run_id" ]; then echo "no green main run to compare against"; exit 0; fi
-          mkdir -p /tmp/main-e2e
-          if ! gh run download "$run_id" -n e2e-contract-results -D /tmp/main-e2e 2>/dev/null; then
-            echo "main run $run_id has no e2e-contract-results artifact (expired or skipped)"; exit 0
-          fi
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-
-      - name: Benchmark against main
-        if: always() && github.event_name == 'pull_request' && steps.baseline.outputs.run_id != ''
-        continue-on-error: true
-        run: |
-          baseline=/tmp/main-e2e/e2e-results.json
-          # The artifact is data, never executed: cap its size and require the result shape
-          # (scenarios[] + coverage.latency) before the bench script reads it.
-          if [ ! -f "$baseline" ] || [ "$(stat -c %s "$baseline")" -gt 10485760 ]; then
-            echo "baseline artifact missing or over 10 MB; skipping"; exit 0
-          fi
-          if ! bun -e 'const r = await Bun.file(process.argv[1]).json(); if (!Array.isArray(r.scenarios) || typeof r.coverage?.latency?.overall?.p50 !== "number") process.exit(1)' "$baseline"; then
-            echo "baseline artifact is not an e2e result file; skipping"; exit 0
-          fi
-          bun run e2e:bench "$baseline" e2e-results.json --md e2e-bench.md > /dev/null
-          { echo; echo "### Benchmark against main (run ${{ steps.baseline.outputs.run_id }})"; echo; cat e2e-bench.md; } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload E2E results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-contract-results
-          path: |
-            e2e-results.json
-            e2e-bench.md
+          path: e2e-results.json
           if-no-files-found: warn
 
   test:

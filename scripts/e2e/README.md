@@ -174,3 +174,4 @@ bun scripts/e2e/bench.ts /tmp/e2e-before.json /tmp/e2e-after.json
 ```
 
 `bench.ts` prints per-group p50/p95 deltas and the scenario durations side by side.
+CI uploads result JSON for local comparison.

@@ -124,9 +124,8 @@ reviewers checked standards and spec, zero blockers. Outcome:
 - `src/be/scripts/boot-args-schema.ts` normalizes stored schema JSON without executing source.
   It removes defaulted fields from `required` and preserves versions and timestamps.
   A second boot performs no writes.
-- CI: the E2E Contract job benchmarks each PR against main's last green run
-  (`bun run e2e:bench`) in the job summary. The runbook explains how to read it and how to retire
-  unit tests the suite already proves.
+- CI uploads each result report. Compare reports locally with `bun run e2e:bench`.
+  The runbook also explains how to retire unit tests the suite already proves.
 - Local unit failures verified as environment: under the pinned Bun 1.4.4 (via `bunx bun@1.4.4`)
   the doubled-`changes` tests pass; only `codex-gateway-route` still fails locally, and it fails
   on clean main too.
@@ -155,8 +154,8 @@ reviewers checked standards and spec, zero blockers. Outcome:
 - P1: `CODEX_OAUTH_DEVICE_BASE_URL` was config-writable and unvalidated. Now an env-only reserved
   key (with `DESPLEGA_TELEMETRY_ENDPOINT`), loopback-only; the runner fixes the stub port at
   boot and exposes it as `ctx.sutEnv`.
-- P2: the benchmark step ran PR code with `GH_TOKEN`. Now a token-only download step and a
-  token-free bench step; the artifact is size-capped and shape-checked before use.
+- B3 (previously P2): removed the CI baseline download and comparison after review found that separate steps still exposed the job token.
+  The E2E job now uses only `contents: read`. The local benchmark command remains available.
 - Also hardened: the args-schema extractor runs under `buildSandboxedCommand`.
 
 ## Follow-ups (not in this PR)
