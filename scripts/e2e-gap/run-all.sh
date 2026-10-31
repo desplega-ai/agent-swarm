@@ -18,7 +18,7 @@ leg() { # name, command...
 # (agent-swarm PRs #2490, #2561, #2551). The package resolves to ./src under bun, so patch the sources.
 SM=node_modules/@desplega.ai/slack-mock
 if ! grep -q dropSocketBeforeAck "$SM"/src/*.ts 2>/dev/null; then
-  (cd "$SM" && git apply "$OLDPWD/scripts/e2e-gap/slack-mock-gap.patch") || echo "slack-mock patch did not apply" >&2
+  (cd "$SM" && patch -p1 < "$OLDPWD/scripts/e2e-gap/slack-mock-gap.patch") || echo "slack-mock patch did not apply" >&2
 fi
 # The Codex adapter finds `codex` on PATH; point it at the binary the SDK installed.
 export CODEX_PATH_OVERRIDE=${CODEX_PATH_OVERRIDE:-$(find "$PWD/node_modules/@openai/codex-linux-x64" -name codex -type f 2>/dev/null | head -1)}
