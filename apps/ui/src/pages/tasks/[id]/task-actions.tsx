@@ -5,6 +5,7 @@ import {
   Ellipsis,
   Hash,
   LifeBuoy,
+  MessageSquare,
   MessagesSquare,
   Network,
   Pause,
@@ -15,7 +16,7 @@ import {
   ScrollText,
 } from "lucide-react";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useCancelTask, usePauseTask, useResumeTask, useRetryTask } from "@/api/hooks/use-tasks";
@@ -86,6 +87,8 @@ interface TaskActionModel {
   getHelp: ((opener: HTMLElement | null) => void) | null;
   /** Opens the experimental lineage view. Null when the API predates it. */
   lineage: (() => void) | null;
+  /** The task's session page (`/sessions/<root id>`). Null when it cannot open. */
+  session: string | null;
   /** Opens the title's rename field. Null when the role cannot rename. */
   rename: (() => void) | null;
   /** The log shows the raw log, not the transcript. */
@@ -110,6 +113,8 @@ export function useTaskActions(
     onRename: () => void;
     rawLog: boolean;
     onToggleRawLog: () => void;
+    /** The session page link, from the page (it owns the lineage path). */
+    session: string | null;
   },
 ): TaskActionModel | null {
   const cancelTask = useCancelTask();
@@ -151,6 +156,7 @@ export function useTaskActions(
     diagnostics: failed ? buildDiagnostics(task, apiVersion) : null,
     getHelp: shouldShowTaskFailureHelp(task.status, resolved, issue) ? handlers.onGetHelp : null,
     lineage: lineageGate.supported ? () => void navigate(`/tasks/${task.id}/lineage`) : null,
+    session: handlers.session,
     rename: allowed.action ? handlers.onRename : null,
     rawLog: handlers.rawLog,
     toggleRawLog: handlers.onToggleRawLog,
@@ -294,9 +300,21 @@ function LineageMenuItem({ onSelect, className }: { onSelect: () => void; classN
   );
 }
 
+/** "Open session": the session this task belongs to, as a link (a new tab works). */
+function SessionMenuItem({ href, className }: { href: string; className?: string }) {
+  return (
+    <DropdownMenuItem asChild className={className}>
+      <Link to={href}>
+        <MessageSquare />
+        Open session
+      </Link>
+    </DropdownMenuItem>
+  );
+}
+
 /**
  * The wide hero's "..." menu: Retry where it is not a button, Copy task id,
- * the raw log toggle, View lineage, Get help.
+ * the raw log toggle, Open session, View lineage, Get help.
  */
 function MoreActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
@@ -325,6 +343,7 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
           Copy task id
         </DropdownMenuItem>
         <RawLogMenuItem model={model} />
+        {model.session ? <SessionMenuItem href={model.session} /> : null}
         {model.lineage ? <LineageMenuItem onSelect={model.lineage} /> : null}
         {getHelp ? (
           <>
@@ -348,7 +367,8 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
  * - in progress: Pause. Paused: Resume.
  * - not finished: Cancel task, behind the confirm step.
  * - always: Rename (with the role's action verb), Copy task id, the raw log
- *   toggle, View lineage (beta), and Get help for a failed task.
+ *   toggle, Open session (when it can open), View lineage (beta), and Get
+ *   help for a failed task.
  * The trigger and the items are 44 px tall.
  */
 export function TaskActionsMenu({
@@ -460,6 +480,7 @@ export function TaskActionsMenu({
             Copy task id
           </DropdownMenuItem>
           <RawLogMenuItem model={model} className="min-h-11" />
+          {model.session ? <SessionMenuItem className="min-h-11" href={model.session} /> : null}
           {model.lineage ? <LineageMenuItem className="min-h-11" onSelect={model.lineage} /> : null}
           {getHelp ? (
             <>

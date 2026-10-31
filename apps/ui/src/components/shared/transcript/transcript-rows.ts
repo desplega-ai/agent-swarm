@@ -94,6 +94,20 @@ function timeOf(at: string | undefined): number {
 }
 
 /**
+ * The newest time among rows and the steps of their work rows, in ms (0 when
+ * there are none). The transcript compares new data with it, never with the
+ * browser's clock, which can be off from the server's.
+ */
+export function newestTime(items: (TranscriptRow | WorkEntry)[]): number {
+  let newest = 0;
+  for (const item of items) {
+    newest = Math.max(newest, timeOf(item.at));
+    if (item.kind === "work") newest = Math.max(newest, newestTime(item.entries));
+  }
+  return newest;
+}
+
+/**
  * Where a steering message sits in the run: a delivered one when the agent
  * got it, not when it was sent (a queued message waits for a turn boundary),
  * and a pending one after everything, since the agent has not seen it yet.

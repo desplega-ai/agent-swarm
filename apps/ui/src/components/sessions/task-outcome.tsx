@@ -13,6 +13,7 @@ import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
+import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
 import { ShowMore } from "@/components/shared/show-more";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -84,7 +85,8 @@ export function TaskOutcome({
 }
 
 // Env-var names in inline code get a copy button; other inline code is unchanged.
-const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode };
+// Links to this swarm render as chips (`useSwarmLinkPlugins`).
+const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode, "swarm-link": SwarmLinkChip };
 
 /**
  * Successful output — renders inline as plain prose, no border. Hover surfaces
@@ -92,10 +94,13 @@ const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode };
  */
 function OutcomeProse({ text, hideCopy }: { text: string; hideCopy: boolean }) {
   const trimmed = text.trim();
+  const rehypePlugins = useSwarmLinkPlugins();
   return (
     <OutcomeCopyShell copyText={trimmed} hideCopy={hideCopy}>
       <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
-        <Streamdown components={STREAMDOWN_COMPONENTS}>{normalizeNewlines(trimmed)}</Streamdown>
+        <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
+          {normalizeNewlines(trimmed)}
+        </Streamdown>
       </div>
     </OutcomeCopyShell>
   );

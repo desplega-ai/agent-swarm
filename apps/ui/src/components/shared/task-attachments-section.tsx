@@ -206,19 +206,49 @@ function hostOf(url: string | undefined): string | null {
 }
 
 /**
- * A list row's one meta line: what the row is (the link's host, "Page", or
- * the file's type), its size, and a short intent ("Task deliverable"). A
- * longer intent or description goes on its own line (`note`).
+ * A GitHub or GitLab PR, MR or issue link, read from its URL: a short label
+ * ("PR #2593") and the repo. Null for any other link.
+ */
+function vcsRef(url: string | undefined): { label: string; repo: string } | null {
+  let path: string;
+  let host: string;
+  try {
+    ({ pathname: path, hostname: host } = new URL(url ?? ""));
+  } catch {
+    return null;
+  }
+  const gitlab = /^\/(.+?)\/-\/(merge_requests|issues)\/(\d+)/.exec(path);
+  if (gitlab) {
+    const label = gitlab[2] === "issues" ? `Issue #${gitlab[3]}` : `MR !${gitlab[3]}`;
+    return { label, repo: gitlab[1] };
+  }
+  // GitLab's `/-/` paths are its own on any host; the GitHub shape is not
+  // (Sentry has `/organizations/<org>/issues/<n>`), so it needs GitHub's host.
+  const github =
+    host === "github.com" ? /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/.exec(path) : null;
+  if (github) {
+    const label = github[2] === "pull" ? `PR #${github[3]}` : `Issue #${github[3]}`;
+    return { label, repo: github[1] };
+  }
+  return null;
+}
+
+/**
+ * A list row's one meta line: what the row is (a PR's repo, the link's
+ * host, "Page", or the file's type), its size, and a short intent ("Task
+ * deliverable"). A longer intent or description goes on its own line
+ * (`note`).
  */
 function rowMeta(
   attachment: TaskAttachment,
   previewKind: PreviewKind | null,
+  ref: { repo: string } | null,
 ): { meta: string; note: string | null } {
   // A file named without an extension ("Research report") keeps it in its path.
   const extension = getExtension(attachment.name) || getExtension(attachment.path ?? "");
   const what =
     attachment.kind === "url"
-      ? (hostOf(attachment.url) ?? "Link")
+      ? (ref?.repo ?? hostOf(attachment.url) ?? "Link")
       : attachment.kind === "page"
         ? "Page"
         : extension
@@ -562,7 +592,10 @@ function AttachmentRow({
     );
   }
 
-  const { meta, note } = rowMeta(attachment, previewKind);
+  // A PR or issue link reads "PR #2593"; the stored name is its tooltip.
+  const ref = attachment.kind === "url" ? vcsRef(attachment.url) : null;
+  const name = ref?.label ?? attachment.name;
+  const { meta, note } = rowMeta(attachment, previewKind, ref);
   return (
     // One calm row: a kind icon, the name, one meta line. The actions show on
     // hover or focus over the row's end. A touch screen shows them under the
@@ -575,7 +608,7 @@ function AttachmentRow({
         >
           <KindIcon attachment={attachment} previewKind={previewKind} />
         </span>
-        <div className="min-w-0 flex-1" title={pathDisplay ?? undefined}>
+        <div className="min-w-0 flex-1" title={pathDisplay ?? (ref ? attachment.name : undefined)}>
           <div className="flex min-w-0 items-center gap-1.5">
             {attachment.isPrimary && (
               <Star
@@ -583,7 +616,7 @@ function AttachmentRow({
                 aria-label="Primary attachment"
               />
             )}
-            <AttachmentName href={href} to={combTo} name={attachment.name} />
+            <AttachmentName href={href} to={combTo} name={name} />
           </div>
           {meta ? <p className="truncate text-xs text-muted-foreground">{meta}</p> : null}
           {note ? <p className="line-clamp-2 text-xs text-muted-foreground">{note}</p> : null}
@@ -602,7 +635,7 @@ function AttachmentRow({
                 className={ROW_ACTION}
                 onClick={toggleExpanded}
                 aria-expanded={expanded}
-                aria-label={`${expanded ? "Hide" : "Show"} ${attachment.name} preview`}
+                aria-label={`${expanded ? "Hide" : "Show"} ${name} preview`}
                 title={expanded ? "Hide preview" : "Show preview"}
               >
                 {expanded ? <EyeOff /> : <Eye />}
@@ -615,7 +648,7 @@ function AttachmentRow({
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  aria-label={`Open ${attachment.name} in agent-fs`}
+                  aria-label={`Open ${name} in agent-fs`}
                   title="Open in agent-fs"
                 >
                   <ExternalLink />
@@ -638,7 +671,7 @@ function AttachmentRow({
                 variant="ghost"
                 className={ROW_ACTION}
                 onClick={() => onDownload(attachment)}
-                aria-label={`Download ${attachment.name}`}
+                aria-label={`Download ${name}`}
                 title="Download"
               >
                 <Download />
@@ -653,7 +686,7 @@ function AttachmentRow({
                     variant="ghost"
                     className="size-6 text-muted-foreground hover:text-status-error-strong"
                     disabled={deleting}
-                    aria-label={`Delete ${attachment.name}`}
+                    aria-label={`Delete ${name}`}
                     title="Delete"
                   >
                     {deleting ? <Spinner className="size-3" /> : <Trash2 />}
@@ -663,7 +696,7 @@ function AttachmentRow({
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete attachment</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This removes {attachment.name} from the task. This action cannot be undone.
+                      This removes {name} from the task. This action cannot be undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

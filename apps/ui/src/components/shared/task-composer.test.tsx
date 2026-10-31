@@ -19,6 +19,7 @@ mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/kbd", () => require("../ui/kbd"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
 mock.module("@/components/sessions/composer-dock", () => require("../sessions/composer-dock"));
@@ -98,18 +99,25 @@ mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "u1" }),
 }));
 // Steering is its own surface; the stub shows which composer is up, the send
-// label and placeholder it was handed, and renders its extra actions.
+// label, placeholder and route detail it was handed, and renders its extra actions.
 mock.module("@/components/steering/steer-composer", () => ({
   SteerComposer: ({
     extraActions,
     sendLabel,
     placeholder,
+    routeDetail,
   }: {
     extraActions?: React.ReactNode;
     sendLabel?: string;
     placeholder?: string;
+    routeDetail?: string;
   }) => (
-    <div data-testid="steer-composer" data-send-label={sendLabel} data-placeholder={placeholder}>
+    <div
+      data-testid="steer-composer"
+      data-send-label={sendLabel}
+      data-placeholder={placeholder}
+      data-route-detail={routeDetail}
+    >
       {extraActions}
     </div>
   ),
@@ -216,6 +224,25 @@ function placeholderOf(container: HTMLElement): string | null {
   return container.querySelector("textarea")?.getAttribute("placeholder") ?? null;
 }
 
+/** Focuses `element` and returns the text of the tooltip that opens, if any. */
+async function tooltipOnFocus(element: HTMLElement): Promise<string | null> {
+  await act(async () => element.focus());
+  const text = document.querySelector('[role="tooltip"]')?.textContent ?? null;
+  await act(async () => element.blur());
+  return text;
+}
+
+/**
+ * The target named in the routing label's tooltip: the steer stub's, or the
+ * follow-up dock's (its routing label takes focus only when it has one).
+ */
+async function routeDetailOf(container: HTMLElement): Promise<string | null> {
+  const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+  if (steer) return steer.dataset.routeDetail ?? null;
+  const routeLine = container.querySelector('form div[tabindex="0"]') as HTMLElement | null;
+  return routeLine ? tooltipOnFocus(routeLine) : null;
+}
+
 const textOf = (container: HTMLElement) =>
   (container.querySelector("textarea") as HTMLTextAreaElement).value;
 
@@ -282,16 +309,13 @@ describe("TaskComposer on Sessions", () => {
 
   test("before the chain loads, the follow-up chains off the session root", async () => {
     const { container, unmount } = await mount(
-      <TaskComposer
-        rootTaskId="root-1"
-        targetTask={null}
-        canSteer={false}
-        placeholder="Continue the session…"
-      />,
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} showTarget />,
     );
     expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
     const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea.placeholder).toBe("Continue the session…");
+    expect(textarea.placeholder).toBe("Follow up…");
+    // No target yet, so no tooltip names one.
+    expect(await routeDetailOf(container)).toBeNull();
 
     await type(container, "next step");
     await send(container);
@@ -371,8 +395,10 @@ describe("TaskComposer on Sessions", () => {
       />,
     );
     await attachAndSend(container);
-    await waitFor(() => cancelled.length === 1);
-    await act(async () => {});
+    // The failed send has settled once its error shows. A click before that
+    // lands on a pending (disabled) button and does nothing.
+    await waitFor(() => (container.textContent ?? "").includes("nothing was sent"));
+    expect(cancelled).toHaveLength(1);
 
     rejectUploads = false;
     await act(async () => sendButton(container).click());
@@ -508,7 +534,7 @@ describe("TaskComposer on Sessions", () => {
 });
 
 describe("TaskComposer mode", () => {
-  test("a steerable task sends with Steer, and names the target in the placeholder with showTarget", async () => {
+  test("a steerable task sends with Steer, and names the target in the routing tooltip with showTarget", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         rootTaskId="root-1"
@@ -518,11 +544,13 @@ describe("TaskComposer mode", () => {
       />,
     );
     expect(sendLabelOf(container)).toBe("Steer");
-    expect(placeholderOf(container)).toBe("Steer #lead-1 Fix the parser…");
+    expect(await routeDetailOf(container)).toBe("Steers #lead-1 Fix the parser…");
+    // The steer box keeps its own short placeholder.
+    expect(placeholderOf(container)).toBeNull();
     await unmount();
   });
 
-  test("a long target title is cut so the placeholder stays one line", async () => {
+  test("a long target title is cut so the routing tooltip stays short", async () => {
     const title = `Migrate the billing service from the legacy cron runner to the workflow engine.`;
     const { container, unmount } = await mount(
       <TaskComposer
@@ -532,32 +560,35 @@ describe("TaskComposer mode", () => {
         showTarget
       />,
     );
-    expect(placeholderOf(container)).toBe(
-      "Steer #lead-1 Migrate the billing service from the legacy cron runner to…",
+    expect(await routeDetailOf(container)).toBe(
+      "Steers #lead-1 Migrate the billing service from the legacy cron runner to…",
     );
     await unmount();
   });
 
-  test("without showTarget the placeholder names no task", async () => {
+  test("without showTarget no task is named", async () => {
     const { container, unmount } = await mount(
       <TaskComposer targetTask={runningLeadTask} canSteer />,
     );
     expect(sendLabelOf(container)).toBe("Steer");
+    expect(await routeDetailOf(container)).toBeNull();
     expect(placeholderOf(container)).toBeNull();
     await unmount();
   });
 
-  test("an ended task sends with Follow up, shown on the button", async () => {
+  test("an ended task sends with Follow up: an icon button named for it, a short placeholder", async () => {
     const { container, unmount } = await mount(
       <TaskComposer targetTask={completedWorkerTask} canSteer={false} />,
     );
     expect(sendLabelOf(container)).toBe("Follow up");
-    expect(container.querySelector('button[type="submit"]')?.textContent).toBe("Follow up");
-    expect(placeholderOf(container)).toBe("Follow up on this task…");
+    // Icon only: the name lives in aria-label and the tooltip.
+    expect(sendButton(container).textContent).toBe("");
+    expect(placeholderOf(container)).toBe("Follow up…");
+    expect(await routeDetailOf(container)).toBeNull();
     await unmount();
   });
 
-  test("on Sessions an ended target is named in the follow-up placeholder", async () => {
+  test("on Sessions an ended target is named in the routing tooltip, not the placeholder", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         rootTaskId="root-1"
@@ -566,7 +597,28 @@ describe("TaskComposer mode", () => {
         showTarget
       />,
     );
-    expect(placeholderOf(container)).toBe("Follow up #done-1 Ship the docs…");
+    expect(placeholderOf(container)).toBe("Follow up…");
+    expect(await routeDetailOf(container)).toBe("Follows up #done-1 Ship the docs…");
+    await unmount();
+  });
+
+  test("the send button's tooltip names the send and its keys, and an empty box blocks it", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer targetTask={completedWorkerTask} canSteer={false} />,
+    );
+    expect(container.textContent).not.toContain("newline");
+    const button = sendButton(container);
+    // Empty: blocked but focusable, so the tooltip still opens.
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(await tooltipOnFocus(button)).toBe(
+      "Follow up. Enter sends, Shift+Enter adds a new line.",
+    );
+    await act(async () => button.click());
+    expect(createdTasks).toEqual([]);
+
+    await type(container, "one more thing");
+    expect(sendButton(container).hasAttribute("aria-disabled")).toBe(false);
     await unmount();
   });
 
@@ -629,7 +681,7 @@ describe("TaskComposer on the task page", () => {
     const { container, unmount } = await mount(<Page />);
 
     const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea.placeholder).toBe("Follow up on this task…");
+    expect(textarea.placeholder).toBe("Follow up…");
     await type(container, "now ship it");
     await send(container);
 

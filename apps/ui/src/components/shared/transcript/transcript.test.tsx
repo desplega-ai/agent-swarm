@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
-import type { SteeringMessage } from "@/api/types";
+import { MemoryRouter } from "react-router-dom";
+import type { AgentTask, SteeringMessage } from "@/api/types";
 
 // A DOM for the client render; removed after this file so other files keep
 // their server-render environment.
@@ -23,7 +24,10 @@ for (const alias of [
   "@/components/ui/tooltip",
   "@/components/ui/trace",
   "@/hooks/use-copy-to-clipboard",
+  "@/hooks/use-media-query",
+  "@/hooks/use-reveal-text",
   "@/lib/json-value",
+  "@/lib/reveal-text",
   "@/lib/status-labels",
   "@/lib/task-title",
   "@/lib/utils",
@@ -31,6 +35,11 @@ for (const alias of [
   const path = Bun.resolveSync(`./${alias.slice(2)}`, SRC);
   mock.module(alias, () => require(path));
 }
+mock.module("@/components/shared/agent-avatar", () => ({
+  AgentAvatar: ({ agentId }: { agentId: string }) => (
+    <span data-testid="agent-avatar" data-agent-id={agentId} />
+  ),
+}));
 mock.module("@/components/shared/markdown-view", () => ({
   MarkdownView: ({ text }: { text: string }) => <div data-testid="markdown">{text}</div>,
 }));
@@ -241,6 +250,136 @@ describe("Transcript live line", () => {
     await rerender(<Transcript rows={live(3)} running />);
     expect(lastTrigger(container).getAttribute("aria-expanded")).toBe("false");
     expect(container.querySelector('[data-slot="transcript-tool-details"]')).toBeNull();
+    await unmount();
+  });
+});
+
+describe("Transcript delegation", () => {
+  test("the subtitle shows the agent's avatar before its name", async () => {
+    const task = {
+      id: "c1",
+      task: "Check the env gap",
+      status: "completed",
+      agentId: "lead-1",
+      createdAt: "2026-10-30T10:00:00Z",
+      acceptedAt: "2026-10-30T10:00:00Z",
+      finishedAt: "2026-10-30T10:01:23Z",
+    } as AgentTask;
+    const rows = buildTranscriptRows({ messages: [], children: [{ task, agentName: "Lead" }] });
+    const { container, unmount } = await mount(
+      <MemoryRouter>
+        <Transcript rows={rows} running={false} />
+      </MemoryRouter>,
+    );
+    const card = container.querySelector('[data-slot="transcript-delegation"]') as HTMLElement;
+    const avatar = card.querySelector('[data-testid="agent-avatar"]') as HTMLElement;
+    expect(avatar.dataset.agentId).toBe("lead-1");
+    expect(avatar.parentElement?.textContent).toBe("Delegated toLead · Completed · 1m 23s");
+    await unmount();
+  });
+});
+
+describe("Transcript person message", () => {
+  test("shows markdown, switches to the raw text, and copies the raw text", async () => {
+    const text = "Check `db.ts`:\n- one\n- two";
+    const { container, unmount } = await mount(
+      <Transcript rows={[]} running={false} prompt={<TranscriptUserMessage text={text} />} />,
+    );
+    const prompt = container.querySelector('section[aria-label="Task prompt"]') as HTMLElement;
+    expect(prompt.querySelector('[data-testid="markdown"]')?.textContent).toBe(text);
+
+    const toggle = prompt.querySelector('button[aria-label="Show raw"]') as HTMLButtonElement;
+    await act(async () => toggle.click());
+    expect(prompt.querySelector('[data-testid="markdown"]')).toBeNull();
+    expect(prompt.textContent).toContain(text);
+    expect(toggle.getAttribute("aria-label")).toBe("Show formatted");
+    expect(prompt.querySelector('button[aria-label="Copy message"]')).not.toBeNull();
+    await unmount();
+  });
+});
+
+describe("Transcript fake streaming", () => {
+  const message = (id: string, text: string, timestamp: string) => ({
+    id,
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    iteration: 1,
+    timestamp,
+  });
+  const history = message("m1", "Looking at the failing test.", "2026-10-30T10:00:01Z");
+  const text = "Found the cause: the fixture reused a stale id.";
+  const prose = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-slot="transcript-assistant"]')] as HTMLElement[];
+  // `act` renders its queued updates when it ends, so each call runs one step.
+  const step = () => act(async () => new Promise((r) => setTimeout(r, 40)));
+
+  test("a message that a poll brings in fades in and reveals word by word", async () => {
+    const { container, rerender, unmount } = await mount(
+      <Transcript rows={buildTranscriptRows({ messages: [history] })} running />,
+    );
+    const later = "2026-10-30T10:00:09Z";
+    await rerender(
+      <Transcript
+        rows={buildTranscriptRows({ messages: [history, message("m2", text, later)] })}
+        running
+      />,
+    );
+    const [old, fresh] = prose(container);
+    expect(old.textContent).toBe(history.content[0].text);
+    expect(old.className).not.toContain("animate-in");
+    expect(fresh.className).toContain("animate-in");
+    const first = fresh.querySelector('[data-testid="markdown"]')?.textContent ?? "";
+    expect(first.length).toBeLessThan(text.length);
+    expect(text.startsWith(first)).toBe(true);
+
+    await step();
+    const mid = fresh.querySelector('[data-testid="markdown"]')?.textContent ?? "";
+    expect(mid.length).toBeGreaterThan(first.length);
+    expect(text.startsWith(mid)).toBe(true);
+    expect(text.charAt(mid.length)).toBe(" ");
+
+    const markdown = () => fresh.querySelector('[data-testid="markdown"]')?.textContent;
+    for (let i = 0; i < 20 && markdown() !== text; i++) await step();
+    expect(markdown()).toBe(text);
+    await unmount();
+  });
+
+  test("the browser clock does not matter: only data newer than the first rows arrives", async () => {
+    // The server is 20 s ahead of the browser: the first rows look like the future.
+    const ahead = (s: number) => new Date(Date.now() + 20_000 + s * 1000).toISOString();
+    const first = message("m1", "Looking at the failing test.", ahead(0));
+    const { container, rerender, unmount } = await mount(
+      <Transcript rows={buildTranscriptRows({ messages: [first] })} running />,
+    );
+    expect(prose(container)[0].textContent).toBe(first.content[0].text);
+    expect(prose(container)[0].className).not.toContain("animate-in");
+
+    // A poll brings a row: newer than the first rows, older than the browser's clock.
+    const behind = message("m0", "Earlier note.", "2026-10-30T10:00:00Z");
+    await rerender(
+      <Transcript
+        rows={buildTranscriptRows({ messages: [behind, first, message("m2", text, ahead(4))] })}
+        running
+      />,
+    );
+    const [old, kept, fresh] = prose(container);
+    expect(old.className).not.toContain("animate-in");
+    expect(kept.className).not.toContain("animate-in");
+    expect(fresh.className).toContain("animate-in");
+    expect(fresh.textContent?.length).toBeLessThan(text.length);
+    await unmount();
+  });
+
+  test("the end of the run shows the whole text at once", async () => {
+    const { container, rerender, unmount } = await mount(
+      <Transcript rows={buildTranscriptRows({ messages: [history] })} running />,
+    );
+    const rows = buildTranscriptRows({
+      messages: [history, message("m2", text, "2026-10-30T10:00:09Z")],
+    });
+    await rerender(<Transcript rows={rows} running />);
+    await rerender(<Transcript rows={rows} running={false} />);
+    expect(prose(container).at(-1)?.textContent).toBe(text);
     await unmount();
   });
 });

@@ -23,6 +23,7 @@ import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useRevealText } from "@/hooks/use-reveal-text";
 import { findLatestUsableContextSnapshot } from "@/lib/context-display";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
@@ -134,6 +135,11 @@ function runTime(task: TaskWithLogs, stats: CostStats | null): string | null {
 /** The rail's run time, for other places on the page that name it. */
 export function taskRunTime(task: TaskWithLogs, costs: SessionCost[] | undefined): string | null {
   return runTime(task, summarizeCosts(costs));
+}
+
+/** The rail's total cost in USD, for the header chip. Null without cost rows. */
+export function taskTotalCost(costs: SessionCost[] | undefined): number | null {
+  return summarizeCosts(costs)?.totalCost ?? null;
 }
 
 /** "26 turns". Devin bills in ACUs and has no turn count. */
@@ -356,10 +362,23 @@ function ContextBar({ percent, label }: { percent: number; label: string }) {
   );
 }
 
+/**
+ * The repo's page: the PR or issue URL up to the repo path (it keeps a
+ * self-hosted GitLab's host). Without a URL only GitHub has a known host;
+ * GitLab and Bitbucket can be self-hosted, so their repo stays plain text.
+ */
+function repoUrl(task: TaskWithLogs): string | null {
+  if (!task.vcsRepo) return null;
+  const at = task.vcsUrl?.indexOf(`/${task.vcsRepo}`) ?? -1;
+  if (task.vcsUrl && at > 0) return task.vcsUrl.slice(0, at + task.vcsRepo.length + 1);
+  return task.vcsProvider === "github" ? `https://github.com/${task.vcsRepo}` : null;
+}
+
 function SourceControlSection({ task }: { task: TaskWithLogs }) {
   if (!(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor)) {
     return null;
   }
+  const repoHref = repoUrl(task);
   return (
     <RailSection title="Source control">
       <div className="space-y-1.5 py-1">
@@ -375,11 +394,25 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
           ) : task.vcsProvider ? (
             <Link2 className="size-4 shrink-0" />
           ) : null}
-          {task.vcsRepo && (
+          {task.vcsRepo && repoHref ? (
+            <a
+              href={repoHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={task.vcsRepo}
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 font-mono text-xs text-primary hover:underline",
+                NARROW_TARGET,
+              )}
+            >
+              <span className="truncate">{task.vcsRepo}</span>
+              <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
+            </a>
+          ) : task.vcsRepo ? (
             <span className="truncate font-mono text-xs text-foreground" title={task.vcsRepo}>
               {task.vcsRepo}
             </span>
-          )}
+          ) : null}
         </div>
         {/* Row 2: PR or MR link, then the author. */}
         {(task.vcsUrl || task.vcsAuthor) && (
@@ -441,6 +474,8 @@ interface TaskDetailsRailProps {
   callUsage?: CallUsageTotals | null;
   /** The latest session's request composition, with usage details on. */
   composition?: RailComposition | null;
+  /** The session this task belongs to, when the caller can open it. */
+  session?: { href: string; title: string } | null;
   className?: string;
 }
 
@@ -450,6 +485,14 @@ interface TaskDetailsRailProps {
  * card of sections, after T3 Code's thread details card. The wide layout
  * shows it next to the column; the narrow layout shows it in the Details tab.
  */
+/**
+ * A poll lands a whole new progress line; reveal it word by word while the
+ * task runs. Its own component, so each reveal step re-renders only the line.
+ */
+function RevealedText({ text, live }: { text: string; live: boolean }) {
+  return useRevealText(text, live);
+}
+
 export function TaskDetailsRail({
   task,
   agentName,
@@ -460,6 +503,7 @@ export function TaskDetailsRail({
   contextLoading,
   callUsage = null,
   composition = null,
+  session = null,
   className,
 }: TaskDetailsRailProps) {
   const stats = summarizeCosts(costs);
@@ -532,6 +576,19 @@ export function TaskDetailsRail({
               </Link>
             </RailRow>
           ) : null}
+          {session ? (
+            <RailRow label="Session">
+              <Link
+                to={session.href}
+                className={cn(
+                  "inline-flex max-w-full items-center text-primary hover:underline",
+                  NARROW_INLINE_TARGET,
+                )}
+              >
+                <span className="truncate">{session.title}</span>
+              </Link>
+            </RailRow>
+          ) : null}
           {task.requestedByUserId ? (
             <RailRow label="Requested by">
               {requestedByName ?? (
@@ -551,8 +608,12 @@ export function TaskDetailsRail({
             <span title={parseUTCDate(timeValue).toLocaleString()}>
               {formatSmartTime(timeValue)}
             </span>
-            {ran ? ` · ran ${ran}` : null}
           </RailRow>
+          {ran ? (
+            <RailRow label="Duration" mono>
+              {ran}
+            </RailRow>
+          ) : null}
           {costsLoading ? (
             <RailRow label="Cost">
               <Skeleton className="mt-1 h-3 w-24" />
@@ -635,7 +696,7 @@ export function TaskDetailsRail({
       {task.progress && !isTerminal ? (
         <RailSection title="Progress">
           <p className="max-h-32 overflow-auto whitespace-pre-wrap text-data leading-5 text-muted-foreground">
-            {task.progress}
+            <RevealedText text={task.progress} live={!isTerminal} />
           </p>
         </RailSection>
       ) : null}
@@ -670,7 +731,7 @@ export function TaskDetailsRail({
             <CopyableId value={task.id} label="Copy task id" />
           </RailRow>
           {task.claudeSessionId ? (
-            <RailRow label="Session">
+            <RailRow label="Harness session">
               <CopyableId value={task.claudeSessionId} label="Copy session id">
                 <SessionId
                   sessionId={task.claudeSessionId}

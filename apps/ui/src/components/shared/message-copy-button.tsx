@@ -1,4 +1,6 @@
+import { Code, Type } from "lucide-react";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,43 @@ export function MessageCopyButton({
             // A 44 px touch area on touch screens; the row keeps its height.
             className="text-muted-foreground hit-area [--hit-size:44px] hover:text-foreground"
           />
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </span>
+  );
+}
+
+/**
+ * Switches a person's message between its markdown view and its raw text.
+ * It sits next to `MessageCopyButton`, with the same hover and group.
+ */
+export function MessageRawToggle({
+  raw,
+  onRawChange,
+  hover = false,
+  group = "message",
+}: {
+  raw: boolean;
+  onRawChange: (raw: boolean) => void;
+  hover?: boolean;
+  group?: MessageActionGroup;
+}) {
+  const label = raw ? "Show formatted" : "Show raw";
+  return (
+    <span className={messageActionClass(hover, group)}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={label}
+            onClick={() => onRawChange(!raw)}
+            className="text-muted-foreground hit-area [--hit-size:44px] hover:text-foreground"
+          >
+            {raw ? <Type /> : <Code />}
+          </Button>
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>

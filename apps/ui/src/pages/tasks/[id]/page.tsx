@@ -33,7 +33,9 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskStatus, TaskWithLogs } from "@/api/types";
+import { useTaskPath } from "@/components/layout/use-task-path";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -51,7 +53,6 @@ import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
 import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
-import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,10 +65,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { CHAT_COLUMN } from "@/lib/chat-width";
+import { formatCost } from "@/lib/cost-format";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
 import { useUsageDetails } from "@/lib/session-log-usage-details";
+import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
@@ -78,7 +81,7 @@ import {
 } from "@/lib/task-model-resolution";
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 import { normalizeSessionLogs, parseSessionLogs, sumItemCallUsage } from "@/logs-parser";
 import { directChildren } from "./spawned-tasks";
 import {
@@ -88,7 +91,7 @@ import {
   TaskPrimaryAction,
   useTaskActions,
 } from "./task-actions";
-import { TaskDetailsRail, taskRunTime } from "./task-details-rail";
+import { TaskDetailsRail, taskRunTime, taskTotalCost } from "./task-details-rail";
 import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
@@ -180,8 +183,9 @@ function TaskHeading({
         </TooltipContent>
       </Tooltip>
       {onRename && pencilRef ? (
-        // In at once on hover or focus, out with the linger.
-        <span className="flex shrink-0 opacity-0 transition-opacity delay-50 duration-200 ease-snappy group-hover/title:opacity-100 group-hover/title:delay-0 group-hover/title:duration-0 focus-within:opacity-100 focus-within:delay-0 focus-within:duration-0">
+        // In at once on hover (anywhere on the header) or focus, out with the
+        // linger. A touch screen has no hover: the pencil always shows there.
+        <span className="flex shrink-0 opacity-0 transition-opacity delay-50 duration-200 ease-snappy group-hover/title:opacity-100 group-hover/title:delay-0 group-hover/title:duration-0 focus-within:opacity-100 focus-within:delay-0 focus-within:duration-0 pointer-coarse:opacity-100">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -214,7 +218,7 @@ function TaskTitleField({
   placeholder,
   onDone,
 }: {
-  /** The saved title, or "" when the prompt names the task. */
+  /** The title as shown: the saved one, or the prompt's. */
   current: string;
   /** The prompt's title: an empty title shows it again. */
   placeholder: string;
@@ -405,6 +409,20 @@ export default function TaskDetailPage() {
   // retry), so it keeps its slow poll after the task finishes.
   const sessionsGate = useFeatureGate("1.76.0");
   const { data: session } = useSession(sessionsGate.supported ? id : undefined);
+  // The session this task belongs to: `/sessions/<root id>`, a root task's
+  // own. The lineage path is the breadcrumb's fetch (same query key), and
+  // its 200 means the caller can read the session. Only an API that serves
+  // the sessions v2 view gets the link.
+  const sessionsV2Gate = useFeatureGate(SESSIONS_V2_MIN_VERSION);
+  const { data: taskPath } = useTaskPath(id);
+  const sessionRoot = sessionsV2Gate.supported ? (taskPath?.sessionRoot ?? null) : null;
+  // A root task reads its own title live: a rename here shows at once.
+  const sessionLink = sessionRoot
+    ? {
+        href: `/sessions/${sessionRoot.id}`,
+        title: sessionDisplayTitle(sessionRoot.id === task?.id ? task : sessionRoot),
+      }
+    : null;
   // A task that finishes while the page is open gets one last read: the final
   // log lines and context snapshot can land after the previous poll. An
   // invalidation refetches even under `staleTime: Infinity`.
@@ -418,12 +436,6 @@ export default function TaskDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["task", task.id, part] });
     }
   }, [taskLive, task, queryClient]);
-  // Composer dock is collapsible on this page only (the sessions surface is a
-  // chat, its composer always stays put). Default expanded.
-  const [composerCollapsed, setComposerCollapsed] = useLocalToggle(
-    "tasks:steer-composer-collapsed",
-    false,
-  );
   // The draft is owned by the page, not the composer. The narrow and wide
   // layouts each mount their own <TaskComposer>, and the wide box moves when
   // the task finishes (the steer box under the log, the follow-up box under
@@ -486,13 +498,18 @@ export default function TaskDetailPage() {
     false,
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
-  // center column. The column is the page's one scroller: the log flows in it.
+  // center column. One scroller holds the column and the details card: the
+  // log flows in it.
   const {
     past: heroScrolledPast,
     scroller: centerScroller,
     scrollerRef: centerScrollerRef,
     sentinelRef: heroEndRef,
   } = useHeroScrolledPast();
+  // The wide scroller's height caps the details card, and the message box
+  // pinned to its bottom goes to the log as `--log-sticky-bottom`.
+  const [wideHeight, wideAreaRef] = useElementHeight();
+  const [wideComposerHeight, wideComposerRef] = useElementHeight();
   // The narrow layout scrolls as one above the pinned message box: the hero
   // scrolls away and the tabs stick. Their height goes to the log as
   // `--log-sticky-top`.
@@ -526,6 +543,7 @@ export default function TaskDetailPage() {
     onRename: startRename,
     rawLog: logMode === "raw",
     onToggleRawLog: () => setLogMode(logMode === "raw" ? "transcript" : "raw"),
+    session: sessionLink?.href ?? null,
   });
   // A follow-up on a finished task is a new task: the page moves to it once
   // it starts. The composer holds a task whose files failed to upload, so the
@@ -655,6 +673,7 @@ export default function TaskDetailPage() {
       contextLoading={contextLoading}
       callUsage={callUsage}
       composition={compositions?.rail}
+      session={sessionLink}
       className={className}
     />
   );
@@ -822,26 +841,9 @@ export default function TaskDetailPage() {
     </section>
   );
 
-  // The wide layout's live message box: it steers the task, as before. It
-  // sits under the log, folded or open.
-  const steerComposer =
-    composerProps && !isTerminal ? (
-      <CollapsibleComposerDock
-        collapsed={composerCollapsed}
-        onCollapsedChange={setComposerCollapsed}
-        collapsedLabel={
-          task.supportedSteerModes && task.supportedSteerModes.length === 0
-            ? "Add a follow-up for this task"
-            : task.status === "pending"
-              ? "Send a message to the queued task"
-              : task.status === "paused"
-                ? "Send a message to the paused task"
-                : "Send a message to the running task"
-        }
-      >
-        <TaskComposer {...composerProps} />
-      </CollapsibleComposerDock>
-    ) : null;
+  // The wide layout's live message box: it steers the task. It always shows
+  // in the transcript (the raw log hides every message box).
+  const steerComposer = composerProps && !isTerminal ? <TaskComposer {...composerProps} /> : null;
 
   const headerTitle = taskListTitle(task);
   // The server records the model it resolved when the task was claimed
@@ -911,6 +913,26 @@ export default function TaskDetailPage() {
       </Link>
     </Badge>
   ) : null;
+  // The cost and the run time as one chip next to the status ("$0.19 in
+  // 1m 25s"). The tooltip has the exact figure. No chip without cost rows.
+  const totalCost = taskTotalCost(costs);
+  const runTime = taskRunTime(task, costs);
+  const costChip =
+    totalCost != null && totalCost > 0 ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="h-6 px-2 font-mono tabular-nums">
+            <span className="sr-only">Cost: </span>
+            {formatCost(totalCost, { precision: 2 })}
+            {runTime ? <span className="font-sans text-muted-foreground">in {runTime}</span> : null}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="font-mono tabular-nums">
+          {formatCost(totalCost, { precision: 4 })}
+        </TooltipContent>
+      </Tooltip>
+    ) : null;
+
   // The tags as a chip with their count. The list opens in a popover.
   const tagsChip =
     task.tags && task.tags.length > 0 ? (
@@ -972,11 +994,16 @@ export default function TaskDetailPage() {
   // The heading, or the rename field in its place. Only the wide layout
   // shows the pencil: the narrow one renames from its "..." menu.
   const canRename = actions.allowed.action;
+  // The field starts with the title as shown (the prompt's title when no
+  // title is saved), cut to the server's limit, so saving it unchanged writes
+  // nothing and an edited long prompt title still fits.
+  const renameStart = headerTitle.slice(0, TITLE_MAX);
   const endRename = (typed: string | null, refocus: boolean) => {
     refocusAfterRename.current = refocus;
     setRenaming(false);
     const next = typed?.trim();
-    if (next === undefined || next === (task.title?.trim() ?? "")) return;
+    if (next === undefined) return;
+    if (next ? next === renameStart.trim() : !task.title?.trim()) return;
     void saveTitle(task.id, next || null);
   };
   // Optimistic: the heading (and the next rename's "unchanged" check) reads
@@ -1005,7 +1032,7 @@ export default function TaskDetailPage() {
   const renderHeading = (pencil: boolean) =>
     renaming && canRename ? (
       <TaskTitleField
-        current={task.title ?? ""}
+        current={renameStart}
         placeholder={taskListTitle({ task: task.task })}
         onDone={endRename}
       />
@@ -1021,7 +1048,8 @@ export default function TaskDetailPage() {
   // then one row: where the task came from on the left, the chips on the
   // right. A narrow column wraps the chips under the source line.
   const wideHero = (
-    <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
+    // `group/title`: a pointer anywhere on the header shows the rename pencil.
+    <div className="group/title grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
       {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
       <div className="min-w-0">{renderHeading(true)}</div>
@@ -1037,6 +1065,7 @@ export default function TaskDetailPage() {
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {tagsChip}
           <StatusBadge status={task.status} size="md" />
+          {costChip}
           {wideModelChip}
           {agentChip}
         </div>
@@ -1070,8 +1099,9 @@ export default function TaskDetailPage() {
         className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"
       >
         <div className="min-w-0 max-w-full">{sourceLine}</div>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           <StatusBadge status={task.status} size="md" />
+          {costChip}
           {narrowModelChip}
           {tagsChip}
         </div>
@@ -1136,8 +1166,9 @@ export default function TaskDetailPage() {
             </TabsContent>
           </Tabs>
         </div>
-        {composerProps ? (
-          // Pinned under the scroller, on every tab. `env(safe-area-inset-bottom)`
+        {composerProps && logMode !== "raw" ? (
+          // Pinned under the scroller, on every tab. The raw log is a full-screen
+          // debug view, so it has no message box. `env(safe-area-inset-bottom)`
           // keeps the box above the home indicator when the page runs edge to edge.
           <div
             ref={narrowBarRef}
@@ -1151,72 +1182,94 @@ export default function TaskDetailPage() {
         ) : null}
       </div>
 
-      {/* Wide: a center column and the details card. The grid bleeds into
-          <main>'s vertical padding, so the column runs from under the app
-          header down to the window edge. */}
+      {/* Wide: a center column and the details card in one scroller, so its
+          scrollbar sits at the right edge of the window. It bleeds into
+          <main>'s vertical and right padding (the grid pads back on the
+          right). It also reaches 12 px into the left padding and pads back,
+          so the title field's border and focus ring, which sit left of the
+          text, are not clipped. */}
       <div
+        ref={wideAreaRef}
         className={cn(
-          "hidden @min-[60rem]:grid flex-1 min-h-0",
-          detailsCollapsed ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_320px]",
+          "hidden @min-[60rem]:flex flex-1 min-h-0 flex-col -mr-4 md:-mr-6",
           MAIN_BLEED_Y,
         )}
       >
-        <section className="flex min-h-0 flex-col">
-          {/* Only the transcript scrolls. Its toolbar sticks under the bar. */}
-          <div
-            ref={centerScrollerRef}
-            style={{ "--log-sticky-top": STICKY_BAR_HEIGHT } as CSSProperties}
-            className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
-          >
-            <TaskStickyBar
-              visible={heroScrolledPast}
-              title={headerTitle}
-              status={task.status}
-              model={displayModel}
-              effort={displayEffort}
-              action={<TaskPrimaryAction model={actions} />}
-              onTitleClick={() => scrollToTop(centerScroller)}
-            />
-            <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
-              <div className="pb-2">
-                {wideHero}
-                <div ref={heroEndRef} aria-hidden className="h-px" />
-              </div>
-              <Separator />
+        <div
+          ref={centerScrollerRef}
+          style={
+            {
+              "--log-sticky-top": STICKY_BAR_HEIGHT,
+              "--log-sticky-bottom": `${wideComposerHeight}px`,
+            } as CSSProperties
+          }
+          className="relative -ml-3 min-h-0 flex-1 overflow-y-auto pl-3 [scrollbar-gutter:stable]"
+        >
+          <div className="grid min-h-full grid-cols-[minmax(0,1fr)_auto] pr-4">
+            <section className="flex min-w-0 flex-col">
+              {/* The log's toolbar sticks under the bar. */}
+              <TaskStickyBar
+                visible={heroScrolledPast}
+                title={headerTitle}
+                status={task.status}
+                model={displayModel}
+                effort={displayEffort}
+                action={<TaskPrimaryAction model={actions} />}
+                onTitleClick={() => scrollToTop(centerScroller)}
+              />
+              <div className="flex flex-1 flex-col gap-3 pt-6 pr-6 pb-3">
+                <div className="pb-2">
+                  {wideHero}
+                  <div ref={heroEndRef} aria-hidden className="h-px" />
+                </div>
+                <Separator />
 
-              {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
-                  outcome as its last message, as in a chat. It keeps T3 Code's
-                  reading width; the header above spans the column. The raw log
-                  is wide event rows, so it takes the full column. */}
-              <div className={logMode === "raw" ? undefined : CHAT_COLUMN}>
-                {renderSessionLogs(centerScroller)}
+                {/* THE TRANSCRIPT is the main view: the prompt, the run, then the
+                    outcome as its last message, as in a chat. It keeps T3 Code's
+                    reading width; the header above spans the column. The raw log
+                    is wide event rows, so it takes the full column. */}
+                <div className={logMode === "raw" ? undefined : CHAT_COLUMN}>
+                  {renderSessionLogs(centerScroller)}
+                </div>
               </div>
-            </div>
-          </div>
-          {composerProps ? (
-            // THE MESSAGE BOX, pinned under the scroller: it steers a live
-            // task and follows up a finished one.
-            <div className="shrink-0 bg-background pt-2 pr-6 pb-3">
-              <div className={CHAT_COLUMN}>
-                {isTerminal ? (
-                  <div ref={wideFollowUpBoxRef}>
-                    <TaskComposer {...composerProps} />
+              {composerProps && logMode !== "raw" ? (
+                // THE MESSAGE BOX, pinned to the bottom of the scroller under
+                // the column: it steers a live task and follows up a finished
+                // one. At the end of the log it sits under the last row.
+                <div
+                  ref={wideComposerRef}
+                  className="sticky bottom-0 z-20 bg-background pt-2 pr-6 pb-3"
+                >
+                  <div className={CHAT_COLUMN}>
+                    {isTerminal ? (
+                      <div ref={wideFollowUpBoxRef}>
+                        <TaskComposer {...composerProps} />
+                      </div>
+                    ) : (
+                      steerComposer
+                    )}
                   </div>
-                ) : (
-                  steerComposer
-                )}
-              </div>
-            </div>
-          ) : null}
-        </section>
+                </div>
+              ) : null}
+            </section>
 
-        {/* The details card floats next to the column, level with the
-            title, and scrolls inside when it is taller than the window. */}
-        {detailsCollapsed ? null : (
-          <aside aria-label="Task details" className="flex min-h-0 flex-col pt-6 pb-3">
-            {renderDetails("min-h-0 overflow-y-auto")}
-          </aside>
-        )}
+            {/* The details card is an island next to the column: it sticks to
+                the top, level with the title, and scrolls inside when it is
+                taller than the scroller. It folds with the collapse pattern
+                (DESIGN.md § Motion): width and fade, 200 ms open and 150 ms
+                close; reduced motion fades only. The grid's `auto` column
+                follows the width, so nothing jumps. */}
+            <AnimatedReveal open={!detailsCollapsed} axis="x" className="sticky top-0 self-start">
+              <aside
+                aria-label="Task details"
+                style={{ maxHeight: wideHeight || undefined }}
+                className="flex w-80 flex-col pt-6 pb-3"
+              >
+                {renderDetails("min-h-0 overflow-y-auto")}
+              </aside>
+            </AnimatedReveal>
+          </div>
+        </div>
       </div>
     </div>
   );

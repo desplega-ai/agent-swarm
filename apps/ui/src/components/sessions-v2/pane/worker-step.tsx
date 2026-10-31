@@ -12,6 +12,7 @@ import { messageActionClass } from "@/components/shared/message-copy-button";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useRevealText } from "@/hooks/use-reveal-text";
 import { useTaskSheetParam } from "@/hooks/use-task-sheet-param";
 import { formatSpan } from "@/lib/format-duration-ms";
 import { type JsonContainer, parseJsonOutput } from "@/lib/json-output";
@@ -171,6 +172,8 @@ export function WorkerStep({
     () => preview({ status, output, failureReason, progress, task }, open),
     [status, output, failureReason, progress, task, open],
   );
+  // A running step's closed row reads its progress: new words reveal between polls.
+  const shownLine = useRevealText(line, !open && status === "in_progress");
   const end = TERMINAL_STATUSES.has(last.status)
     ? Date.parse(last.finishedAt ?? last.lastUpdatedAt)
     : now;
@@ -214,7 +217,7 @@ export function WorkerStep({
               {statusText(step)}
             </span>
           </span>
-          <span className="truncate text-xs text-muted-foreground">{line}</span>
+          <span className="truncate text-xs text-muted-foreground">{shownLine}</span>
         </span>
         <span
           title={`Started ${new Date(first.createdAt).toLocaleString()}`}
