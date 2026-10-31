@@ -1,6 +1,6 @@
-import { asRecord, asRecords, expect, expectStatus } from "../http";
+import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { cleanupStack } from "./platform-helpers";
+import { cleanupStack, putConfig, reloadConfig } from "./platform-helpers";
 
 // First-run onboarding: the state machine behind the dashboard setup flow, the embeddings
 // probe that saves a memory configuration, and the telemetry relay routes.
@@ -337,6 +337,10 @@ export const platformTelemetry: Scenario = {
     );
 
     // Telemetry is off in the test SUT: a valid, catalogued event is accepted and dropped.
+    // The mock inference host doubles as the telemetry sink (DESPLEGA_TELEMETRY_ENDPOINT).
+    const sink = () =>
+      ctx.llm.requestsTo("/telemetry/v1/events").map((request) => asRecord(request.body));
+    expect(sink().length === 0, "telemetry is off at boot: the sink has seen nothing");
     const accepted = await ctx.api("POST", "/api/telemetry/ui-event", {
       body: { event: "ui.session_started" },
     });
@@ -383,13 +387,90 @@ export const platformTelemetry: Scenario = {
       `a body over 8 KiB is refused, got ${tooBig.status}`,
     );
 
-    // POST /api/telemetry/enable turns the real telemetry client on, which sends a
-    // `telemetry.enabled` event to the production sink. The suite stays hermetic, so only the
-    // request validation is exercised here.
     expectStatus(
       await ctx.api("POST", "/api/telemetry/enable", { body: { via: "carrier-pigeon" } }),
       [400],
       "enable with an unknown via",
     );
+    expect(sink().length === 0, "refused requests send nothing");
+
+    // POST /api/telemetry/enable turns the real telemetry client on and sends `telemetry.enabled`
+    // once. The sink is the mock, so nothing leaves the machine. The route stores the flag as a
+    // global config row, and the cleanup stores it as `false`, because deleting the row would
+    // restore the value the route set in the process environment.
+    const cleanup = cleanupStack(ctx);
+    cleanup.add("turn telemetry off", async () => {
+      await putConfig(ctx, { key: "ANONYMIZED_TELEMETRY", value: "false" });
+      await reloadConfig(ctx);
+    });
+    try {
+      const enabled = await ctx.api("POST", "/api/telemetry/enable", {
+        body: { via: "settings" },
+      });
+      expectStatus(enabled, [200], "turn telemetry on");
+      expect(asRecord(enabled.json).enabled === true, "enable answers { enabled: true }");
+
+      // The client sends without blocking the response, so wait for the sink.
+      expect(
+        await pollUntil(() => sink().some((body) => body.event === "telemetry.enabled"), 10_000),
+        "telemetry.enabled reached the sink",
+      );
+      const first = sink().find((body) => body.event === "telemetry.enabled") ?? {};
+      expect(
+        first.schema_version === 2 && first.product === "agent-swarm",
+        "the event carries the v2 envelope for agent-swarm",
+      );
+      expect(first.source === "api-server", `the event comes from the api-server: ${first.source}`);
+      expect(asRecord(first.properties).via === "settings", "the event names the `via` we sent");
+      expect(
+        typeof first.actor_anonymous_id === "string" &&
+          first.actor_anonymous_id.startsWith("install_"),
+        "the event is pseudonymous: an install id, no user",
+      );
+      expect(
+        typeof first.occurred_at === "string" && !Number.isNaN(Date.parse(first.occurred_at)),
+        "the event carries an occurrence time",
+      );
+      expect(
+        typeof asRecord(first.context).org_id === "string",
+        "the event carries the org id in its context",
+      );
+
+      // With telemetry on, a relayed dashboard event reaches the sink with its properties.
+      expectStatus(
+        await ctx.api("POST", "/api/telemetry/ui-event", {
+          body: { event: "page.viewed", properties: { route_template: "/tasks/:id" } },
+        }),
+        [204],
+        "relay an event with telemetry on",
+      );
+      expect(
+        await pollUntil(() => sink().some((body) => body.event === "page.viewed"), 10_000),
+        "the relayed page.viewed reached the sink",
+      );
+      const relayed = sink().find((body) => body.event === "page.viewed") ?? {};
+      expect(
+        asRecord(relayed.properties).route_template === "/tasks/:id",
+        "the relayed event keeps its properties",
+      );
+      expect(
+        relayed.actor_anonymous_id === first.actor_anonymous_id,
+        "both events carry the same install id",
+      );
+    } finally {
+      await cleanup.run();
+    }
+
+    // The opt-out holds again: a relayed event is accepted and dropped.
+    const sent = sink().length;
+    expectStatus(
+      await ctx.api("POST", "/api/telemetry/ui-event", {
+        body: { event: "page.viewed", properties: { route_template: "/agents/:id" } },
+      }),
+      [204],
+      "relay an event with telemetry back off",
+    );
+    await Bun.sleep(300);
+    expect(sink().length === sent, "no event reaches the sink once telemetry is off again");
   },
 };
