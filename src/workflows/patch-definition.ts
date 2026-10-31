@@ -53,7 +53,9 @@ export async function patchWorkflowDefinition(options: {
     if (!validation.valid) {
       return { ok: false, reason: "invalid", errors: validation.errors };
     }
-    const modelErrors = await workflowModelErrors(patchResult.definition);
+    const modelErrors = await workflowModelErrors(patchResult.definition, {
+      vcsRepo: updates?.vcsRepo === undefined ? existing.vcsRepo : updates.vcsRepo,
+    });
     if (modelErrors.length > 0) {
       return { ok: false, reason: "invalid", errors: modelErrors };
     }

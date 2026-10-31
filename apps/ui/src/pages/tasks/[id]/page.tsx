@@ -76,8 +76,10 @@ import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
 import {
   describeModelResolution,
+  modelSourceLabel,
   taskDisplayEffort,
   taskDisplayModel,
+  taskDisplayProfile,
 } from "@/lib/task-model-resolution";
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
@@ -899,6 +901,37 @@ export default function TaskDetailPage() {
       {modelBadge}
     </Badge>
   ) : null;
+  // The model profile the task ran with (claim's pick), else the one it asked
+  // for. The wide chip's tooltip names the layer that chose it.
+  const displayProfile = taskDisplayProfile(task);
+  const profileChipBody = displayProfile ? (
+    <>
+      <span className="sr-only">Model profile: </span>
+      <span className="min-w-0 truncate">{displayProfile}</span>
+    </>
+  ) : null;
+  const wideProfileChip = profileChipBody ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" tabIndex={0} className={modelChipClass}>
+          {profileChipBody}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="text-left">
+        <div className="font-mono">{displayProfile}</div>
+        <div>
+          {task.resolvedProfile && task.modelSource
+            ? `Chosen by: ${modelSourceLabel(task.modelSource)}`
+            : "Requested by the task; applied when a worker claims it"}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
+  const narrowProfileChip = profileChipBody ? (
+    <Badge variant="outline" className={modelChipClass}>
+      {profileChipBody}
+    </Badge>
+  ) : null;
   const agentChip = task.agentId ? (
     <Badge variant="outline" asChild className="h-6 max-w-full gap-1.5 pr-2 pl-0.5 outline-none">
       <Link to={`/agents/${task.agentId}`}>
@@ -1067,6 +1100,7 @@ export default function TaskDetailPage() {
           <StatusBadge status={task.status} size="md" />
           {costChip}
           {wideModelChip}
+          {wideProfileChip}
           {agentChip}
         </div>
       </div>
@@ -1103,6 +1137,7 @@ export default function TaskDetailPage() {
           <StatusBadge status={task.status} size="md" />
           {costChip}
           {narrowModelChip}
+          {narrowProfileChip}
           {tagsChip}
         </div>
       </div>

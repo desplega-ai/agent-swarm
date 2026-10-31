@@ -90,6 +90,7 @@ export const SDK_TOOL_NAME_MAP = {
   modelCatalog_refresh: "model-catalog-refresh", // external: fetches models.dev
   modelCatalog_overlayUpsert: "model-catalog-overlay-upsert",
   modelProfile_list: "list-model-profiles",
+  modelProfile_check: "check-model-profile",
 
   // ── slack ──
   slack_read: "slack-read",

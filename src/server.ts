@@ -85,6 +85,7 @@ import {
   registerModelCatalogOverlayUpsertTool,
   registerModelCatalogRefreshTool,
 } from "./tools/model-catalog";
+import { registerCheckModelProfileTool } from "./tools/model-profiles/check-model-profile";
 import { registerListModelProfilesTool } from "./tools/model-profiles/list-model-profiles";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
@@ -491,6 +492,7 @@ export async function createServer(
     registerGetMetricsTool(server);
     registerSendTaskTool(server);
     registerListModelProfilesTool(server);
+    registerCheckModelProfileTool(server);
     registerGetTaskDetailsTool(server);
     registerStoreProgressTool(server);
     registerMyAgentInfoTool(server);
