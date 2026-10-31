@@ -3,6 +3,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  getDbClient,
   getLogsByTaskIdAndEventType,
   getTaskById,
   initDb,
@@ -203,6 +204,26 @@ describe("follow-up gate shadow runner", () => {
     expect(followUp.agentId).toBe(leadId);
     expect(await shadowRows(task.id)).toHaveLength(0);
     expect(calls).toEqual({ getVerifier: 0, runVerifier: 0 });
+  });
+
+  test("mode off registers no post-commit hook; shadow registers exactly one", async () => {
+    stubDeps(async () => ({ ok: true, controls: { ok: true } }));
+    const afterCommit = spyOn(getDbClient(), "afterCommit");
+    try {
+      const hooksFor = async () => {
+        const task = await workerTask();
+        const before = afterCommit.mock.calls.length;
+        await finish(task);
+        const count = afterCommit.mock.calls.length - before;
+        await drainFollowUpGateShadowForTest();
+        return count;
+      };
+      const off = await hooksFor();
+      shadowEnv();
+      expect(await hooksFor()).toBe(off + 1);
+    } finally {
+      afterCommit.mockRestore();
+    }
   });
 
   test("ok:true with passing controls records would_skip", async () => {
