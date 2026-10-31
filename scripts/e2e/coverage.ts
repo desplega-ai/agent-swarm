@@ -2,7 +2,13 @@ import type { ApiClient, HttpCall } from "./http";
 import { asRecord, expectStatus } from "./http";
 import type { ScenarioResult } from "./report";
 
-type Operation = { method: string; template: string; group: string; literalSegments: number };
+type Operation = {
+  method: string;
+  template: string;
+  group: string;
+  /** Literal characters in the template; the longer literal wins a tie between matches. */
+  literalLength: number;
+};
 
 export type SurfaceCoverage = {
   total: number;
@@ -66,11 +72,25 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const PARAM_RE = /\{([^}]+)\}/g;
+
+/**
+ * `{param}` matches one segment, also when it sits inside a segment (`{id}.json`).
+ * A param named `path` is the server's `exact: false` tail (`/share/{path}`,
+ * `/api/skills/{id}/files/{path}`) and matches across slashes.
+ */
 function templateRegex(template: string): RegExp {
-  const parts = template
-    .split("/")
-    .map((part) => (/^\{[^}]+\}$/.test(part) ? "[^/]+" : escapeRegex(part)));
-  return new RegExp(`^${parts.join("/")}$`);
+  const source = template
+    .split(PARAM_RE)
+    .map((piece, index) =>
+      index % 2 === 0 ? escapeRegex(piece) : piece === "path" ? ".+" : "[^/]+",
+    )
+    .join("");
+  return new RegExp(`^${source}$`);
+}
+
+function literalLength(template: string): number {
+  return template.replace(PARAM_RE, "").length;
 }
 
 function groupFor(template: string): string {
@@ -93,9 +113,7 @@ function readOperations(document: unknown): Operation[] {
         method: method.toUpperCase(),
         template,
         group: groupFor(template),
-        literalSegments: template
-          .split("/")
-          .filter((segment) => segment && !/^\{[^}]+\}$/.test(segment)).length,
+        literalLength: literalLength(template),
       });
     }
   }
@@ -108,7 +126,7 @@ function matchOperation(call: HttpCall, operations: Operation[]): Operation | un
       (operation) =>
         operation.method === call.method && templateRegex(operation.template).test(call.path),
     )
-    .sort((a, b) => b.literalSegments - a.literalSegments)[0];
+    .sort((a, b) => b.literalLength - a.literalLength)[0];
 }
 
 function quantile(sorted: number[], q: number): number {

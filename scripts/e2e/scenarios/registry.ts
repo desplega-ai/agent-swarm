@@ -16,6 +16,7 @@ const SCENARIOS_DIR = join(import.meta.dir);
 const NON_SCENARIO_FILES = new Set([
   "core-helpers.ts",
   "registry.ts",
+  "platform-helpers.ts",
   "platformb-helpers.ts",
   "slack-helpers.ts",
   "workflow-helpers.ts",
