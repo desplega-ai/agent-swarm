@@ -90,6 +90,29 @@ export const mcpSurface: Scenario = {
         (await connection.listTools()).length > 0,
         "MCP transport failed after the unknown tool call",
       );
+
+      // Parked for the state-surface gate: a pool task moved to backlog by its requester.
+      // This scenario runs before any lead exists, so the task stays unassigned long enough
+      // to be moved, and nothing later picks a backlog task up.
+      const backlogCreate = await ctx.api("POST", "/api/tasks", {
+        agentId,
+        body: { task: `backlog ${ctx.nonce}`, source: "api" },
+      });
+      expectStatus(backlogCreate, [201], "create a pool task to move to backlog");
+      const backlogTaskId = asRecord(backlogCreate.json).id;
+      expect(typeof backlogTaskId === "string", "Backlog task response has no id");
+      const moved = asRecord(
+        await connection.callTool("task-action", { action: "to_backlog", taskId: backlogTaskId }),
+      );
+      expect(
+        moved.isError !== true,
+        `task-action to_backlog returned isError: ${contentText(moved)}`,
+      );
+      const backlogRow = ctx.db.get<{ status: string }>(
+        "SELECT status FROM agent_tasks WHERE id = ?",
+        [backlogTaskId],
+      );
+      expect(backlogRow?.status === "backlog", `backlog task has status ${backlogRow?.status}`);
     } finally {
       await connection.close();
     }

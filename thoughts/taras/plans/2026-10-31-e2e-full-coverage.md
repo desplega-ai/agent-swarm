@@ -130,6 +130,16 @@ reviewers checked standards and spec, zero blockers. Outcome:
   the doubled-`changes` tests pass; only `codex-gateway-route` still fails locally, and it fails
   on clean main too.
 
+## Fourth pass (same PR): engine state surfaces and flow completeness
+
+- `coverage-manifest.json` gained `stateSurfaces`: nine read-only SELECTs over the SUT database
+  (task statuses, workflow run and step statuses, script run statuses, script step types,
+  scopes, fs modes, executors) with a declared universe and reasoned exclusions for transient
+  states. Strict fails on a declared value never produced and on a database value outside the
+  universe. Scenarios now park one row in each reachable terminal-ish state (offered, paused,
+  backlog tasks; a waiting workflow run; aborted_limit and paused script runs).
+- Every scenario must belong to a flow; the manifest pins 67 flows covering all 92 scenarios.
+
 ## Security scan findings (Superagent, same PR)
 
 - P1: `CODEX_OAUTH_DEVICE_BASE_URL` was config-writable and unvalidated. Now an env-only reserved

@@ -108,7 +108,9 @@ function emptyCoverage(): Coverage {
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
+    stateSurfaces: [],
     flows: [],
+    scenariosWithoutFlow: [],
     staleExclusions: [],
     deadExclusions: [],
     unknownFlowScenarios: [],
@@ -310,6 +312,8 @@ async function main(): Promise<number> {
       observedNodeTypes,
       scenarios: scenarioResults,
       knownScenarios: new Set(scenarios.map((scenario) => scenario.name)),
+      queryValues: (sql) =>
+        activeDb!.query<{ value: unknown }>(sql).map((row) => String(row.value)),
       manifest,
     });
   } catch (error) {
@@ -379,6 +383,8 @@ async function main(): Promise<number> {
   console.log(surfaceLine("routes", coverage.routes));
   console.log(surfaceLine("mcp tools", coverage.mcpTools));
   console.log(surfaceLine("workflow node types", coverage.nodeTypes));
+  for (const state of coverage.stateSurfaces)
+    console.log(surfaceLine(`state ${state.name}`, state));
   console.log(
     `latency: p50 ${coverage.latency.overall.p50} ms, p95 ${coverage.latency.overall.p95} ms over ${coverage.latency.overall.count} calls`,
   );

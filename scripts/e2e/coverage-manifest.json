@@ -1,5 +1,5 @@
 {
-  "$comment": "Deliberate coverage exclusions for `bun run e2e --strict`. Every entry needs a reason a reviewer can check. A stale entry (the item is covered anyway) or a dead entry (the server no longer exposes it) fails the strict run. `flows` pins scenario names that must exist and pass.",
+  "$comment": "Deliberate coverage exclusions for `bun run e2e --strict`. Every entry needs a reason a reviewer can check. A stale entry (the item is covered anyway) or a dead entry (the server no longer exposes it) fails the strict run. `flows` pins scenario names that must exist and pass. `stateSurfaces` declare the values an engine column can hold (statuses, step types, executors); each is read from the SUT database after the run and every declared value must be observed unless excluded, and every observed value must be declared. Every scenario must belong to a flow.",
   "routes": [],
   "mcpTools": [],
   "nodeTypes": [],
@@ -12,9 +12,17 @@
       "description": "public share/site pages through the agent-fs proxy and the Comb review-batch gate",
       "scenarios": ["knowledge-agentfs-edges"]
     },
+    "agent-profile-and-tools": {
+      "description": "Agent profile versions and coaching, agent tools over MCP, preferences",
+      "scenarios": ["core-agent-profile", "core-agent-tools", "core-preferences"]
+    },
     "agentfs-proxy": {
       "description": "Pass-through proxy to agent-fs with header allowlists, registration gate and rate limit, public share and site pages",
       "scenarios": ["platformb-agentfs-proxy"]
+    },
+    "api-health-and-auth": {
+      "description": "Health endpoint and the operator-key gate: no key and a wrong key are 401, the right key passes",
+      "scenarios": ["health", "auth"]
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
@@ -28,9 +36,17 @@
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
       "scenarios": ["core-budgets"]
     },
+    "config-roundtrip": {
+      "description": "A config write is readable back and masked when secret",
+      "scenarios": ["config-roundtrip"]
+    },
     "config-store": {
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
       "scenarios": ["platform-config", "platform-lead-tools"]
+    },
+    "connector-handoff": {
+      "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
+      "scenarios": ["connector-handoff"]
     },
     "cost-and-orphan-recovery": {
       "description": "Session costs priced and billed, active sessions, orphan task recovery",
@@ -52,9 +68,17 @@
       "description": "A saved script exposed as a bearer or open HTTP endpoint and invoked from outside.",
       "scenarios": ["platform-edge"]
     },
+    "external-tools": {
+      "description": "swarm_x, WhatsApp send and reply, AgentMail inbox registration with ownership, the Codex device login against a loopback stand-in",
+      "scenarios": ["platform-external-tools", "platform-codex-device-login"]
+    },
     "first-run-onboarding": {
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
+    },
+    "integrations-surface": {
+      "description": "mcp-user config, Slack manifest and icon, Chat SDK status, claude-managed test",
+      "scenarios": ["platform-integrations"]
     },
     "kapso-whatsapp-inbound": {
       "description": "Lead registers a Kapso number, a signed inbound message becomes a task pinned to the mapped agent, unregister stops routing.",
@@ -67,6 +91,10 @@
     "mcp-server-lifecycle": {
       "description": "MCP server definitions created over HTTP and MCP tools, installed per agent, OAuth client pre-registered, deleted.",
       "scenarios": ["platform-mcp-servers", "platform-mcp-server-tools"]
+    },
+    "mcp-surface": {
+      "description": "tools/list, my-agent-info, pool claim and progress over MCP, graceful error on an unknown tool",
+      "scenarios": ["mcp-surface"]
     },
     "memory-lifecycle": {
       "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
@@ -84,9 +112,17 @@
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
       "scenarios": ["platformb-models"]
     },
+    "model-harness-guard": {
+      "description": "Explicit model and harness pairs are validated on task create",
+      "scenarios": ["model-harness-guard"]
+    },
     "oauth-app-authorization": {
       "description": "OAuth app -> authorize-url -> provider callback -> authorization -> refresh -> remote revoke -> delete, against a loopback provider.",
       "scenarios": ["platform-oauth-apps"]
+    },
+    "oauth-refresh-locks": {
+      "description": "Refresh lock acquire, contention, wrong-owner release, expiry takeover",
+      "scenarios": ["platform-oauth-locks"]
     },
     "page-publishing": {
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
@@ -107,6 +143,10 @@
     "repo-registry": {
       "description": "Register, update, gate allowMerge, list and delete repo records over HTTP and MCP",
       "scenarios": ["platformb-repos"]
+    },
+    "runtime-pools-flag-off": {
+      "description": "Runtime pools, controllers and the worker socket under MULTI_RUNTIME_ENABLED=false",
+      "scenarios": ["runtime-pools", "platformb-runtime"]
     },
     "script-apis": {
       "description": "A saved script is published as a public endpoint, called with its bearer secret, rotated, disabled and deleted.",
@@ -152,9 +192,44 @@
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread",
       "scenarios": ["platformb-slack-tools"]
     },
+    "slack-conversations": {
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, pre-task-create block",
+      "scenarios": [
+        "slack-mention",
+        "slack-follow-up",
+        "slack-failed-task",
+        "slack-assistant-file-share",
+        "slack-reaction-override",
+        "slack-relay-restart",
+        "slack-task-output-citations",
+        "slack-pre-task-create-block"
+      ]
+    },
+    "slack-deferrals": {
+      "description": "Defer with an ETA on both renderers, wake, re-defer",
+      "scenarios": [
+        "slack-defer-eta-legacy",
+        "slack-defer-eta-v2",
+        "slack-defer-wake-v2",
+        "slack-redefer"
+      ]
+    },
+    "slack-delegation": {
+      "description": "Delegated child results, failed and late children, and the flag-off repro",
+      "scenarios": [
+        "slack-delegation-flag-off-repro",
+        "slack-delegation-child-result",
+        "slack-delegation-failed-child",
+        "slack-delegation-late-child"
+      ]
+    },
     "task-attachments-local-fs": {
       "description": "Upload, list, download byte for byte, delete a task attachment on the local-fs provider",
       "scenarios": ["platformb-fs"]
+    },
+    "task-controls": {
+      "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
+      "scenarios": ["core-task-controls"]
     },
     "task-defer-wake": {
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
@@ -164,9 +239,21 @@
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
     },
+    "task-lifecycle-http": {
+      "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
+      "scenarios": ["task-lifecycle"]
+    },
     "task-steering": {
       "description": "Steer outcomes per harness, worker callbacks, accept-steer, promotion of undelivered steering",
       "scenarios": ["core-steering"]
+    },
+    "teammate-invites": {
+      "description": "Invite an email, open the link, exchange the code for a user token, replay is refused",
+      "scenarios": ["invites"]
+    },
+    "telemetry-relay": {
+      "description": "Telemetry enable and ui-event relay to the sink, validation and size cap",
+      "scenarios": ["platform-telemetry"]
     },
     "tracker-disabled-contract": {
       "description": "Linear and Jira routes answer the unconfigured contract; tracker tools keep sync and agent mappings without a provider",
@@ -175,6 +262,10 @@
     "used-by-consent": {
       "description": "Consent grant relayed to the proxy, persisted, revoked",
       "scenarios": ["core-org"]
+    },
+    "user-directory": {
+      "description": "Users CRUD, identities, unmapped queue, merge, event timeline",
+      "scenarios": ["platform-users-lifecycle"]
     },
     "user-token-lifecycle": {
       "description": "Operator mints a user MCP token, the user authenticates with it on /api/whoami and /mcp-user, the operator revokes it and it stops working.",
@@ -205,5 +296,116 @@
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
     }
-  }
+  },
+  "stateSurfaces": [
+    {
+      "name": "task-statuses",
+      "query": "SELECT DISTINCT status AS value FROM agent_tasks",
+      "universe": [
+        "draft",
+        "backlog",
+        "unassigned",
+        "offered",
+        "reviewing",
+        "pending",
+        "in_progress",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+        "superseded",
+        "resume"
+      ],
+      "excluded": [
+        {
+          "value": "draft",
+          "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
+        },
+        {
+          "value": "reviewing",
+          "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
+        },
+        {
+          "value": "resume",
+          "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
+        },
+        {
+          "value": "unassigned",
+          "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
+        }
+      ]
+    },
+    {
+      "name": "workflow-run-statuses",
+      "query": "SELECT DISTINCT status AS value FROM workflow_runs",
+      "universe": ["running", "waiting", "completed", "failed", "skipped", "cancelled"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: every run the suite starts reaches a terminal or waiting state before the table is read"
+        }
+      ]
+    },
+    {
+      "name": "workflow-step-statuses",
+      "query": "SELECT DISTINCT status AS value FROM workflow_run_steps",
+      "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
+        },
+        {
+          "value": "skipped",
+          "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
+        }
+      ]
+    },
+    {
+      "name": "script-run-statuses",
+      "query": "SELECT DISTINCT status AS value FROM script_runs",
+      "universe": ["running", "paused", "completed", "failed", "cancelled", "aborted_limit"],
+      "excluded": [
+        {
+          "value": "running",
+          "reason": "transient: every durable run the suite launches is settled or cancelled before the table is read"
+        }
+      ]
+    },
+    {
+      "name": "script-run-step-types",
+      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
+      "universe": ["raw-llm", "agent-task", "swarm-script"],
+      "excluded": []
+    },
+    {
+      "name": "script-run-step-statuses",
+      "query": "SELECT DISTINCT status AS value FROM script_run_journal",
+      "universe": ["completed", "failed"],
+      "excluded": []
+    },
+    {
+      "name": "script-scopes",
+      "query": "SELECT DISTINCT scope AS value FROM scripts",
+      "universe": ["global", "agent"],
+      "excluded": []
+    },
+    {
+      "name": "script-fs-modes",
+      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
+      "universe": ["none", "workspace-rw"],
+      "excluded": [
+        {
+          "value": "workspace-rw",
+          "reason": "v1 answers 501 before a script is stored, so no row can carry it"
+        }
+      ]
+    },
+    {
+      "name": "script-executors",
+      "query": "SELECT DISTINCT executor AS value FROM scripts WHERE executor IS NOT NULL",
+      "universe": ["native", "quickjs"],
+      "excluded": []
+    }
+  ]
 }

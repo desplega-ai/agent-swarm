@@ -341,6 +341,21 @@ export const workflowEngineCancel: Scenario = {
           !parentFailed.steps.some((step) => step.nodeId === "after"),
         `a cancelled child fails the parent: ${String(parentFailed.run.error)}`,
       );
+
+      // Parked: a long time wait that nobody cancels. The strict state-surface gate expects a
+      // waiting run and a waiting step to be left in the database after the scenarios.
+      const parkId = await createWorkflow(
+        ctx,
+        "cancel-park",
+        {
+          nodes: [{ id: "park", type: "wait", config: { mode: "time", durationMs: 3_600_000 } }],
+        },
+        {},
+        workerId,
+      );
+      const parkRun = await triggerWorkflow(ctx, parkId, {}, { agentId: workerId });
+      await waitForStep(ctx, parkRun.runId, "park", "waiting");
+      await waitForRun(ctx, parkRun.runId, "waiting", 20_000, "parked time-wait run");
     } finally {
       await connection.close();
     }

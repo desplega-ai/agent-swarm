@@ -14,7 +14,8 @@ This runbook is for operators and reviewers. Authors read
 | Route operations | every `METHOD /template` in `GET /openapi.json` | a recorded request matched the template | uncovered and not excluded → fail |
 | MCP tools | `tools/list` for a worker registered before any scenario, every capability on | a scenario called the tool over `/mcp` | uncovered and not excluded → fail |
 | Workflow node types | `GET /api/executor-types` | a run executed the node (`workflow_run_steps.nodeType`) | uncovered and not excluded → fail |
-| Flows | `flows` in `coverage-manifest.json` | every named scenario ran and passed | missing or failing → fail |
+| Engine states | `stateSurfaces` in `coverage-manifest.json`: task, workflow run, workflow step and script run statuses, script step types, scopes, fs modes, executors | the suite left at least one row in that state (read from the database after the run) | a declared value never produced, or a database value the universe does not list → fail |
+| Flows | `flows` in `coverage-manifest.json` | every named scenario ran and passed, and every scenario belongs to a flow | missing, failing or orphan → fail |
 | Manifest hygiene | the manifest itself | | stale (excluded but covered) or dead (matches nothing) → fail |
 
 Exclusions live in `scripts/e2e/coverage-manifest.json` with a reason each. Adding one is a
