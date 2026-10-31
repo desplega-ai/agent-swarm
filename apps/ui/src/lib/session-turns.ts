@@ -369,11 +369,14 @@ export function hasHandoffs(turns: Turn[]): boolean {
 }
 
 /**
- * A task that ended in a deferral: `defer-task` sets `deferredAt`. Its output
- * only says what the swarm waits for.
+ * A task that ended in a deferral: `defer-task` sets `deferredAt`, and its
+ * output only says what the swarm waits for. With an output schema the output
+ * is the agent's JSON instead, so that reply is not folded into a wait line.
  */
 export function isDeferral(task: AgentTask): boolean {
-  return typeof task.deferredAt === "string";
+  if (typeof task.deferredAt !== "string") return false;
+  const { who, by } = deferralText(task.output);
+  return who !== null || by !== null;
 }
 
 export interface DeferralText {

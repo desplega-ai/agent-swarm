@@ -7,6 +7,7 @@ import {
   deferralText,
   foldWaits,
   hasHandoffs,
+  isDeferral,
   onlyWaits,
   partSteps,
   type SessionTurns,
@@ -869,10 +870,18 @@ describe("deferrals", () => {
       who: null,
       by: "tomorrow 09:00",
     });
-    expect(deferralText("Checking back on Nov 2 at 09:00")).toEqual({
+    // defer-task writes far dates as "on MM-DD at HH:MM".
+    expect(deferralText("Checking back on 11-02 at 09:00")).toEqual({
       who: null,
-      by: "Nov 2 09:00",
+      by: "11-02 09:00",
     });
     expect(deferralText('{"status":"pending"}')).toEqual({ who: null, by: null });
+  });
+
+  test("a deferred task whose output is schema JSON is not a wait line", () => {
+    // With an output schema, defer-task stores the agent's JSON as the output.
+    const json = task({ id: "j", output: '{"status":"pending","pr":12}', ...deferred });
+    expect(isDeferral(json)).toBe(false);
+    expect(isDeferral(task({ id: "k", output: waiting("Lead", "15:03"), ...deferred }))).toBe(true);
   });
 });

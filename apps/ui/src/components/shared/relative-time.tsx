@@ -44,7 +44,8 @@ export function RelativeTime({
       <TooltipTrigger asChild>
         <time
           dateTime={date.toISOString()}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: focus opens the tooltip, so keyboard users can read the exact time
+          // An empty title hides a row's native `title` while this tooltip shows.
+          title=""
           tabIndex={focusable ? 0 : undefined}
           className={cn(
             "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",

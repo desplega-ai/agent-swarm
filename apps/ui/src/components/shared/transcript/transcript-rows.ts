@@ -313,7 +313,8 @@ export function rowsAfterEnd(
   if (!end) return { during: rows, after: [] };
   const during: TranscriptRow[] = [];
   const after: TranscriptRow[] = [];
-  for (const row of rows) (row.kind === "child" && timeOf(row.at) > end ? after : during).push(row);
+  for (const row of rows)
+    (row.kind === "child" && timeOf(row.at) >= end ? after : during).push(row);
   return { during, after };
 }
 

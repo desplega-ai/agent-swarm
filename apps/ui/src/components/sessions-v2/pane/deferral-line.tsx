@@ -68,8 +68,8 @@ function WaitRow({
  */
 export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: () => void }) {
   const { who, by } = deferralText(task.output);
-  // A time reads "at 16:12"; a day reads as is ("tomorrow 09:00").
-  const back = by ? `Checking back ${/^\d/.test(by) ? "at " : ""}${by}` : "Waiting";
+  // A time alone reads "at 16:12"; a day reads as is ("tomorrow 09:00", "11-02 09:00").
+  const back = by ? `Checking back ${/^\d{1,2}:\d{2}$/.test(by) ? "at " : ""}${by}` : "Waiting";
   const label = [who ? `Waiting on ${who}` : back, who && by ? `by ${by}` : null, workedFor(task)]
     .filter(Boolean)
     .join(" · ");

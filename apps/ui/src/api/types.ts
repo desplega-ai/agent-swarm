@@ -3379,7 +3379,7 @@ export interface StatusIdentity {
   hide_cloud_promo: boolean;
   /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
   org_id: string | null;
-  /** The swarm's public dashboard URL (`APP_URL`). Null when unset, absent on older APIs. */
+  /** The swarm's public dashboard URL (`APP_URL`, else `DASHBOARD_URL`). Null when unset, absent on older APIs. */
   dashboard_url?: string | null;
 }
 

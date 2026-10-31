@@ -74,9 +74,13 @@ export function MonacoCodeBlock({
   // The source line count is only the first guess: `wordWrap` turns a long
   // line into several, so Monaco's measured content height replaces it.
   // The guess floors at 80 so the first paint is not a sliver; once Monaco
-  // measures, the box fits the code exactly (a 2-line diff gets no empty band).
+  // measures, the box fits the code (a 2-line diff gets no empty band), with
+  // a 36 px floor so a one-line block still holds the 24 px copy button.
   const [contentHeight, setContentHeight] = useState<number | null>(null);
-  const height = contentHeight ?? Math.max(80, lineCount * MONACO_LINE_HEIGHT + MONACO_PADDING);
+  const height =
+    contentHeight !== null
+      ? Math.max(36, contentHeight)
+      : Math.max(80, lineCount * MONACO_LINE_HEIGHT + MONACO_PADDING);
   return (
     <div
       className={cn(
@@ -95,9 +99,9 @@ export function MonacoCodeBlock({
           readOnly: true,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
-          // No overview ruler: it drew a stray mark at the top right of short blocks.
-          overviewRulerLanes: 0,
-          overviewRulerBorder: false,
+          // No overview ruler on snippets: it drew a stray mark at the top right
+          // of short blocks. A `fill` editor scrolls, so it keeps its ruler.
+          ...(fill ? {} : { overviewRulerLanes: 0, overviewRulerBorder: false }),
           // Monaco's own scrollbars are disabled so the outer container is the
           // single source of scroll truth, except in `fill` mode, where the
           // editor owns its viewport and must scroll itself.
