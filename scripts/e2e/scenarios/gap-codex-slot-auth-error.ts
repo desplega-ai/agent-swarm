@@ -15,7 +15,13 @@ async function probe(apiUrl: string, apiKey: string, slot: string) {
   try {
     const child = Bun.spawn(["bun", "scripts/e2e-gap/codex-slot-probe.ts", apiUrl, apiKey, slot], {
       cwd: repoRoot,
-      env: { PATH: process.env.PATH ?? "", HOME: home },
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: home,
+        ...(process.env.CODEX_PATH_OVERRIDE
+          ? { CODEX_PATH_OVERRIDE: process.env.CODEX_PATH_OVERRIDE }
+          : {}),
+      },
       stdout: "pipe",
       stderr: "pipe",
     });

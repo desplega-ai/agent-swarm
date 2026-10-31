@@ -14,10 +14,14 @@ leg() { # name, command...
   if "$@" >"$OUT/$name.log" 2>&1; then echo "PASS $name"; else echo "FAIL $name (rc=$?)"; rc_all=1; fi
 }
 
-# slack-mock: the local patch adds dropSocketBeforeAck and file attachments (agent-swarm PRs #2490, #2561).
-if ! grep -q dropSocketBeforeAck node_modules/@desplega.ai/slack-mock/dist/*.js 2>/dev/null; then
-  (cd node_modules/@desplega.ai/slack-mock && git apply --directory=. "$OLDPWD/scripts/e2e-gap/slack-mock-gap.patch") || echo "slack-mock patch did not apply" >&2
+# slack-mock: the local patch adds dropSocketBeforeAck, file attachments and an app-avatar value
+# (agent-swarm PRs #2490, #2561, #2551). The package resolves to ./src under bun, so patch the sources.
+SM=node_modules/@desplega.ai/slack-mock
+if ! grep -q dropSocketBeforeAck "$SM"/src/*.ts 2>/dev/null; then
+  (cd "$SM" && git apply "$OLDPWD/scripts/e2e-gap/slack-mock-gap.patch") || echo "slack-mock patch did not apply" >&2
 fi
+# The Codex adapter finds `codex` on PATH; point it at the binary the SDK installed.
+export CODEX_PATH_OVERRIDE=${CODEX_PATH_OVERRIDE:-$(find "$PWD/node_modules/@openai/codex-linux-x64" -name codex -type f 2>/dev/null | head -1)}
 
 # Plain scenarios, one SUT.
 leg plain bun scripts/e2e/run.ts --only gap-pool-keys,gap-schedule-session-visibility,gap-workflow-run-finished --json "$OUT/plain.json"
