@@ -59,6 +59,24 @@ export function resolveRaterModelString(kind: CredentialKind): string {
   return process.env.MEMORY_RATER_MODEL ?? MEMORY_RATER_DEFAULT_MODEL[kind];
 }
 
+const PROVIDER_TO_KIND: Record<string, CredentialKind> = {
+  openrouter: "openrouter",
+  anthropic: "anthropic",
+  openai: "openai",
+  "openai-codex": "openai-codex",
+};
+
+/**
+ * Credential kind a model string belongs to. `provider/model-id` maps through
+ * the provider prefix; a bare alias (`haiku`) is a `claude -p` model. `null`
+ * for a provider the internal-ai layer cannot call.
+ */
+export function kindForModelString(modelStr: string): CredentialKind | null {
+  const slash = modelStr.indexOf("/");
+  if (slash < 0) return "claude-cli";
+  return PROVIDER_TO_KIND[modelStr.slice(0, slash)] ?? null;
+}
+
 /**
  * Split a `provider/model-id` string on the FIRST `/` so that OpenRouter
  * compound IDs like `openrouter/deepseek/deepseek-v4.1-flash` parse as

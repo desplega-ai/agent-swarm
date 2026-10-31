@@ -14,6 +14,7 @@ import { Type } from "typebox";
 import { z } from "zod";
 import { completeStructuredWithModel } from "./complete-structured.js";
 import { type CredentialKind, type ResolvedCredential, resolveCredentials } from "./credentials.js";
+import { kindForModelString } from "./models.js";
 
 /** Longest generated title. The PATCH /api/tasks/{id}/title route allows 120. */
 export const TASK_TITLE_MAX_CHARS = 100;
@@ -57,23 +58,7 @@ export const TASK_TITLE_MODEL_CANDIDATES: readonly TaskTitleCandidateGroup[] = [
   { kind: "claude-cli", models: ["haiku"] },
 ];
 
-const PROVIDER_TO_KIND: Record<string, CredentialKind> = {
-  openrouter: "openrouter",
-  anthropic: "anthropic",
-  openai: "openai",
-  "openai-codex": "openai-codex",
-};
-
-/**
- * Credential kind a pinned model string belongs to. `provider/model-id` maps
- * through the provider prefix; a bare alias (`haiku`) is a `claude -p` model.
- * `null` for a provider the internal-ai layer cannot call.
- */
-export function kindForModelString(modelStr: string): CredentialKind | null {
-  const slash = modelStr.indexOf("/");
-  if (slash < 0) return "claude-cli";
-  return PROVIDER_TO_KIND[modelStr.slice(0, slash)] ?? null;
-}
+export { kindForModelString };
 
 /**
  * The candidate list for one environment. `TASK_AUTO_TITLE_MODEL` moves its
