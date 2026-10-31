@@ -31,7 +31,7 @@ import {
   isPageFeedbackRequested,
 } from "../pages/feedback-overlay";
 import { type Page, PageSchema } from "../types";
-import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
+import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
 import { extractAndVerifyCookie, pageSessionSetCookies } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -350,21 +350,12 @@ function buildCsp(page: Page): string {
   // `frame-ancestors` lists every origin allowed to iframe `/p/:id`. We must
   // include the SPA origin(s). Configured app URLs may be comma-separated so
   // portless dev (`https://ui.swarm.localhost`), a Vite port (`http://localhost:5274`),
-  // and a tunnel/staging origin can all coexist. Additionally, in non-production
-  // we always allow `http://localhost:*` and `https://*.localhost` so swapping
-  // between Vite ports / portless dev doesn't require restarting the API.
+  // and a tunnel/staging origin can all coexist. Under an explicit
+  // development/test NODE_ENV we also allow the local Vite ports and
+  // `*.localhost` so swapping between them doesn't require restarting the API.
+  // Unset NODE_ENV (every deployed image) gets no localhost ancestors.
   const configured = getConfiguredAppUrls();
-  const devFallbacks =
-    getNodeEnv() === "production"
-      ? []
-      : [
-          "http://localhost:5274",
-          "http://localhost:5175",
-          "http://127.0.0.1:5274",
-          "http://127.0.0.1:5175",
-          "https://*.localhost",
-          "http://*.localhost",
-        ];
+  const devFallbacks = getLocalDevAppOrigins();
   const embedders = page.authMode === "public" ? getPageFrameAncestors() : [];
   const ancestors = Array.from(new Set([...configured, ...devFallbacks, ...embedders]));
   // Allow Tailwind Play CDN (`cdn.tailwindcss.com`) for scripts, Google
