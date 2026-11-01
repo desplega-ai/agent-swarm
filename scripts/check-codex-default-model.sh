@@ -35,7 +35,7 @@ if [ -z "$ts_default" ]; then
 fi
 
 # Keep the operator-facing guide aligned with the runtime default and document both override paths.
-documented_default=$(grep -oE 'Codex uses `[^\`]+`' "$DOC_FILE" | head -1 | sed -E 's/.*`([^\`]+)`/\1/' || true)
+documented_default=$(sed -n 's/.*Codex uses `\([^`]*\)`.*/\1/p' "$DOC_FILE" | head -1 || true)
 if [ -z "$documented_default" ] || [ "$documented_default" != "$ts_default" ]; then
   echo "check-codex-default-model: documentation default MISMATCH" >&2
   echo "  docs-site Codex default: ${documented_default:-<missing>}" >&2
