@@ -649,6 +649,80 @@ describe("all-users read scope", () => {
     }
   });
 
+  test("with RBAC off a non-admin still needs a stored admin or session.read.all grant", async () => {
+    const { root, child } = await session(owner.id);
+    const previous = process.env.RBAC_ENABLED;
+    process.env.RBAC_ENABLED = "false";
+    try {
+      for (const opts of [{ auth: requesterAuth }, { dashboardUserId: requester.id }]) {
+        const scoped = { ...opts, sessionScope: "all" };
+        expect(await taskIds("&scope=all", opts)).not.toContain(root.id);
+        expect(await taskIds("", scoped)).not.toContain(child.id);
+        expect(await sessionIds("&scope=all", opts)).not.toContain(root.id);
+        expect(await sessionIds("&scope=tree&show=all", scoped)).not.toContain(root.id);
+        expect(await sessionIds("&scope=tree", scoped)).not.toContain(root.id);
+        expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+        expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(
+          403,
+        );
+        expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+      }
+      // A stored admin grant still opts in with RBAC off.
+      expect(await taskIds("&scope=all", { auth: ezeAuth })).toContain(root.id);
+      const ezeScoped = { auth: ezeAuth, sessionScope: "all" };
+      expect((await call("users", "GET", "/api/whoami", ezeScoped)).body.sessionReadAll).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.RBAC_ENABLED;
+      else process.env.RBAC_ENABLED = previous;
+    }
+  });
+
+  test("Mine keeps a shared machine-started session when the scope turns on: list, tree and counts", async () => {
+    const run = await createTaskExtended("SHARED WORKFLOW RUN", {
+      requestedByUserId: owner.id,
+      source: "workflow",
+    });
+    await setSessionShares(
+      { id: run.id, requestedByUserId: owner.id },
+      { everyone: "none", users: [{ userId: eze.id, access: "read" }] },
+      owner.id,
+    );
+    const mine = async (opts: Call) => {
+      const list = await call(
+        "sessions",
+        "GET",
+        "/api/sessions?limit=200&scope=tree&showSource=workflow",
+        opts,
+      );
+      const tree = await call("sessions", "GET", "/api/session-tree?showSource=workflow", opts);
+      expect(list.status).toBe(200);
+      expect(tree.status).toBe(200);
+      return {
+        ids: list.body.sessions.map((s: { root: { id: string } }) => s.root.id) as string[],
+        total: list.body.total as number,
+        workflowTotal:
+          (tree.body.sources as { source: string; total: number }[]).find(
+            (s) => s.source === "workflow",
+          )?.total ?? 0,
+      };
+    };
+    for (const opts of [{ auth: ezeAuth }, { dashboardUserId: eze.id }]) {
+      const off = await mine(opts);
+      const on = await mine({ ...opts, sessionScope: "all" });
+      expect(off.ids).toContain(run.id);
+      expect(on.ids).toContain(run.id);
+      expect(off.workflowTotal).toBeGreaterThan(0);
+      expect(on.workflowTotal).toBeGreaterThanOrEqual(off.workflowTotal);
+      expect(on.total).toBeGreaterThanOrEqual(off.total);
+    }
+    // An unshared machine-started run of another user stays out of Mine.
+    const unshared = await createTaskExtended("UNSHARED WORKFLOW RUN", {
+      requestedByUserId: owner.id,
+      source: "workflow",
+    });
+    expect((await mine({ auth: ezeAuth, sessionScope: "all" })).ids).not.toContain(unshared.id);
+  });
+
   test("whoami reports the opt-in for the picked user on the operator key", async () => {
     const asPicked = async (userId?: string) =>
       (await call("users", "GET", "/api/whoami", userId ? { dashboardUserId: userId } : {})).body;

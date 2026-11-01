@@ -62,19 +62,18 @@ export function sessionMineCondition(
 } {
   const machine = MACHINE_SESSION_SOURCES.map(() => "?").join(",");
   const humanSystem = HUMAN_SYSTEM_TASK_TYPES.map(() => "?").join(",");
-  if (readAll) {
-    // The all-users read scope: every user's human-started roots.
-    return {
-      sql: `(r.source NOT IN (${machine})
-        OR (r.source = 'system' AND r.taskType IN (${humanSystem})))`,
-      params: [...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES],
-    };
-  }
-  return {
-    sql: `((r.requestedByUserId = ? AND (r.source NOT IN (${machine})
-        OR (r.source = 'system' AND r.taskType IN (${humanSystem}))))
-      OR r.id IN (SELECT s.rootTaskId FROM session_shares s
-        WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?)))`,
-    params: [userId, ...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES, userId],
-  };
+  const humanStarted = `(r.source NOT IN (${machine})
+        OR (r.source = 'system' AND r.taskType IN (${humanSystem})))`;
+  const humanParams = [...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES];
+  const shared = `r.id IN (SELECT s.rootTaskId FROM session_shares s
+        WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
+  // The all-users read scope widens the owner check to every user's
+  // human-started roots. Sessions shared with the viewer stay in Mine, so a
+  // shared machine-started root never drops out when the scope turns on.
+  return readAll
+    ? { sql: `(${humanStarted} OR ${shared})`, params: [...humanParams, userId] }
+    : {
+        sql: `((r.requestedByUserId = ? AND ${humanStarted}) OR ${shared})`,
+        params: [userId, ...humanParams, userId],
+      };
 }

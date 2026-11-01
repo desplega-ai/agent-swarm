@@ -51,12 +51,12 @@ function requestsAllUsersScope(req: IncomingMessage): boolean {
 }
 
 /**
- * Whether `userId` may opt in to read every user's sessions: a grant-all role
- * (admin), or a role holding `session.read.all`. With RBAC off every user may,
- * the same as `GET /api/whoami` reporting `grantsAll`.
+ * Whether `userId` may opt in to read every user's sessions: a stored
+ * grant-all role (admin), or a role holding `session.read.all`. The stored
+ * grant decides with RBAC on or off: RBAC off opens the admission gate, not
+ * other users' private sessions, so `grantsAll` on whoami is no answer here.
  */
 export async function canReadAllSessions(userId: string): Promise<boolean> {
-  if (!isRbacEnabled()) return true;
   const grant = await getUserGrant(userId);
   return grant.grantsAll || grant.verbs.has("session.read.all");
 }
