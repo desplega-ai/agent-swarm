@@ -24166,7 +24166,7 @@ export interface paths {
         };
         /**
          * List product improvements
-         * @description Lists drafted and sent improvements, newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch. Pending and failed rows carry `leakHints` for the approver.
+         * @description Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.
          */
         get: {
             parameters: {

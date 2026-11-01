@@ -62,7 +62,7 @@ const listRoute = route({
   pattern: ["api", "improvements"],
   summary: "List product improvements",
   description:
-    "Lists drafted and sent improvements, newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch. Pending and failed rows carry `leakHints` for the approver.",
+    "Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.",
   tags: ["Improvements"],
   responses: {
     200: {

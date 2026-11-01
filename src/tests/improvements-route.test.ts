@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { closeDb, createAgent, createUser, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, createAgent, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { getImprovement } from "../be/improvements";
 import { type IdentityActor, mintSessionToken, mintToken } from "../be/users";
 import { resolveHttpRequestAuth } from "../http/auth";
@@ -287,5 +287,35 @@ describe("list", () => {
       (r: { text: string }) => r.text === "imp-worker keeps timing out",
     );
     expect(row.leakHints).toContain("imp-worker");
+  });
+
+  test("old pending and failed drafts stay listed behind more than 100 newer rows", async () => {
+    const insert = (id: string, status: string, createdAt: string) =>
+      getDbClient().run(
+        `INSERT INTO improvements (id, text, status, source, approved_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'api', ?, ?, ?)`,
+        [id, `row ${id}`, status, status === "sent" ? "operator" : null, createdAt, createdAt],
+      );
+    const oldPending = crypto.randomUUID();
+    const oldFailed = crypto.randomUUID();
+    await insert(oldPending, "pending_approval", "2000-01-01T00:00:00.000Z");
+    await insert(oldFailed, "failed", "2000-01-01T00:00:01.000Z");
+    for (let i = 0; i < 150; i++) {
+      const at = new Date(Date.UTC(2099, 0, 1, 0, 0, i)).toISOString();
+      await insert(crypto.randomUUID(), i % 2 ? "sent" : "discarded", at);
+    }
+
+    const list = await call("GET", "/api/improvements", operator());
+    expect(list.status).toBe(200);
+    const rows = list.body.improvements as Array<{ id: string; status: string; createdAt: string }>;
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(oldPending);
+    expect(ids).toContain(oldFailed);
+    expect(rows.find((r) => r.id === oldPending)?.status).toBe("pending_approval");
+    // History stays capped, and the whole list stays newest first.
+    const history = rows.filter((r) => r.status !== "pending_approval" && r.status !== "failed");
+    expect(history).toHaveLength(100);
+    const created = rows.map((r) => r.createdAt);
+    expect(created).toEqual([...created].sort().reverse());
   });
 });

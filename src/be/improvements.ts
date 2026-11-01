@@ -151,10 +151,21 @@ export async function getImprovement(id: string): Promise<Improvement | null> {
   return row ? toImprovement(row) : null;
 }
 
-export async function listImprovements(limit = 100): Promise<Improvement[]> {
+/**
+ * Every row a person still has to act on (`pending_approval`, `failed`), plus
+ * the newest `historyLimit` other rows, newest first. Only history is capped:
+ * an actionable draft must stay reachable however many newer rows exist.
+ */
+export async function listImprovements(historyLimit = 100): Promise<Improvement[]> {
   const rows = await getDbClient().query<ImprovementRow>(
-    "SELECT * FROM improvements ORDER BY created_at DESC, id DESC LIMIT ?",
-    [limit],
+    `SELECT * FROM improvements WHERE status IN ('pending_approval', 'failed')
+     UNION ALL
+     SELECT * FROM (
+       SELECT * FROM improvements WHERE status NOT IN ('pending_approval', 'failed')
+        ORDER BY created_at DESC, id DESC LIMIT ?
+     )
+     ORDER BY created_at DESC, id DESC`,
+    [historyLimit],
   );
   return rows.map(toImprovement);
 }
