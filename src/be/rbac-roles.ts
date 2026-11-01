@@ -3,6 +3,8 @@ import { PermissionVerbSchema } from "../rbac";
 import { invalidateTelemetryUserRole } from "../telemetry-identity";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb, getDbClient } from "./db";
+import { isInTransaction } from "./db-client";
+import { revokeAllUserCredentials } from "./users";
 
 export const DEFAULT_ROLE_ID = "rbac-role-admin";
 
@@ -242,6 +244,45 @@ export async function userHoldsOperatorGrantedRole(userId: string): Promise<bool
   return row != null;
 }
 
+/** A caller tried to credential, or bind an identity to, a user holding an operator-granted role. */
+export class OperatorGrantedTargetError extends Error {
+  constructor() {
+    super(
+      "This user holds an operator-granted role (auditor); this change requires the operator key",
+    );
+  }
+}
+
+/**
+ * Who asks for a credential or identity write on a user. `agent` is an agent
+ * caller (the Lead's `manage-user` tool), keyed on the agent rather than the
+ * operator actor it records in the audit log.
+ */
+export type CredentialCaller = { kind: "operator" | "user" | "system" | "agent"; id: string };
+
+/**
+ * Throws OperatorGrantedTargetError when `caller` would get a credential for,
+ * or bind an identity to, another user holding an operator-granted role.
+ * The operator key and the user itself pass. `system` callers (integration
+ * webhooks attributing their own events by email or external id) pass too:
+ * they hand no credential to a caller.
+ *
+ * Call it inside the write transaction that issues the credential or binds
+ * the identity. Adding an operator-granted role takes the same write lock
+ * (`setUserRoles`), so a grant cannot land between this check and the write.
+ */
+export async function assertMayActOnOperatorGrantedTarget(
+  caller: CredentialCaller,
+  targetUserId: string,
+): Promise<void> {
+  if (caller.kind === "operator" || caller.kind === "system") return;
+  if (caller.kind === "user" && caller.id === targetUserId) return;
+  if (!isInTransaction()) {
+    throw new Error("assertMayActOnOperatorGrantedTarget must run inside the write transaction");
+  }
+  if (await userHoldsOperatorGrantedRole(targetUserId)) throw new OperatorGrantedTargetError();
+}
+
 export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
   const rows = await getDbClient().query<GrantRow>(
     `SELECT r.id AS roleId, r.grantsAll, rp.verb
@@ -404,20 +445,21 @@ export async function setUserRoles(
     // A user actor may keep or drop a role with an operator-granted verb but
     // never add one. Checked against `current` inside this transaction, so a
     // concurrent revoke cannot slip between the check and the write.
-    if (actorUserId !== null) {
-      const heldIds = new Set(current.map((r) => r.id));
-      const added = wanted.filter((r) => !heldIds.has(r.id));
-      if (added.length > 0) {
-        const gated = await tx.query<{ name: string }>(
-          `SELECT DISTINCT r.name
-           FROM roles r JOIN role_permissions rp ON rp.roleId = r.id
-           WHERE r.id IN (${added.map(() => "?").join(", ")})
-             AND rp.verb IN (${OPERATOR_GRANTED_VERBS.map(() => "?").join(", ")})
-           ORDER BY r.name`,
-          [...added.map((r) => r.id), ...OPERATOR_GRANTED_VERBS],
-        );
-        if (gated.length > 0) throw new OperatorGrantedRoleError(gated.map((r) => r.name));
-      }
+    const heldIds = new Set(current.map((r) => r.id));
+    const added = wanted.filter((r) => !heldIds.has(r.id));
+    const gated =
+      added.length === 0
+        ? []
+        : await tx.query<{ name: string }>(
+            `SELECT DISTINCT r.name
+             FROM roles r JOIN role_permissions rp ON rp.roleId = r.id
+             WHERE r.id IN (${added.map(() => "?").join(", ")})
+               AND rp.verb IN (${OPERATOR_GRANTED_VERBS.map(() => "?").join(", ")})
+             ORDER BY r.name`,
+            [...added.map((r) => r.id), ...OPERATOR_GRANTED_VERBS],
+          );
+    if (actorUserId !== null && gated.length > 0) {
+      throw new OperatorGrantedRoleError(gated.map((r) => r.name));
     }
     const wantsAll = wanted.some((r) => r.grantsAll === 1);
     if (current.some((r) => r.grantsAll === 1) && !wantsAll) {
@@ -452,6 +494,13 @@ export async function setUserRoles(
          VALUES ('user', ?, ?, ?)`,
         [userId, row.id, actorUserId],
       );
+    }
+    // Any credential issued before the grant may sit with someone other than
+    // the user (an admin could mint a token or code for any user), so adding
+    // an operator-granted role revokes them all in this transaction. The user
+    // or the operator issues fresh ones; other users are refused from now on.
+    if (gated.length > 0) {
+      await revokeAllUserCredentials(userId, { kind: "system", id: "operator-granted-role" });
     }
     getDbClient().afterCommit(() => invalidateTelemetryUserRole(userId));
     return { before: current.map((r) => r.name), after: wanted.map((r) => r.name).sort() };

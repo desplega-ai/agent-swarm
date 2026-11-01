@@ -51,12 +51,13 @@ import {
   upsertBudget,
 } from "../be/db";
 import {
+  assertMayActOnOperatorGrantedTarget,
   assertNotLastAdmin,
   getUserGrant,
   LastAdminError,
   listUserRoles,
+  OperatorGrantedTargetError,
   setUserRoles,
-  userHoldsOperatorGrantedRole,
 } from "../be/rbac-roles";
 import {
   findUserByEmail,
@@ -686,23 +687,28 @@ const deleteIdentityRoute = route({
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Refuse a user actor that would get a credential for, or bind an identity to,
- * another user holding an operator-granted role (auditor). Every new user is
- * a grant-all admin, so without this any admin could act as an auditor.
- * Writes a 403 and returns true when refused.
+ * Run `write` in one write transaction after the operator-granted check: a
+ * user actor may not get a credential for, or bind an identity to, another
+ * user holding an operator-granted role (auditor). Every new user is a
+ * grant-all admin, so without this any admin could act as an auditor. The
+ * check and the write share the write lock, so an operator grant cannot land
+ * between them. Throws OperatorGrantedTargetError when refused.
  */
-async function refuseOperatorGrantedTarget(
-  res: ServerResponse,
+function writeGuarded<T>(
   actor: IdentityActor,
   targetUserId: string,
-): Promise<boolean> {
-  if (actor.kind === "operator" || actor.id === targetUserId) return false;
-  if (!(await userHoldsOperatorGrantedRole(targetUserId))) return false;
-  jsonError(
-    res,
-    "This user holds an operator-granted role (auditor); this change requires the operator key",
-    403,
-  );
+  write: () => Promise<T>,
+): Promise<T> {
+  return getDbClient().transaction(async () => {
+    await assertMayActOnOperatorGrantedTarget(actor, targetUserId);
+    return await write();
+  });
+}
+
+/** Writes the 403 for an OperatorGrantedTargetError; returns true when it did. */
+function respondOperatorGrantedRefusal(res: ServerResponse, err: unknown): boolean {
+  if (!(err instanceof OperatorGrantedTargetError)) return false;
+  jsonError(res, err.message, 403);
   return true;
 }
 
@@ -994,7 +1000,6 @@ export async function handleUsers(
           return true;
         }
         targetUserId = existing.id;
-        if (await refuseOperatorGrantedTarget(res, actor, targetUserId)) return true;
       } else {
         const created = await createUser({
           name: parsed.body.name,
@@ -1003,7 +1008,9 @@ export async function handleUsers(
         });
         targetUserId = created.id;
       }
-      await linkIdentity(targetUserId, kind, externalId, actor);
+      await writeGuarded(actor, targetUserId, () =>
+        linkIdentity(targetUserId, kind, externalId, actor),
+      );
       // Clear both kv rows (best-effort — DELETE is idempotent).
       const ns = `integration:unmapped:${kind}`;
       await deleteKv(ns, `${externalId}:meta`);
@@ -1011,6 +1018,7 @@ export async function handleUsers(
       const user = await composeUser(targetUserId);
       resolveUnmapped.respond(res, 200, { user });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to resolve unmapped", 500);
     }
     return true;
@@ -1042,13 +1050,9 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
-
     try {
-      const { tokenId, plaintext } = await mintToken(
-        parsed.params.id,
-        parsed.body.label ?? null,
-        actor,
+      const { tokenId, plaintext } = await writeGuarded(actor, parsed.params.id, () =>
+        mintToken(parsed.params.id, parsed.body.label ?? null, actor),
       );
       const token = (await listUserTokens(parsed.params.id)).find((t) => t.id === tokenId);
       mintUserMcpTokenRoute.respond(res, 200, {
@@ -1057,6 +1061,7 @@ export async function handleUsers(
         user: await composeUser(parsed.params.id),
       });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
     }
     return true;
@@ -1072,7 +1077,6 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
     // The connector refuses non-HTTPS swarm origins, so fail before minting a code.
     // Same swarm_config-aware resolver as the dashboard's HTTPS gate.
     const swarmOrigin = await resolveMcpBaseUrl();
@@ -1101,6 +1105,8 @@ export async function handleUsers(
       const connectUrl = connect.toString();
       createConnectorCodeRoute.respond(res, 201, { code, expiresAt, connectUrl });
     } catch (err) {
+      // createConnectorCode runs the operator-granted check with its insert.
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to create connector code", 500);
     }
     return true;
@@ -1318,13 +1324,15 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
     try {
-      await linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
+      await writeGuarded(actor, parsed.params.id, () =>
+        linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor),
+      );
       addIdentityRoute.respond(res, 200, {
         identities: await getUserIdentities(parsed.params.id),
       });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       if (isUniqueViolation(err, "user_external_ids")) {
         jsonError(res, "identity_taken", 409);
         return true;
@@ -1383,11 +1391,10 @@ export async function handleUsers(
       jsonError(res, "Source user not found", 404);
       return true;
     }
-    // The source's identities and email aliases move to the target.
-    if (await refuseOperatorGrantedTarget(res, actor, targetId)) return true;
-
     try {
       const mergedUser = await getDbClient().transaction(async () => {
+        // The source's identities and email aliases move to the target.
+        await assertMayActOnOperatorGrantedTarget(actor, targetId);
         // Move every identity from source → target.
         for (const ident of sourceBefore.identities) {
           await unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
@@ -1448,6 +1455,7 @@ export async function handleUsers(
       });
       mergeUsersRoute.respond(res, 200, { user: mergedUser });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       if (err instanceof LastAdminError) {
         jsonError(res, "last_admin", 409);
         return true;
@@ -1483,12 +1491,8 @@ export async function handleUsers(
       return true;
     }
     const { identities: newIdentities, email: newEmail, emailAliases: newAliases } = parsed.body;
-    if (
-      (newIdentities !== undefined || newEmail !== undefined || newAliases !== undefined) &&
-      (await refuseOperatorGrantedTarget(res, actor, parsed.params.id))
-    ) {
-      return true;
-    }
+    const bindsIdentity =
+      newIdentities !== undefined || newEmail !== undefined || newAliases !== undefined;
 
     try {
       const { identities, metadata, comms, ...rest } = parsed.body;
@@ -1510,102 +1514,116 @@ export async function handleUsers(
       } else if (metadata !== undefined) {
         update.metadata = metadata as Record<string, unknown> | null;
       }
-      const updated = await updateUser(parsed.params.id, update);
-      if (!updated) {
+      // One write transaction: the operator-granted check for identity, email
+      // and alias changes, then every write, so a grant cannot land between.
+      const found = await getDbClient().transaction(async () => {
+        if (bindsIdentity) await assertMayActOnOperatorGrantedTarget(actor, parsed.params.id);
+        const updated = await updateUser(parsed.params.id, update);
+        if (!updated) return false;
+        await syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
+
+        // Budget event
+        if (
+          parsed.body.dailyBudgetUsd !== undefined &&
+          (before.dailyBudgetUsd ?? null) !== (parsed.body.dailyBudgetUsd ?? null)
+        ) {
+          await recordIdentityEvent(
+            parsed.params.id,
+            "budget_changed",
+            actor,
+            { dailyBudgetUsd: before.dailyBudgetUsd ?? null },
+            { dailyBudgetUsd: parsed.body.dailyBudgetUsd ?? null },
+          );
+        }
+
+        // Status event
+        if (parsed.body.status !== undefined && before.status !== parsed.body.status) {
+          await recordIdentityEvent(
+            parsed.params.id,
+            "status_changed",
+            actor,
+            { status: before.status },
+            { status: parsed.body.status },
+          );
+        }
+
+        // Email aliases diff — emit email_added / email_removed per Q19
+        if (parsed.body.emailAliases !== undefined) {
+          const beforeSet = new Set((before.emailAliases ?? []).map((a) => a.toLowerCase()));
+          const afterSet = new Set(parsed.body.emailAliases.map((a) => a.toLowerCase()));
+          for (const a of parsed.body.emailAliases) {
+            if (!beforeSet.has(a.toLowerCase())) {
+              await recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
+            }
+          }
+          for (const a of before.emailAliases ?? []) {
+            if (!afterSet.has(a.toLowerCase())) {
+              await recordIdentityEvent(
+                parsed.params.id,
+                "email_removed",
+                actor,
+                { email: a },
+                null,
+              );
+            }
+          }
+        }
+
+        // Profile-field diffs — emit one `profile_changed` event per field that
+        // changed value. Status / budget / aliases / identities already emit
+        // their own dedicated events above; skip them here to avoid double-emit.
+        const PROFILE_FIELDS = [
+          "name",
+          "email",
+          "role",
+          "timezone",
+          "preferredChannel",
+          "notes",
+          "metadata",
+        ] as const;
+        for (const field of PROFILE_FIELDS) {
+          if (parsed.body[field] === undefined) continue;
+          const beforeVal = (before as Record<string, unknown>)[field] ?? null;
+          const afterVal = parsed.body[field] ?? null;
+          // Cheap deep-equal via JSON — fields are scalar strings or object/null.
+          if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;
+          await recordIdentityEvent(
+            parsed.params.id,
+            "profile_changed",
+            actor,
+            { [field]: beforeVal },
+            { [field]: afterVal },
+          );
+        }
+
+        // Identities diff — complete-list semantics. linkIdentity / unlinkIdentity
+        // already emit the right event each.
+        if (identities !== undefined) {
+          const beforeIds = await getUserIdentities(parsed.params.id);
+          const beforeKeys = new Set(beforeIds.map((i) => `${i.kind}:${i.externalId}`));
+          const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
+          for (const i of identities) {
+            if (!beforeKeys.has(`${i.kind}:${i.externalId}`)) {
+              await linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            }
+          }
+          for (const i of beforeIds) {
+            if (!afterKeys.has(`${i.kind}:${i.externalId}`)) {
+              await unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            }
+          }
+        }
+        return true;
+      });
+      if (!found) {
         jsonError(res, "User not found", 404);
         return true;
-      }
-      await syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
-
-      // Budget event
-      if (
-        parsed.body.dailyBudgetUsd !== undefined &&
-        (before.dailyBudgetUsd ?? null) !== (parsed.body.dailyBudgetUsd ?? null)
-      ) {
-        await recordIdentityEvent(
-          parsed.params.id,
-          "budget_changed",
-          actor,
-          { dailyBudgetUsd: before.dailyBudgetUsd ?? null },
-          { dailyBudgetUsd: parsed.body.dailyBudgetUsd ?? null },
-        );
-      }
-
-      // Status event
-      if (parsed.body.status !== undefined && before.status !== parsed.body.status) {
-        await recordIdentityEvent(
-          parsed.params.id,
-          "status_changed",
-          actor,
-          { status: before.status },
-          { status: parsed.body.status },
-        );
-      }
-
-      // Email aliases diff — emit email_added / email_removed per Q19
-      if (parsed.body.emailAliases !== undefined) {
-        const beforeSet = new Set((before.emailAliases ?? []).map((a) => a.toLowerCase()));
-        const afterSet = new Set(parsed.body.emailAliases.map((a) => a.toLowerCase()));
-        for (const a of parsed.body.emailAliases) {
-          if (!beforeSet.has(a.toLowerCase())) {
-            await recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
-          }
-        }
-        for (const a of before.emailAliases ?? []) {
-          if (!afterSet.has(a.toLowerCase())) {
-            await recordIdentityEvent(parsed.params.id, "email_removed", actor, { email: a }, null);
-          }
-        }
-      }
-
-      // Profile-field diffs — emit one `profile_changed` event per field that
-      // changed value. Status / budget / aliases / identities already emit
-      // their own dedicated events above; skip them here to avoid double-emit.
-      const PROFILE_FIELDS = [
-        "name",
-        "email",
-        "role",
-        "timezone",
-        "preferredChannel",
-        "notes",
-        "metadata",
-      ] as const;
-      for (const field of PROFILE_FIELDS) {
-        if (parsed.body[field] === undefined) continue;
-        const beforeVal = (before as Record<string, unknown>)[field] ?? null;
-        const afterVal = parsed.body[field] ?? null;
-        // Cheap deep-equal via JSON — fields are scalar strings or object/null.
-        if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;
-        await recordIdentityEvent(
-          parsed.params.id,
-          "profile_changed",
-          actor,
-          { [field]: beforeVal },
-          { [field]: afterVal },
-        );
-      }
-
-      // Identities diff — complete-list semantics. linkIdentity / unlinkIdentity
-      // already emit the right event each.
-      if (identities !== undefined) {
-        const beforeIds = await getUserIdentities(parsed.params.id);
-        const beforeKeys = new Set(beforeIds.map((i) => `${i.kind}:${i.externalId}`));
-        const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
-        for (const i of identities) {
-          if (!beforeKeys.has(`${i.kind}:${i.externalId}`)) {
-            await linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
-          }
-        }
-        for (const i of beforeIds) {
-          if (!afterKeys.has(`${i.kind}:${i.externalId}`)) {
-            await unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
-          }
-        }
       }
 
       const composed = await composeUser(parsed.params.id);
       updateUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to update user", 500);
     }
     return true;

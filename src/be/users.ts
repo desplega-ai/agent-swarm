@@ -516,6 +516,38 @@ export async function revokeToken(tokenId: string, actor: IdentityActor): Promis
 }
 
 /**
+ * Revoke every live MCP token of a user and spend every unspent connector and
+ * invite code for it, with one `token_revoked` event per token. Joins the
+ * caller's transaction when there is one.
+ */
+export async function revokeAllUserCredentials(
+  userId: string,
+  actor: IdentityActor,
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const live = await tx.query<{ id: string; label: string | null; tokenPreview: string }>(
+      "SELECT id, label, tokenPreview FROM user_tokens WHERE userId = ? AND revokedAt IS NULL",
+      [userId],
+    );
+    for (const token of live) {
+      await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [now, token.id]);
+      await recordIdentityEvent(
+        userId,
+        "token_revoked",
+        actor,
+        { tokenId: token.id, label: token.label, preview: token.tokenPreview },
+        null,
+      );
+    }
+    await tx.run("UPDATE connector_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL", [
+      now,
+      userId,
+    ]);
+  });
+}
+
+/**
  * Resolve a plaintext token to its owning user. Returns null if the token
  * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
  * People page can surface "last seen".

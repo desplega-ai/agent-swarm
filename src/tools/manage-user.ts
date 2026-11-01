@@ -5,9 +5,11 @@ import {
   deleteUser,
   getAgentById,
   getAllUsers,
+  getDbClient,
   getUserById,
   updateUser,
 } from "@/be/db";
+import { assertMayActOnOperatorGrantedTarget } from "@/be/rbac-roles";
 import {
   getUserIdentities,
   type IdentityActor,
@@ -233,57 +235,79 @@ export const registerManageUserTool = (server: McpServer) => {
               input.comms,
             );
 
-            const user = await updateUser(input.userId, {
-              name: input.name,
-              email: input.email,
-              role: input.role,
-              notes: input.notes,
-              emailAliases: input.emailAliases,
-              preferredChannel: input.preferredChannel,
-              timezone: input.timezone,
-              dailyBudgetUsd: input.dailyBudgetUsd,
-              status: input.status,
-              metadata,
+            // The Lead acts with the operator actor in the audit log, but it is
+            // an agent, not the operator key: identity, email and alias changes
+            // on a user holding an operator-granted role (auditor) are refused.
+            // Check and writes share one write transaction, so an operator
+            // grant cannot land between them.
+            const userId = input.userId;
+            const bindsIdentity =
+              input.identities !== undefined ||
+              input.email !== undefined ||
+              input.emailAliases !== undefined;
+            const user = await getDbClient().transaction(async () => {
+              if (bindsIdentity) {
+                await assertMayActOnOperatorGrantedTarget(
+                  { kind: "agent", id: callerAgent.id },
+                  userId,
+                );
+              }
+              const updated = await updateUser(userId, {
+                name: input.name,
+                email: input.email,
+                role: input.role,
+                notes: input.notes,
+                emailAliases: input.emailAliases,
+                preferredChannel: input.preferredChannel,
+                timezone: input.timezone,
+                dailyBudgetUsd: input.dailyBudgetUsd,
+                status: input.status,
+                metadata,
+              });
+              if (!updated) return null;
+
+              // Identity diff — pass the desired set, helper emits the deltas.
+              if (input.identities !== undefined) {
+                const current = await getUserIdentities(userId);
+                const currentSet = new Set(current.map((i) => `${i.kind}:${i.externalId}`));
+                const desiredSet = new Set(
+                  input.identities.map((i) => `${i.kind}:${i.externalId}`),
+                );
+
+                for (const ident of input.identities) {
+                  if (!currentSet.has(`${ident.kind}:${ident.externalId}`)) {
+                    await linkIdentity(userId, ident.kind, ident.externalId, operatorActor);
+                  }
+                }
+                for (const ident of current) {
+                  if (!desiredSet.has(`${ident.kind}:${ident.externalId}`)) {
+                    await unlinkIdentity(userId, ident.kind, ident.externalId, operatorActor);
+                  }
+                }
+              }
+
+              // Email alias diff — emit dedicated email_added / email_removed events (Q19).
+              if (input.emailAliases !== undefined) {
+                const { added, removed } = diffAliases(before.emailAliases, input.emailAliases);
+                for (const alias of added) {
+                  await recordIdentityEvent(userId, "email_added", operatorActor, null, {
+                    alias,
+                  });
+                }
+                for (const alias of removed) {
+                  await recordIdentityEvent(
+                    userId,
+                    "email_removed",
+                    operatorActor,
+                    { alias },
+                    null,
+                  );
+                }
+              }
+              return updated;
             });
             if (!user) {
               return toolErr(`User ${input.userId} not found.`);
-            }
-
-            // Identity diff — pass the desired set, helper emits the deltas.
-            if (input.identities !== undefined) {
-              const current = await getUserIdentities(input.userId);
-              const currentSet = new Set(current.map((i) => `${i.kind}:${i.externalId}`));
-              const desiredSet = new Set(input.identities.map((i) => `${i.kind}:${i.externalId}`));
-
-              for (const ident of input.identities) {
-                if (!currentSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  await linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
-                }
-              }
-              for (const ident of current) {
-                if (!desiredSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  await unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
-                }
-              }
-            }
-
-            // Email alias diff — emit dedicated email_added / email_removed events (Q19).
-            if (input.emailAliases !== undefined) {
-              const { added, removed } = diffAliases(before.emailAliases, input.emailAliases);
-              for (const alias of added) {
-                await recordIdentityEvent(input.userId, "email_added", operatorActor, null, {
-                  alias,
-                });
-              }
-              for (const alias of removed) {
-                await recordIdentityEvent(
-                  input.userId,
-                  "email_removed",
-                  operatorActor,
-                  { alias },
-                  null,
-                );
-              }
             }
 
             return toolOk(`User updated: "${user.name}" (${user.id}).`, {
