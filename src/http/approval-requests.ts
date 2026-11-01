@@ -74,8 +74,14 @@ const QuestionSchema = z.object({
   ),
 });
 
-/** Create input: `label` may be omitted on a config question (it defaults to the key). */
-const QuestionInputSchema = QuestionSchema.extend({ label: z.string().optional() });
+/**
+ * Create input: `label` may be omitted on a config question (it defaults to the key), and
+ * `required` defaults to true like the request-human-input tool and the workflow node.
+ */
+const QuestionInputSchema = QuestionSchema.extend({
+  label: z.string().optional(),
+  required: z.boolean().default(true),
+});
 
 export type ApprovalQuestion = z.infer<typeof QuestionSchema>;
 
@@ -310,14 +316,32 @@ function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boo
   }
 }
 
+/** No answer given: absent, null, a blank string or an empty list. */
+function isUnanswered(response: unknown): boolean {
+  return (
+    response === undefined ||
+    response === null ||
+    (typeof response === "string" && response.trim() === "") ||
+    (Array.isArray(response) && response.length === 0)
+  );
+}
+
+/**
+ * Questions whose answer blocks the response: a required question without a valid answer,
+ * or an optional one that was answered with an invalid value. An unanswered optional
+ * question passes. Config answers are checked later by `parseConfigAnswer`.
+ */
 export function missingRequiredResponseIds(
   questions: ApprovalQuestion[],
   responses: Record<string, unknown>,
 ): string[] {
   return questions
-    .filter(
-      (question) => question.required && !hasRequiredResponse(question, responses[question.id]),
-    )
+    .filter((question) => {
+      const response = responses[question.id];
+      if (hasRequiredResponse(question, response)) return false;
+      if (question.required) return true;
+      return question.type !== "config" && !isUnanswered(response);
+    })
     .map((question) => question.id);
 }
 
@@ -556,7 +580,7 @@ export async function handleApprovalRequests(
     const questions = existing.questions as ApprovalQuestion[];
     const missingRequired = missingRequiredResponseIds(questions, parsed.body.responses);
     if (missingRequired.length > 0) {
-      jsonError(res, `Required responses missing or invalid: ${missingRequired.join(", ")}`, 400);
+      jsonError(res, `Responses missing or invalid: ${missingRequired.join(", ")}`, 400);
       return true;
     }
 

@@ -106,6 +106,8 @@
     "mono:dev": "turbo run dev",
     "test:root": "bash scripts/run-bun-tests.sh",
     "e2e": "bun scripts/e2e/run.ts",
+    "e2e:strict": "bun scripts/e2e/run.ts --strict",
+    "e2e:bench": "bun scripts/e2e/bench.ts",
     "e2e:ui": "bun packages/ui-e2e/boot/run.ts",
     "e2e:ui:tsc": "bun tsc --noEmit -p packages/ui-e2e/tsconfig.json && bun tsc --noEmit -p packages/ui-e2e/tsconfig.boot.json",
     "e2e:visuals": "bun scripts/e2e/visuals.ts",

@@ -103,8 +103,9 @@ export async function exchangeAuthorizationCode(
   verifier: string,
   redirectUri: string = REDIRECT_URI,
   signal?: AbortSignal,
+  tokenUrl: string = TOKEN_URL,
 ): Promise<TokenResult> {
-  const response = await _fetchHolder.current(TOKEN_URL, {
+  const response = await _fetchHolder.current(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

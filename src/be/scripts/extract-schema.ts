@@ -8,6 +8,7 @@
  */
 
 import { fileURLToPath } from "node:url";
+import { buildSandboxedCommand } from "../../utils/sandboxed-process";
 
 const TIMEOUT_MS = 5_000;
 
@@ -28,16 +29,20 @@ export async function extractArgsJsonSchema(source: string): Promise<string | nu
     const resultFile = `${tmpdir}/result.json`;
     await Bun.write(sourceFile, source);
 
-    const proc = Bun.spawn(["bun", "run", extractorPath()], {
-      env: {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        HOME: process.env.HOME ?? "/tmp",
-        TMPDIR: tmpdir,
-        SCRIPT_RUNTIME_DIR: process.env.SCRIPT_RUNTIME_DIR,
-        SWARM_SCHEMA_SOURCE_FILE: sourceFile,
-        SWARM_SCHEMA_RESULT_FILE: resultFile,
-        SWARM_SCHEMA_TMPDIR: tmpdir,
-      },
+    // The extractor imports user-supplied source. Run it under the same ulimit
+    // sandbox and --no-orphans wrapper as a script run, so a hostile argsSchema
+    // module gets the memory, CPU, process and file caps of the runtime.
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      TMPDIR: tmpdir,
+      SWARM_SCHEMA_SOURCE_FILE: sourceFile,
+      SWARM_SCHEMA_RESULT_FILE: resultFile,
+      SWARM_SCHEMA_TMPDIR: tmpdir,
+    };
+    if (process.env.SCRIPT_RUNTIME_DIR) env.SCRIPT_RUNTIME_DIR = process.env.SCRIPT_RUNTIME_DIR;
+    const proc = Bun.spawn(buildSandboxedCommand(["bun", "run", extractorPath()], env), {
+      env,
       cwd: tmpdir,
       stdout: "ignore",
       stderr: "ignore",

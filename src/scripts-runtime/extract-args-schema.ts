@@ -77,8 +77,10 @@ try {
     process.exit(0);
   }
 
+  // `io: "input"` describes what callers send, so a `.default()` field is optional
+  // (its `default` is kept). The default output mode would mark it `required`.
   // biome-ignore lint/suspicious/noExplicitAny: argsSchema is a Zod schema at runtime
-  const schema = toJSONSchema(mod.argsSchema as any);
+  const schema = toJSONSchema(mod.argsSchema as any, { io: "input" });
   await Bun.write(resultFile, JSON.stringify(schema));
   process.exit(0);
 } catch (err) {

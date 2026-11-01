@@ -3720,6 +3720,7 @@
           "url",
           "name",
           "clonePath",
+          "hooks",
           "createdAt",
           "lastUpdatedAt"
         ]
@@ -3732,9 +3733,7 @@
             "default": false
           }
         },
-        "default": {
-          "enabled": false
-        }
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -12125,7 +12124,7 @@
             }
           },
           "404": {
-            "description": "Agent not found",
+            "description": "Agent not found, or changedByAgentId names no agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -13733,7 +13732,8 @@
                           "type": "string"
                         },
                         "required": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "default": true
                         },
                         "description": {
                           "type": "string"
@@ -28816,7 +28816,7 @@
     "/api/models-catalog": {
       "get": {
         "summary": "Get the live model catalog for the picker-reachable providers",
-        "description": "Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
+        "description": "Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
         "tags": [
           "Pricing"
         ],
@@ -29951,6 +29951,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -30428,6 +30438,7 @@
     "/api/mcp-oauth/{mcpServerId}": {
       "delete": {
         "summary": "Revoke and delete the OAuth token for an MCP server",
+        "description": "Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.",
         "tags": [
           "MCP OAuth"
         ],
@@ -49085,6 +49096,7 @@
       "post": {
         "operationId": "script_runs_internal_step_create",
         "summary": "Write a script run journal step",
+        "description": "Write-once per stepKey; a replay keeps the first journal entry and still answers 201.",
         "tags": [
           "Script Runs"
         ],
@@ -56966,6 +56978,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A server with this name already exists in the same scope and owner (mcp_server_name_taken)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -60830,6 +60852,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A user with this email already exists (user_exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -63062,7 +63094,7 @@
             }
           },
           "400": {
-            "description": "Validation error or PK collision",
+            "description": "Validation error",
             "content": {
               "application/json": {
                 "schema": {
@@ -63083,6 +63115,16 @@
           },
           "404": {
             "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The (kind, externalId) identity is already linked (identity_taken)",
             "content": {
               "application/json": {
                 "schema": {
@@ -65682,6 +65724,16 @@
           },
           "400": {
             "description": "Cannot retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
             "content": {
               "application/json": {
                 "schema": {
