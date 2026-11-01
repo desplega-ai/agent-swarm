@@ -397,6 +397,42 @@ describe("runClaudeManagedSetup — entry point", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  test("--help documents AGENT_SWARM_API_KEY before API_KEY for --api-key", async () => {
+    const lines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runClaudeManagedSetup(["--help"], {
+        log: mock(() => undefined),
+        error: mock(() => undefined),
+        exit: mock(() => {
+          throw new Error("exit was called");
+        }),
+        flow: mock(async () => {
+          throw new Error("flow should not be called");
+        }),
+        resolveConfig: mock(async () => {
+          throw new Error("resolveConfig should not be called");
+        }),
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    const text = lines.join("\n");
+    expect(text).toContain("AGENT_SWARM_API_KEY");
+    expect(text).toContain("API_KEY");
+    expect(text).toContain("123123");
+    // Prefer the namespaced key, then legacy API_KEY (same order as getApiKey / COMMAND_HELP).
+    const apiKeyLine = text
+      .split("\n")
+      .find((line) => line.includes("--api-key") && line.includes("default:"));
+    expect(apiKeyLine).toBeDefined();
+    expect(apiKeyLine!).toMatch(/AGENT_SWARM_API_KEY.*API_KEY/);
+  });
+
   test("on error, calls error() + exit(1) without throwing", async () => {
     const log = mock((_msg: string) => undefined);
     const errorMessages: string[] = [];

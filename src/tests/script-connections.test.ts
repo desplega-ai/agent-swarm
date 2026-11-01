@@ -680,8 +680,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "266_script_runs_source_task.sql");
       // 269 alters pages, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "269_pages_design_system.sql");
-      // 270 alters model_profiles (made by the skipped 220) and scheduled_tasks.
-      markMigrationApplied(database, "270_model_profiles_pr2.sql");
+      // 271 normalizes session_costs, which this migration-112-only fixture lacks.
+      markMigrationApplied(database, "271_subscription_usage_model.sql");
+      // 273 alters model_profiles (made by the skipped 220) and scheduled_tasks.
+      markMigrationApplied(database, "273_model_profiles_pr2.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

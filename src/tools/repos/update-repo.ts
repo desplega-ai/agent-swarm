@@ -46,7 +46,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
         hooks: RepoHooksSchema.nullable()
           .optional()
           .describe(
-            "Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable.",
+            "Repository hook install config. Best-effort worker hook installation is enabled by default for new repos. Disable it with { enabled: false } (or null), or turn it back on with { enabled: true }.",
           ),
         guidelines: RepoGuidelinesInputSchema.nullable()
           .optional()

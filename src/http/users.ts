@@ -78,6 +78,7 @@ import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
+import { resolveSessionActor } from "./session-access";
 import { ensureRoleManager } from "./user-roles";
 import { jsonError } from "./utils";
 
@@ -197,6 +198,11 @@ const whoamiRoute = route({
             roles: z.array(z.string()),
           })
           .optional(),
+        // Whether this request may opt in to the all-users read scope
+        // (`scope=all`, `X-Swarm-Session-Scope: all`). On the operator key it
+        // answers for the user picked in `X-Swarm-User-Id`. Absent on older
+        // servers.
+        sessionReadAll: z.boolean().optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -251,6 +257,7 @@ const createUserRoute = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    409: { description: "A user with this email already exists (user_exists)" },
   },
   auth: { apiKey: true },
 });
@@ -624,9 +631,10 @@ const addIdentityRoute = route({
       description: "Updated identity list",
       schema: z.object({ identities: z.array(UserIdentityLinkSchema) }),
     },
-    400: { description: "Validation error or PK collision" },
+    400: { description: "Validation error" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
+    409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
   auth: { apiKey: true },
 });
@@ -650,6 +658,15 @@ const deleteIdentityRoute = route({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** True when `err` is a SQLite UNIQUE violation whose message names `target` (e.g. `users.email`). */
+function isUniqueViolation(err: unknown, target: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.includes("UNIQUE constraint") &&
+    err.message.includes(target)
+  );
+}
 
 const UNMAPPED_KINDS = [
   "slack",
@@ -822,6 +839,8 @@ export async function handleUsers(
     const parsed = await whoamiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const user = authUser(getRequestAuth(req));
+    const scopeActor = await resolveSessionActor(req, undefined, { allUsers: true });
+    const sessionReadAll = scopeActor.kind === "bypass" || scopeActor.readAll === true;
     if (user) {
       const [grant, roles] = await Promise.all([getUserGrant(user.id), listUserRoles(user.id)]);
       const grantsAll = !isRbacEnabled() || grant.grantsAll;
@@ -833,12 +852,14 @@ export async function handleUsers(
           verbs: grantsAll ? [] : [...grant.verbs].sort(),
           roles: roles.map((role) => role.name),
         },
+        sessionReadAll,
       });
     } else {
       whoamiRoute.respond(res, 200, {
         kind: "operator",
         user: null,
         grants: { grantsAll: true, verbs: [], roles: [] },
+        sessionReadAll,
       });
     }
     return true;
@@ -877,6 +898,10 @@ export async function handleUsers(
       const composed = await composeUser(user.id);
       createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
+      if (isUniqueViolation(err, "users.email")) {
+        jsonError(res, "user_exists", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Failed to create user", 500);
     }
     return true;
@@ -1249,6 +1274,10 @@ export async function handleUsers(
         identities: await getUserIdentities(parsed.params.id),
       });
     } catch (err) {
+      if (isUniqueViolation(err, "user_external_ids")) {
+        jsonError(res, "identity_taken", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Failed to link identity", 400);
     }
     return true;

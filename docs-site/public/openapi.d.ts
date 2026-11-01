@@ -1979,7 +1979,7 @@ export interface paths {
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
-                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                         } | {
                             ok: boolean;
                             result: {
@@ -2922,7 +2922,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Agent not found */
+                /** @description Agent not found, or changedByAgentId names no agent */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -4097,6 +4097,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                             label?: string;
+                            /** @default true */
                             required?: boolean;
                             description?: string;
                             placeholder?: string;
@@ -11463,7 +11464,7 @@ export interface paths {
         };
         /**
          * Get the live model catalog for the picker-reachable providers
-         * @description Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
+         * @description Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
          */
         get: {
             parameters: {
@@ -12042,6 +12043,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -12368,7 +12378,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke and delete the OAuth token for an MCP server */
+        /**
+         * Revoke and delete the OAuth token for an MCP server
+         * @description Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.
+         */
         delete: {
             parameters: {
                 query?: {
@@ -13850,7 +13863,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
          */
         get: {
             parameters: {
@@ -13875,6 +13888,8 @@ export interface paths {
                     offset?: number | null;
                     fields?: "full" | "slim" | "timeline";
                     includeTotal?: "true" | "false";
+                    /** @description all: every user's tasks, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
+                    scope?: "all";
                 };
                 header?: never;
                 path?: never;
@@ -13899,7 +13914,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -13949,7 +13964,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -14833,7 +14848,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -14983,7 +14998,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark task as completed or failed (runner endpoint) */
+        /**
+         * Mark task as completed, failed, or skipped (runner endpoint)
+         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -14997,7 +15015,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        status: "completed" | "failed";
+                        status: "completed" | "failed" | "skipped";
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
@@ -15026,7 +15044,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid status */
+                /** @description Invalid status, or a skip without a reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15312,7 +15330,7 @@ export interface paths {
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
-                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                         };
                     };
                 };
@@ -19310,7 +19328,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write a script run journal step */
+        /**
+         * Write a script run journal step
+         * @description Write-once per stepKey; a replay keeps the first journal entry and still answers 201.
+         */
         post: operations["script_runs_internal_step_create"];
         delete?: never;
         options?: never;
@@ -20185,8 +20206,8 @@ export interface paths {
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
-                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. */
-                    scope?: "mine" | "shared" | "tree";
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree. */
+                    scope?: "mine" | "shared" | "tree" | "all";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
                     /** @description Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it. */
@@ -20218,7 +20239,7 @@ export interface paths {
                                     task: string;
                                     title?: string;
                                     /** @enum {string} */
-                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                     /**
                                      * @default mcp
                                      * @enum {string}
@@ -20257,7 +20278,7 @@ export interface paths {
                                 chainTaskCount: number;
                                 lastActivityAt: string;
                                 /** @enum {string} */
-                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** @enum {string} */
                                 readState?: "unread" | "read" | "later" | "done";
                                 snoozeUntil?: string | null;
@@ -22406,6 +22427,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A server with this name already exists in the same scope and owner (mcp_server_name_taken) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -24378,6 +24408,7 @@ export interface paths {
                                 verbs: string[];
                                 roles: string[];
                             };
+                            sessionReadAll?: boolean;
                         };
                     };
                 };
@@ -24543,6 +24574,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A user with this email already exists (user_exists) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25730,7 +25770,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error or PK collision */
+                /** @description Validation error */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -25750,6 +25790,15 @@ export interface paths {
                 };
                 /** @description User not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The (kind, externalId) identity is already linked (identity_taken) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -27368,6 +27417,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -27948,7 +28006,7 @@ export interface components {
             task: string;
             title?: string;
             /** @enum {string} */
-            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
             /**
              * @default mcp
              * @enum {string}
@@ -28852,16 +28910,12 @@ export interface components {
             defaultBranch: string;
             /** @default true */
             autoClone: boolean;
-            hooks?: components["schemas"]["RepoHooks"];
+            hooks: components["schemas"]["RepoHooks"];
             guidelines?: components["schemas"]["RepoGuidelines"];
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /**
-         * @default {
-         *       "enabled": false
-         *     }
-         */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -32457,7 +32511,7 @@ export interface operations {
                     "application/json": {
                         taskId: string;
                         /** @enum {string} */
-                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                     };
                 };
             };

@@ -353,6 +353,8 @@ async function taskStateGlyph(
       return "🚫";
     case "superseded":
       return "↪️";
+    case "skipped":
+      return `:${reactionName("skipped")}:`;
     default:
       return "🕒";
   }
@@ -378,7 +380,7 @@ function terminalEnd(task: AgentTask, now: Date): Date {
 }
 
 function isTerminalTreeStatus(status: AgentTask["status"]): boolean {
-  return ["completed", "failed", "cancelled", "superseded"].includes(status);
+  return ["completed", "failed", "cancelled", "superseded", "skipped"].includes(status);
 }
 
 function cleanTaskDescription(task: AgentTask): string {
@@ -440,6 +442,16 @@ function renderProgress(progress: string | undefined): string | undefined {
   return `${normalized.slice(0, cut).trimEnd()}…`;
 }
 
+/** A skipped row's reason: one line, bounded like progress, no trailing ellipsis. */
+function renderSkipReason(reason: string | undefined): string | undefined {
+  const normalized = markdownToSlack(reason ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= MAX_TREE_PROGRESS_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_TREE_PROGRESS_LENGTH - 1).trimEnd()}…`;
+}
+
 async function renderNodeLines(
   node: RenderNode,
   depth: number,
@@ -456,8 +468,15 @@ async function renderNodeLines(
       ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : indent;
   let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now, threadTasks)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
-  const progress = renderProgress(node.task.progress);
-  const suffix = isTerminalTreeStatus(node.task.status) ? "" : progress ? ` · ${progress}` : "";
+  // A skip posts no outcome card, so its row carries the reason. Editing the
+  // tree is silent; it notifies no one.
+  const detail =
+    node.task.status === "skipped"
+      ? renderSkipReason(node.task.failureReason)
+      : isTerminalTreeStatus(node.task.status)
+        ? undefined
+        : renderProgress(node.task.progress);
+  const suffix = detail ? ` · ${detail}` : "";
   if (suffix && line.length + suffix.length <= MAX_TREE_NODE_LINE_LENGTH) {
     line += suffix;
   }
@@ -901,6 +920,14 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
     return withStatusLead(
       "🚫 **Cancelled:**",
       outcomeText(task.failureReason, "Task was cancelled."),
+    );
+  }
+  // Only a deferral card resolved by a skipped wake-up reaches here: a skip
+  // gets no outcome card of its own. The rewrite is an edit, so it is silent.
+  if (task.status === "skipped") {
+    return withStatusLead(
+      `:${reactionName("skipped")}: **Skipped:**`,
+      outcomeText(task.failureReason, "Task was skipped."),
     );
   }
   // A deferral's output is engine-authored, never posted by hand via

@@ -37,6 +37,7 @@ import { useConfig } from "@/hooks/use-config";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsPhone } from "@/hooks/use-mobile";
 import { useStableHandler } from "@/hooks/use-stable-handler";
+import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import { peerColor } from "@/lib/comb/presence";
 import { chatSourceOf, groupCrumb } from "@/lib/session-groups";
 import { useSessionsFilter } from "@/lib/sessions-show";
@@ -128,6 +129,7 @@ function GroupList({
   const noUnread = view === "later" || view === "done";
 
   const { limit: _sidebarLimit, ...base } = sidebarListParams(view);
+  const keepPrevious = useWithinAllUsersScope(keepPreviousData);
   // The last page stays on screen while the next one loads: no blank grid, no "0 sessions".
   const list = useQuery({
     ...sessionsQueryOptions(me, {
@@ -138,7 +140,8 @@ function GroupList({
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    placeholderData: keepPreviousData,
+    // Never across a scope change: the kept page could hold all-users rows.
+    placeholderData: keepPrevious,
   });
   const total = list.data?.total ?? 0;
   // A kept page past the end of a list that shrank moves back to its last page.

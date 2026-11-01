@@ -319,6 +319,7 @@ export const AgentTaskStatusSchema = z.enum([
   "failed",
   "cancelled", // Task was cancelled by lead or creator
   "superseded", // Original terminated, replaced by a follow-up "resume" task
+  "skipped", // Agent declined: the work was not its to handle (e.g. a Slack thread message addressed to someone else)
 ]);
 
 /**
@@ -337,7 +338,13 @@ export const AgentTaskStatusSchema = z.enum([
  *   - `status = CASE WHEN status IN ('completed'` — setProgress guard
  * and update every site.
  */
-export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "superseded"] as const;
+export const TERMINAL_TASK_STATUSES = [
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "skipped",
+] as const;
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
 
 export function isTerminalTaskStatus(status: string): status is TerminalTaskStatus {
@@ -2120,7 +2127,9 @@ export const SwarmRepoSchema = z
     clonePath: z.string().min(1),
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
-    hooks: RepoHooksSchema.optional().default({ enabled: false }),
+    hooks: RepoHooksSchema.describe(
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+    ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),

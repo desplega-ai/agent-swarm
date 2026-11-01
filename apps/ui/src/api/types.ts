@@ -15,7 +15,8 @@ export type AgentTaskStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "superseded";
+  | "superseded"
+  | "skipped";
 export type AgentTaskSource =
   | "mcp"
   | "slack"
@@ -654,6 +655,11 @@ export interface WhoamiResponse {
   user: User | null;
   /** The caller's RBAC grants. Absent on APIs older than 2.6.1. */
   grants?: WhoamiGrants;
+  /**
+   * Whether the caller may use the "All users" read scope. On the operator
+   * key it answers for the picked user (`X-Swarm-User-Id`). Absent on older APIs.
+   */
+  sessionReadAll?: boolean;
 }
 
 /** RBAC grants from whoami. `grantsAll` is also true when RBAC is off. */

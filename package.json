@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "2.7.6",
+  "version": "2.7.7",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -106,6 +106,8 @@
     "mono:dev": "turbo run dev",
     "test:root": "bash scripts/run-bun-tests.sh",
     "e2e": "bun scripts/e2e/run.ts",
+    "e2e:strict": "bun scripts/e2e/run.ts --strict",
+    "e2e:bench": "bun scripts/e2e/bench.ts",
     "e2e:ui": "bun packages/ui-e2e/boot/run.ts",
     "e2e:ui:tsc": "bun tsc --noEmit -p packages/ui-e2e/tsconfig.json && bun tsc --noEmit -p packages/ui-e2e/tsconfig.boot.json",
     "e2e:visuals": "bun scripts/e2e/visuals.ts",
@@ -214,7 +216,7 @@
     "@chat-adapter/teams": "4.41.1",
     "@chat-adapter/telegram": "4.41.1",
     "@cursor/sdk": "1.2.0",
-    "@desplega.ai/agent-fs-just-bash": "0.18.13",
+    "@desplega.ai/agent-fs-just-bash": "0.18.14",
     "@desplega.ai/business-use": "^0.4.2",
     "@earendil-works/pi-agent-core": "^1.4.0",
     "@earendil-works/pi-ai": "^1.4.0",

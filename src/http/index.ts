@@ -910,6 +910,14 @@ httpServer
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
+    // Normalize stored schema JSON so defaulted fields become optional.
+    // This repair never executes script source. It is idempotent and non-fatal.
+    import("../be/scripts/boot-args-schema")
+      .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
+      .catch((err) => {
+        console.error("[boot-args-schema] startup backfill failed (non-fatal):", err);
+      });
+
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored
     // rows (logs, tasks, memory, events, workflow steps) that pre-date the
     // current scrubber rules. Idempotent and resumable, tracked via seed_state.

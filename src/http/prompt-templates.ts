@@ -366,7 +366,7 @@ export async function handlePromptTemplates(
       checkoutRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      if (message.includes("not found")) {
+      if (message.includes("not found") || message.startsWith("No history entry")) {
         jsonError(res, message, 404);
       } else {
         jsonError(res, message, 400);

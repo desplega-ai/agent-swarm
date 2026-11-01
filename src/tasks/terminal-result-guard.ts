@@ -5,7 +5,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 
 export type TerminalResultWrite = {
-  status?: "completed" | "failed";
+  status?: "completed" | "failed" | "skipped";
   output?: string;
   failureReason?: string;
   force?: boolean;

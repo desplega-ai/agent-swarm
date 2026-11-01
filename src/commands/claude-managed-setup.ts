@@ -125,7 +125,7 @@ Usage:
 
 Options:
   --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)
-  --api-key <key>    Swarm API key   (default: API_KEY or 123123)
+  --api-key <key>    Swarm API key (default: AGENT_SWARM_API_KEY or API_KEY, falling back to 123123)
   --force            Recreate agent + environment even if already configured
   -h, --help         Show this help
 

@@ -102,6 +102,7 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "comb.presence",
   "session.share",
   "session.presence",
+  "session.read.all",
   "approval.respond",
   "runtime_controller.write",
   "runtime_pool.write",

@@ -86,6 +86,7 @@ const SHOW_STATUS_PILL = new Set<string>([
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
   "paused",
   "reviewing",
   "offered",
