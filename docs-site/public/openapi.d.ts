@@ -13965,7 +13965,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
                 403: {
                     headers: {
                         [name: string]: unknown;

@@ -323,6 +323,8 @@ export async function createSlackTaskWithFiles(
   inbound: InboundSlackFiles,
   slack?: TaskCreateEvent["slack"],
 ): Promise<{ task: AgentTask; unattached: SlackFileFailure[] }> {
+  // Todos los callers son ingresos humanos: el hilo no impone el oficio del worker anterior.
+  options = { ...options, routingAffinity: options.routingAffinity ?? { capabilities: [] } };
   noteSlackInboundSideEffect("task_created");
   const context = { origin: "slack" as const, slack };
   if (inbound.fetched.length === 0) {
