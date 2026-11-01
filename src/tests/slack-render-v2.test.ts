@@ -38,6 +38,7 @@ import {
   isPendingSlackMessage,
   markTaskSlackReplySent,
   noteSlackOutcomeDeliveryFailure,
+  skipTask,
   startTask,
   supersedeTask,
   updateAgentProfile,
@@ -2723,6 +2724,78 @@ describe("Slack renderer v2", () => {
     expect(rewrite?.payload.text).toContain("the build never finished");
     expect(rewrite?.payload.text).not.toContain("Waiting on Researcher");
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+  });
+
+  test("a skipped wake-up closes the deferral card silently and settles the ask with the skip reaction", async () => {
+    const lead = await createAgent({ name: "Skipping Wake Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_DEFER_RESOLVE_SKIP");
+    const triggerTs = `${slackAddressSequence}.2`;
+    const ask = await createTaskExtended("answer later", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await completeTask(ask.id, "Waiting on Researcher — or today at 18:38 at the latest", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.ts).toBeTruthy();
+
+    const schedule = await createScheduledTask({
+      name: "deferred-resolve-skip",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await skipTask(wake.id, "Researcher already answered in the thread.");
+    calls.length = 0;
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The ⏳ card is edited in place to the skip, which notifies no one.
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
+    );
+    expect(rewrite?.payload.text).toContain(":mute: **Skipped:**");
+    expect(rewrite?.payload.text).toContain("Researcher already answered in the thread.");
+    expect(rewrite?.payload.text).not.toContain("Waiting on Researcher");
+    expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
+    // No new message: no outcome card for the wake-up, no stream, no post.
+    expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
+    expect(
+      calls.filter(
+        (call) => call.method === "chat.startStream" || call.method === "chat.postMessage",
+      ),
+    ).toHaveLength(0);
+    // The completed deferral does not mask the skip: 👀 goes, :mute: lands.
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "mute", timestamp: triggerTs },
+    });
+    expect(calls).toContainEqual({
+      method: "reactions.remove",
+      payload: { channel: channelId, name: "eyes", timestamp: triggerTs },
+    });
+    expect(
+      calls.filter(
+        (call) => call.method === "reactions.add" && call.payload.name === "white_check_mark",
+      ),
+    ).toHaveLength(0);
   });
 
   test("a deferral whose wake-up is still running keeps its ⏳ card untouched", async () => {

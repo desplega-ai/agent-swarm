@@ -290,7 +290,7 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
 
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
     [taskId],
   );
   if (row && oldTask) {
@@ -437,7 +437,7 @@ export async function completeTask(
     // terminal transition (e.g. heartbeat failTask) land first.
     let completed = await getDbClient().get<AgentTaskRow>(
       `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
+         WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
       ["completed", finishedAt, id],
     );
     if (!completed) return null;
@@ -569,7 +569,7 @@ export async function failTask(
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          AND (? IS NULL OR lastUpdatedAt = ?) RETURNING *`,
     [
       scrubbedReason,
@@ -666,7 +666,7 @@ export async function overwriteTerminalTaskResultText(
     const updated =
       (await getDbClient().get<AgentTaskRow>(
         `UPDATE agent_tasks SET output = ?, failureReason = ?
-         WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+         WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          RETURNING *`,
         [output, failureReason, id],
       )) ?? null;
@@ -705,7 +705,7 @@ export async function cancelTask(
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
     [cancelReason, finishedAt, id],
   );
 
@@ -801,6 +801,76 @@ export async function cancelTask(
 }
 
 /**
+ * Skip a task: the agent decided the work is not its to handle (for example a
+ * Slack thread message addressed to someone else). `skipped` is terminal. The
+ * one-line reason lands in `failureReason`, like a cancel's, so `output` stays
+ * empty and nothing that publishes a task's output has text to post.
+ *
+ * Unlike `cancelTask` it does not cascade-fail dependents: a skipped
+ * dependency satisfies `dependsOn` (see `checkDependencies`). It emits
+ * `task.skipped`, which defer-task waits and workflow resume listen for; the
+ * Slack, chat, Jira and Linear outbound paths do not, so a skip notifies no one.
+ */
+export async function skipTask(id: string, reason: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(id);
+  if (!oldTask) return null;
+  if (isTerminalTaskStatus(oldTask.status)) return null;
+
+  const finishedAt = new Date().toISOString();
+  const skipReason = scrubSecrets(reason);
+  // Status predicate re-checks the idempotency guard atomically (a racing
+  // terminal transition can land during the await above).
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'skipped', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
+    [skipReason, finishedAt, id],
+  );
+  if (!row) return null;
+
+  try {
+    await dependencies.createLogEntry({
+      eventType: "task_status_change",
+      taskId: id,
+      agentId: row.agentId ?? undefined,
+      oldValue: oldTask.status,
+      newValue: "skipped",
+      metadata: { reason: skipReason },
+    });
+  } catch {}
+  getDbClient().afterCommit(() => {
+    import("../../../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.skipped", {
+          taskId: id,
+          failureReason: skipReason,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
+      })
+      .catch((err) =>
+        console.error(
+          "[db] task.skipped event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
+  });
+  try {
+    await dependencies.promotePendingSteeringForTask(
+      id,
+      "Task was skipped before steering was delivered",
+    );
+  } catch (error) {
+    console.error(
+      "[skipTask] pending steering promotion error:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  return rowToAgentTask(row);
+}
+
+/**
  * Supersede a task: mark it as `superseded` (terminal) so a fresh "resume"
  * follow-up task can pick up where it left off. Used by the graceful-shutdown
  * path and the `POST /api/tasks/:id/supersede` route. Returns null if the task
@@ -834,7 +904,7 @@ export async function supersedeTask(
        SET status = 'superseded',
            finishedAt = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          AND (? IS NULL OR lastUpdatedAt = ?)
        RETURNING *`,
     [finishedAt, id, args.expectedLastUpdatedAt ?? null, args.expectedLastUpdatedAt ?? null],
@@ -1189,7 +1259,7 @@ export async function updateTaskProgress(id: string, progress: string): Promise<
   const scrubbedProgress = scrubSecrets(progress);
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET progress = ?,
-       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
+       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     [scrubbedProgress, id],

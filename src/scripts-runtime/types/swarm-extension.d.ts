@@ -111,6 +111,7 @@ declare module "swarm-extension" {
     agentId: string | null;
     task: string;
     status:
+      | "skipped"
       | "draft"
       | "backlog"
       | "unassigned"

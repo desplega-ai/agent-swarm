@@ -79,6 +79,7 @@ import {
   taskDisplayEffort,
   taskDisplayModel,
 } from "@/lib/task-model-resolution";
+import { taskReason } from "@/lib/task-reason";
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
@@ -89,6 +90,7 @@ import {
   TaskActionsMenu,
   TaskFailureCallout,
   TaskPrimaryAction,
+  TaskSkippedCallout,
   useTaskActions,
 } from "./task-actions";
 import { TaskDetailsRail, taskRunTime, taskTotalCost } from "./task-details-rail";
@@ -680,8 +682,12 @@ export default function TaskDetailPage() {
 
   // A failed task's error, always open, with Retry and Get help. "Failed
   // after" names the rail's run time, so the two never disagree.
+  // A skipped task's reason, in the neutral tone: a skip is not a failure.
+  const skipReason = task.status === "skipped" ? taskReason(task)?.text : undefined;
   const failureCallout = isFailed ? (
     <TaskFailureCallout model={actions} duration={taskRunTime(task, costs)} />
+  ) : skipReason ? (
+    <TaskSkippedCallout reason={skipReason} />
   ) : null;
 
   // THE MESSAGE BOX, one per layout tree, on the one draft. A finished task

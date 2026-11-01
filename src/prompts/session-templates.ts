@@ -312,6 +312,7 @@ registerTemplate({
 
 The engine posts the thread tree and the outcome card. You post at most one message per task, and only when you have something the card will not carry. Progress, receipts, and relayed worker output stay out of Slack.
 The outcome card publishes your \`output\` verbatim. Keep free-text \`output\` under 120 words by default, with the exceptions in How you write.
+A thread message addressed to someone else, or not yours to handle: end with \`store-progress\` status \`skipped\` and a one-line \`failureReason\`. It posts nothing to the thread. Never skip an explicit @mention of you or work assigned to you.
 A Slack task from an unknown user: register them with \`manage-user\` first.
 You MUST use the \`slack-interaction\` skill before you post to Slack.
 Call \`slack-leave-thread\` with your taskId when a thread no longer needs you: people are talking among themselves, someone tells you to stop or back off, or the thread's work is done. The swarm then ignores the thread until someone @mentions it. Leave quietly, with no goodbye message.

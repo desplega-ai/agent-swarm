@@ -36,6 +36,7 @@ stateDiagram-v2
 | `completed` | Task finished successfully |
 | `failed` | Task could not be completed |
 | `cancelled` | Task was cancelled by the lead or creator |
+| `skipped` | The agent decided the work was not its to handle, such as a Slack thread message addressed to someone else. Set with `store-progress` status `skipped` and a one-line `failureReason`. Posts nothing to Slack and creates no lead follow-up. |
 
 ## Task Creation
 
@@ -91,7 +92,7 @@ send-task(
 )
 ```
 
-A task with dependencies won't be offered or claimable until all dependencies are completed. If an upstream task fails, is cancelled, or is superseded, its dependents are now cascade-failed with a descriptive reason instead of staying blocked forever.
+A task with dependencies won't be offered or claimable until all dependencies are completed or skipped. If an upstream task fails, is cancelled, or is superseded, its dependents are now cascade-failed with a descriptive reason instead of staying blocked forever.
 
 ## Task Properties
 

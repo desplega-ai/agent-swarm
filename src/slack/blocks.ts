@@ -462,6 +462,7 @@ const STATUS_ICON: Record<TreeStatusIcon, string> = {
   failed: "❌",
   cancelled: "🚫",
   superseded: "↪️",
+  skipped: "🔇",
 };
 
 const MAX_VISIBLE_CHILDREN = 8;

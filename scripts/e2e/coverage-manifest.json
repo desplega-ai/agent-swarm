@@ -108,6 +108,7 @@
         "completed",
         "failed",
         "cancelled",
+        "skipped",
         "superseded",
         "resume"
       ],
@@ -426,6 +427,10 @@
         "slack-delegation-failed-child",
         "slack-delegation-late-child"
       ]
+    },
+    "slack-skipped-tasks": {
+      "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
+      "scenarios": ["slack-skipped-task-legacy", "slack-skipped-task-v2"]
     },
     "task-attachments-local-fs": {
       "description": "Upload, list, download byte for byte, delete a task attachment on the local-fs provider",

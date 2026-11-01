@@ -104,7 +104,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "task_storeProgress": {
       const taskId = typeof body.taskId === "string" ? body.taskId : undefined;
       if (!taskId) throw new Error("task_storeProgress requires string `taskId`");
-      if (body.status === "completed" || body.status === "failed") {
+      if (body.status === "completed" || body.status === "failed" || body.status === "skipped") {
         return {
           method: "POST",
           path: `/api/tasks/${encodeURIComponent(taskId)}/finish`,

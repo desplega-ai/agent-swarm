@@ -598,6 +598,7 @@ export default function AgentDetailPage() {
                 <SelectItem value="failed">Failed</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
                 <SelectItem value="superseded">Superseded</SelectItem>
+                <SelectItem value="skipped">Skipped</SelectItem>
               </SelectContent>
             </Select>
             {isMobile ? null : (
