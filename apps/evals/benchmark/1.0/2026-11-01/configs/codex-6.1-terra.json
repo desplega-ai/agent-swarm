@@ -5,21 +5,10 @@
   "harness": "codex",
   "model": "gpt-6.1-terra",
   "modelAlias": null,
-  "resolvedModels": [
-    "gpt-6.1-terra"
-  ],
+  "resolvedModels": ["gpt-6.1-terra"],
   "reasoningEffort": null,
   "envKeys": [],
-  "apiVersions": [
-    "2.7.6",
-    "2.7.7"
-  ],
-  "workerVersions": [
-    "2.7.6",
-    "2.7.7"
-  ],
-  "e2bTemplates": [
-    "rkxvj304b0cbgcc5rzuz",
-    "sd4hhphn0dopxjkrruix"
-  ]
+  "apiVersions": ["2.7.6", "2.7.7"],
+  "workerVersions": ["2.7.6", "2.7.7"],
+  "e2bTemplates": ["rkxvj304b0cbgcc5rzuz", "sd4hhphn0dopxjkrruix"]
 }

@@ -21,10 +21,7 @@
   "budgetUsd": 5,
   "budgetMs": 1200000,
   "passThreshold": 0.75,
-  "gates": [
-    "pushed-branch",
-    "no-upstream-lookup"
-  ],
+  "gates": ["pushed-branch", "no-upstream-lookup"],
   "dimensions": [
     {
       "name": "correctness",
@@ -43,10 +40,7 @@
     {
       "name": "delivery",
       "weight": 1,
-      "checks": [
-        "pushed-branch",
-        "existing-tests-still-green"
-      ],
+      "checks": ["pushed-branch", "existing-tests-still-green"],
       "judge": null
     },
     {
