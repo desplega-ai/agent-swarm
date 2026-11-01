@@ -15,11 +15,13 @@ import {
   LastAdminError,
   listRbacRoles,
   listUserRoles,
+  OPERATOR_GRANTED_VERBS,
   PRIMARY_ROLE_NAMES,
   setUserRoles,
 } from "../be/rbac-roles";
 import { recordIdentityEvent } from "../be/users";
 import { can, isRbacEnabled } from "../rbac";
+import type { PermissionVerb } from "../rbac/permissions";
 import { RbacRoleSchema, UserRbacRolesSchema } from "../types";
 import { getOperatorActor } from "./operator-actor";
 import { agentFirstPrincipal, authUserId, rejectGuest, requireAuthKind } from "./request-principal";
@@ -58,14 +60,16 @@ const setUserRolesRoute = route({
   pattern: ["api", "users", null, "roles"],
   operationId: "users_setRbacRoles",
   summary: "Set a user's RBAC roles",
-  description: `Replaces the user's roles. The set holds exactly one of ${PRIMARY_ROLE_NAMES.join(", ")} plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.`,
+  description: `Replaces the user's roles. The set holds exactly one of ${PRIMARY_ROLE_NAMES.join(", ")} plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself.`,
   tags: ["Users"],
   params: z.object({ id: z.string().min(1) }),
   body: z.object({ roles: z.array(z.string().min(1)).min(1) }).strict(),
   responses: {
     200: { description: "The user's roles after the change", schema: UserRbacRolesSchema },
     400: { description: "Invalid role set" },
-    403: { description: "Not allowed to change roles" },
+    403: {
+      description: "Not allowed to change roles, or adding an operator-only role with a user token",
+    },
     404: { description: "User not found" },
     409: { description: "Would leave no active admin" },
   },
@@ -76,6 +80,24 @@ async function composeRoles(userId: string) {
   const [catalog, held] = await Promise.all([listRbacRoles(), listUserRoles(userId)]);
   const names = new Set(held.map((role) => role.name));
   return { userId, roles: catalog.filter((role) => names.has(role.name)) };
+}
+
+/**
+ * Roles in `requested` that the user does not hold yet and that carry an
+ * operator-granted verb. Keeping or removing such a role stays open to any
+ * role manager; only adding one needs the operator key.
+ */
+async function operatorOnlyRolesAdded(userId: string, requested: string[]): Promise<string[]> {
+  const [catalog, held] = await Promise.all([listRbacRoles(), listUserRoles(userId)]);
+  const heldNames = new Set(held.map((role) => role.name));
+  return catalog
+    .filter(
+      (role) =>
+        requested.includes(role.name) &&
+        !heldNames.has(role.name) &&
+        role.verbs.some((verb) => OPERATOR_GRANTED_VERBS.includes(verb as PermissionVerb)),
+    )
+    .map((role) => role.name);
 }
 
 /** Operator or user only; agents never change human roles, even with the shared key. */
@@ -145,6 +167,13 @@ export async function handleUserRoles(
     if (!(await getUserById(userId))) {
       jsonError(res, "User not found", 404);
       return true;
+    }
+    if (actor.kind !== "operator") {
+      const gated = await operatorOnlyRolesAdded(userId, parsed.body.roles);
+      if (gated.length > 0) {
+        jsonError(res, `Adding ${gated.join(", ")} requires the operator key`, 403);
+        return true;
+      }
     }
     try {
       const { before, after } = await setUserRoles(

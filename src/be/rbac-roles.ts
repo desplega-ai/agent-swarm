@@ -64,6 +64,13 @@ export const BUILTIN_ROLES = [
   },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
+/**
+ * Verbs only the operator key may grant. Every new user is a grant-all admin,
+ * so letting a grant-all user add a role with one of these would let any user
+ * grant it to itself.
+ */
+export const OPERATOR_GRANTED_VERBS: readonly PermissionVerb[] = ["session.read.all"];
+
 /** A person holds exactly one of these; other roles are extras on top. */
 export const PRIMARY_ROLE_NAMES: readonly string[] = ["admin", "requester", "viewer"];
 

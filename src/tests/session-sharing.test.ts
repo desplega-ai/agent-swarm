@@ -633,7 +633,7 @@ describe("all-users read scope", () => {
     expect(alone.status).toBe(400);
   });
 
-  test("PUT /api/users/{id}/roles adding auditor opts an admin in; a non-grant-all user cannot assign it", async () => {
+  test("only the operator key adds auditor via PUT /api/users/{id}/roles; it then opts a default admin in", async () => {
     const admin = await createUser({ name: "Admin to audit" });
     const adminAuth: HttpRequestAuth = { kind: "user", userId: admin.id, user: admin as never };
     const { root, child } = await session(owner.id);
@@ -661,9 +661,22 @@ describe("all-users read scope", () => {
     await denied();
     expect(await taskIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
 
-    // A grant-all user adds auditor next to the primary role.
-    const granted = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+    // A default grant-all admin cannot add it either: not for itself, not for another user.
+    const selfGrant = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: adminAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(selfGrant.status).toBe(403);
+    expect(selfGrant.body.error).toContain("operator key");
+    const byAdmin = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
       auth: ezeAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(byAdmin.status).toBe(403);
+    await denied();
+
+    // The operator key adds auditor next to the primary role.
+    const granted = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
       body: { roles: ["admin", "auditor"] },
     });
     expect(granted.status).toBe(200);
@@ -673,6 +686,17 @@ describe("all-users read scope", () => {
       expect(await sessionIds("&scope=all", { auth: adminAuth })).toContain(root.id);
       expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
       expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(true);
+      // A grant-all user may keep it while changing other roles, and may revoke it.
+      const kept = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin", "auditor"] },
+      });
+      expect(kept.status).toBe(200);
+      const revoked = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin"] },
+      });
+      expect(revoked.status).toBe(200);
     } finally {
       await setUserRoles(admin.id, ["admin"], null);
     }
