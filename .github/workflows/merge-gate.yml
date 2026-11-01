@@ -121,9 +121,10 @@ jobs:
           #   skill-fs-writer.ts      the FS reconcile the tests cover
           SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|plugin/pi-skills/|plugin/commands/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills|build-docs-index)\.ts$|docs-site/content/docs/|apps/ui/src/lib/integrations-catalog\.ts$)')
 
-          # script SDK types freshness: source constants + generator + outputs +
-          # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
-          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/|src/extensions/|scripts/bundle-(script|extension)-types\.ts$|src/server\.ts$)')
+          # Extension declarations follow transitive TypeScript imports. Provider-only
+          # changes can reorder emitted unions without changing the contract source.
+          # Include source and dependency inputs, generators, and checked-in outputs.
+          SCRIPT_TYPES=$(match '^(src/|packages/|package\.json$|bun\.lock$|bunfig\.toml$|tsconfig\.json$|scripts/(bundle-(script|extension)-types\.ts|check-script-types-freshness\.sh)$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
