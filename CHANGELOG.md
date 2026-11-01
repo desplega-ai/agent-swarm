@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.7] - 2026-11-01
+
+### Added
+- Tasks: every new task gets a short display title from the cheapest configured model; `TASK_AUTO_TITLE_ENABLED` and `TASK_AUTO_TITLE_MODEL` control it (#2604).
+- Pages: a token-based design system (`designVersion` 2) with `theme` presets and `themeTokens` overrides on `create-page`, plus the `paper` app theme (#2607).
+- UI: simpler task creation with session drafts (#2609).
+- Follow-ups: `FOLLOW_UP_GATE_MODE=shadow` records a verifier verdict beside each follow-up of the schedules in `FOLLOW_UP_GATE_SCHEDULE_IDS`, without skipping or delaying it (#2599).
+
+### Changed
+- Seed: the default schedules drop `daily-workflow-health-audit` (its queries moved into `daily-status-report`), and `daily-swarm-update-check` now runs the new `swarm-update-check` script instead of an LLM task (#2612).
+- Merge gate: E2E is skipped on PRs it cannot see, and history checkouts are blobless (#2611).
+- agent-fs pins bumped to 0.18.14 (#2616).
+- Docker: bumped claude-code, opencode, amp and kiro (#2602, #2617).
+
+### Fixed
+- Database: queued writers no longer spin the event loop behind an external write lock such as a Litestream snapshot (#2614).
+- Pages: the page-session cookie is Secure, and localhost frame-ancestors fail closed, when `NODE_ENV` is unset (#2608, #2610).
+- Profile sync: an untouched profile file no longer overwrites a newer DB edit at session end or on self-edit (#2600).
+- Codex: the app-server launches on the gateway provider, so gateway turns no longer fail on a provider mismatch (#2606).
+- Tasks: small unfiltered task pages use the `lastUpdatedAt` index (#2615).
+- UI: session timelines show steering receipts (#2613).
+
 ## [2.7.6] - 2026-10-31
 
 ### Added
