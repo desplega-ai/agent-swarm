@@ -343,6 +343,10 @@ export async function handleSchedules(
         );
         return true;
       }
+      if (!body.cronExpression && !body.intervalMs) {
+        jsonError(res, "Either cronExpression or intervalMs must be provided.", 400);
+        return true;
+      }
     }
 
     if (body.cronExpression) {

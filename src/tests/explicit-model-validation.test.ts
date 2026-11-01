@@ -240,6 +240,20 @@ describe("explicitModelError", () => {
     }
   });
 
+  test("a Claude shortname is the same mismatch as its catalog id off the Claude harnesses", async () => {
+    for (const model of ["opus", "sonnet", "sonnet[1m]"]) {
+      for (const allowCustomModel of [false, true]) {
+        const error = await explicitModelError({
+          model,
+          harnessProvider: "codex",
+          allowCustomModel,
+        });
+        expect(error).toContain("does not run on the codex harness");
+      }
+      expect(await explicitModelError({ model, harnessProvider: "claude" })).toBeNull();
+    }
+  });
+
   test("an OpenAI model on claude fails", async () => {
     expect(await explicitModelError({ model: "gpt-5.6-sol", harnessProvider: "claude" })).toContain(
       "does not run on the claude harness",

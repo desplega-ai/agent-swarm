@@ -13,7 +13,6 @@ import {
   getAgentById,
   getAllChannelActivityCursors,
   getDbClient,
-  getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getTaskAttachments,
@@ -524,12 +523,12 @@ export async function handlePoll(
         // would instruct a missing tool and strand the claimed mentions.
         const claimedChannels = hasCapability("messaging") ? await claimMentions(myAgentId) : [];
         if (claimedChannels.length > 0) {
-          // Recalculate inbox summary now that we've claimed
-          const inbox = await getInboxSummary(myAgentId);
+          // Count what this claim took: the inbox summary no longer sees mentions already
+          // moved to "processing".
           return {
             trigger: {
               type: "unread_mentions",
-              mentionsCount: inbox.mentionsCount,
+              mentionsCount: claimedChannels.reduce((sum, c) => sum + c.mentionsCount, 0),
               claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
             },
           };

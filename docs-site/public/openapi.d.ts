@@ -2921,7 +2921,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Agent not found */
+                /** @description Agent not found, or changedByAgentId names no agent */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -4044,6 +4044,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                             label?: string;
+                            /** @default true */
                             required?: boolean;
                             description?: string;
                             placeholder?: string;
@@ -11392,7 +11393,7 @@ export interface paths {
         };
         /**
          * Get the live model catalog for the picker-reachable providers
-         * @description Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
+         * @description Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
          */
         get: {
             parameters: {
@@ -11971,6 +11972,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -12297,7 +12307,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke and delete the OAuth token for an MCP server */
+        /**
+         * Revoke and delete the OAuth token for an MCP server
+         * @description Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.
+         */
         delete: {
             parameters: {
                 query?: {
@@ -19219,7 +19232,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write a script run journal step */
+        /**
+         * Write a script run journal step
+         * @description Write-once per stepKey; a replay keeps the first journal entry and still answers 201.
+         */
         post: operations["script_runs_internal_step_create"];
         delete?: never;
         options?: never;
@@ -22315,6 +22331,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A server with this name already exists in the same scope and owner (mcp_server_name_taken) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -24457,6 +24482,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A user with this email already exists (user_exists) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -25637,7 +25671,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error or PK collision */
+                /** @description Validation error */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -25657,6 +25691,15 @@ export interface paths {
                 };
                 /** @description User not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The (kind, externalId) identity is already linked (identity_taken) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -27275,6 +27318,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -28744,16 +28796,12 @@ export interface components {
             defaultBranch: string;
             /** @default true */
             autoClone: boolean;
-            hooks?: components["schemas"]["RepoHooks"];
+            hooks: components["schemas"]["RepoHooks"];
             guidelines?: components["schemas"]["RepoGuidelines"];
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /**
-         * @default {
-         *       "enabled": false
-         *     }
-         */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;

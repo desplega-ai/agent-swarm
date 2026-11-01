@@ -16,7 +16,9 @@ import { handleCore } from "../http/core";
 import { handleOnboarding } from "../http/onboarding";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import {
+  codexDeviceVerificationUrl,
   DeviceCodeNotEnabledError,
+  exchangeDeviceAuthorizationCode,
   pollDeviceToken,
   requestDeviceCode,
 } from "../providers/codex-oauth/device";
@@ -167,6 +169,64 @@ describe("Codex device provider", () => {
 
     await expect(requestDeviceCode()).resolves.toMatchObject({ intervalSeconds: 5 });
     await expect(requestDeviceCode()).rejects.toBeInstanceOf(DeviceCodeNotEnabledError);
+  });
+});
+
+describe("Codex device base URL", () => {
+  const BASE_ENV = "CODEX_OAUTH_DEVICE_BASE_URL";
+  const original = process.env[BASE_ENV];
+  afterEach(() => {
+    if (original === undefined) delete process.env[BASE_ENV];
+    else process.env[BASE_ENV] = original;
+  });
+
+  test("all device URLs follow the base read at call time", async () => {
+    process.env[BASE_ENV] = "http://127.0.0.1:9999/";
+    const seen: string[] = [];
+    fetchImpl = (async (input, init) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith("/usercode")) {
+        return jsonResponse({ device_auth_id: "device-base", user_code: "BASE", interval: 5 });
+      }
+      if (url.endsWith("/deviceauth/token")) {
+        return jsonResponse({ authorization_code: "base-code", code_verifier: "base-verifier" });
+      }
+      expect(url).toBe("http://127.0.0.1:9999/oauth/token");
+      expect(new URLSearchParams(String(init?.body)).get("redirect_uri")).toBe(
+        "http://127.0.0.1:9999/deviceauth/callback",
+      );
+      return jsonResponse({
+        access_token: accountToken("account-base"),
+        refresh_token: "refresh-base",
+        expires_in: 3600,
+      });
+    }) as typeof fetch;
+
+    await requestDeviceCode();
+    await pollDeviceToken("device-base", "BASE");
+    await exchangeDeviceAuthorizationCode("base-code", "base-verifier");
+    expect(seen).toEqual([
+      "http://127.0.0.1:9999/api/accounts/deviceauth/usercode",
+      "http://127.0.0.1:9999/api/accounts/deviceauth/token",
+      "http://127.0.0.1:9999/oauth/token",
+    ]);
+    expect(codexDeviceVerificationUrl()).toBe("http://127.0.0.1:9999/codex/device");
+  });
+
+  test("an unset or blank base falls back to auth.openai.com", async () => {
+    const seen: string[] = [];
+    fetchImpl = (async (input) => {
+      seen.push(String(input));
+      return new Response(null, { status: 403 });
+    }) as typeof fetch;
+
+    delete process.env[BASE_ENV];
+    await pollDeviceToken("device", "code");
+    process.env[BASE_ENV] = "  ";
+    await pollDeviceToken("device", "code");
+    expect(seen).toEqual([DEVICE_TOKEN_URL, DEVICE_TOKEN_URL]);
+    expect(codexDeviceVerificationUrl()).toBe("https://auth.openai.com/codex/device");
   });
 });
 

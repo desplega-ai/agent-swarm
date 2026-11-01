@@ -95,6 +95,27 @@ const mv = (from: string, to: string) => async (repo: string) => {
 };
 
 describe("merge-gate detect-changes flags", () => {
+  test.each([
+    "src/types.ts",
+    "src/providers/swarm-events-shared.ts",
+    "src/be/db.ts",
+    "packages/model-catalog/src/index.ts",
+    "package.json",
+    "bun.lock",
+    "bunfig.toml",
+    "tsconfig.json",
+    "scripts/check-script-types-freshness.sh",
+  ])(
+    "%s runs script and extension type freshness checks",
+    async (path) => {
+      const flags = await flagsFor([path], async (repo) => {
+        await Bun.write(join(repo, path), "edited\n");
+      });
+      expect(flags.script_types).toBe("true");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
   test(
     "renaming a server file out of src/ still runs E2E",
     async () => {
@@ -124,6 +145,7 @@ describe("merge-gate detect-changes flags", () => {
       expect(flags.e2e).toBe("false");
       expect(flags.test).toBe("false");
       expect(flags.lint).toBe("false");
+      expect(flags.script_types).toBe("false");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

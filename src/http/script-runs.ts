@@ -238,6 +238,8 @@ const postInternalStepRoute = route({
   pattern: ["api", "internal", "script-runs", null, "steps"],
   operationId: "script_runs_internal_step_create",
   summary: "Write a script run journal step",
+  description:
+    "Write-once per stepKey; a replay keeps the first journal entry and still answers 201.",
   tags: ["Script Runs"],
   params: runIdParamsSchema,
   body: journalStepBodySchema,

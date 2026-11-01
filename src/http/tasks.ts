@@ -2090,6 +2090,9 @@ export async function handleTasks(
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      if (task.agentId) {
+        await updateAgentStatusFromCapacity(task.agentId);
+      }
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",
@@ -2130,6 +2133,11 @@ export async function handleTasks(
         resumeTaskId: null,
       });
       return true;
+    }
+
+    // Cancel and finish recompute the agent status; a superseded task frees its slot too.
+    if (task.agentId) {
+      await updateAgentStatusFromCapacity(task.agentId);
     }
 
     // Parent is now superseded. Create the resume child.
