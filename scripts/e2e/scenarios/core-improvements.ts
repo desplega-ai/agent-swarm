@@ -43,6 +43,8 @@ export const coreImprovements: Scenario = {
   order: 266,
   async run(ctx) {
     const proxy = startProxy();
+    // A function, so an earlier assertion does not narrow the count for later reads.
+    const sentCount = () => proxy.received.length;
     const configIds: string[] = [];
     const workerId = await registerWorker(ctx, "improvements");
     const connection = await ctx.connectMcp(workerId);
@@ -55,7 +57,7 @@ export const coreImprovements: Scenario = {
         text: `Improve search ${ctx.nonce}`,
       });
       const draftId = asString(asRecord(drafted.structured).id, "drafted id");
-      expect(proxy.received.length === 0, "the tool sent something to the proxy");
+      expect(sentCount() === 0, "the tool sent something to the proxy");
 
       // REST: an agent's sendNow still drafts.
       let response = await ctx.api("POST", "/api/improvements", {
@@ -73,7 +75,7 @@ export const coreImprovements: Scenario = {
         body: {},
       });
       expectStatus(response, [403], "agent approve is refused");
-      expect(proxy.received.length === 0, "an agent approve reached the proxy");
+      expect(sentCount() === 0, "an agent approve reached the proxy");
 
       // The list shows both drafts with leak hints.
       response = await ctx.api("GET", "/api/improvements");
@@ -119,7 +121,7 @@ export const coreImprovements: Scenario = {
       expect(asRecord(response.json).code === "improvements_disabled", response.text);
       response = await ctx.api("GET", "/api/improvements");
       expect(asRecord(response.json).enabled === false, "list reports the switch off");
-      expect(proxy.received.length === 1, "the proxy got more than the one approved send");
+      expect(sentCount() === 1, "the proxy got more than the one approved send");
     } finally {
       await connection.close();
       proxy.server.stop(true);
