@@ -12,6 +12,11 @@ import {
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
+import {
+  isFollowUpGateScheduleId,
+  parseFollowUpGateScheduleIds,
+} from "../utils/follow-up-gate-schedule-ids";
+import { kindForModelString } from "../utils/internal-ai/models";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -306,6 +311,24 @@ export function validateRuntimeTokenTtlHours(value: unknown): string | null {
     : "Invalid RUNTIME_TOKEN_TTL_HOURS (must be greater than zero and at most 168)";
 }
 
+/**
+ * `TASK_AUTO_TITLE_MODEL` pins the task-title model: `provider/model-id` for a
+ * provider the internal-ai layer can call, or a bare `claude -p` alias. Empty
+ * clears the pin. The model id itself is checked at call time (an unknown id
+ * logs and falls through to the next candidate).
+ */
+export function validateTaskAutoTitleModel(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid TASK_AUTO_TITLE_MODEL (must be a string)";
+  const model = value.trim();
+  if (!model) return null;
+  if (/\s/.test(model) || model.endsWith("/")) {
+    return "Invalid TASK_AUTO_TITLE_MODEL (use provider/model-id or a claude -p alias)";
+  }
+  return kindForModelString(model)
+    ? null
+    : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -428,6 +451,13 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
+  // `enforce` is deliberately absent: the follow-up gate only records decisions.
+  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
+  FOLLOW_UP_GATE_SCHEDULE_IDS: (value: unknown) => {
+    const message = "Invalid FOLLOW_UP_GATE_SCHEDULE_IDS (must be comma-separated schedule UUIDs)";
+    if (typeof value !== "string") return message;
+    return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
+  },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
@@ -525,7 +555,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "MODEL_AUTO_UPGRADE",
     "COMB_ENABLED",
     "AGENT_FS_PROXY",
+    "TASK_AUTO_TITLE_ENABLED",
   ]),
+  TASK_AUTO_TITLE_MODEL: validateTaskAutoTitleModel,
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),

@@ -1815,6 +1815,12 @@
     },
     "key": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "theme": {
+      "exempt": "enum or fixed-format value"
+    },
+    "theme_tokens": {
+      "exempt": "JSON map of page token names to CSS values that importThemeTokens (src/themes/import.ts) normalizes and checks"
     }
   },
   "permission_audit": {

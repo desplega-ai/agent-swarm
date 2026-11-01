@@ -20,6 +20,10 @@ import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
 import scheduleHealth from "../be/seed-scripts/catalog/schedule-health";
+import swarmUpdateCheck, {
+  compareVersions,
+  parseVersion,
+} from "../be/seed-scripts/catalog/swarm-update-check";
 import taskContextGathering from "../be/seed-scripts/catalog/task-context-gathering";
 import taskFailureAudit from "../be/seed-scripts/catalog/task-failure-audit";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
@@ -62,8 +66,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 39 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(39);
+  test("manifest holds 40 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(40);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {
@@ -1998,5 +2002,141 @@ describe("dreaming-heartbeat check refuses a worker-chosen draftPath", () => {
     const out = await runCheck(planPath);
     expect(out.draftPath).toBe(planPath);
     expect(out.reasons.join(" ")).not.toContain("draftPath");
+  });
+});
+
+describe("swarm-update-check", () => {
+  const RELEASES = "https://api.github.com/repos/desplega-ai/agent-swarm/releases/latest";
+
+  /** Fake API + GitHub: `/health` answers `running`, the release endpoint `release`. */
+  function fakeCtx(opts: {
+    running?: string | null;
+    release?: { status: number; body?: unknown } | "network-error";
+    agents?: unknown[];
+  }) {
+    const fetches: { url: string; retries?: number }[] = [];
+    const sent: any[] = [];
+    const stdlib = {
+      Redacted: { value: (v: unknown) => v },
+      fetch: async (url: string, init: { retries?: number } = {}) => {
+        fetches.push({ url, retries: init.retries });
+        if (url === "http://api.test/health") {
+          return new Response(
+            JSON.stringify(opts.running === null ? {} : { version: opts.running }),
+          );
+        }
+        if (url === RELEASES) {
+          const release = opts.release ?? { status: 200, body: {} };
+          if (release === "network-error") throw new Error("getaddrinfo ENOTFOUND");
+          return new Response(JSON.stringify(release.body ?? {}), { status: release.status });
+        }
+        return new Response("{}", { status: 404 });
+      },
+    };
+    const swarm = {
+      config: { mcpBaseUrl: "http://api.test/" },
+      async swarm_get() {
+        return {
+          success: true,
+          status: 200,
+          data: {
+            agents: opts.agents ?? [
+              { id: "worker-1", isLead: false },
+              { id: "lead-1", isLead: true },
+            ],
+          },
+        };
+      },
+      async task_send(args: unknown) {
+        sent.push(args);
+        return { success: true, status: 200, data: { success: true, task: { id: "notify-1" } } };
+      },
+    };
+    return { ctx: { stdlib, swarm }, fetches, sent };
+  }
+
+  const release = (tag: string) => ({
+    status: 200,
+    body: {
+      tag_name: tag,
+      html_url: `https://github.com/desplega-ai/agent-swarm/releases/tag/${tag}`,
+    },
+  });
+
+  test("compares versions numerically, never as strings", () => {
+    expect(compareVersions(parseVersion("1.10.0")!, parseVersion("1.9.0")!)).toBeGreaterThan(0);
+    expect(compareVersions(parseVersion("v2.0.0")!, parseVersion("2.0.0")!)).toBe(0);
+    expect(parseVersion("1.2")).toBeNull();
+    expect(parseVersion(undefined)).toBeNull();
+  });
+
+  test("a newer release notifies the lead once, with the versions and release URL", async () => {
+    const { ctx, sent } = fakeCtx({ running: "1.9.0", release: release("v1.10.0") });
+    const result: any = await swarmUpdateCheck({}, ctx);
+    expect(result).toMatchObject({
+      checked: true,
+      status: "update-available",
+      running: "1.9.0",
+      latest: "1.10.0",
+      notified: true,
+      leadTaskId: "notify-1",
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ agentId: "lead-1", routingReason: "skill" });
+    expect(sent[0].task).toContain("running 1.9.0, latest 1.10.0");
+    expect(sent[0].task).toContain(
+      "https://github.com/desplega-ai/agent-swarm/releases/tag/v1.10.0",
+    );
+    expect(sent[0].task).toContain("admin delivery channel");
+  });
+
+  test("control: up to date and older-than-running releases notify nobody", async () => {
+    for (const tag of ["v1.10.0", "v1.9.9"]) {
+      const { ctx, sent } = fakeCtx({ running: "1.10.0", release: release(tag) });
+      const result: any = await swarmUpdateCheck({}, ctx);
+      expect(result).toMatchObject({ checked: true, status: "up-to-date" });
+      expect(sent).toHaveLength(0);
+    }
+  });
+
+  test("a missing running version is unknown, not up to date, and skips GitHub", async () => {
+    const { ctx, sent, fetches } = fakeCtx({ running: null, release: release("v9.0.0") });
+    const result: any = await swarmUpdateCheck({}, ctx);
+    expect(result).toMatchObject({ checked: false, status: "unknown" });
+    expect(result.message).toContain("Unable to determine running version");
+    expect(fetches.map((f) => f.url)).not.toContain(RELEASES);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("a failed GitHub call is reported after one attempt and notifies nobody", async () => {
+    for (const failure of [
+      { status: 403, body: { message: "rate limited" } },
+      "network-error" as const,
+    ]) {
+      const { ctx, sent, fetches } = fakeCtx({ running: "1.0.0", release: failure });
+      const result: any = await swarmUpdateCheck({}, ctx);
+      expect(result).toMatchObject({ checked: false, status: "github-unreachable" });
+      expect(result.message).toContain("Could not reach GitHub releases API");
+      const github = fetches.filter((f) => f.url === RELEASES);
+      expect(github).toHaveLength(1);
+      expect(github[0]?.retries).toBe(1);
+      expect(sent).toHaveLength(0);
+    }
+  });
+
+  test("dryRun reports the update without notifying", async () => {
+    const { ctx, sent } = fakeCtx({ running: "1.0.0", release: release("v1.0.1") });
+    const result: any = await swarmUpdateCheck({ dryRun: true }, ctx);
+    expect(result).toMatchObject({ status: "update-available", notified: false });
+    expect(sent).toHaveLength(0);
+  });
+
+  test("an update with no lead to notify fails the run", async () => {
+    const { ctx } = fakeCtx({
+      running: "1.0.0",
+      release: release("v1.0.1"),
+      agents: [{ id: "worker-1", isLead: false }],
+    });
+    await expect(swarmUpdateCheck({}, ctx)).rejects.toThrow("no lead to notify");
   });
 });

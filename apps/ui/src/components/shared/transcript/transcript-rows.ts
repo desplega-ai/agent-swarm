@@ -257,7 +257,7 @@ function sameText(a: string, b: string): boolean {
  * The rows a finished turn shows. Closed, the fold keeps only the agent's last
  * message in view (unless it says the same as `outcomeText`, the task's
  * outcome shown under the run), the tasks it started (each its own
- * transcript), and any steering message still waiting for the agent. Open,
+ * transcript), and every steering message. Open,
  * every row shows in run order: work after the last message stays after it.
  */
 export function foldedTurnRows(
@@ -275,10 +275,7 @@ export function foldedTurnRows(
     }
   }
   return rows.filter(
-    (row, i) =>
-      i === lastAssistant ||
-      row.kind === "child" ||
-      (row.kind === "steer" && row.message.status === "pending"),
+    (row, i) => i === lastAssistant || row.kind === "child" || row.kind === "steer",
   );
 }
 

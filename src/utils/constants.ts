@@ -3,6 +3,7 @@
  */
 
 import { isEnvFlagEnabled, parseEnvFlag } from "./env-flag";
+import { isDevOrTestNodeEnv } from "./node-env";
 
 /** Maximum profile-file length in JavaScript characters (not UTF-8 bytes). */
 export const MAX_PROFILE_FILE_LENGTH = 256 * 1024;
@@ -43,6 +44,24 @@ export function getConfiguredAppUrls(): string[] {
  */
 export function getAppUrl(fallback = DEFAULT_APP_URL): string {
   return (getConfiguredAppUrls()[0] || fallback).replace(/\/+$/, "");
+}
+
+/**
+ * Local dashboard origins (Vite ports and portless `*.localhost`) that may
+ * iframe pages without being listed in `APP_URL`. Returned only when NODE_ENV
+ * is explicitly development or test: deployed images leave NODE_ENV unset, and
+ * an unset value must not let a localhost origin frame production pages.
+ */
+export function getLocalDevAppOrigins(): string[] {
+  if (!isDevOrTestNodeEnv()) return [];
+  return [
+    "http://localhost:5274",
+    "http://localhost:5175",
+    "http://127.0.0.1:5274",
+    "http://127.0.0.1:5175",
+    "https://*.localhost",
+    "http://*.localhost",
+  ];
 }
 
 /**

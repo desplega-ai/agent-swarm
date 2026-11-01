@@ -141,6 +141,10 @@ export interface ComposerDockProps {
    * this is its aria-label and the first line of its tooltip.
    */
   sendLabel?: string;
+  /** Show the action label beside the send icon. */
+  showSendLabel?: boolean;
+  /** Accessible name for the text input. */
+  inputLabel?: string;
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
   attachmentErrorMessage?: string | null;
@@ -254,6 +258,8 @@ export function ComposerDock({
   modeControl,
   pendingLabel = "Sending…",
   sendLabel = "Send",
+  showSendLabel = false,
+  inputLabel,
   attachments = [],
   onAttachmentsChange,
   attachmentErrorMessage,
@@ -417,6 +423,7 @@ export function ComposerDock({
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           placeholder={placeholder}
+          aria-label={inputLabel}
           disabled={disabled || isPending}
           rows={1}
           className={cn(
@@ -486,9 +493,9 @@ export function ComposerDock({
                 <TooltipTrigger asChild>{routeLine}</TooltipTrigger>
                 <TooltipContent side="top">{routeDetail}</TooltipContent>
               </Tooltip>
-            ) : (
+            ) : routeLabel ? (
               routeLine
-            )}
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             {extraActions}
@@ -517,7 +524,7 @@ export function ComposerDock({
               <TooltipTrigger asChild>
                 <Button
                   type="submit"
-                  size="icon"
+                  size={showSendLabel ? "sm" : "icon"}
                   // In flight or no identity: `disabled`. An empty box only
                   // blocks the send (`aria-disabled`, and the form's submit
                   // checks `canSubmit`), so hover and focus still show the
@@ -526,13 +533,19 @@ export function ComposerDock({
                   aria-disabled={canSubmit ? undefined : true}
                   aria-label={sendLabel}
                   className={cn(
-                    "rounded-full shadow-sm",
+                    "shadow-sm",
+                    showSendLabel ? "rounded-lg" : "rounded-full",
                     "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-primary aria-disabled:active:scale-100",
                     // 44 px on touch: the bar's full size, or a 32 px circle
                     // with a 44 px hit area on a coarse pointer.
-                    bar || touch ? "size-11" : "size-8 hit-area [--hit-size:44px]",
+                    showSendLabel
+                      ? "h-9 px-3"
+                      : bar || touch
+                        ? "size-11"
+                        : "size-8 hit-area [--hit-size:44px]",
                   )}
                 >
+                  {showSendLabel ? sendLabel : null}
                   <ArrowUp className="size-4" />
                 </Button>
               </TooltipTrigger>

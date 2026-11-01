@@ -60,6 +60,7 @@ import starHistoryRefreshSrc from "./catalog/star-history-refresh.ts" with { typ
 // @ts-expect-error Bun text imports synthesize a default string for this helper.
 import starHistoryRendererSrc from "./catalog/star-history-renderer.ts" with { type: "text" };
 import swarmOverviewSrc from "./catalog/swarm-overview.ts" with { type: "text" };
+import swarmUpdateCheckSrc from "./catalog/swarm-update-check.ts" with { type: "text" };
 import taskContextGatheringSrc from "./catalog/task-context-gathering.ts" with { type: "text" };
 import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "text" };
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
@@ -216,6 +217,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Task onboarding: one call instead of task_get plus multiple memory_search calls. Pass the task description split into 2-4 natural-language queries.",
     source: asText(taskContextGatheringSrc),
+  },
+  {
+    name: "swarm-update-check",
+    description:
+      "Compare the running agent-swarm version (API /health) with the latest GitHub release of desplega-ai/agent-swarm as numeric major.minor.patch, and hand the lead one notify task only when a newer release exists.",
+    intent:
+      "Daily zero-config upgrade watchdog behind the daily-swarm-update-check schedule; dryRun reports the verdict without notifying.",
+    source: asText(swarmUpdateCheckSrc),
   },
   {
     name: "schedule-health",

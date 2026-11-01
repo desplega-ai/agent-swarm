@@ -12,6 +12,10 @@
  * the title slugifies to empty (e.g. all symbols), fall back to the
  * generated page id.
  *
+ * Design fields: `theme`, `themeTokens` and `designVersion` set how an HTML
+ * page is styled. A new page gets designVersion 2. On an upsert, an omitted
+ * field keeps the stored value, and `null` clears `theme` / `themeTokens`.
+ *
  * Architecture note: this tool runs on the API server (per
  * `src/server.ts:155`+ pattern) and accesses `src/be/db` directly. The
  * worker-side DB-boundary invariant doesn't apply because `src/tools/*`
@@ -23,9 +27,18 @@ import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
 import { getPageEditCounter } from "@/be/db/page-versions";
+import { classAttributeValues, countColorLiterals } from "@/pages/color-literals";
 import { snapshotPage } from "@/pages/version";
+import { readThemeFields } from "@/themes/page-fields";
+import { PAGE_THEME_COLOR_TOKENS } from "@/themes/tokens";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { AssetKeySchema, PageAuthModeSchema, PageContentTypeSchema } from "@/types";
+import {
+  AssetKeySchema,
+  type Page,
+  PageAuthModeSchema,
+  PageContentTypeSchema,
+  PageThemeTokensInputSchema,
+} from "@/types";
 import { getAppUrl, getPublicMcpBaseUrl } from "@/utils/constants";
 
 /** Same slugifier used by the HTTP createPage handler. */
@@ -46,6 +59,26 @@ function getAppBaseUrl(): string {
   return getAppUrl();
 }
 
+/** A `swarm-` primitive class inside one class attribute value. */
+const SWARM_CLASS = /(?:^|\s)swarm-/;
+const COLOR_TOKEN_REFERENCE = /var\(\s*--color-/i;
+const PAGE_COLOR_TOKENS: ReadonlySet<string> = new Set<string>(PAGE_THEME_COLOR_TOKENS);
+
+/** The body uses a `swarm-` class or a `var(--color-...)` token, which only design version 2 styles. */
+function bodyUsesDesignSystem(html: string): boolean {
+  return (
+    COLOR_TOKEN_REFERENCE.test(html) ||
+    classAttributeValues(html).some((value) => SWARM_CLASS.test(value))
+  );
+}
+
+/** The stored overrides set light colors and no dark colors, so dark mode keeps the preset's colors. */
+function hasLightOnlyColors(tokens: Page["themeTokens"]): boolean {
+  if (!tokens) return false;
+  const isColor = (name: string) => PAGE_COLOR_TOKENS.has(name);
+  return Object.keys(tokens.light).some(isColor) && !Object.keys(tokens.dark).some(isColor);
+}
+
 export const registerCreatePageTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "create_page",
@@ -56,7 +89,15 @@ export const registerCreatePageTool = (server: McpServer) => {
         "Calls are upsert-by-(agent, slug): if you previously created a page " +
         "with the same slug, its prior state is snapshotted and the row is " +
         "updated. Use this for static reports, dashboards, or JSON action " +
-        "specs that don't need a long-lived process.",
+        "specs that don't need a long-lived process. " +
+        "HTML pages use the swarm design system (designVersion 2): theme " +
+        "tokens such as var(--color-primary), the swarm-* primitives, and " +
+        "Tailwind v4 utilities such as bg-card and text-muted-foreground. " +
+        "Set `theme` to a preset id or pass `themeTokens` (a token map, or a " +
+        'CSS variable block with format "css") to restyle the whole page. ' +
+        "Do not hardcode colors: inside the dashboard the page follows the " +
+        "viewer's theme and dark mode. Pages created before designVersion 2 " +
+        "keep the old look; pass designVersion: 2 when you rewrite one.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         key: AssetKeySchema.optional().describe(
@@ -99,6 +140,27 @@ export const registerCreatePageTool = (server: McpServer) => {
           .describe(
             "Declared credential needs for JSON pages (renderer ignores for v1 — reserved for follow-up).",
           ),
+        theme: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            "Theme preset id that restyles the whole page, for example paper, github or hive. An unknown id returns an error that lists every preset. Omit to follow the viewer's theme (on update, to keep the stored one). Pass null to clear it.",
+          ),
+        themeTokens: PageThemeTokensInputSchema.nullable()
+          .optional()
+          .describe(
+            'Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value (for example { light: { "--color-primary": "oklch(0.55 0.2 260)" } }), or { format: "css", css } with a CSS variable block (:root, .dark, @theme) as shadcn, tweakcn and Tailwind v4 export it. Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and reported in the result. Replaces the stored overrides. Omit to keep them on update. Pass null to clear them.',
+          ),
+        designVersion: z
+          .number()
+          .int()
+          .min(1)
+          .max(2)
+          .optional()
+          .describe(
+            "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -107,6 +169,11 @@ export const registerCreatePageTool = (server: McpServer) => {
         version: z.number().optional(),
         app_url: z.string().optional(),
         api_url: z.string().optional(),
+        designVersion: z.number().optional(),
+        ignoredTokens: z.array(z.string()).optional(),
+        colorLiteralCount: z.number().optional(),
+        usesDesignSystem: z.boolean().optional(),
+        lightOnlyColors: z.boolean().optional(),
       }),
     },
     async (input, requestInfo, _meta) => {
@@ -114,6 +181,9 @@ export const registerCreatePageTool = (server: McpServer) => {
         const msg = "Agent ID required. Set the X-Agent-ID header on the MCP request.";
         return toolErr(msg);
       }
+
+      const themeFields = readThemeFields(input);
+      if ("error" in themeFields) return toolErr(themeFields.error);
 
       const slug = input.slug ?? slugify(input.title);
       const finalSlug = slug || "page"; // Fallback if title slugifies to empty.
@@ -167,6 +237,10 @@ export const registerCreatePageTool = (server: McpServer) => {
           passwordHash: passwordHash ?? null,
           body: input.body,
           needsCredentials: needsCredentialsNames ?? null,
+          // Omitted design fields keep the stored values.
+          theme: themeFields.theme,
+          themeTokens: themeFields.themeTokens,
+          designVersion: input.designVersion,
         });
         if (!updated) {
           const msg = `Failed to update existing page ${existing.id}.`;
@@ -188,6 +262,9 @@ export const registerCreatePageTool = (server: McpServer) => {
             passwordHash,
             body: input.body,
             needsCredentials: needsCredentialsNames,
+            theme: themeFields.theme,
+            themeTokens: themeFields.themeTokens,
+            designVersion: input.designVersion,
           });
           id = created.id;
         } catch (err) {
@@ -209,17 +286,46 @@ export const registerCreatePageTool = (server: McpServer) => {
       const appUrl = `${getAppBaseUrl()}/pages/${id}`;
       const version = await getPageEditCounter(id);
 
-      return toolOk(`Page "${input.title}" saved (slug=${finalSlug}, version=${version}).`, {
-        details: `API: ${apiUrl}\n  App: ${appUrl}`,
-        data: {
-          yourAgentId: requestInfo.agentId,
-          id,
-          key: fresh.key,
-          version,
-          app_url: appUrl,
-          api_url: apiUrl,
+      // Judged on the saved page, so an upsert that keeps an older design
+      // version is judged by the version it keeps. The NUDGES entry for this
+      // tool reads these flags. Only HTML pages get the design system head.
+      const designFlags =
+        fresh.contentType === "text/html"
+          ? {
+              usesDesignSystem:
+                typeof input.theme === "string" ||
+                Boolean(input.themeTokens) ||
+                bodyUsesDesignSystem(fresh.body),
+              lightOnlyColors: hasLightOnlyColors(fresh.themeTokens),
+              ...(fresh.designVersion >= 2
+                ? { colorLiteralCount: countColorLiterals(fresh.body) }
+                : {}),
+            }
+          : {};
+      const { ignored } = themeFields;
+
+      return toolOk(
+        `Page "${input.title}" saved (slug=${finalSlug}, version=${version}, designVersion=${fresh.designVersion}).` +
+          (ignored.length > 0
+            ? " Some theme tokens were ignored (outside the page token contract or referencing a variable outside it)."
+            : ""),
+        {
+          details:
+            `API: ${apiUrl}\n  App: ${appUrl}` +
+            (ignored.length > 0 ? `\n  Ignored theme tokens: ${ignored.join(", ")}` : ""),
+          data: {
+            yourAgentId: requestInfo.agentId,
+            id,
+            key: fresh.key,
+            version,
+            app_url: appUrl,
+            api_url: apiUrl,
+            designVersion: fresh.designVersion,
+            ...(ignored.length > 0 ? { ignoredTokens: ignored } : {}),
+            ...designFlags,
+          },
         },
-      });
+      );
     },
   );
 };

@@ -19,295 +19,18 @@ import {
   TasksTable,
   useTasksColumns,
 } from "@/components/shared/tasks-table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
 import { formatRelativeTime } from "@/lib/utils";
-import { TaskEffortField } from "./task-effort-field";
+import { CreateTaskDialog, type TaskFormData } from "./create-task-dialog";
 import { useStalePageCorrection } from "./use-stale-page-correction";
-
-interface TaskFormData {
-  task: string;
-  agentId: string;
-  taskType: string;
-  tags: string;
-  priority: number;
-  dependsOn: string[];
-  modelTier: string;
-  effort: string;
-}
-
-const emptyTaskForm: TaskFormData = {
-  task: "",
-  agentId: "",
-  taskType: "",
-  tags: "",
-  priority: 50,
-  dependsOn: [],
-  modelTier: "",
-  effort: "",
-};
-
-function CreateTaskDialog({
-  open,
-  onOpenChange,
-  onSubmit,
-  initialValues,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (data: TaskFormData) => void;
-  /** Optional starting values — used by the dashboard "To start" inbox bucket
-   *  to pre-fill the dialog from a `task_templates` row. Applied each time
-   *  the dialog opens; cleared on submit/cancel via the existing reset path. */
-  initialValues?: Partial<TaskFormData>;
-}) {
-  const { data: agents } = useAgents();
-  const { data: tasksData } = useTasks({ status: "pending", limit: 200 });
-  const { data: runningTasksData } = useTasks({ status: "in_progress", limit: 200 });
-  const [form, setForm] = useState<TaskFormData>(() => ({ ...emptyTaskForm, ...initialValues }));
-  const [depSearch, setDepSearch] = useState("");
-
-  // Re-seed the form whenever the dialog transitions from closed → open. We
-  // capture the latest `initialValues` via a ref so the effect doesn't fire
-  // on every parent render (where callers typically pass a fresh object
-  // literal). Reusing the same dialog instance across "To start" templates
-  // relies on this re-seed.
-  const initialValuesRef = useRef(initialValues);
-  initialValuesRef.current = initialValues;
-  useEffect(() => {
-    if (open) {
-      setForm({ ...emptyTaskForm, ...initialValuesRef.current });
-      setDepSearch("");
-    }
-  }, [open]);
-
-  const leadAgent = agents?.find((a) => a.isLead) ?? agents?.[0];
-  const selectedAgent = agents?.find((a) => a.id === (form.agentId || leadAgent?.id));
-  const setEffort = useCallback((effort: string) => setForm((f) => ({ ...f, effort })), []);
-
-  // Merge pending + running tasks for dependency picker
-  const availableDeps = useMemo(() => {
-    const all = [...(tasksData?.tasks ?? []), ...(runningTasksData?.tasks ?? [])];
-    const seen = new Set<string>();
-    return all.filter((t) => {
-      if (seen.has(t.id)) return false;
-      seen.add(t.id);
-      return true;
-    });
-  }, [tasksData, runningTasksData]);
-
-  const filteredDeps = useMemo(() => {
-    if (!depSearch) return availableDeps;
-    const q = depSearch.toLowerCase();
-    return availableDeps.filter(
-      (t) =>
-        t.task.toLowerCase().includes(q) ||
-        t.id.toLowerCase().includes(q) ||
-        t.status.toLowerCase().includes(q),
-    );
-  }, [availableDeps, depSearch]);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.task.trim()) return;
-    // Ensure agentId is set — default to lead if empty
-    const agentId = form.agentId || leadAgent?.id || "";
-    if (!agentId) return;
-    onSubmit({ ...form, agentId });
-    setForm(emptyTaskForm);
-    setDepSearch("");
-    onOpenChange(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto overflow-x-hidden">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create Task</DialogTitle>
-            <DialogDescription>Send a new task to an agent for execution.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Description *</Label>
-              <Textarea
-                placeholder="Describe the task..."
-                value={form.task}
-                onChange={(e) => setForm({ ...form, task: e.target.value })}
-                required
-                rows={3}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Agent *</Label>
-              <Select
-                value={form.agentId || leadAgent?.id || ""}
-                onValueChange={(v) => setForm({ ...form, agentId: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents?.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                      {a.isLead ? " (Lead)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Task Type</Label>
-                <Input
-                  placeholder="e.g. code, research"
-                  value={form.taskType}
-                  onChange={(e) => setForm({ ...form, taskType: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Priority (0–100)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.priority}
-                  onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Tags (comma-separated)</Label>
-              <Input
-                placeholder="feature, urgent"
-                value={form.tags}
-                onChange={(e) => setForm({ ...form, tags: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Model Tier</Label>
-              <Select
-                value={form.modelTier}
-                onValueChange={(v) => setForm({ ...form, modelTier: v === "_none" ? "" : v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Default" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">Default</SelectItem>
-                  {MODEL_TIER_OPTIONS.map((tier) => (
-                    <SelectItem key={tier.value} value={tier.value}>
-                      {tier.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <TaskEffortField
-              agent={selectedAgent}
-              tier={form.modelTier}
-              value={form.effort}
-              onChange={setEffort}
-              enabled={open}
-            />
-            <div className="space-y-2">
-              <Label>Dependencies</Label>
-              {form.dependsOn.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-1">
-                  {form.dependsOn.map((depId) => {
-                    const depTask = availableDeps.find((t) => t.id === depId);
-                    return (
-                      <Badge
-                        key={depId}
-                        variant="outline"
-                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center gap-1 cursor-pointer hover:bg-status-error/10 hover:border-status-error/30"
-                        onClick={() =>
-                          setForm({ ...form, dependsOn: form.dependsOn.filter((d) => d !== depId) })
-                        }
-                      >
-                        #{depId.slice(0, 8)}{" "}
-                        {depTask ? `— ${taskListTitle(depTask).slice(0, 20)}` : ""}
-                        <X className="h-2.5 w-2.5" />
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="space-y-1">
-                <Input
-                  placeholder="Search pending/running tasks..."
-                  value={depSearch}
-                  onChange={(e) => setDepSearch(e.target.value)}
-                />
-                {depSearch && filteredDeps.length > 0 && (
-                  <div className="max-h-32 overflow-y-auto rounded-md border border-border bg-popover">
-                    {filteredDeps.slice(0, 10).map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        disabled={form.dependsOn.includes(t.id)}
-                        onClick={() => {
-                          setForm({ ...form, dependsOn: [...form.dependsOn, t.id] });
-                          setDepSearch("");
-                        }}
-                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <StatusBadge status={t.status} />
-                        <span className="truncate flex-1">{taskListTitle(t)}</span>
-                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                          #{t.id.slice(0, 8)}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className="bg-primary hover:bg-primary/90"
-              disabled={!form.task.trim() || !(form.agentId || leadAgent?.id)}
-            >
-              Create
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 const DEFAULT_PAGE_SIZE = 100;
@@ -471,12 +194,12 @@ export default function TasksPage() {
     }
   }, [searchParams, setSearchParams, prefillId, templates]);
 
-  function handleCreateSubmit(data: TaskFormData) {
+  async function handleCreateSubmit(data: TaskFormData) {
     const tags = data.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    createTask.mutate({
+    await createTask.mutateAsync({
       task: data.task,
       agentId: data.agentId,
       routingReason: data.agentId ? "human_pinned" : undefined,
@@ -759,6 +482,7 @@ export default function TasksPage() {
         onOpenChange={setDialogOpen}
         onSubmit={handleCreateSubmit}
         initialValues={dialogInitialValues}
+        isPending={createTask.isPending}
       />
     </div>
   );

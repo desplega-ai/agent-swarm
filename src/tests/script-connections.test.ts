@@ -678,6 +678,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "264_slack_thread_cover_index.sql");
       // 266 alters script_runs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "266_script_runs_source_task.sql");
+      // 269 alters pages, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "269_pages_design_system.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

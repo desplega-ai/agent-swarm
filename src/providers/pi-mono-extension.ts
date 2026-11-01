@@ -8,6 +8,13 @@
 
 import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
+import {
+  advanceIdentityBaselines,
+  contentSha256,
+  PROFILE_FILE_IO,
+  type ProfileFileIO,
+  readIdentityBaselines,
+} from "../commands/profile-sync";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { renderGoalReminder } from "../prompts/goal-reminder";
 import { isSessionSummarySkipped } from "../utils/env-flag";
@@ -100,11 +107,16 @@ export async function fetchTaskDetails(
   }
 }
 
-/** Sync identity files (SOUL.md, IDENTITY.md, TOOLS.md) to server */
+/**
+ * Sync identity files (SOUL.md, IDENTITY.md, TOOLS.md) to server. A file whose
+ * hash still equals its baseline was not edited and is skipped, so a stale copy
+ * never overwrites a DB-side edit made during the session.
+ */
 export async function syncIdentityFilesToServer(
   config: SwarmHooksConfig,
   changeSource: "self_edit" | "session_sync" = "session_sync",
   signal?: AbortSignal,
+  io: ProfileFileIO = PROFILE_FILE_IO,
 ): Promise<void> {
   const updates: Record<string, string> = {};
   const paths: Record<string, string> = {
@@ -112,15 +124,14 @@ export async function syncIdentityFilesToServer(
     identityMd: "/workspace/IDENTITY.md",
     toolsMd: "/workspace/TOOLS.md",
   };
+  const baselines = await readIdentityBaselines(io.readFile);
 
   for (const [key, path] of Object.entries(paths)) {
     try {
-      const file = Bun.file(path);
-      if (await file.exists()) {
-        const content = await file.text();
-        if (content.trim() && content.length <= 65536) {
-          updates[key] = content;
-        }
+      const content = await io.readFile(path);
+      if (content === undefined || baselines?.[key] === contentSha256(content)) continue;
+      if (content.trim() && content.length <= 65536) {
+        updates[key] = content;
       }
     } catch {
       /* skip */
@@ -130,28 +141,27 @@ export async function syncIdentityFilesToServer(
   if (Object.keys(updates).length === 0) return;
 
   try {
-    await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
+    const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
       method: "PUT",
       headers: apiHeaders(config),
       body: JSON.stringify({ ...updates, changeSource }),
       signal,
     });
+    if (resp.ok) await advanceIdentityBaselines(updates, io);
   } catch {
     /* silently fail */
   }
 }
 
 /** Sync setup script to server */
-async function syncSetupScriptToServer(
+export async function syncSetupScriptToServer(
   config: SwarmHooksConfig,
   changeSource: "self_edit" | "session_sync" = "session_sync",
+  io: ProfileFileIO = PROFILE_FILE_IO,
 ): Promise<void> {
   try {
-    const file = Bun.file("/workspace/start-up.sh");
-    if (!(await file.exists())) return;
-
-    const raw = await file.text();
-    if (!raw.trim()) return;
+    const raw = await io.readFile("/workspace/start-up.sh");
+    if (!raw?.trim()) return;
 
     const markerStart = "# === Agent-managed setup (from DB) ===";
     const markerEnd = "# === End agent-managed setup ===";
@@ -166,12 +176,17 @@ async function syncSetupScriptToServer(
     }
 
     if (!content || content.length > 65536) return;
+    const baselines = await readIdentityBaselines(io.readFile);
+    if (baselines?.setupScript === contentSha256(content)) return;
 
-    await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
+    const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
       method: "PUT",
       headers: apiHeaders(config),
       body: JSON.stringify({ setupScript: content, changeSource }),
     });
+    if (resp.ok) {
+      await advanceIdentityBaselines({ setupScript: content }, io);
+    }
   } catch {
     /* silently fail */
   }

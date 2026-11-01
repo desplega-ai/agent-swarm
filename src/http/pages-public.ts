@@ -25,15 +25,26 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getPage, incrementPageViewCount } from "../be/db";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
+import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
 import {
   feedbackKeyGuardScript,
   feedbackOverlayScripts,
   isPageFeedbackRequested,
 } from "../pages/feedback-overlay";
+import {
+  buildPageHeadV2,
+  PAGE_HEAD_V1,
+  PAGE_MODE_PARAM,
+  PAGE_THEME_PARAM,
+} from "../pages/page-head";
+import { resolvePageTheme } from "../themes/page-theme";
 import { type Page, PageSchema } from "../types";
-import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
-import { getNodeEnv } from "../utils/node-env";
-import { extractAndVerifyCookie, pageSessionSetCookies } from "../utils/page-session";
+import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
+import {
+  extractAndVerifyCookie,
+  isLocalDevPageRequest,
+  pageSessionSetCookies,
+} from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -95,96 +106,76 @@ const publicPageJsonRoute = route({
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Inject the BROWSER_SDK script tag into an HTML body. Insert immediately
- * after `<head>` if present; otherwise prepend so partial fragments still get
- * the SDK. The script is wrapped in `<script>...</script>` with no token
- * injection (the SDK relies on server-side header injection at the
- * `/@swarm/api/*` proxy boundary).
- *
- * Also injects `<base target="_blank">` so links inside the iframed page
- * open in the parent window — avoids the user being trapped inside an
- * iframe by a misbehaving page.
+ * The `<head>` defaults for a page's design version (`src/pages/page-head.ts`).
+ * Version 1 is the frozen original head and ignores the viewer params. Version
+ * 2 resolves the theme: the page `theme`, else the viewer's `__swarm-theme`
+ * preset, else Hive, plus the page `themeTokens` on top. It is dark only for
+ * `__swarm-mode=dark`, and a `?print=1` export is always light. A body with
+ * `COLOR_LITERAL_THRESHOLD` or more hardcoded colors also stays light: its
+ * hardcoded light surfaces would get the dark-mode text color.
  */
-/**
- * Default `<head>` injection: `<base>` so links escape the iframe, Tailwind
- * Play CDN so agent pages can use utility classes out of the box, Space
- * Grotesk / Space Mono fonts to match the swarm SPA, a small reset that
- * makes pages theme-aware (light by default) so an agent who writes zero CSS
- * still gets a presentable page, and finally the Browser SDK so
- * `window.swarmSdk` works.
- *
- * Agent-provided styles can override these defaults. Tailwind utilities stay
- * available, but its Preflight reset is disabled to preserve browser heading,
- * margin, and list styles.
- */
-const PAGE_HEAD_DEFAULTS = `<base target="_blank">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  if (window.tailwind) {
-    window.tailwind.config = { corePlugins: { preflight: false } };
-  }
-</script>
-<style>
-  *, ::before, ::after { box-sizing: border-box; border: 0 solid #e5e7eb; }
-  hr { border-top-width: 1px; }
-  img, video { display: block; max-width: 100%; height: auto; }
-  button, input, optgroup, select, textarea, ::file-selector-button { font: inherit; }
-  :root {
-    color-scheme: light;
-    --swarm-bg: #fbfbfa;
-    --swarm-card: #ffffff;
-    --swarm-border: #e5e7eb;
-    --swarm-text: #111827;
-    --swarm-muted: #6b7280;
-    --swarm-primary: #3b82f6;
-  }
-  html, body { background: var(--swarm-bg); color: var(--swarm-text); }
-  body {
-    font-family: "Space Grotesk", system-ui, sans-serif;
-    margin: 0;
-    padding: 24px;
-    line-height: 1.5;
-  }
-  code, pre, kbd, samp { font-family: "Space Mono", ui-monospace, monospace; }
-  a { color: var(--swarm-primary); }
-  ::selection { background: var(--swarm-primary); color: #fff; }
-  @media print {
-    /* Override theme variables so built-in primitives (swarm-diff, swarm-card)
-       that read var(--swarm-card) / var(--swarm-border) etc. inline-styled
-       backgrounds also flip to light. Without this, diff cards stay dark navy
-       on print. */
-    :root {
-      --swarm-bg: #ffffff;
-      --swarm-card: #ffffff;
-      --swarm-border: #cccccc;
-      --swarm-text: #000000;
-      --swarm-muted: #555555;
-    }
-    html, body { background: white !important; color: black !important; }
-    a { color: black !important; text-decoration: underline; }
-    /* Hide any swarm chrome the agent (or built-in primitives) tagged with
-       .no-print. Use this class on annotation badges, jump-list nav, anything
-       that shouldn't appear in the PDF export. */
-    .no-print { display: none !important; }
-    /* Avoid page-break inside cards / diff blocks. */
-    .swarm-card, swarm-diff { break-inside: avoid; }
-  }
-</style>`;
+function pageHead(page: Page, queryParams: URLSearchParams, wantsPrint: boolean): string {
+  if (page.designVersion === 1) return PAGE_HEAD_V1;
+  const theme = resolvePageTheme({
+    pageTheme: page.theme,
+    viewerTheme: queryParams.get(PAGE_THEME_PARAM),
+    overrides: page.themeTokens,
+  });
+  const dark =
+    !wantsPrint &&
+    queryParams.get(PAGE_MODE_PARAM) === "dark" &&
+    countColorLiterals(page.body) < COLOR_LITERAL_THRESHOLD;
+  return buildPageHeadV2({ theme, mode: dark ? "dark" : "light" });
+}
 
-function injectBrowserSdk(html: string, headFirst = ""): string {
-  const injection = `${headFirst}${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
-  // Use the first occurrence of `<head>` (case-insensitive). A page that
-  // doesn't have a `<head>` element (raw fragment) still gets the SDK at the
-  // front of the document.
-  const headOpenMatch = html.match(/<head\b[^>]*>/i);
-  if (headOpenMatch) {
-    const idx = headOpenMatch.index! + headOpenMatch[0].length;
-    return html.slice(0, idx) + injection + html.slice(idx);
-  }
-  return injection + html;
+/** A doctype at the start of a body (`\s` also matches a BOM). */
+const LEADING_DOCTYPE_RE = /^\s*<!doctype\b[^>]*>/i;
+/** The `<html ...>` start tag right after a leading doctype. */
+const LEADING_HTML_TAG_RE = /^\s*<!doctype\b[^>]*>\s*<html\b[^>]*>/i;
+
+/**
+ * Inject the head defaults and the BROWSER_SDK script tag into an HTML body,
+ * right after the first `<head ...>` tag. The script is wrapped in
+ * `<script>...</script>` with no token injection (the SDK relies on
+ * server-side header injection at the `/@swarm/api/*` proxy boundary).
+ *
+ * A body without `<head>` (a raw fragment) still gets the SDK:
+ * - Design version 1 prepends it, as it always did.
+ * - Design version 2 (`standardsMode`) keeps the browser in standards mode,
+ *   because its defaults are written for it. It prepends `<!doctype html>`
+ *   when the body has no doctype, then injects after `<html ...>`, else after
+ *   the doctype. Content before the doctype puts the page in quirks mode.
+ *
+ * Both head versions start with `<base target="_blank">`, so links inside the
+ * iframed page open in a new tab: a misbehaving page cannot trap the user
+ * inside the iframe.
+ */
+function injectBrowserSdk(
+  html: string,
+  { head, headFirst, standardsMode }: { head: string; headFirst: string; standardsMode: boolean },
+): string {
+  const injection = `${headFirst}${head}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
+  const doc = standardsMode && !LEADING_DOCTYPE_RE.test(html) ? `<!doctype html>${html}` : html;
+  // The first `<head>` (case-insensitive) wins.
+  const leading = standardsMode
+    ? (LEADING_HTML_TAG_RE.exec(doc) ?? LEADING_DOCTYPE_RE.exec(doc))
+    : null;
+  const idx = headTagEnd(doc) ?? (leading ? leading.index + leading[0].length : null);
+  if (idx === null) return injection + doc;
+  return doc.slice(0, idx) + injection + doc.slice(idx);
+}
+
+/**
+ * End offset of the first `<head ...>` start tag, or null. It finds the same
+ * tag as `/<head\b[^>]*>/i` in linear time. That regex rescans the rest of the
+ * body for every `<head` that has no `>` after it, so a planted body could
+ * block the API on each view.
+ */
+function headTagEnd(doc: string): number | null {
+  const start = doc.search(/<head\b/i);
+  if (start === -1) return null;
+  const close = doc.indexOf(">", start);
+  return close === -1 ? null : close + 1;
 }
 
 /**
@@ -350,24 +341,16 @@ function buildCsp(page: Page): string {
   // `frame-ancestors` lists every origin allowed to iframe `/p/:id`. We must
   // include the SPA origin(s). Configured app URLs may be comma-separated so
   // portless dev (`https://ui.swarm.localhost`), a Vite port (`http://localhost:5274`),
-  // and a tunnel/staging origin can all coexist. Additionally, in non-production
-  // we always allow `http://localhost:*` and `https://*.localhost` so swapping
-  // between Vite ports / portless dev doesn't require restarting the API.
+  // and a tunnel/staging origin can all coexist. Under an explicit
+  // development/test NODE_ENV we also allow the local Vite ports and
+  // `*.localhost` so swapping between them doesn't require restarting the API.
+  // Unset NODE_ENV (every deployed image) gets no localhost ancestors.
   const configured = getConfiguredAppUrls();
-  const devFallbacks =
-    getNodeEnv() === "production"
-      ? []
-      : [
-          "http://localhost:5274",
-          "http://localhost:5175",
-          "http://127.0.0.1:5274",
-          "http://127.0.0.1:5175",
-          "https://*.localhost",
-          "http://*.localhost",
-        ];
+  const devFallbacks = getLocalDevAppOrigins();
   const embedders = page.authMode === "public" ? getPageFrameAncestors() : [];
   const ancestors = Array.from(new Set([...configured, ...devFallbacks, ...embedders]));
-  // Allow Tailwind Play CDN (`cdn.tailwindcss.com`) for scripts, Google
+  // Allow Tailwind Play CDN (`cdn.tailwindcss.com`, design version 1; the
+  // pinned v4 build of design version 2 comes from jsdelivr) for scripts, Google
   // Fonts (`fonts.googleapis.com` stylesheets + `fonts.gstatic.com` font
   // files) for the swarm default typography, and same-origin /@swarm/api/*
   // for the Browser SDK. Inline scripts/styles remain allowed so
@@ -471,29 +454,6 @@ function extractPasswordCandidate(
   return decoded.slice(colonIdx + 1);
 }
 
-/**
- * Detect whether the originating request is from a "dev" / localhost context,
- * mirroring the same logic used by the bearer-launch endpoint in
- * `src/http/pages.ts`. Used to decide whether to issue cookies with
- * `SameSite=Lax` (dev) vs `SameSite=None; Secure` (prod).
- */
-function isLocalhostRequest(req: IncomingMessage): boolean {
-  if (getNodeEnv() === "production") return false;
-  // Only emit `SameSite=Lax` (no Secure) when the request comes from the
-  // SAME http://localhost origin as the API — Lax cookies don't travel on
-  // cross-site fetches, so portless `*.localhost` setups (SPA on https
-  // talking to the API on http) must use `SameSite=None; Secure`. Chrome
-  // treats localhost as a secure origin so Secure is honored on HTTP.
-  const origin = (req.headers.origin as string | undefined) ?? "";
-  if (origin === "") {
-    const rawHost = req.headers.host;
-    const host = Array.isArray(rawHost) ? rawHost[0] : rawHost;
-    if (!host) return true; // best-effort dev default
-    return host.startsWith("localhost") || host.startsWith("127.0.0.1");
-  }
-  return origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1");
-}
-
 // ─── Handler ────────────────────────────────────────────────────────────────
 
 export async function handlePagesPublic(
@@ -562,7 +522,7 @@ export async function handlePagesPublic(
         }
         if (matched) {
           inlineSetCookie = await pageSessionSetCookies(req, page.id, {
-            dev: isLocalhostRequest(req),
+            dev: isLocalDevPageRequest(req),
           });
           // fall through to the regular 200 path below.
         } else {
@@ -669,7 +629,11 @@ export async function handlePagesPublic(
   // The feedback key guard goes first in <head> so it runs before page scripts.
   const feedback = isPageFeedbackRequested(queryParams);
   const html =
-    injectBrowserSdk(page.body, feedback ? feedbackKeyGuardScript() : "") +
+    injectBrowserSdk(page.body, {
+      head: pageHead(page, queryParams, wantsPrint),
+      headFirst: feedback ? feedbackKeyGuardScript() : "",
+      standardsMode: page.designVersion !== 1,
+    }) +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
     (feedback ? feedbackOverlayScripts(page.id) : "");
   const headers: Record<string, string | string[]> = {

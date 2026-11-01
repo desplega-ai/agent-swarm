@@ -810,7 +810,14 @@ DB-backed pages let agents publish static reports, dashboards, and JSON action s
 
 Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted into the version history and the row is updated.
 
-HTML pages receive fonts, basic layout styles, and Tailwind utilities when served. Tailwind Preflight is disabled so it does not reset authored headings, spacing, or lists. These defaults apply to existing pages without regenerating their stored HTML. A page can still use explicit Tailwind utilities to override individual styles.
+HTML pages use the swarm design system when `designVersion` is 2, the default for new pages. Each served page gets:
+
+- The dashboard theme tokens as CSS variables, such as `var(--color-primary)` and `var(--color-muted-foreground)`.
+- Element defaults, so a page with no CSS still looks finished.
+- The `swarm-*` primitive classes, such as `swarm-panel`, `swarm-metric`, `swarm-badge`, and `swarm-table`.
+- Tailwind v4 utilities that map to the tokens, such as `bg-card` and `text-muted-foreground`. Tailwind Preflight stays off.
+
+Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `themeTokens` takes a token map, or a CSS variable block with `format: "css"` (shadcn, tweakcn, or a Tailwind v4 `@theme` block). Inside the dashboard, a version 2 page follows the viewer's light or dark mode. It also follows the viewer's preset when the page sets no `theme`. Use tokens, not hardcoded colors. Print is always light. Pages created before version 2 keep `designVersion` 1: the old head with the Tailwind v3 Play CDN and the `--swarm-*` tokens. Pass `designVersion: 2` when you rewrite one.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -823,6 +830,9 @@ HTML pages receive fonts, basic layout styles, and Tailwind utilities when serve
 | `description` | string | No | Optional short description, used in listings + OG-tag unfurl |
 | `needsCredentials` | array | No | Declared credential needs for JSON pages (reserved for follow-up) |
 | `key` | string | No | Logical asset namespace for the page |
+| `theme` | string | No | Theme preset id, such as `hive`, `paper`, or `github`. An unknown id is rejected. `null` clears it. An upsert that omits it keeps the stored value |
+| `themeTokens` | object | No | Token overrides: `light` and `dark` maps of token names to values, or `format: "css"` with a `css` variable block. Stored normalized. Names outside the token contract come back in `ignoredTokens`. `null` clears them |
+| `designVersion` | number | No | `2` (the default for new pages) uses the design system. `1` keeps the old head. An upsert that omits it keeps the stored value |
 
 Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
 

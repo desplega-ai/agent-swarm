@@ -11,8 +11,8 @@
  * with a "Working for" timer, and a finished run folds behind "Worked for".
  * Rows come from `buildTranscriptRows` (transcript-rows.ts).
  *
- * A steering message is the person's message too, right-aligned, with a
- * "Queued" mark until the agent gets it. A task this one started links to
+ * A steering message shows its sender and a receipt for its lifecycle.
+ * A task this one started links to
  * its own transcript: a delegation is one line (agent, status, duration), a
  * person's follow-up is their message with a status line, and a deferral's
  * wake-up, a resume or the result sent to the lead is one quiet line. The
@@ -34,7 +34,6 @@ import {
   Check,
   ChevronRight,
   CircleDot,
-  Clock,
   FileText,
   Globe,
   type LucideIcon,
@@ -56,7 +55,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentTask } from "@/api/types";
+import type { AgentTask, SteeringMessage } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -65,6 +64,9 @@ import { PromptContext } from "@/components/shared/prompt-context";
 import { RelativeTime } from "@/components/shared/relative-time";
 import type { ToolKind } from "@/components/shared/session-log-messages";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { steeringSenderLabel } from "@/components/steering/steering-message-chips";
+import { SteeringReceipt } from "@/components/steering/steering-receipt";
 import { Button } from "@/components/ui/button";
 import {
   Trace,
@@ -76,6 +78,7 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useRevealText } from "@/hooks/use-reveal-text";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { statusLabel } from "@/lib/status-labels";
@@ -241,29 +244,47 @@ function TranscriptRowView({ row, live }: { row: TranscriptRow; live: boolean })
     case "assistant":
       return <AssistantMessage text={row.text} arrived={arrived} />;
     case "steer":
-      return (
-        <TranscriptUserMessage
-          className={className}
-          text={row.message.body}
-          label="Steering message"
-          footer={
-            row.message.status === "pending" ? (
-              <span
-                data-slot="transcript-queued"
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-              >
-                <Clock aria-hidden className="size-3" />
-                Queued
-              </span>
-            ) : null
-          }
-        />
-      );
+      return <SteeringBubble message={row.message} className={className} />;
     case "child":
       return <ChildRow task={row.task} agentName={row.agentName} className={className} />;
     case "work":
       return <WorkRow entries={row.entries} live={live} className={className} />;
   }
+}
+
+/** The sender stays beside a steer as its receipt changes through the lifecycle. */
+function SteeringBubble({ message, className }: { message: SteeringMessage; className?: string }) {
+  const { userId } = useCurrentUser();
+  const { data: users } = useUsers();
+  const senderId = message.createdByUserId ?? message.createdByAgentId ?? message.createdByKind;
+  const name =
+    (message.createdByKind === "user"
+      ? users?.find((user) => user.id === message.createdByUserId)?.name
+      : undefined) ?? steeringSenderLabel(message);
+  const mine = message.createdByKind === "user" && !!userId && message.createdByUserId === userId;
+  return (
+    <TranscriptUserMessage
+      text={message.body}
+      label="Steering message"
+      className={className}
+      align={mine ? "end" : "start"}
+      avatar={
+        message.createdByKind === "agent" && message.createdByAgentId ? (
+          <AgentAvatar agentId={message.createdByAgentId} agentName={name} size="sm" />
+        ) : (
+          <UserAvatar id={senderId} name={name} />
+        )
+      }
+      footer={
+        <>
+          {!mine ? <span className="max-w-32 truncate text-meta">{name} ·</span> : null}
+          {mine ? <SteeringReceipt message={message} /> : null}
+          <RelativeTime at={message.createdAt} className="font-mono text-meta uppercase" />
+          {!mine ? <SteeringReceipt message={message} /> : null}
+        </>
+      }
+    />
+  );
 }
 
 /**
@@ -508,15 +529,19 @@ export function TranscriptUserMessage({
   footer,
   label = "Task prompt",
   className,
+  avatar,
+  align = "end",
 }: {
   text: string;
   /** Above the text inside the bubble (a Slack thread's context). */
   header?: ReactNode;
-  /** Under the bubble, right-aligned (a steering message's "Queued"). */
+  /** Under the bubble, beside the message actions. */
   footer?: ReactNode;
   /** The section's accessible name. */
   label?: string;
   className?: string;
+  avatar?: ReactNode;
+  align?: "start" | "end";
 }) {
   const long = text.length > LONG_MESSAGE_CHARS || text.split("\n").length > LONG_MESSAGE_LINES;
   const [expanded, setExpanded] = useState(false);
@@ -526,35 +551,57 @@ export function TranscriptUserMessage({
     <section
       aria-label={label}
       data-slot="transcript-user"
-      className={cn("group/transcript-message flex min-w-0 flex-col items-end gap-1", className)}
+      className={cn(
+        "group/transcript-message flex min-w-0 items-start gap-2.5",
+        align === "end" && "flex-row-reverse",
+        className,
+      )}
     >
+      {avatar ? <div className="mt-2 shrink-0">{avatar}</div> : null}
       <div
         className={cn(
-          "relative max-w-[80%] min-w-0 overflow-hidden rounded-2xl rounded-tr-sm bg-muted px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
-          clipped && "max-h-44 [mask-image:linear-gradient(to_bottom,black_60%,transparent)]",
+          "flex min-w-0 flex-col gap-1.5",
+          avatar ? "max-w-[85%]" : "max-w-[80%]",
+          align === "end" && "items-end",
         )}
       >
-        {header}
-        <MessageText text={text} raw={raw} />
+        <div
+          className={cn(
+            "relative min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
+            align === "end"
+              ? "rounded-tr-sm bg-muted"
+              : "rounded-tl-sm border border-border bg-card",
+            clipped && "max-h-44 [mask-image:linear-gradient(to_bottom,black_60%,transparent)]",
+          )}
+        >
+          {header}
+          <MessageText text={text} raw={raw} />
+        </div>
+        <div
+          className={cn(
+            "flex max-w-full min-w-0 flex-wrap items-center gap-1.5 text-muted-foreground",
+            align === "end" && "justify-end",
+          )}
+        >
+          {align === "start" ? footer : null}
+          {long ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              className="hit-area text-xs text-muted-foreground hover:text-foreground"
+            >
+              {expanded ? "Show less" : "Show full message"}
+            </button>
+          ) : null}
+          {text.trim() ? (
+            <>
+              <MessageRawToggle raw={raw} onRawChange={setRaw} hover group="transcript-message" />
+              <MessageCopyButton text={text} hover group="transcript-message" />
+            </>
+          ) : null}
+          {align === "end" ? footer : null}
+        </div>
       </div>
-      <div className="flex min-w-0 items-center gap-2">
-        {long ? (
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded)}
-            className="hit-area text-xs text-muted-foreground hover:text-foreground"
-          >
-            {expanded ? "Show less" : "Show full message"}
-          </button>
-        ) : null}
-        {text.trim() ? (
-          <>
-            <MessageRawToggle raw={raw} onRawChange={setRaw} hover group="transcript-message" />
-            <MessageCopyButton text={text} hover group="transcript-message" />
-          </>
-        ) : null}
-      </div>
-      {footer}
     </section>
   );
 }

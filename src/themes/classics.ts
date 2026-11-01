@@ -1,20 +1,20 @@
 /**
- * Classic-theme presets — github / vscode / material / solarized / tokyo /
+ * Classic-theme presets: github / vscode / material / solarized / tokyo /
  * monokai / gruvbox mapped onto the dashboard token slots (Taras-approved
  * board, 2026-08-06). These are the first presets to override the
  * `--color-status-*` tokens: a classic theme's identity includes its status
- * palette, so the "statuses are never themed" rule is relaxed HERE ONLY —
- * hue semantics stay fixed (success=green, error=red, active=amber/busy,
+ * palette, so the "statuses are never themed" rule is relaxed HERE ONLY.
+ * Hue semantics stay fixed (success=green, error=red, active=amber/busy,
  * info=blue, pending=yellow, warning=orange, paused=violet, neutral=gray).
  * Narrow palettes (solarized, monokai) deliberately share stops between
  * active/pending/warning. Catppuccin (Latte/Mocha) was added later, outside
  * that board.
  *
  * Hand-editable; originally generated from the board data. Same invariants as
- * themes.ts: light/dark key symmetry, destructive/action tokens untouched.
+ * presets.ts: light/dark key symmetry, destructive/action tokens untouched.
  */
 
-import type { ThemePreset } from "./themes";
+import type { ThemePreset } from "./presets";
 
 export const CLASSIC_THEME_PRESETS: ThemePreset[] = [
   {
@@ -366,7 +366,7 @@ export const CLASSIC_THEME_PRESETS: ThemePreset[] = [
     id: "solarized",
     name: "Solarized",
     description:
-      "Ethan Schoonover's palette; accents are mode-invariant by design (narrow palette — active/pending/warning share stops).",
+      "Ethan Schoonover's palette; accents are mode-invariant by design (narrow palette: active/pending/warning share stops).",
     accent: { light: "oklch(0.615 0.139 244.9)", dark: "oklch(0.615 0.139 244.9)" },
     field: { light: "oklch(0.974 0.026 90.1)", dark: "oklch(0.267 0.049 219.8)" },
     vars: {

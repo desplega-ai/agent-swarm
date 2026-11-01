@@ -26,6 +26,7 @@ export interface CodexAppServerOptions {
   env: Readonly<Record<string, string | undefined>>;
   requestTimeoutMs?: number;
   onStderr?: (line: string) => void;
+  configOverrides?: Readonly<Record<string, CodexConfigValue | undefined>>;
 }
 
 type PendingRequest = {
@@ -51,6 +52,25 @@ export class CodexAppServerRpcError extends Error {
     this.code = error.code;
     this.data = error.data;
   }
+}
+
+/** `-c key=<TOML value>` pairs, one per top-level key; tables become inline tables. */
+export function configOverrideArgs(
+  overrides: Readonly<Record<string, CodexConfigValue | undefined>> = {},
+): string[] {
+  return Object.entries(overrides).flatMap(([key, value]) =>
+    value === undefined ? [] : ["-c", `${key}=${tomlValue(value)}`],
+  );
+}
+
+function tomlValue(value: CodexConfigValue): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `[${value.map(tomlValue).join(", ")}]`;
+  const fields = Object.entries(value as Record<string, CodexConfigValue | undefined>).flatMap(
+    ([key, field]) => (field === undefined ? [] : [`${JSON.stringify(key)} = ${tomlValue(field)}`]),
+  );
+  return `{ ${fields.join(", ")} }`;
 }
 
 /** Thin JSONL client for one `codex app-server --listen stdio://` process. */
@@ -79,7 +99,13 @@ export class CodexAppServer {
     this.onStderr = options.onStderr;
 
     const codexPath = options.codexPath ?? resolveCodexPath(options.env.PATH);
-    const command = [codexPath, "app-server", "--listen", "stdio://"];
+    const command = [
+      codexPath,
+      ...configOverrideArgs(options.configOverrides),
+      "app-server",
+      "--listen",
+      "stdio://",
+    ];
 
     const env = Object.fromEntries(
       Object.entries(options.env).filter(

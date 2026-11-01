@@ -252,7 +252,7 @@ describe("/api/pages/:id/launch", () => {
     expect(cookie!).toContain("HttpOnly");
     expect(cookie!).toContain("Path=/");
     expect(cookie!).toContain("Max-Age=3600");
-    // In dev (NODE_ENV != production) the cookie should be SameSite=Lax sans Secure.
+    // Under bun test (NODE_ENV=test) from http://localhost the cookie should be SameSite=Lax sans Secure.
     expect(cookie!).toContain("SameSite=Lax");
     expect(cookie!).not.toMatch(/\bSecure\b/);
     const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(cookie!)?.[1];

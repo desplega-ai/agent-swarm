@@ -95,7 +95,8 @@ beforeAll(async () => {
       return texts.map(() => null);
     },
   });
-  for (const name of ["dreaming-gather", "dreaming-reports-check"]) {
+  // swarm-update-check: the seeded daily-swarm-update-check schedule targets it.
+  for (const name of ["dreaming-gather", "dreaming-reports-check", "swarm-update-check"]) {
     await upsertScriptByName({
       name,
       scope: "global",

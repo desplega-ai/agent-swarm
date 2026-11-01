@@ -1023,6 +1023,14 @@ export async function getAllTasks(
     params.push(filters.requestedByUserId);
   }
 
+  // Without selective filters, tiny LIMITs can make SQLite choose a full
+  // scan and sort when ANALYZE statistics are absent. Keep filtered pages
+  // planner-controlled so they can use their selective indexes.
+  const pageIndex =
+    conditions.length === 0 && !filters?.readableBy && filters?.orderBy !== "createdAt"
+      ? "INDEXED BY idx_agent_tasks_last_updated"
+      : "";
+
   // Exclude system/heartbeat tasks by default. The flag is still called
   // `includeHeartbeat` for backward compat with existing API callers, but we
   // also gate boot-triage + heartbeat-checklist behind it since those are
@@ -1056,7 +1064,7 @@ export async function getAllTasks(
   // lastUpdatedAt index for a full scan. The outer sort adds it only to fix
   // the order of exact ties inside the page.
   const query = `WITH page AS (
-      SELECT rowid AS rid FROM agent_tasks ${whereClause}
+      SELECT rowid AS rid FROM agent_tasks ${pageIndex} ${whereClause}
       ORDER BY ${orderColumns.join(", ")} LIMIT ${limit} OFFSET ${offset}
     )
     SELECT ${LIST_COLUMNS[fields]},

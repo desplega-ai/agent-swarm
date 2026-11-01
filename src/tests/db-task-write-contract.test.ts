@@ -589,6 +589,7 @@ value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
+value:setTaskTitleIfUnset
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
@@ -659,6 +660,7 @@ value:pauseTask
 value:recordTaskProviderIfUnset
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
+value:setTaskTitleIfUnset
 value:settleSupersededTaskDependents
 value:startTask
 value:supersedeTask
