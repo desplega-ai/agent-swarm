@@ -106,6 +106,11 @@ export const PERMISSIONS = {
     description: "Join the presence room of a session the principal can view.",
     namespace: "task",
   },
+  "session.read.all": {
+    description:
+      "Opt in to read every user's tasks and sessions (the dashboard's All users scope). Read-only: writes and steering still need the principal's own access.",
+    namespace: "task",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",

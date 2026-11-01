@@ -2,6 +2,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
 import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
+import { allUsersScopeEnabled, SESSION_SCOPE_HEADER } from "../lib/all-users-scope";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
 import { type AccessConnection, noteUnauthorized } from "./access-rejection";
@@ -485,6 +486,11 @@ class ApiClient {
     const dashboardUserId = dashboardUserIdFor(config);
     if (dashboardUserId) {
       headers[DASHBOARD_USER_HEADER] = dashboardUserId;
+    }
+    // The admin "All users" read scope. The server ignores it for anyone it
+    // does not let read every session.
+    if (allUsersScopeEnabled(config)) {
+      headers[SESSION_SCOPE_HEADER] = "all";
     }
     return headers;
   }

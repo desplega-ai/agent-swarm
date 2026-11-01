@@ -5,8 +5,13 @@
  * or everyone.
  * `mine`: owned by the viewer. `shared`: owned by someone else and shared with
  * the viewer or everyone. A null `userId` (a guest page session) owns nothing.
+ * `readAll` (the all-users read scope) lifts the `all` filter: every root.
  */
-export type SessionViewer = { userId: string | null; scope: "all" | "mine" | "shared" };
+export type SessionViewer = {
+  userId: string | null;
+  scope: "all" | "mine" | "shared";
+  readAll?: boolean;
+};
 
 /** SQL condition + params restricting root tasks (alias `r`) to what `viewer` may open. */
 export function sessionViewerCondition(viewer: SessionViewer): {
@@ -16,6 +21,7 @@ export function sessionViewerCondition(viewer: SessionViewer): {
   // Uncorrelated, so SQLite builds the shared set once instead of probing per root.
   const shared = `r.id IN (SELECT s.rootTaskId FROM session_shares s
       WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
+  if (viewer.scope === "all" && viewer.readAll) return { sql: "1", params: [] };
   if (viewer.scope === "mine") {
     return { sql: "r.requestedByUserId = ?", params: [viewer.userId] };
   }
@@ -47,17 +53,27 @@ const HUMAN_SYSTEM_TASK_TYPES = ["kapso-inbound"] as const;
  * sessions shared with this user or everyone. A list filter only: it narrows
  * what a list shows and never changes who can open a session.
  */
-export function sessionMineCondition(userId: string | null): {
+export function sessionMineCondition(
+  userId: string | null,
+  readAll?: boolean,
+): {
   sql: string;
   params: (string | null)[];
 } {
   const machine = MACHINE_SESSION_SOURCES.map(() => "?").join(",");
   const humanSystem = HUMAN_SYSTEM_TASK_TYPES.map(() => "?").join(",");
-  return {
-    sql: `((r.requestedByUserId = ? AND (r.source NOT IN (${machine})
-        OR (r.source = 'system' AND r.taskType IN (${humanSystem}))))
-      OR r.id IN (SELECT s.rootTaskId FROM session_shares s
-        WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?)))`,
-    params: [userId, ...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES, userId],
-  };
+  const humanStarted = `(r.source NOT IN (${machine})
+        OR (r.source = 'system' AND r.taskType IN (${humanSystem})))`;
+  const humanParams = [...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES];
+  const shared = `r.id IN (SELECT s.rootTaskId FROM session_shares s
+        WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
+  // The all-users read scope widens the owner check to every user's
+  // human-started roots. Sessions shared with the viewer stay in Mine, so a
+  // shared machine-started root never drops out when the scope turns on.
+  return readAll
+    ? { sql: `(${humanStarted} OR ${shared})`, params: [...humanParams, userId] }
+    : {
+        sql: `((r.requestedByUserId = ? AND ${humanStarted}) OR ${shared})`,
+        params: [userId, ...humanParams, userId],
+      };
 }

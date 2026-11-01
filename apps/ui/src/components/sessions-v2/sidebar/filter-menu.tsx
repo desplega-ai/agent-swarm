@@ -7,6 +7,7 @@
  */
 
 import { ListFilter } from "lucide-react";
+import { useAllUsersScope } from "@/api/hooks/use-all-users-scope";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +53,8 @@ export function FilterMenu({
 }) {
   const [show, setShow] = useSessionsShow();
   const [shown, setShown] = useSessionsShownSources();
-  const active = sessionsFilterActive(canShow ? show : "mine", shown);
+  const allUsers = useAllUsersScope();
+  const active = sessionsFilterActive(canShow ? show : "mine", shown) || allUsers.enabled;
   // A shown source with no sessions still has a row, so it can be turned off.
   const rows = [
     ...sources,
@@ -110,6 +112,20 @@ export function FilterMenu({
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+            {allUsers.available ? (
+              <DropdownMenuCheckboxItem
+                checked={allUsers.enabled}
+                onCheckedChange={allUsers.setEnabled}
+                onSelect={keepOpen}
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span>All users</span>
+                  <span className="text-xs text-muted-foreground">
+                    Admins: Mine and All for every user, read-only
+                  </span>
+                </span>
+              </DropdownMenuCheckboxItem>
+            ) : null}
           </>
         ) : null}
         {rows.length > 0 ? (
@@ -143,6 +159,7 @@ export function FilterMenu({
               onSelect={() => {
                 setShow("mine");
                 setShown(DEFAULT_SHOWN_SOURCES);
+                if (allUsers.enabled) allUsers.setEnabled(false);
               }}
             >
               Reset filter
