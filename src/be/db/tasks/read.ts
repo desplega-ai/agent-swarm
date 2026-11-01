@@ -20,6 +20,7 @@ import {
   RoutingAffinitySchema,
   TERMINAL_TASK_STATUSES,
 } from "../../../types";
+import { normalizeOutputSchema } from "../../../utils/output-schema";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
@@ -359,7 +360,11 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
-    outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    // A stored '{}' (legacy rows, defer-task resumes that copied it) means no
+    // schema: expose it as absent so no harness or validator treats it as one.
+    outputSchema: row.outputSchema
+      ? normalizeOutputSchema(JSON.parse(row.outputSchema))
+      : undefined,
     followUpConfig,
     contextKey: row.contextKey ?? undefined,
     compactionCount: row.compactionCount ?? undefined,
