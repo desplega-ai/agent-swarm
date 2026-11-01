@@ -61196,6 +61196,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Target user not found",
             "content": {
@@ -61671,6 +61681,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User not found",
             "content": {
@@ -61910,6 +61930,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62196,6 +62226,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62888,6 +62928,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Target or source user not found",
             "content": {
@@ -63111,6 +63161,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {

@@ -15,13 +15,12 @@ import {
   LastAdminError,
   listRbacRoles,
   listUserRoles,
-  OPERATOR_GRANTED_VERBS,
+  OperatorGrantedRoleError,
   PRIMARY_ROLE_NAMES,
   setUserRoles,
 } from "../be/rbac-roles";
 import { recordIdentityEvent } from "../be/users";
 import { can, isRbacEnabled } from "../rbac";
-import type { PermissionVerb } from "../rbac/permissions";
 import { RbacRoleSchema, UserRbacRolesSchema } from "../types";
 import { getOperatorActor } from "./operator-actor";
 import { agentFirstPrincipal, authUserId, rejectGuest, requireAuthKind } from "./request-principal";
@@ -80,24 +79,6 @@ async function composeRoles(userId: string) {
   const [catalog, held] = await Promise.all([listRbacRoles(), listUserRoles(userId)]);
   const names = new Set(held.map((role) => role.name));
   return { userId, roles: catalog.filter((role) => names.has(role.name)) };
-}
-
-/**
- * Roles in `requested` that the user does not hold yet and that carry an
- * operator-granted verb. Keeping or removing such a role stays open to any
- * role manager; only adding one needs the operator key.
- */
-async function operatorOnlyRolesAdded(userId: string, requested: string[]): Promise<string[]> {
-  const [catalog, held] = await Promise.all([listRbacRoles(), listUserRoles(userId)]);
-  const heldNames = new Set(held.map((role) => role.name));
-  return catalog
-    .filter(
-      (role) =>
-        requested.includes(role.name) &&
-        !heldNames.has(role.name) &&
-        role.verbs.some((verb) => OPERATOR_GRANTED_VERBS.includes(verb as PermissionVerb)),
-    )
-    .map((role) => role.name);
 }
 
 /** Operator or user only; agents never change human roles, even with the shared key. */
@@ -168,14 +149,9 @@ export async function handleUserRoles(
       jsonError(res, "User not found", 404);
       return true;
     }
-    if (actor.kind !== "operator") {
-      const gated = await operatorOnlyRolesAdded(userId, parsed.body.roles);
-      if (gated.length > 0) {
-        jsonError(res, `Adding ${gated.join(", ")} requires the operator key`, 403);
-        return true;
-      }
-    }
     try {
+      // A user actor may keep or drop an operator-granted role but not add it;
+      // setUserRoles checks that inside its write transaction.
       const { before, after } = await setUserRoles(
         userId,
         parsed.body.roles,
@@ -195,6 +171,10 @@ export async function handleUserRoles(
       }
       if (err instanceof InvalidRoleSetError) {
         jsonError(res, err.message, 400);
+        return true;
+      }
+      if (err instanceof OperatorGrantedRoleError) {
+        jsonError(res, err.message, 403);
         return true;
       }
       throw err;

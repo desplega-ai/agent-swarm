@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Readable } from "node:stream";
 import {
   closeDb,
@@ -16,6 +16,7 @@ import {
   setSessionShares,
 } from "../be/session-shares";
 import { handleRealtimeTicket } from "../http/realtime";
+import { canReadAllSessions } from "../http/session-access";
 import { handleSessions } from "../http/sessions";
 import { handleTasks } from "../http/tasks";
 import { handleUserRoles } from "../http/user-roles";
@@ -701,6 +702,105 @@ describe("all-users read scope", () => {
       await setUserRoles(admin.id, ["admin"], null);
     }
     await denied();
+  });
+
+  describe("a keep request racing an operator revoke", () => {
+    /**
+     * Holds the next top-level DB transaction at `where`: before it starts
+     * (the old handler had already checked roles by then), or inside it after
+     * the callback ran and before COMMIT. Resolves `paused` once held.
+     */
+    function holdNextTransaction(where: "before" | "inside") {
+      const client = getDbClient();
+      const original = client.transaction.bind(client);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markPaused!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        markPaused = resolve;
+      });
+      const spy = spyOn(client, "transaction").mockImplementationOnce((async (
+        fn: (tx: never) => Promise<unknown>,
+        opts?: never,
+      ) => {
+        if (where === "before") {
+          markPaused();
+          await gate;
+          return original(fn, opts);
+        }
+        return original(async (tx: never) => {
+          const out = await fn(tx);
+          markPaused();
+          await gate;
+          return out;
+        }, opts);
+      }) as never);
+      return { paused, release, restore: () => spy.mockRestore() };
+    }
+
+    const keep = (userId: string) =>
+      call("roles", "PUT", `/api/users/${userId}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin", "auditor"] },
+      });
+    const revoke = (userId: string) =>
+      call("roles", "PUT", `/api/users/${userId}/roles`, { body: { roles: ["admin"] } });
+    const names = async (userId: string) =>
+      (await call("roles", "GET", `/api/users/${userId}/roles`)).body.roles.map(
+        (r: { name: string }) => r.name,
+      );
+
+    test("a revoke that lands before the replacement wins: the keep is refused, not a re-add", async () => {
+      const target = await createUser({ name: "Raced before" });
+      await setUserRoles(target.id, ["admin", "auditor"], null);
+      const hold = holdNextTransaction("before");
+      try {
+        const kept = keep(target.id);
+        await hold.paused;
+        hold.restore();
+        const revoked = await revoke(target.id);
+        expect(revoked.status).toBe(200);
+        expect(await names(target.id)).toEqual(["admin"]);
+        hold.release();
+        const result = await kept;
+        expect(result.status).toBe(403);
+        expect(result.body.error).toContain("operator key");
+        expect(await names(target.id)).toEqual(["admin"]);
+        expect(await canReadAllSessions(target.id)).toBe(false);
+      } finally {
+        hold.release();
+        hold.restore();
+      }
+    });
+
+    test("a revoke issued while the keep holds its transaction waits for it, then wins", async () => {
+      const target = await createUser({ name: "Raced inside" });
+      await setUserRoles(target.id, ["admin", "auditor"], null);
+      const hold = holdNextTransaction("inside");
+      try {
+        const kept = keep(target.id);
+        await hold.paused;
+        hold.restore();
+        let revokeDone = false;
+        const revoked = revoke(target.id).then((r) => {
+          revokeDone = true;
+          return r;
+        });
+        // The keep's check and write share one write lock: the revoke queues.
+        for (let i = 0; i < 20; i++) await Bun.sleep(1);
+        expect(revokeDone).toBe(false);
+        hold.release();
+        expect((await kept).status).toBe(200);
+        expect((await revoked).status).toBe(200);
+        expect(await names(target.id)).toEqual(["admin"]);
+        expect(await canReadAllSessions(target.id)).toBe(false);
+      } finally {
+        hold.release();
+        hold.restore();
+      }
+    });
   });
 
   describe("with an explicit session.read.all grant", () => {

@@ -19,6 +19,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { getDbClient } from "./db";
+import { userHoldsOperatorGrantedRole } from "./rbac-roles";
 import { type IdentityActor, mintToken, recordIdentityEvent } from "./users";
 
 export type ConnectorCodeKind = "connector" | "invite";
@@ -82,6 +83,15 @@ export async function exchangeConnectorCode(
     );
     if (!row) return null;
     const actor: IdentityActor = { kind: row.actor_kind, id: row.actor_id };
+    // Another user's code must not become a credential for an operator-granted
+    // role the target gained after the code was created. The code is spent.
+    if (
+      actor.kind !== "operator" &&
+      actor.id !== row.user_id &&
+      (await userHoldsOperatorGrantedRole(row.user_id))
+    ) {
+      return null;
+    }
 
     if (kind === "invite") {
       const activated = await tx.run(

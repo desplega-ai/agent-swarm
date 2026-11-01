@@ -24644,6 +24644,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target user not found */
                 404: {
                     headers: {
@@ -24834,6 +24843,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
                     headers: {
@@ -24923,6 +24941,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25083,6 +25110,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25537,6 +25573,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target or source user not found */
                 404: {
                     headers: {
@@ -25685,6 +25730,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

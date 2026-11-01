@@ -224,6 +224,24 @@ export async function userHoldsExplicitVerb(
   return row != null;
 }
 
+/**
+ * Whether one of the user's roles lists an operator-granted verb. Minting a
+ * credential for such a user, or binding another identity to it, hands the
+ * caller that verb, so only the operator key may do it.
+ */
+export async function userHoldsOperatorGrantedRole(userId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found
+     FROM principal_roles pr
+     JOIN role_permissions rp ON rp.roleId = pr.roleId
+     WHERE pr.principalType = 'user' AND pr.principalId = ?
+       AND rp.verb IN (${OPERATOR_GRANTED_VERBS.map(() => "?").join(", ")})
+     LIMIT 1`,
+    [userId, ...OPERATOR_GRANTED_VERBS],
+  );
+  return row != null;
+}
+
 export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
   const rows = await getDbClient().query<GrantRow>(
     `SELECT r.id AS roleId, r.grantsAll, rp.verb
@@ -309,6 +327,13 @@ export async function listRbacRoles(): Promise<RbacRoleCatalogEntry[]> {
 
 export class InvalidRoleSetError extends Error {}
 
+/** A user actor tried to add a role that lists an operator-granted verb. */
+export class OperatorGrantedRoleError extends Error {
+  constructor(readonly roles: string[]) {
+    super(`Adding ${roles.join(", ")} requires the operator key`);
+  }
+}
+
 export class LastAdminError extends Error {
   constructor() {
     super("last_admin");
@@ -344,7 +369,9 @@ export async function assertNotLastAdmin(userId: string): Promise<void> {
 /**
  * Replace a user's RBAC roles. The set holds exactly one primary role
  * (admin, requester or viewer) plus any extra roles. Refuses to leave the
- * swarm without an active grant-all user.
+ * swarm without an active grant-all user. `actorUserId` is the acting user,
+ * or null for the operator key: a user actor gets OperatorGrantedRoleError
+ * when the set adds a role with an operator-granted verb.
  */
 export async function setUserRoles(
   userId: string,
@@ -374,6 +401,24 @@ export async function setUserRoles(
        ORDER BY r.name`,
       [userId],
     );
+    // A user actor may keep or drop a role with an operator-granted verb but
+    // never add one. Checked against `current` inside this transaction, so a
+    // concurrent revoke cannot slip between the check and the write.
+    if (actorUserId !== null) {
+      const heldIds = new Set(current.map((r) => r.id));
+      const added = wanted.filter((r) => !heldIds.has(r.id));
+      if (added.length > 0) {
+        const gated = await tx.query<{ name: string }>(
+          `SELECT DISTINCT r.name
+           FROM roles r JOIN role_permissions rp ON rp.roleId = r.id
+           WHERE r.id IN (${added.map(() => "?").join(", ")})
+             AND rp.verb IN (${OPERATOR_GRANTED_VERBS.map(() => "?").join(", ")})
+           ORDER BY r.name`,
+          [...added.map((r) => r.id), ...OPERATOR_GRANTED_VERBS],
+        );
+        if (gated.length > 0) throw new OperatorGrantedRoleError(gated.map((r) => r.name));
+      }
+    }
     const wantsAll = wanted.some((r) => r.grantsAll === 1);
     if (current.some((r) => r.grantsAll === 1) && !wantsAll) {
       const user = await tx.get<{ status: string }>("SELECT status FROM users WHERE id = ?", [

@@ -56,10 +56,12 @@ import {
   LastAdminError,
   listUserRoles,
   setUserRoles,
+  userHoldsOperatorGrantedRole,
 } from "../be/rbac-roles";
 import {
   findUserByEmail,
   getUserIdentities,
+  type IdentityActor,
   type IdentityEvent,
   linkIdentity,
   listUserEvents,
@@ -304,6 +306,10 @@ const resolveUnmapped = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
@@ -370,6 +376,10 @@ const updateUserRoute = route({
     },
     400: { description: "Validation error or empty body" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -397,6 +407,10 @@ const mintUserMcpTokenRoute = route({
       }),
     },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -443,6 +457,10 @@ const createConnectorCodeRoute = route({
     },
     400: { description: "The public API origin or CONNECTOR_CONNECT_URL is not HTTPS" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -590,6 +608,10 @@ const mergeUsersRoute = route({
     },
     400: { description: "Validation error (e.g. target == source)" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "Target or source user not found" },
     409: { description: "Source is the last active admin (last_admin)" },
   },
@@ -633,6 +655,10 @@ const addIdentityRoute = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
     409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
@@ -658,6 +684,27 @@ const deleteIdentityRoute = route({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Refuse a user actor that would get a credential for, or bind an identity to,
+ * another user holding an operator-granted role (auditor). Every new user is
+ * a grant-all admin, so without this any admin could act as an auditor.
+ * Writes a 403 and returns true when refused.
+ */
+async function refuseOperatorGrantedTarget(
+  res: ServerResponse,
+  actor: IdentityActor,
+  targetUserId: string,
+): Promise<boolean> {
+  if (actor.kind === "operator" || actor.id === targetUserId) return false;
+  if (!(await userHoldsOperatorGrantedRole(targetUserId))) return false;
+  jsonError(
+    res,
+    "This user holds an operator-granted role (auditor); this change requires the operator key",
+    403,
+  );
+  return true;
+}
 
 /** True when `err` is a SQLite UNIQUE violation whose message names `target` (e.g. `users.email`). */
 function isUniqueViolation(err: unknown, target: string): boolean {
@@ -947,6 +994,7 @@ export async function handleUsers(
           return true;
         }
         targetUserId = existing.id;
+        if (await refuseOperatorGrantedTarget(res, actor, targetUserId)) return true;
       } else {
         const created = await createUser({
           name: parsed.body.name,
@@ -994,6 +1042,7 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
+    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
 
     try {
       const { tokenId, plaintext } = await mintToken(
@@ -1023,6 +1072,7 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
+    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
     // The connector refuses non-HTTPS swarm origins, so fail before minting a code.
     // Same swarm_config-aware resolver as the dashboard's HTTPS gate.
     const swarmOrigin = await resolveMcpBaseUrl();
@@ -1268,6 +1318,7 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
+    if (await refuseOperatorGrantedTarget(res, actor, parsed.params.id)) return true;
     try {
       await linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
       addIdentityRoute.respond(res, 200, {
@@ -1332,6 +1383,8 @@ export async function handleUsers(
       jsonError(res, "Source user not found", 404);
       return true;
     }
+    // The source's identities and email aliases move to the target.
+    if (await refuseOperatorGrantedTarget(res, actor, targetId)) return true;
 
     try {
       const mergedUser = await getDbClient().transaction(async () => {
@@ -1427,6 +1480,13 @@ export async function handleUsers(
     const before = await getUserById(parsed.params.id);
     if (!before) {
       jsonError(res, "User not found", 404);
+      return true;
+    }
+    const { identities: newIdentities, email: newEmail, emailAliases: newAliases } = parsed.body;
+    if (
+      (newIdentities !== undefined || newEmail !== undefined || newAliases !== undefined) &&
+      (await refuseOperatorGrantedTarget(res, actor, parsed.params.id))
+    ) {
       return true;
     }
 
