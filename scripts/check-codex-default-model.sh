@@ -11,8 +11,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCKERFILE="$ROOT/Dockerfile.worker"
 MODELS_TS="$ROOT/src/providers/codex-models.ts"
 PACKAGE_JSON="$ROOT/package.json"
+DOC_FILE="$ROOT/docs-site/content/docs/(documentation)/guides/harness-configuration.mdx"
 
-for f in "$DOCKERFILE" "$MODELS_TS" "$PACKAGE_JSON"; do
+for f in "$DOCKERFILE" "$MODELS_TS" "$PACKAGE_JSON" "$DOC_FILE"; do
   if [ ! -f "$f" ]; then
     echo "check-codex-default-model: missing ${f#"$ROOT"/}" >&2
     exit 1
@@ -30,6 +31,19 @@ if [ -z "$dockerfile_model" ]; then
 fi
 if [ -z "$ts_default" ]; then
   echo "check-codex-default-model: CODEX_DEFAULT_MODEL resolved to an empty value" >&2
+  exit 1
+fi
+
+# Keep the operator-facing guide aligned with the runtime default and document both override paths.
+documented_default=$(grep -oE 'Codex uses `[^\`]+`' "$DOC_FILE" | head -1 | sed -E 's/.*`([^\`]+)`/\1/' || true)
+if [ -z "$documented_default" ] || [ "$documented_default" != "$ts_default" ]; then
+  echo "check-codex-default-model: documentation default MISMATCH" >&2
+  echo "  docs-site Codex default: ${documented_default:-<missing>}" >&2
+  echo "  CODEX_DEFAULT_MODEL: $ts_default" >&2
+  exit 1
+fi
+if ! grep -Fq '`MODEL_OVERRIDE`' "$DOC_FILE" || ! grep -Fq 'task-level `model`' "$DOC_FILE"; then
+  echo "check-codex-default-model: Codex docs must describe MODEL_OVERRIDE and task-level model overrides" >&2
   exit 1
 fi
 
