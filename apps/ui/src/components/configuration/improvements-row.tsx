@@ -219,7 +219,7 @@ export function ImprovementsRow() {
                   <Badge variant={STATUS_VARIANT[row.status]} size="tag">
                     {STATUS_LABEL[row.status]}
                   </Badge>
-                  <span>{row.source === "mcp" ? "Agent draft" : "Person"}</span>
+                  <span>{row.requestedByAgentId ? "Agent draft" : "Person"}</span>
                   {row.approvedBy ? <span>Approved by {row.approvedBy}</span> : null}
                   <span>{formatTime(row.sentAt ?? row.updatedAt)}</span>
                   {row.proxyStatus ? <span>Proxy {row.proxyStatus}</span> : null}
