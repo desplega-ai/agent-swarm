@@ -594,16 +594,17 @@ const listSessions = route({
      * an empty list for mine or shared.
      * tree: Sessions that GET /api/session-tree counts: mine plus shared with me,
      * no ownerless roots. A bypass actor sees every root.
-     * all: every user's sessions, read-only. Honored for a user who may read
-     * every session (admin, or `session.read.all`); anyone else gets the
-     * default list. The `X-Swarm-Session-Scope: all` header opts in the same
-     * way and also lifts the tree scope.
+     * all: every user's sessions, read-only. Honored for a user whose role
+     * lists `session.read.all` (the built-in `auditor` role; grant-all admin
+     * alone does not count); anyone else gets the default list. The
+     * `X-Swarm-Session-Scope: all` header opts in the same way and also lifts
+     * the tree scope.
      */
     scope: z
       .enum(["mine", "shared", "tree", "all"])
       .optional()
       .describe(
-        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
+        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
       ),
     /** With `scope=tree`: `mine` (default) or `all`. Must match the tree's `show`. */
     show: SessionShowSchema,

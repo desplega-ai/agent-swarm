@@ -8,7 +8,7 @@ import {
   getDbClient,
   initDb,
 } from "../be/db";
-import { getUserGrant, setUserRoles } from "../be/rbac-roles";
+import { ensureRbacSeedsSynced, getUserGrant, setUserRoles } from "../be/rbac-roles";
 import {
   getSessionRoot,
   listSessionShareHistory,
@@ -18,6 +18,7 @@ import {
 import { handleRealtimeTicket } from "../http/realtime";
 import { handleSessions } from "../http/sessions";
 import { handleTasks } from "../http/tasks";
+import { handleUserRoles } from "../http/user-roles";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { authorizeRoomNamespace } from "../realtime/auth";
@@ -51,7 +52,7 @@ function jsonReq(method: string, url: string, body?: unknown) {
 }
 
 async function call(
-  handler: "sessions" | "tasks" | "ticket" | "users",
+  handler: "sessions" | "tasks" | "ticket" | "users" | "roles",
   method: string,
   url: string,
   opts: Call = {},
@@ -81,7 +82,9 @@ async function call(
         ? await handleTasks(req as never, res as never, segments, query, opts.agentId)
         : handler === "users"
           ? await handleUsers(req as never, res as never, segments, query)
-          : await handleRealtimeTicket(req as never, res as never, segments, query);
+          : handler === "roles"
+            ? await handleUserRoles(req as never, res as never, segments, query)
+            : await handleRealtimeTicket(req as never, res as never, segments, query);
   expect(handled).toBe(true);
   return { status, body: chunks.length > 0 ? JSON.parse(chunks.join("")) : null };
 }
@@ -93,6 +96,8 @@ let ezeAuth: HttpRequestAuth;
 
 beforeAll(async () => {
   initDb(":memory:");
+  // Built-in roles, including the extra `auditor` role, as at server boot.
+  ensureRbacSeedsSynced({ quiet: true });
   owner = await createUser({ name: "Owner" });
   eze = await createUser({ name: "Eze" });
   mar = await createUser({ name: "Mar" });
@@ -578,11 +583,6 @@ describe("all-users read scope", () => {
     requester = await createUser({ name: "Req" });
     await setUserRoles(requester.id, ["requester"], null);
     requesterAuth = { kind: "user", userId: requester.id, user: requester as never };
-    const db = getDbClient();
-    await db.run("INSERT INTO roles (id, name) VALUES ('role-auditor', 'auditor')");
-    await db.run(
-      "INSERT INTO role_permissions (roleId, verb) VALUES ('role-auditor', 'session.read.all')",
-    );
   });
 
   const taskIds = async (query: string, opts: Call) => {
@@ -612,6 +612,71 @@ describe("all-users read scope", () => {
       expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(403);
       expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
     }
+  });
+
+  test("the built-in auditor role is an extra, never a default, and holds only session.read.all", async () => {
+    const catalog = await call("roles", "GET", "/api/rbac/roles");
+    const auditor = catalog.body.roles.find((r: { name: string }) => r.name === "auditor");
+    expect(auditor).toMatchObject({
+      isBuiltin: true,
+      grantsAll: false,
+      primary: false,
+      verbs: ["session.read.all"],
+    });
+    const fresh = await createUser({ name: "Fresh default" });
+    const roles = await call("roles", "GET", `/api/users/${fresh.id}/roles`);
+    expect(roles.body.roles.map((r: { name: string }) => r.name)).toEqual(["admin"]);
+    // Not a primary role: it cannot stand alone.
+    const alone = await call("roles", "PUT", `/api/users/${fresh.id}/roles`, {
+      body: { roles: ["auditor"] },
+    });
+    expect(alone.status).toBe(400);
+  });
+
+  test("PUT /api/users/{id}/roles adding auditor opts an admin in; a non-grant-all user cannot assign it", async () => {
+    const admin = await createUser({ name: "Admin to audit" });
+    const adminAuth: HttpRequestAuth = { kind: "user", userId: admin.id, user: admin as never };
+    const { root, child } = await session(owner.id);
+    const scoped = { auth: adminAuth, sessionScope: "all" };
+    const denied = async () => {
+      expect(await taskIds("&scope=all", { auth: adminAuth })).not.toContain(root.id);
+      expect(await sessionIds("&scope=all", { auth: adminAuth })).not.toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+    };
+    await denied();
+
+    // A requester (no grant-all role) is refused, and nothing changes.
+    const byRequester = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: requesterAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(byRequester.status).toBe(403);
+    // Nor can the requester grant it to itself.
+    const self = await call("roles", "PUT", `/api/users/${requester.id}/roles`, {
+      auth: requesterAuth,
+      body: { roles: ["requester", "auditor"] },
+    });
+    expect(self.status).toBe(403);
+    await denied();
+    expect(await taskIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
+
+    // A grant-all user adds auditor next to the primary role.
+    const granted = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: ezeAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(granted.status).toBe(200);
+    expect(granted.body.roles.map((r: { name: string }) => r.name)).toEqual(["admin", "auditor"]);
+    try {
+      expect(await taskIds("&scope=all", { auth: adminAuth })).toContain(root.id);
+      expect(await sessionIds("&scope=all", { auth: adminAuth })).toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(true);
+    } finally {
+      await setUserRoles(admin.id, ["admin"], null);
+    }
+    await denied();
   });
 
   describe("with an explicit session.read.all grant", () => {

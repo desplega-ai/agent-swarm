@@ -51,6 +51,17 @@ export const BUILTIN_ROLES = [
     grantsAll: false,
     verbs: ["favorite.write.own", "session.presence", "comb.presence", "fs.join.own"],
   },
+  {
+    // An extra role, never a primary one and never assigned by default. It is
+    // the supported way to grant `session.read.all`, which `grantsAll` does
+    // not imply (see `userHoldsExplicitVerb`).
+    id: "rbac-role-auditor",
+    name: "auditor",
+    description: "Extra role: opt in to every user's tasks and sessions, read-only.",
+    isBuiltin: true,
+    grantsAll: false,
+    verbs: ["session.read.all"],
+  },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
 /** A person holds exactly one of these; other roles are extras on top. */
