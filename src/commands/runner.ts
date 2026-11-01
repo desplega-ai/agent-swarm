@@ -1355,6 +1355,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "read-messages": "💬 Reading messages",
   "request-human-input": "🙋 Requesting human input",
   "cancel-approval-request": "🚫 Cancelling approval request",
+  "submit-improvement": "💡 Drafting improvement",
   "cancel-task": "🚫 Cancelling task",
   "db-query": "🗃️ Querying database",
   "inject-learning": "🧠 Storing learning",

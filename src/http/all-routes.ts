@@ -72,6 +72,7 @@ import "./trackers/jira";
 import "./trackers/linear";
 import "./ranking";
 import "./used-by";
+import "./improvements";
 import "./fleet-benchmark";
 import "./user-roles";
 import "./users";

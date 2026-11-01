@@ -54,6 +54,16 @@ export const PERMISSIONS = {
       "Approve or reject a pending approval request as a person. Agents never hold it; the request's approvers list still applies.",
     namespace: "approval",
   },
+  "improvement.submit": {
+    description:
+      "Draft a product improvement for desplega. An agent's draft stays pending until a person approves it.",
+    namespace: "improvement",
+  },
+  "improvement.approve": {
+    description:
+      "Approve and send a drafted product improvement to desplega as a person. Agents never hold it.",
+    namespace: "improvement",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",
