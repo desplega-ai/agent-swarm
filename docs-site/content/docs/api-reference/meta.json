@@ -23,6 +23,7 @@
     "fs",
     "favorites",
     "heartbeat",
+    "improvements",
     "inbox-state",
     "integrations",
     "kv",
