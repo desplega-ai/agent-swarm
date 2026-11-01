@@ -38,8 +38,7 @@ import {
   PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
-import { getNodeEnv } from "../utils/node-env";
-import { pageSessionSetCookies } from "../utils/page-session";
+import { isLocalDevPageRequest, pageSessionSetCookies } from "../utils/page-session";
 import { authUser, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
@@ -494,7 +493,7 @@ const getPageVersionRoute = route({
  * Cookie issuance moved to `src/utils/page-session.ts::issuePageSessionCookie`
  * so the password-flow on `/p/:id` (step-5) can mint cookies via the same
  * helper. `dev=true` softens the cookie for `http://localhost` (no Secure
- * required; SameSite=Lax). Detected by `isDevRequest()` below.
+ * required; SameSite=Lax). Detected by `isLocalDevPageRequest()` in `src/utils/page-session.ts`.
  */
 
 /**
@@ -591,20 +590,6 @@ function formatFeedbackComments(comments: z.infer<typeof PageFeedbackCommentSche
       return lines.join("\n");
     })
     .join("\n\n");
-}
-
-function isDevRequest(req: IncomingMessage): boolean {
-  if (getNodeEnv() === "production") return false;
-  // We want `SameSite=Lax` only when the request itself comes from the same
-  // local-`http://localhost` origin as the API — same-site loads tolerate
-  // Lax without Secure. Anything else (including portless `*.localhost`
-  // setups talking from HTTPS to the HTTP API) must use `SameSite=None;
-  // Secure` so the cookie travels on cross-site fetches; Chrome treats
-  // localhost as a secure origin so the Secure flag is fine on HTTP.
-  const origin = (req.headers.origin as string | undefined) ?? "";
-  return (
-    origin === "" || origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")
-  );
 }
 
 // ─── Handler ────────────────────────────────────────────────────────────────
@@ -1076,7 +1061,7 @@ export async function handlePages(
         ? { name: `guest-${randomUUID().slice(0, 8)}`, op: true as const }
         : undefined;
     const cookies = await pageSessionSetCookies(req, page.id, {
-      dev: isDevRequest(req),
+      dev: isLocalDevPageRequest(req),
       ...identity,
     });
 

@@ -40,8 +40,11 @@ import {
 import { resolvePageTheme } from "../themes/page-theme";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
-import { getNodeEnv } from "../utils/node-env";
-import { extractAndVerifyCookie, pageSessionSetCookies } from "../utils/page-session";
+import {
+  extractAndVerifyCookie,
+  isLocalDevPageRequest,
+  pageSessionSetCookies,
+} from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -451,29 +454,6 @@ function extractPasswordCandidate(
   return decoded.slice(colonIdx + 1);
 }
 
-/**
- * Detect whether the originating request is from a "dev" / localhost context,
- * mirroring the same logic used by the bearer-launch endpoint in
- * `src/http/pages.ts`. Used to decide whether to issue cookies with
- * `SameSite=Lax` (dev) vs `SameSite=None; Secure` (prod).
- */
-function isLocalhostRequest(req: IncomingMessage): boolean {
-  if (getNodeEnv() === "production") return false;
-  // Only emit `SameSite=Lax` (no Secure) when the request comes from the
-  // SAME http://localhost origin as the API — Lax cookies don't travel on
-  // cross-site fetches, so portless `*.localhost` setups (SPA on https
-  // talking to the API on http) must use `SameSite=None; Secure`. Chrome
-  // treats localhost as a secure origin so Secure is honored on HTTP.
-  const origin = (req.headers.origin as string | undefined) ?? "";
-  if (origin === "") {
-    const rawHost = req.headers.host;
-    const host = Array.isArray(rawHost) ? rawHost[0] : rawHost;
-    if (!host) return true; // best-effort dev default
-    return host.startsWith("localhost") || host.startsWith("127.0.0.1");
-  }
-  return origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1");
-}
-
 // ─── Handler ────────────────────────────────────────────────────────────────
 
 export async function handlePagesPublic(
@@ -542,7 +522,7 @@ export async function handlePagesPublic(
         }
         if (matched) {
           inlineSetCookie = await pageSessionSetCookies(req, page.id, {
-            dev: isLocalhostRequest(req),
+            dev: isLocalDevPageRequest(req),
           });
           // fall through to the regular 200 path below.
         } else {

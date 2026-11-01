@@ -579,10 +579,10 @@ describe("Codex app-server session", () => {
     expect(snapshots).toHaveLength(2);
     expect(snapshots[0]).toMatchObject({ contextUsedTokens: 51_000, contextTotalTokens: 258_400 });
     expect(snapshots[0]?.contextPercent).toBeCloseTo((51_000 / 258_400) * 100, 6);
-    // A null window falls back to the models.dev window for the model.
+    // Missing updates retain the last window the running harness reported.
     expect(snapshots[1]).toMatchObject({
       contextUsedTokens: 61_000,
-      contextTotalTokens: 1_050_000,
+      contextTotalTokens: 258_400,
     });
   });
 

@@ -4643,6 +4643,7 @@ export async function spawnProviderProcess(
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
   const CONTEXT_THROTTLE_MS = 30_000;
+  let latestContextWindow: number | undefined;
 
   // Phase 10: accumulate per-turn output tokens across the session so progress
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
@@ -4901,6 +4902,14 @@ export async function spawnProviderProcess(
           });
           break;
         case "context_usage": {
+          // Observe every live window, including events whose HTTP post is throttled.
+          if (
+            event.contextTotalTokens != null &&
+            Number.isFinite(event.contextTotalTokens) &&
+            event.contextTotalTokens > 0
+          ) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           const now2 = Date.now();
           if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
             lastContextPostTime = now2;
@@ -4937,6 +4946,9 @@ export async function spawnProviderProcess(
           break;
         }
         case "compaction": {
+          if (Number.isFinite(event.contextTotalTokens) && event.contextTotalTokens > 0) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           // Always record compaction events (no throttle)
           telemetry.compaction("triggered", {
             compactTrigger: event.compactTrigger,
@@ -5112,7 +5124,10 @@ export async function spawnProviderProcess(
               sessionId: opts.runnerSessionId,
               cumulativeInputTokens: result.cost.inputTokens ?? 0,
               cumulativeOutputTokens: result.cost.outputTokens ?? 0,
-              contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+              contextTotalTokens: getContextWindowSize(
+                result.cost.model || "default",
+                latestContextWindow,
+              ),
             }),
           }).catch(() => {});
         }

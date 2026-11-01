@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getScheduledTasks, initDb, listWorkflows } from "../be/db";
+import {
+  closeDb,
+  getScheduledTaskByName,
+  getScheduledTasks,
+  initDb,
+  listWorkflows,
+} from "../be/db";
+import { getScript } from "../be/scripts/db";
 import { runSeeder, SEEDERS } from "../be/seed";
 import { schedulesSeeder } from "../be/seed/schedules-seeder";
 import { workflowsSeeder } from "../be/seed/workflows-seeder";
+import { scriptsSeeder } from "../be/seed-scripts";
 
 const TEST_DB_PATH = "./test-seed-registry.sqlite";
 
@@ -58,15 +66,29 @@ describe("seeder registry", () => {
     }
   });
 
-  test("seeds all 23 automation templates on a fresh database and re-runs as a no-op", async () => {
+  test("seeds all 22 automation templates on a fresh database and re-runs as a no-op", async () => {
     expect(await listWorkflows()).toHaveLength(0);
     expect(await getScheduledTasks()).toHaveLength(0);
 
+    // Boot order: scripts seed before schedules, so a script-target schedule
+    // (daily-swarm-update-check) resolves its catalog script on a fresh install.
+    const order = SEEDERS.map((seeder) => seeder.kind);
+    expect(order.indexOf("script")).toBeLessThan(order.indexOf("schedule"));
+    expect(await getScript({ name: "swarm-update-check", scope: "global" })).toBeNull();
+    const scriptResult = await runSeeder(scriptsSeeder, {
+      quiet: true,
+      scriptEmbeddingMode: "skip",
+    });
     const workflowResult = await runSeeder(workflowsSeeder, { quiet: true });
     const scheduleResult = await runSeeder(schedulesSeeder, { quiet: true });
 
+    expect(scriptResult.failed).toEqual([]);
     expect(workflowResult).toMatchObject({ created: 11, failed: [] });
-    expect(scheduleResult).toMatchObject({ created: 12, failed: [] });
+    expect(scheduleResult).toMatchObject({ created: 11, failed: [] });
+    expect(await getScheduledTaskByName("daily-swarm-update-check")).toMatchObject({
+      targetType: "script",
+      scriptName: "swarm-update-check",
+    });
     expect((await listWorkflows()).map((workflow) => workflow.name).sort()).toEqual(
       workflowsSeeder.items().map((item) => item.key),
     );
@@ -83,10 +105,10 @@ describe("seeder registry", () => {
     expect(await runSeeder(schedulesSeeder, { quiet: true })).toMatchObject({
       created: 0,
       updated: 0,
-      skippedUnchanged: 12,
+      skippedUnchanged: 11,
       failed: [],
     });
     expect(await listWorkflows()).toHaveLength(11);
-    expect(await getScheduledTasks()).toHaveLength(12);
-  });
+    expect(await getScheduledTasks()).toHaveLength(11);
+  }, 60_000); // typechecks every catalog script with tsc
 });
