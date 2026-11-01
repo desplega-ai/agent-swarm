@@ -152,6 +152,8 @@ before the catalog's API maximum. The runner retains this value for completion
 even when a progress post was throttled; Codex also retains it across native
 notifications that omit the window. Pi reasoning usage is an informational
 subset of output tokens and is not charged again.
+An adapter-side completion without prior context updates resolves its window
+from the result model's catalog entry, independently of the runner snapshot.
 
 ## Manual overrides
 

@@ -216,6 +216,33 @@ describe("createCodexSwarmEventHandler", () => {
   });
 
   describe("result", () => {
+    test("uses the result model's catalog window without a prior context update", () => {
+      const { calls } = installFetchStub(() => new Response("{}", { status: 200 }));
+      const handler = createCodexSwarmEventHandler(buildOpts());
+      handler({ type: "session_init", sessionId: "thread-abc" });
+      handler({
+        type: "result",
+        cost: {
+          sessionId: "thread-abc",
+          agentId: "agent-1",
+          totalCostUsd: 0,
+          durationMs: 1234,
+          numTurns: 1,
+          model: "gpt-5.4",
+          isError: false,
+        },
+        isError: false,
+      });
+
+      const snapshots = calls.filter((call) => call.url.includes("/api/tasks/task-1/context"));
+      expect(snapshots).toHaveLength(1);
+      expect(JSON.parse(String(snapshots[0]?.init?.body))).toEqual({
+        eventType: "completion",
+        sessionId: "thread-abc",
+        contextTotalTokens: 1_050_000,
+      });
+    });
+
     test("posts a completion context event", async () => {
       const { calls } = installFetchStub(() => new Response("{}", { status: 200 }));
       const handler = createCodexSwarmEventHandler(buildOpts());

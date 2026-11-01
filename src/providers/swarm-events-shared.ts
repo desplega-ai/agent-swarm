@@ -41,6 +41,7 @@
  */
 
 import { checkToolLoop } from "../hooks/tool-loop-detection";
+import { getContextWindowSize } from "../utils/context-window";
 import type { ProviderEvent } from "./types";
 
 /** Throttle windows (ms) keyed by action name. Exported for unit assertions. */
@@ -222,7 +223,7 @@ export function createSwarmEventHandler(
     }
   };
 
-  const progressCompletion = (): void => {
+  const progressCompletion = (model: string): void => {
     if (opts.taskId) {
       fireAndForget(`${opts.apiUrl}/api/tasks/${encodeURIComponent(opts.taskId)}/context`, {
         method: "POST",
@@ -230,7 +231,7 @@ export function createSwarmEventHandler(
         body: JSON.stringify({
           eventType: "completion",
           sessionId: sessionId ?? `${opts.sessionIdFallbackPrefix ?? "session"}-${opts.taskId}`,
-          contextTotalTokens: latestContextWindow,
+          contextTotalTokens: getContextWindowSize(model, latestContextWindow),
         }),
       });
     }
@@ -280,7 +281,7 @@ export function createSwarmEventHandler(
           break;
         }
         case "result": {
-          progressCompletion();
+          progressCompletion(event.cost.model);
           break;
         }
       }

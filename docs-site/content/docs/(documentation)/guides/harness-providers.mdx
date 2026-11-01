@@ -375,6 +375,8 @@ the bare OpenAI id, matching Codex for per-model reporting. Pi also records
 the reasoning-token subset from assistant usage events. For both harnesses,
 completion context snapshots retain the last live window, including updates
 whose progress posts were throttled, before falling back to the catalog.
+Adapter-side completion events apply this fallback themselves when no context
+update preceded the result; they do not depend on a separate runner snapshot.
 
 All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 

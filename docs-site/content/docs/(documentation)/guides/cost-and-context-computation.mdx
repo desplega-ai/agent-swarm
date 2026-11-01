@@ -216,6 +216,9 @@ valid window from context or compaction events, including throttled events,
 and uses it for the completion snapshot. For example, a live 272k window
 stays 272k at completion even when the API catalog advertises 1.05M.
 Codex retains its last reported window when a subsequent notification omits it.
+The runner and adapter-side lifecycle handler resolve their completion snapshots
+independently. A result without prior context updates still carries the result
+model's catalog window.
 
 Without a live window, the helper resolves the model catalog:
 - Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`)
