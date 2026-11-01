@@ -287,6 +287,7 @@ export const LEGACY_POLICY = {
   "task.parent.attach": taskFsMutate,
   "session.share": operatorOrUser,
   "session.presence": operatorOrUser,
+  "session.read.all": operatorOrUser,
   "task.progress.write": taskProgressWrite,
   "favorite.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,

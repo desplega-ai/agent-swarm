@@ -78,6 +78,7 @@ import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
+import { resolveSessionActor } from "./session-access";
 import { ensureRoleManager } from "./user-roles";
 import { jsonError } from "./utils";
 
@@ -197,6 +198,11 @@ const whoamiRoute = route({
             roles: z.array(z.string()),
           })
           .optional(),
+        // Whether this request may opt in to the all-users read scope
+        // (`scope=all`, `X-Swarm-Session-Scope: all`). On the operator key it
+        // answers for the user picked in `X-Swarm-User-Id`. Absent on older
+        // servers.
+        sessionReadAll: z.boolean().optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -822,6 +828,8 @@ export async function handleUsers(
     const parsed = await whoamiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const user = authUser(getRequestAuth(req));
+    const scopeActor = await resolveSessionActor(req, undefined, { allUsers: true });
+    const sessionReadAll = scopeActor.kind === "bypass" || scopeActor.readAll === true;
     if (user) {
       const [grant, roles] = await Promise.all([getUserGrant(user.id), listUserRoles(user.id)]);
       const grantsAll = !isRbacEnabled() || grant.grantsAll;
@@ -833,12 +841,14 @@ export async function handleUsers(
           verbs: grantsAll ? [] : [...grant.verbs].sort(),
           roles: roles.map((role) => role.name),
         },
+        sessionReadAll,
       });
     } else {
       whoamiRoute.respond(res, 200, {
         kind: "operator",
         user: null,
         grants: { grantsAll: true, verbs: [], roles: [] },
+        sessionReadAll,
       });
     }
     return true;

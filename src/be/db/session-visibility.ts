@@ -5,8 +5,13 @@
  * or everyone.
  * `mine`: owned by the viewer. `shared`: owned by someone else and shared with
  * the viewer or everyone. A null `userId` (a guest page session) owns nothing.
+ * `readAll` (the all-users read scope) lifts the `all` filter: every root.
  */
-export type SessionViewer = { userId: string | null; scope: "all" | "mine" | "shared" };
+export type SessionViewer = {
+  userId: string | null;
+  scope: "all" | "mine" | "shared";
+  readAll?: boolean;
+};
 
 /** SQL condition + params restricting root tasks (alias `r`) to what `viewer` may open. */
 export function sessionViewerCondition(viewer: SessionViewer): {
@@ -16,6 +21,7 @@ export function sessionViewerCondition(viewer: SessionViewer): {
   // Uncorrelated, so SQLite builds the shared set once instead of probing per root.
   const shared = `r.id IN (SELECT s.rootTaskId FROM session_shares s
       WHERE s.revokedAt IS NULL AND (s.userId IS NULL OR s.userId = ?))`;
+  if (viewer.scope === "all" && viewer.readAll) return { sql: "1", params: [] };
   if (viewer.scope === "mine") {
     return { sql: "r.requestedByUserId = ?", params: [viewer.userId] };
   }

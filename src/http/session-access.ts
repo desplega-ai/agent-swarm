@@ -28,12 +28,57 @@ import { jsonError } from "./utils";
  *   active user in `X-Swarm-User-Id`. On the shared key that identity is
  *   honor-system, the same trust the dashboard already gives favorites.
  *   `userId: null` is a guest page session, which has no user at all.
+ *   `readAll` is the all-users read scope: the request opted in and the user
+ *   may read every session (see `canReadAllSessions`). It lifts reads only;
+ *   write and steer checks still need the user's own access.
  */
-export type SessionActor = { kind: "bypass" } | { kind: "user"; userId: string | null };
+export type SessionActor =
+  | { kind: "bypass" }
+  | { kind: "user"; userId: string | null; readAll?: boolean };
 
 const BYPASS: SessionActor = { kind: "bypass" };
 
+/**
+ * Request header that opts a dashboard tab into the all-users read scope, so
+ * every list and detail read of that tab carries it. `GET /api/tasks` and
+ * `GET /api/sessions` also take it as `scope=all`.
+ */
+export const SESSION_SCOPE_HEADER = "x-swarm-session-scope";
+
+function requestsAllUsersScope(req: IncomingMessage): boolean {
+  const raw = req.headers[SESSION_SCOPE_HEADER];
+  return (Array.isArray(raw) ? raw[0] : raw)?.trim().toLowerCase() === "all";
+}
+
+/**
+ * Whether `userId` may opt in to read every user's sessions: a grant-all role
+ * (admin), or a role holding `session.read.all`. With RBAC off every user may,
+ * the same as `GET /api/whoami` reporting `grantsAll`.
+ */
+export async function canReadAllSessions(userId: string): Promise<boolean> {
+  if (!isRbacEnabled()) return true;
+  const grant = await getUserGrant(userId);
+  return grant.grantsAll || grant.verbs.has("session.read.all");
+}
+
+/**
+ * The session actor of a request. The all-users scope (`allUsers`, or the
+ * `X-Swarm-Session-Scope: all` header) sets `readAll` only for a user who may
+ * read every session; for anyone else it is ignored and the usual filter
+ * applies. A bypass actor already reads everything.
+ */
 export async function resolveSessionActor(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  opts: { allUsers?: boolean } = {},
+): Promise<SessionActor> {
+  const actor = await resolveBaseSessionActor(req, myAgentId);
+  if (actor.kind !== "user" || !actor.userId) return actor;
+  if (!opts.allUsers && !requestsAllUsersScope(req)) return actor;
+  return (await canReadAllSessions(actor.userId)) ? { ...actor, readAll: true } : actor;
+}
+
+async function resolveBaseSessionActor(
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): Promise<SessionActor> {
@@ -50,12 +95,18 @@ export async function resolveSessionActor(
   return BYPASS;
 }
 
+/** `access`, raised to at least `read` for an actor with the all-users read scope. */
+export function withReadAll(actor: SessionActor, access: SessionAccess): SessionAccess {
+  return actor.kind === "user" && actor.readAll && access === "none" ? "read" : access;
+}
+
 /** The actor's access to the session holding `taskId`; `owner` for a bypass actor. */
 export async function sessionAccessFor(
   actor: SessionActor,
   taskId: string,
 ): Promise<SessionAccess> {
-  return actor.kind === "bypass" ? "owner" : sessionAccess(actor.userId, taskId);
+  if (actor.kind === "bypass") return "owner";
+  return withReadAll(actor, await sessionAccess(actor.userId, taskId));
 }
 
 export const SESSION_READ_DENIED =
@@ -71,9 +122,12 @@ export async function canReadSession(
   return hasSessionAccess(access, "read");
 }
 
-/** The SQL list filter (`readableSessionCondition`) for an actor; none for a bypass actor. */
+/**
+ * The SQL list filter (`readableSessionCondition`) for an actor; none for a
+ * bypass actor or the all-users read scope.
+ */
 export function readableByFor(actor: SessionActor): { userId: string | null } | undefined {
-  return actor.kind === "user" ? { userId: actor.userId } : undefined;
+  return actor.kind === "user" && !actor.readAll ? { userId: actor.userId } : undefined;
 }
 
 export const SESSION_WRITE_DENIED =
@@ -162,7 +216,8 @@ async function denialFor(
   if (actor.kind === "bypass") return null;
   const root = await getSessionRoot(taskId);
   if (!root) return null;
-  if (hasSessionAccess(await sessionAccessForRoot(actor.userId, root), needed)) return null;
+  const access = withReadAll(actor, await sessionAccessForRoot(actor.userId, root));
+  if (hasSessionAccess(access, needed)) return null;
   return needed === "read" ? SESSION_READ_DENIED : SESSION_WRITE_DENIED;
 }
 
