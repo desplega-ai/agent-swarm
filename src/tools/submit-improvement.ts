@@ -30,7 +30,7 @@ export const registerSubmitImprovementTool = (server: McpServer) => {
     {
       title: "Draft a product improvement",
       description:
-        "Draft a short product improvement for the agent-swarm team at desplega. It is stored as a pending draft and is never sent by this tool: a person must approve it in Settings → Configuration → Improvements. Only the text you write (plus the install id while telemetry is on, and an email the approver adds) is sent.",
+        "Draft a short product improvement for the agent-swarm team at desplega. It is stored as a pending draft and is never sent by this tool: a person must approve it from the Improvements button in the dashboard header. Only the text you write, the install id and the approver's email are sent.",
       annotations: { destructiveHint: false },
       inputSchema: submitImprovementInputSchema,
       outputSchema: submitImprovementOutputSchema,
@@ -56,7 +56,7 @@ export const registerSubmitImprovementTool = (server: McpServer) => {
           requestedByAgentId: info.agentId,
         });
         return toolOk(
-          `Drafted improvement ${improvement.id}. A person must approve it in Settings → Configuration → Improvements before anything is sent.`,
+          `Drafted improvement ${improvement.id}. A person must approve it from the Improvements button in the dashboard header before anything is sent.`,
           { data: { id: improvement.id, status: improvement.status } },
         );
       } catch (error) {

@@ -62,7 +62,11 @@ export const coreImprovements: Scenario = {
       // REST: an agent's sendNow still drafts.
       let response = await ctx.api("POST", "/api/improvements", {
         agentId: workerId,
-        body: { text: `Faster boot ${ctx.nonce}`, sendNow: true },
+        body: {
+          text: `Faster boot ${ctx.nonce}`,
+          sendNow: true,
+          email: `agent-${ctx.nonce}@example.com`,
+        },
       });
       expectStatus(response, [201], "agent drafts over REST");
       const restDraft = improvementOf(response.json);
@@ -72,7 +76,7 @@ export const coreImprovements: Scenario = {
       // An agent cannot approve.
       response = await ctx.api("POST", `/api/improvements/${draftId}/approve`, {
         agentId: workerId,
-        body: {},
+        body: { email: `agent-${ctx.nonce}@example.com` },
       });
       expectStatus(response, [403], "agent approve is refused");
       expect(sentCount() === 0, "an agent approve reached the proxy");
@@ -85,7 +89,15 @@ export const coreImprovements: Scenario = {
       const ids = asRecords(response.json, "improvements").map((row) => row.id);
       expect(ids.includes(draftId) && ids.includes(restId), "list lacks the drafts");
 
-      // The operator approves; the proxy receives exactly three fields.
+      // A send needs an email.
+      expectStatus(
+        await ctx.api("POST", `/api/improvements/${draftId}/approve`, { body: {} }),
+        [400],
+        "approve without an email",
+      );
+      expect(sentCount() === 0, "an approve without an email reached the proxy");
+
+      // The operator approves; the proxy receives exactly the three fields.
       response = await ctx.api("POST", `/api/improvements/${draftId}/approve`, {
         body: { email: `person-${ctx.nonce}@example.com` },
       });
@@ -96,12 +108,14 @@ export const coreImprovements: Scenario = {
       expect(relayed?.path === "/v1/improvements", `proxy path ${relayed?.path}`);
       const keys = Object.keys(relayed?.body ?? {});
       expect(
-        keys.every((key) => ["install_id", "text", "email"].includes(key)) &&
+        keys.sort().join(",") === "email,install_id,text" &&
           relayed?.body.text === `Improve search ${ctx.nonce}`,
         `proxy body ${JSON.stringify(relayed?.body)}`,
       );
       expectStatus(
-        await ctx.api("POST", `/api/improvements/${draftId}/approve`, { body: {} }),
+        await ctx.api("POST", `/api/improvements/${draftId}/approve`, {
+          body: { email: `person-${ctx.nonce}@example.com` },
+        }),
         [409],
         "double approve",
       );

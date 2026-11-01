@@ -29,7 +29,7 @@ export function useSubmitImprovement() {
 }
 
 export function useApproveImprovement() {
-  return useImprovementMutation((input: { id: string; email: string | null }) =>
+  return useImprovementMutation((input: { id: string; email: string }) =>
     api.approveImprovement(input.id, input.email),
   );
 }

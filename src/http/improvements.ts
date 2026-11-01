@@ -79,7 +79,7 @@ const createRoute = route({
   pattern: ["api", "improvements"],
   summary: "Draft a product improvement, or send one as a person",
   description:
-    "Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. Only `install_id` (while telemetry is on), `text` and `email` are sent to desplega.",
+    "Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.",
   tags: ["Improvements"],
   body: z.object({
     text: z.string().max(IMPROVEMENT_TEXT_MAX * 2),
@@ -96,7 +96,7 @@ const createRoute = route({
       description: "Draft stored as `pending_approval`",
       schema: z.object({ improvement: ImprovementSchema }),
     },
-    400: { description: "Invalid text or email" },
+    400: { description: "Invalid text or email, or `sendNow` without an email" },
     403: { description: "The caller may not draft improvements" },
     409: { description: "Improvements are turned off" },
   },
@@ -110,15 +110,16 @@ const approveRoute = route({
   pattern: ["api", "improvements", null, "approve"],
   summary: "Approve and send a drafted improvement",
   description:
-    "Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.",
+    "Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.",
   tags: ["Improvements"],
   params: z.object({ id: z.string().uuid() }),
-  body: z.object({ email: EmailSchema.nullable().optional() }),
+  body: z.object({ email: EmailSchema.describe("The approver's email, sent with the text.") }),
   responses: {
     200: {
       description: "Approved. `status` is `sent`, or `failed` with the proxy status and error.",
       schema: z.object({ improvement: ImprovementSchema }),
     },
+    400: { description: "Missing or invalid email" },
     403: { description: "Caller is an agent" },
     404: { description: "Not found" },
     409: { description: "Already sent, sending or discarded, or improvements are turned off" },
@@ -159,7 +160,7 @@ function headerAgentId(req: IncomingMessage): string | undefined {
 function writeImprovementError(res: ServerResponse, error: unknown): boolean {
   if (!(error instanceof ImprovementError)) return false;
   const status =
-    error.code === "invalid_text"
+    error.code === "invalid_text" || error.code === "invalid_email"
       ? 400
       : error.code === "not_found"
         ? 404
@@ -207,6 +208,10 @@ export async function handleImprovements(
     const parsed = await createRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { text, email, sendNow, source } = parsed.body;
+    if (sendNow && !email) {
+      jsonError(res, "sendNow needs a valid email.", 400);
+      return true;
+    }
     const principal = await agentFirstPrincipal(req, headerAgentId(req));
     const decision = can({ principal, verb: "improvement.submit", source: "http" });
     if (!decision.allow) {
@@ -224,7 +229,7 @@ export async function handleImprovements(
       });
       // The send needs a person from the credential. An agent's `sendNow` is
       // ignored: its draft waits for a person.
-      if (sendNow && !scrubChanged) {
+      if (sendNow && email && !scrubChanged) {
         const person = await approvalResponder(req, {
           verb: "improvement.approve",
           refusedMessage: PERSON_REFUSED,
@@ -232,7 +237,7 @@ export async function handleImprovements(
         if (person.ok) {
           const sent = await approveAndSend(improvement.id, {
             approvedBy: responderKey(person.responder),
-            email: email ?? null,
+            email,
             endpoint: await improvementsEndpoint(),
             updatedBy: person.responder.kind === "user" ? person.responder.user.id : null,
           });
@@ -262,7 +267,7 @@ export async function handleImprovements(
     try {
       const improvement = await approveAndSend(parsed.params.id, {
         approvedBy: responderKey(person.responder),
-        email: parsed.body.email ?? null,
+        email: parsed.body.email,
         endpoint: await improvementsEndpoint(),
         updatedBy: person.responder.kind === "user" ? person.responder.user.id : null,
       });

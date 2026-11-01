@@ -1,48 +1,72 @@
-import { Lightbulb } from "lucide-react";
+import { Lightbulb, Plus } from "lucide-react";
 import { useState } from "react";
 import { useImprovements } from "@/api/hooks/use-improvements";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCan } from "@/lib/use-can";
+import { ImprovementApprovalList, isActionableImprovement } from "./improvement-approval-list";
 import { ImprovementDialog } from "./improvement-dialog";
 
 /**
- * Header door to the improvement dialog. Hidden while `IMPROVEMENTS_ENABLED`
- * is off (or on an API without the route). A dot shows while drafts wait for
- * a person's approval.
+ * Header door to improvements: a popover with the drafts waiting for a
+ * person (approve or discard) and a "New improvement" entry that opens the
+ * dialog. Hidden while `IMPROVEMENTS_ENABLED` is off (or on an API without
+ * the route). A dot shows while drafts wait.
  */
 export function ImprovementHeaderButton() {
-  const [open, setOpen] = useState(false);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const { data } = useImprovements();
+  const canApprove = useCan("improvement.approve");
   if (!data?.enabled) return null;
-  const pending = data.improvements.filter((row) => row.status === "pending_approval").length;
+  const waiting = data.improvements.filter(isActionableImprovement);
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
             className="relative size-8"
-            onClick={() => setOpen(true)}
-            aria-label="Suggest an improvement"
+            aria-label={
+              waiting.length > 0
+                ? `Improvements, ${waiting.length} waiting for approval`
+                : "Improvements"
+            }
           >
             <Lightbulb className="size-4" />
-            {pending > 0 ? (
+            {waiting.length > 0 ? (
               <span
                 className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-status-warning"
                 aria-hidden="true"
               />
             ) : null}
           </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {pending > 0
-            ? `Suggest an improvement (${pending} waiting for approval in Settings)`
-            : "Suggest an improvement"}
-        </TooltipContent>
-      </Tooltip>
-      <ImprovementDialog open={open} onOpenChange={setOpen} />
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          aria-label="Improvements"
+          className="max-h-(--radix-popover-content-available-height) w-96 max-w-[calc(100vw-1rem)] space-y-3 overflow-y-auto"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">Improvements</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setPopoverOpen(false);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="size-3.5" />
+              New improvement
+            </Button>
+          </div>
+          <ImprovementApprovalList rows={waiting} canApprove={canApprove} />
+        </PopoverContent>
+      </Popover>
+      <ImprovementDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
   );
 }

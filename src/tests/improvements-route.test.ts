@@ -129,7 +129,9 @@ beforeEach(async () => {
 describe("an agent can only draft", () => {
   test("shared key + X-Agent-ID approve is refused and nothing is sent", async () => {
     const draft = await draftAsAgent();
-    const res = await call("POST", `/api/improvements/${draft.id}/approve`, asAgent(workerId), {});
+    const res = await call("POST", `/api/improvements/${draft.id}/approve`, asAgent(workerId), {
+      email: "alice@example.com",
+    });
     expect(res.status).toBe(403);
     expect(proxyRequests).toHaveLength(0);
     expect((await getImprovement(draft.id))?.status).toBe("pending_approval");
@@ -141,7 +143,7 @@ describe("an agent can only draft", () => {
       "POST",
       `/api/improvements/${draft.id}/approve`,
       bearer(workerSessionToken),
-      {},
+      { email: "alice@example.com" },
     );
     expect(res.status).toBe(403);
     expect(proxyRequests).toHaveLength(0);
@@ -175,19 +177,18 @@ describe("a person approves", () => {
       expect.objectContaining({ text: "Show cost per workflow run", email: "alice@example.com" }),
     ]);
 
-    const again = await call(
-      "POST",
-      `/api/improvements/${draft.id}/approve`,
-      bearer(user.token),
-      {},
-    );
+    const again = await call("POST", `/api/improvements/${draft.id}/approve`, bearer(user.token), {
+      email: "alice@example.com",
+    });
     expect(again.status).toBe(409);
     expect(proxyRequests).toHaveLength(1);
   });
 
   test("the shared key alone approves as operator", async () => {
     const draft = await draftAsAgent();
-    const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {});
+    const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "alice@example.com",
+    });
     expect(res.status).toBe(200);
     expect(res.body.improvement.approvedBy).toBe("operator");
     expect(proxyRequests).toHaveLength(1);
@@ -197,6 +198,7 @@ describe("a person approves", () => {
     const res = await call("POST", "/api/improvements", bearer(user.token), {
       text: "Let me pin tasks",
       sendNow: true,
+      email: "alice@example.com",
       source: "ui",
     });
     expect(res.status).toBe(200);
@@ -211,13 +213,51 @@ describe("a person approves", () => {
   test("a proxy 500 marks the row failed and a person can retry", async () => {
     proxyStatus = 500;
     const draft = await draftAsAgent();
-    const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {});
+    const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "alice@example.com",
+    });
     expect(res.status).toBe(200);
     expect(res.body.improvement).toMatchObject({ status: "failed", proxyStatus: 500 });
     proxyStatus = 202;
-    const retry = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {});
+    const retry = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "alice@example.com",
+    });
     expect(retry.body.improvement.status).toBe("sent");
     expect(proxyRequests).toHaveLength(2);
+  });
+});
+
+describe("email is required to send", () => {
+  test("approve without an email returns 400 and nothing is sent", async () => {
+    const draft = await draftAsAgent();
+    for (const body of [{}, { email: "" }, { email: "not-an-email" }]) {
+      const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), body);
+      expect(res.status).toBe(400);
+    }
+    expect(proxyRequests).toHaveLength(0);
+    expect((await getImprovement(draft.id))?.status).toBe("pending_approval");
+  });
+
+  test("a person's sendNow without an email returns 400 and stores nothing", async () => {
+    const before = (await call("GET", "/api/improvements", operator())).body.improvements.length;
+    const res = await call("POST", "/api/improvements", bearer(user.token), {
+      text: "No email given",
+      sendNow: true,
+    });
+    expect(res.status).toBe(400);
+    const after = (await call("GET", "/api/improvements", operator())).body.improvements.length;
+    expect(after).toBe(before);
+    expect(proxyRequests).toHaveLength(0);
+  });
+
+  test("an agent draft needs no email and the sent body always carries one", async () => {
+    const draft = await draftAsAgent("Add a dark theme");
+    const res = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "approver@example.com",
+    });
+    expect(res.status).toBe(200);
+    expect(Object.keys(proxyRequests[0] ?? {}).sort()).toEqual(["email", "install_id", "text"]);
+    expect(proxyRequests[0]?.email).toBe("approver@example.com");
   });
 });
 
@@ -226,6 +266,7 @@ describe("secret scrubbing", () => {
     const res = await call("POST", "/api/improvements", bearer(user.token), {
       text: `My token ${GITHUB_TOKEN} leaked in logs`,
       sendNow: true,
+      email: "alice@example.com",
     });
     expect(res.status).toBe(201);
     expect(res.body.improvement.status).toBe("pending_approval");
@@ -247,7 +288,9 @@ describe("discard", () => {
     const own = await call("POST", `/api/improvements/${draft.id}/discard`, asAgent(workerId));
     expect(own.status).toBe(200);
     expect(own.body.improvement.status).toBe("discarded");
-    const approve = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {});
+    const approve = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "alice@example.com",
+    });
     expect(approve.status).toBe(409);
     expect(proxyRequests).toHaveLength(0);
   });
@@ -260,8 +303,11 @@ describe("kill switch", () => {
     const create = await call("POST", "/api/improvements", bearer(user.token), {
       text: "x",
       sendNow: true,
+      email: "alice@example.com",
     });
-    const approve = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {});
+    const approve = await call("POST", `/api/improvements/${draft.id}/approve`, operator(), {
+      email: "alice@example.com",
+    });
     const discard = await call("POST", `/api/improvements/${draft.id}/discard`, operator());
     for (const res of [create, approve, discard]) {
       expect(res.status).toBe(409);

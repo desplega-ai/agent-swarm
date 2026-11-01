@@ -1780,7 +1780,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "IMPROVEMENTS_ENABLED",
         label: "Improvements",
         description:
-          "Let people and agents draft product improvements for the Agent Swarm team. Agents can only draft; nothing is sent until a person approves it. Only the text, an optional email and, while telemetry is on, the install id are sent. Set to false to turn drafting and sending off.",
+          "Let people and agents draft product improvements for the Agent Swarm team. Agents can only draft; nothing is sent until a person approves it. Only the text, the approver's email (required) and the install id are sent. Drafts wait for approval in the lightbulb popover in the header. Set to false to turn drafting and sending off.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration#improvements`,

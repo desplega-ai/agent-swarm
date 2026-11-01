@@ -46,7 +46,7 @@ mock.module("@/components/ui/dialog", () => ({
   DialogDescription: Box,
 }));
 
-const { ImprovementDialog, improvementPreview } = await import("./improvement-dialog");
+const { ImprovementDialog } = await import("./improvement-dialog");
 
 let container: HTMLDivElement;
 let unmount: () => Promise<void>;
@@ -88,15 +88,13 @@ beforeEach(async () => {
 });
 afterEach(async () => unmount());
 
-test("the email defaults to the signed-in user and the preview shows the exact fields", async () => {
+test("the email defaults to the signed-in user and no JSON preview is shown", async () => {
   const email = container.querySelector("#improvement-email") as HTMLInputElement;
   expect(email.value).toBe("dana@acme.com");
+  expect(email.required).toBe(true);
   await type("#improvement-text", "  Bulk retry  ");
-  const preview = container.querySelector("pre")?.textContent ?? "";
-  const parsed = JSON.parse(preview);
-  expect(Object.keys(parsed).sort()).toEqual(["email", "install_id", "text"]);
-  expect(parsed.text).toBe("Bulk retry");
-  expect(parsed.email).toBe("dana@acme.com");
+  expect(container.querySelector("pre")).toBeNull();
+  expect(container.textContent).not.toContain("install_id");
 });
 
 test("send is disabled until there is text, then submits with sendNow from the ui", async () => {
@@ -110,14 +108,11 @@ test("send is disabled until there is text, then submits with sendNow from the u
   expect(toasts[0]).toContain("sent");
 });
 
-test("a cleared email is not sent, and a redacted draft tells the person to review it", async () => {
-  resultStatus = "pending_approval";
+test("a cleared email blocks send", async () => {
   await type("#improvement-text", "Bulk retry");
   await type("#improvement-email", "");
-  expect(JSON.parse(container.querySelector("pre")?.textContent ?? "{}").email).toBeUndefined();
-  await act(async () => button("Send")?.click());
-  expect(submitted[0]?.email).toBeUndefined();
-  expect(toasts[0]).toContain("redacted");
+  expect(button("Send")?.disabled).toBe(true);
+  expect(submitted).toHaveLength(0);
 });
 
 test("an invalid email blocks send", async () => {
@@ -126,6 +121,10 @@ test("an invalid email blocks send", async () => {
   expect(button("Send")?.disabled).toBe(true);
 });
 
-test("improvementPreview never adds fields beyond install_id, text and email", () => {
-  expect(Object.keys(JSON.parse(improvementPreview("x", "")))).toEqual(["install_id", "text"]);
+test("a redacted draft tells the person to review it in the header", async () => {
+  resultStatus = "pending_approval";
+  await type("#improvement-text", "Bulk retry");
+  await act(async () => button("Send")?.click());
+  expect(toasts[0]).toContain("redacted");
+  expect(toasts[0]).toContain("header");
 });

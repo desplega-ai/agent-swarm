@@ -3465,6 +3465,7 @@ export interface ImprovementsResponse {
 
 export interface SubmitImprovementInput {
   text: string;
+  /** Required with `sendNow` (the API answers 400 without it). */
   email?: string;
   sendNow?: boolean;
   source?: "ui" | "api";

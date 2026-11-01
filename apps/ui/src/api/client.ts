@@ -3929,7 +3929,7 @@ class ApiClient {
     return this.improvementWrite("/api/improvements", input);
   }
 
-  approveImprovement(id: string, email: string | null): Promise<Improvement> {
+  approveImprovement(id: string, email: string): Promise<Improvement> {
     return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/approve`, { email });
   }
 

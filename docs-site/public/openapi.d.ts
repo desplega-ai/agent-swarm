@@ -24213,7 +24213,7 @@ export interface paths {
         put?: never;
         /**
          * Draft a product improvement, or send one as a person
-         * @description Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. Only `install_id` (while telemetry is on), `text` and `email` are sent to desplega.
+         * @description Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.
          */
         post: {
             parameters: {
@@ -24295,7 +24295,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid text or email */
+                /** @description Invalid text or email, or `sendNow` without an email */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -24341,7 +24341,7 @@ export interface paths {
         put?: never;
         /**
          * Approve and send a drafted improvement
-         * @description Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.
+         * @description Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.
          */
         post: {
             parameters: {
@@ -24355,8 +24355,11 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        /** Format: email */
-                        email?: string | null;
+                        /**
+                         * Format: email
+                         * @description The approver's email, sent with the text.
+                         */
+                        email: string;
                     };
                 };
             };
@@ -24389,6 +24392,15 @@ export interface paths {
                                 leakHints?: string[];
                             };
                         };
+                    };
+                };
+                /** @description Missing or invalid email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Caller is an agent */

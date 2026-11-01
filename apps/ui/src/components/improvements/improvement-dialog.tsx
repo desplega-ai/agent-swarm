@@ -14,16 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { isValidImprovementEmail } from "./improvement-email";
 
 export const IMPROVEMENT_TEXT_MAX = 4000;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** The exact body the server sends to desplega (`install_id` is added server-side while telemetry is on). */
-export function improvementPreview(text: string, email: string): string {
-  const body: Record<string, string> = { text: text.trim() };
-  if (email.trim()) body.email = email.trim();
-  return JSON.stringify({ install_id: "<this install, while telemetry is on>", ...body }, null, 2);
-}
 
 export interface ImprovementDialogProps {
   open: boolean;
@@ -33,8 +26,8 @@ export interface ImprovementDialogProps {
 /**
  * Suggest an improvement to the Agent Swarm team. A person's submit approves
  * and sends in one call (`sendNow`). If secret scrubbing changed the text, the
- * server keeps it pending so the person can review the redacted text in
- * Settings first.
+ * server keeps it pending so the person can review the redacted text in the
+ * header popover first. The email is required.
  */
 export function ImprovementDialog({ open, onOpenChange }: ImprovementDialogProps) {
   const { user } = useCurrentUser();
@@ -50,7 +43,7 @@ export function ImprovementDialog({ open, onOpenChange }: ImprovementDialogProps
   }, [open, user?.email]);
 
   const trimmed = text.trim();
-  const emailValid = email.trim() === "" || EMAIL_RE.test(email.trim());
+  const emailValid = isValidImprovementEmail(email);
   const canSubmit =
     trimmed.length > 0 && trimmed.length <= IMPROVEMENT_TEXT_MAX && emailValid && !submit.isPending;
 
@@ -58,17 +51,17 @@ export function ImprovementDialog({ open, onOpenChange }: ImprovementDialogProps
     try {
       const improvement = await submit.mutateAsync({
         text: trimmed,
-        email: email.trim() || undefined,
+        email: email.trim(),
         sendNow: true,
         source: "ui",
       });
       if (improvement.status === "sent") {
         toast.success("Thanks. Your improvement was sent to the Agent Swarm team.");
       } else if (improvement.status === "failed") {
-        toast.error("Could not send it. Retry from Settings → Configuration → Improvements.");
+        toast.error("Could not send it. Retry from the Improvements button in the header.");
       } else {
         toast.info(
-          "Part of the text looked like a secret and was redacted. Review and approve it in Settings → Configuration.",
+          "Part of the text looked like a secret and was redacted. Review and approve it from the Improvements button in the header.",
         );
       }
       onOpenChange(false);
@@ -83,7 +76,8 @@ export function ImprovementDialog({ open, onOpenChange }: ImprovementDialogProps
         <DialogHeader>
           <DialogTitle>Suggest an improvement</DialogTitle>
           <DialogDescription>
-            Tell the Agent Swarm team what would make this better. Only what you see below is sent.
+            Tell the Agent Swarm team what would make this better. Only the text, your email and
+            this install's id are sent.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -102,24 +96,17 @@ export function ImprovementDialog({ open, onOpenChange }: ImprovementDialogProps
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="improvement-email">Email (optional)</Label>
+            <Label htmlFor="improvement-email">Your email</Label>
             <Input
               id="improvement-email"
               type="email"
+              required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@company.com"
               aria-invalid={!emailValid}
             />
-            <p className="text-xs text-muted-foreground">
-              So the team can follow up. Clear it to send anonymously.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium">What is sent</p>
-            <pre className="max-h-40 overflow-auto rounded-md border bg-muted p-2 text-xs whitespace-pre-wrap break-words">
-              {improvementPreview(text, email)}
-            </pre>
+            <p className="text-xs text-muted-foreground">So the team can follow up. Required.</p>
           </div>
         </div>
         <DialogFooter>

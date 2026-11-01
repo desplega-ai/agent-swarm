@@ -8,9 +8,6 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { createRoot } = await import("react-dom/client");
 
 let data: ImprovementsResponse;
-let canApprove = true;
-let approved: Array<{ id: string; email: string | null }> = [];
-let discarded: string[] = [];
 
 mock.module("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: () => {} }),
@@ -18,21 +15,9 @@ mock.module("@tanstack/react-query", () => ({
 mock.module("@/api/hooks/use-config-api", () => ({ useConfigs: () => ({ data: [] }) }));
 mock.module("@/api/hooks/use-improvements", () => ({
   useImprovements: () => ({ data, isError: false }),
-  useApproveImprovement: () => ({
-    isPending: false,
-    mutateAsync: async (input: { id: string; email: string | null }) => {
-      approved.push(input);
-      return { status: "sent" };
-    },
-  }),
-  useDiscardImprovement: () => ({
-    isPending: false,
-    mutateAsync: async (id: string) => {
-      discarded.push(id);
-    },
-  }),
+  useApproveImprovement: () => ({ isPending: false, mutateAsync: async () => ({}) }),
+  useDiscardImprovement: () => ({ isPending: false, mutateAsync: async () => ({}) }),
 }));
-mock.module("@/lib/use-can", () => ({ useCan: () => canApprove }));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "u1", user: { email: "dana@acme.com" } }),
 }));
@@ -40,11 +25,10 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/input", () => require("../ui/input"));
 mock.module("@/components/ui/label", () => require("../ui/label"));
-mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
-mock.module("@/components/improvements/improvement-dialog", () => ({
-  ImprovementDialog: () => null,
-}));
+mock.module("@/components/improvements/improvement-approval-list", () =>
+  require("../improvements/improvement-approval-list"),
+);
 mock.module("@/components/ui/badge", () => ({
   Badge: ({ children }: { children: ReactNode }) => <span data-badge>{children}</span>,
 }));
@@ -84,64 +68,35 @@ async function mount() {
     container.remove();
   };
 }
-const button = (label: string) =>
-  [...container.querySelectorAll("button")].find((b) => b.textContent === label);
 
 beforeEach(() => {
   data = { enabled: true, improvements: [row({})] };
-  canApprove = true;
-  approved = [];
-  discarded = [];
 });
 afterEach(async () => unmount());
 
-test("a pending row highlights its leak hints and approves with the person's email", async () => {
+test("settings has no approval list or submit: it points to the header", async () => {
   await mount();
-  const marks = [...container.querySelectorAll("mark")].map((m) => m.textContent);
-  expect(marks).toEqual(["worker-7", "acme/api"]);
-  await act(async () => button("Approve and send")?.click());
-  expect(approved).toEqual([{ id: "i1", email: "dana@acme.com" }]);
+  expect(container.querySelectorAll("button")).toHaveLength(0);
+  expect(container.querySelector("mark")).toBeNull();
+  expect(container.textContent).toContain("1 draft is waiting for approval in the header.");
 });
 
-test("discard calls the discard route", async () => {
-  await mount();
-  await act(async () => button("Discard")?.click());
-  expect(discarded).toEqual(["i1"]);
-});
-
-test("a failed row offers Retry and history lists sent rows with the approver", async () => {
+test("history lists sent rows with the approver", async () => {
   data = {
     enabled: true,
-    improvements: [
-      row({ id: "f1", status: "failed", proxyStatus: 500 }),
-      row({
-        id: "s1",
-        status: "sent",
-        approvedBy: "operator",
-        proxyStatus: 202,
-        leakHints: undefined,
-      }),
-    ],
+    improvements: [row({ id: "s1", status: "sent", approvedBy: "operator", proxyStatus: 202 })],
   };
   await mount();
-  expect(button("Retry")).toBeDefined();
-  expect(container.textContent).toContain("Proxy answered 500");
   expect(container.textContent).toContain("Approved by operator");
+  expect(container.textContent).toContain("Proxy 202");
+  expect(container.textContent).not.toContain("waiting for approval in the header");
 });
 
-test("without the approve grant there is no approve button", async () => {
-  canApprove = false;
-  await mount();
-  expect(button("Approve and send")).toBeUndefined();
-  expect(container.textContent).toContain("A person with approval rights must approve it.");
-});
-
-test("with the switch off the section reads Off and offers no actions", async () => {
+test("with the switch off the section reads Off", async () => {
   data = { enabled: false, improvements: [row({})] };
   await mount();
   expect([...container.querySelectorAll("[data-badge]")].map((b) => b.textContent)).toContain(
     "Off",
   );
-  expect(button("Approve and send")).toBeUndefined();
-  expect(button("Suggest an improvement")).toBeUndefined();
+  expect(container.textContent).toContain("Turned off.");
 });

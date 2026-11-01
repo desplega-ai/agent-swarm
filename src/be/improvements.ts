@@ -8,19 +8,28 @@
  *   credential (a user id or `operator`). The DB refuses a `sending` / `sent`
  *   row without `approved_by`.
  * - Exactly `install_id`, `text` and `email` leave the install, built by
- *   `buildImprovementPayload`. `install_id` goes only while telemetry is on.
+ *   `buildImprovementPayload`. All three always go: the approver must give a
+ *   valid email, and `install_id` is minted here when telemetry never did.
  * - `IMPROVEMENTS_ENABLED=false` refuses every create, send and discard.
  */
-import { isTelemetryEnabled } from "../telemetry";
 import { parseEnvFlag } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient, getSwarmConfigs } from "./db";
+import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "./db";
 
 export const IMPROVEMENTS_ENABLED_KEY = "IMPROVEMENTS_ENABLED";
 export const IMPROVEMENT_TEXT_MAX = 4000;
 const SEND_TIMEOUT_MS = 10_000;
 const PROXY_ERROR_MAX = 1024;
 const LEAK_HINTS_MAX = 50;
+const INSTALL_ID_KEY = "telemetry_installation_id";
+const EMAIL_MAX = 320;
+const VALID_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A trimmed email of at most 320 characters with a local part, an `@` and a dotted domain. */
+export function isValidImprovementEmail(value: string | null | undefined): value is string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 && trimmed.length <= EMAIL_MAX && VALID_EMAIL_RE.test(trimmed);
+}
 
 export const IMPROVEMENT_STATUSES = [
   "pending_approval",
@@ -89,6 +98,7 @@ function toImprovement(row: ImprovementRow): Improvement {
 export type ImprovementErrorCode =
   | "improvements_disabled"
   | "invalid_text"
+  | "invalid_email"
   | "not_found"
   | "conflict";
 
@@ -122,26 +132,35 @@ async function assertEnabled(): Promise<void> {
   }
 }
 
-export type ImprovementPayload = { install_id?: string; text: string; email?: string };
+export type ImprovementPayload = { install_id: string; text: string; email: string };
 
 /**
  * The only body that leaves the install. It copies exactly three named fields,
  * so no row, config or agent value can ride along.
  */
 export function buildImprovementPayload(input: {
-  installId?: string | null;
+  installId: string;
   text: string;
-  email?: string | null;
+  email: string;
 }): ImprovementPayload {
-  const payload: ImprovementPayload = { text: input.text };
-  if (input.installId) payload.install_id = input.installId;
-  if (input.email) payload.email = input.email;
-  return payload;
+  return { install_id: input.installId, text: input.text, email: input.email };
 }
 
-/** The install id, only while telemetry is on (the `/api/used-by` rule). */
-async function improvementInstallId(): Promise<string | undefined> {
-  return isTelemetryEnabled() ? await globalValue("telemetry_installation_id") : undefined;
+/**
+ * The install id, whether or not telemetry is on. An install that never ran
+ * with telemetry has none, so the first send mints one in the telemetry
+ * format and stores it under the same key: turning telemetry on later reuses
+ * it. The read and the insert share one write transaction, so two first
+ * sends cannot mint two ids.
+ */
+export async function improvementInstallId(): Promise<string> {
+  return getDbClient().transaction(async () => {
+    const existing = await globalValue(INSTALL_ID_KEY);
+    if (existing) return existing;
+    const minted = `install_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await upsertSwarmConfig({ scope: "global", key: INSTALL_ID_KEY, value: minted });
+    return minted;
+  });
 }
 
 export async function getImprovement(id: string): Promise<Improvement | null> {
@@ -214,7 +233,8 @@ export async function createImprovement(input: {
 
 /**
  * Approve a draft and send it. `approvedBy` must come from the caller's
- * credential (a user id or `operator`), never from a request body. The claim
+ * credential (a user id or `operator`), never from a request body. `email` is
+ * required: a draft carries none until its approver gives one. The claim
  * (`pending_approval` or `failed` → `sending`) is one conditional UPDATE, so a
  * double approve gets a conflict instead of a second send. There is no
  * automatic retry: the proxy has no idempotency key.
@@ -223,14 +243,19 @@ export async function approveAndSend(
   id: string,
   approval: {
     approvedBy: string;
-    email?: string | null;
+    email: string;
     endpoint: string;
     updatedBy?: string | null;
   },
 ): Promise<Improvement> {
   await assertEnabled();
+  if (!isValidImprovementEmail(approval.email)) {
+    throw new ImprovementError("invalid_email", "A valid email is required to send.");
+  }
+  const email = approval.email.trim();
+  // Resolved before the claim, so a failed mint cannot strand a row in `sending`.
+  const installId = await improvementInstallId();
   const approvedAt = new Date().toISOString();
-  const email = approval.email?.trim() || null;
   const claimed = await getDbClient().transaction(async (tx) => {
     const result = await tx.run(
       `UPDATE improvements
@@ -255,9 +280,9 @@ export async function approveAndSend(
   }
 
   const payload = buildImprovementPayload({
-    installId: await improvementInstallId(),
+    installId,
     text: claimed.text,
-    email: claimed.email,
+    email,
   });
   let proxyStatus: number | null = null;
   let proxyId: string | null = null;

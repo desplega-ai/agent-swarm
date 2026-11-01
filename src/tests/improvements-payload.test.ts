@@ -1,10 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createSwarmRepo, initDb, upsertSwarmConfig } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createSwarmRepo,
+  getDbClient,
+  getSwarmConfigs,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
 import {
   approveAndSend,
   buildImprovementPayload,
   createImprovement,
+  getImprovement,
+  ImprovementError,
   improvementLeakHints,
 } from "../be/improvements";
 
@@ -79,9 +89,6 @@ describe("improvement payload whitelist", () => {
       text: "Make the inbox faster",
       email: "me@example.com",
     });
-    expect(buildImprovementPayload({ text: "t", installId: null, email: null })).toEqual({
-      text: "t",
-    });
   });
 
   test("an approved agent draft sends exactly the three fields with one header", async () => {
@@ -114,12 +121,65 @@ describe("improvement payload whitelist", () => {
     }
   });
 
-  test("install_id is absent while telemetry is off, and a missing email is omitted", async () => {
+  test("install_id is sent while telemetry is off", async () => {
     process.env.ANONYMIZED_TELEMETRY = "false";
     const { improvement } = await createImprovement({ text: "Dark mode", source: "ui" });
-    await approveAndSend(improvement.id, { approvedBy: "operator", endpoint: ENDPOINT });
+    await approveAndSend(improvement.id, {
+      approvedBy: "operator",
+      email: "person@example.com",
+      endpoint: ENDPOINT,
+    });
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.body).toEqual({ text: "Dark mode" });
+    expect(sent[0]?.body).toEqual({
+      install_id: "install-123",
+      text: "Dark mode",
+      email: "person@example.com",
+    });
+  });
+
+  test("with telemetry off and no install id, the first send mints one and keeps it", async () => {
+    process.env.ANONYMIZED_TELEMETRY = "false";
+    // Worker containers export the key into the env; the read falls back to it.
+    const savedEnvId = process.env.telemetry_installation_id;
+    delete process.env.telemetry_installation_id;
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_installation_id'");
+    try {
+      for (const text of ["First idea", "Second idea"]) {
+        const { improvement } = await createImprovement({ text, source: "ui" });
+        await approveAndSend(improvement.id, {
+          approvedBy: "operator",
+          email: "person@example.com",
+          endpoint: ENDPOINT,
+        });
+      }
+      const stored = (
+        await getSwarmConfigs({ scope: "global", key: "telemetry_installation_id" })
+      )[0]?.value;
+      expect(stored).toMatch(/^install_[0-9a-f]{16}$/);
+      expect(sent.map((request) => request.body.install_id)).toEqual([stored, stored]);
+    } finally {
+      if (savedEnvId !== undefined) process.env.telemetry_installation_id = savedEnvId;
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "telemetry_installation_id",
+        value: "install-123",
+      });
+    }
+  });
+
+  test("an approve without a valid email is refused and nothing is sent", async () => {
+    const { improvement } = await createImprovement({ text: "Bulk retry", source: "mcp" });
+    for (const email of ["", "   ", "not-an-email"]) {
+      const attempt = approveAndSend(improvement.id, {
+        approvedBy: "operator",
+        email,
+        endpoint: ENDPOINT,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(ImprovementError);
+      await expect(attempt).rejects.toMatchObject({ code: "invalid_email" });
+    }
+    expect(sent).toHaveLength(0);
+    expect((await getImprovement(improvement.id))?.status).toBe("pending_approval");
   });
 
   test("leak hints flag install-specific substrings without changing the text", async () => {
