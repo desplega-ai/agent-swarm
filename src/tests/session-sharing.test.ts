@@ -578,6 +578,11 @@ describe("all-users read scope", () => {
     requester = await createUser({ name: "Req" });
     await setUserRoles(requester.id, ["requester"], null);
     requesterAuth = { kind: "user", userId: requester.id, user: requester as never };
+    const db = getDbClient();
+    await db.run("INSERT INTO roles (id, name) VALUES ('role-auditor', 'auditor')");
+    await db.run(
+      "INSERT INTO role_permissions (roleId, verb) VALUES ('role-auditor', 'session.read.all')",
+    );
   });
 
   const taskIds = async (query: string, opts: Call) => {
@@ -591,156 +596,180 @@ describe("all-users read scope", () => {
     return res.body.sessions.map((s: { root: { id: string } }) => s.root.id) as string[];
   };
 
-  test("an admin who opts in sees other users' roots; without the opt-in nothing changes", async () => {
-    // Every new user is admin (trg_users_default_role).
-    expect((await getUserGrant(eze.id)).grantsAll).toBe(true);
+  test("a default-created admin is denied the scope: grant-all is not session.read.all", async () => {
+    // Every new user is admin (trg_users_default_role), so admin alone must not opt in.
+    const fresh = await createUser({ name: "Fresh" });
+    expect((await getUserGrant(fresh.id)).grantsAll).toBe(true);
+    const freshAuth: HttpRequestAuth = { kind: "user", userId: fresh.id, user: fresh as never };
     const { root, child } = await session(owner.id);
-
-    for (const opts of [{ auth: ezeAuth }, { dashboardUserId: eze.id }]) {
-      expect(await taskIds("", opts)).not.toContain(root.id);
-      expect(await sessionIds("", opts)).not.toContain(root.id);
-      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, opts)).status).toBe(403);
-      expect((await call("sessions", "GET", `/api/sessions/${root.id}`, opts)).status).toBe(403);
-
-      const tasks = await taskIds("&scope=all", opts);
-      expect(tasks).toContain(root.id);
-      expect(tasks).toContain(child.id);
-      expect(await sessionIds("&scope=all", opts)).toContain(root.id);
-
-      // The header opts in every read, including the tree view and a detail click.
+    for (const opts of [{ auth: freshAuth }, { dashboardUserId: fresh.id }]) {
       const scoped = { ...opts, sessionScope: "all" };
-      expect(await taskIds("", scoped)).toContain(root.id);
-      expect(await sessionIds("&scope=tree&show=all", scoped)).toContain(root.id);
-      expect(await sessionIds("&scope=tree&show=all", opts)).not.toContain(root.id);
-      // Mine (the default tree view) becomes every user's human-started sessions.
-      expect(await sessionIds("&scope=tree", scoped)).toContain(root.id);
-      expect(await sessionIds("&scope=tree", opts)).not.toContain(root.id);
-      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
-      const detail = await call("sessions", "GET", `/api/sessions/${root.id}`, scoped);
-      expect(detail.status).toBe(200);
-      expect(detail.body.access).toBe("read");
-      // mine and shared keep their meaning.
-      expect(await sessionIds("&scope=mine", scoped)).not.toContain(root.id);
+      expect(await taskIds("&scope=all", opts)).not.toContain(root.id);
+      expect(await sessionIds("&scope=all", opts)).not.toContain(root.id);
+      expect(await taskIds("", scoped)).not.toContain(child.id);
+      expect(await sessionIds("&scope=tree&show=all", scoped)).not.toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+      expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(403);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
     }
   });
 
-  test("a non-admin who opts in gets the usual filter, until a role grants session.read.all", async () => {
-    const { root, child } = await session(owner.id);
-    const scoped = { auth: requesterAuth, sessionScope: "all" };
+  describe("with an explicit session.read.all grant", () => {
+    beforeAll(async () => {
+      await setUserRoles(eze.id, ["admin", "auditor"], null);
+    });
+    afterAll(async () => {
+      await setUserRoles(eze.id, ["admin"], null);
+    });
 
-    expect(await taskIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
-    expect(await sessionIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
-    expect(await taskIds("", scoped)).not.toContain(root.id);
-    expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
-    expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+    test("an admin with the grant who opts in sees other users' roots; without the opt-in nothing changes", async () => {
+      const { root, child } = await session(owner.id);
 
-    const db = getDbClient();
-    await db.run("INSERT INTO roles (id, name) VALUES ('role-auditor', 'auditor')");
-    await db.run(
-      "INSERT INTO role_permissions (roleId, verb) VALUES ('role-auditor', 'session.read.all')",
-    );
-    await setUserRoles(requester.id, ["requester", "auditor"], null);
-    try {
-      expect(await taskIds("&scope=all", { auth: requesterAuth })).toContain(root.id);
-      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
-      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(true);
-    } finally {
-      await setUserRoles(requester.id, ["requester"], null);
-    }
-  });
+      for (const opts of [{ auth: ezeAuth }, { dashboardUserId: eze.id }]) {
+        expect(await taskIds("", opts)).not.toContain(root.id);
+        expect(await sessionIds("", opts)).not.toContain(root.id);
+        expect((await call("tasks", "GET", `/api/tasks/${child.id}`, opts)).status).toBe(403);
+        expect((await call("sessions", "GET", `/api/sessions/${root.id}`, opts)).status).toBe(403);
 
-  test("with RBAC off a non-admin still needs a stored admin or session.read.all grant", async () => {
-    const { root, child } = await session(owner.id);
-    const previous = process.env.RBAC_ENABLED;
-    process.env.RBAC_ENABLED = "false";
-    try {
-      for (const opts of [{ auth: requesterAuth }, { dashboardUserId: requester.id }]) {
+        const tasks = await taskIds("&scope=all", opts);
+        expect(tasks).toContain(root.id);
+        expect(tasks).toContain(child.id);
+        expect(await sessionIds("&scope=all", opts)).toContain(root.id);
+
+        // The header opts in every read, including the tree view and a detail click.
         const scoped = { ...opts, sessionScope: "all" };
-        expect(await taskIds("&scope=all", opts)).not.toContain(root.id);
-        expect(await taskIds("", scoped)).not.toContain(child.id);
-        expect(await sessionIds("&scope=all", opts)).not.toContain(root.id);
-        expect(await sessionIds("&scope=tree&show=all", scoped)).not.toContain(root.id);
-        expect(await sessionIds("&scope=tree", scoped)).not.toContain(root.id);
-        expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
-        expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(
-          403,
-        );
-        expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+        expect(await taskIds("", scoped)).toContain(root.id);
+        expect(await sessionIds("&scope=tree&show=all", scoped)).toContain(root.id);
+        expect(await sessionIds("&scope=tree&show=all", opts)).not.toContain(root.id);
+        // Mine (the default tree view) becomes every user's human-started sessions.
+        expect(await sessionIds("&scope=tree", scoped)).toContain(root.id);
+        expect(await sessionIds("&scope=tree", opts)).not.toContain(root.id);
+        expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
+        const detail = await call("sessions", "GET", `/api/sessions/${root.id}`, scoped);
+        expect(detail.status).toBe(200);
+        expect(detail.body.access).toBe("read");
+        // mine and shared keep their meaning.
+        expect(await sessionIds("&scope=mine", scoped)).not.toContain(root.id);
       }
-      // A stored admin grant still opts in with RBAC off.
-      expect(await taskIds("&scope=all", { auth: ezeAuth })).toContain(root.id);
-      const ezeScoped = { auth: ezeAuth, sessionScope: "all" };
-      expect((await call("users", "GET", "/api/whoami", ezeScoped)).body.sessionReadAll).toBe(true);
-    } finally {
-      if (previous === undefined) delete process.env.RBAC_ENABLED;
-      else process.env.RBAC_ENABLED = previous;
-    }
-  });
-
-  test("Mine keeps a shared machine-started session when the scope turns on: list, tree and counts", async () => {
-    const run = await createTaskExtended("SHARED WORKFLOW RUN", {
-      requestedByUserId: owner.id,
-      source: "workflow",
     });
-    await setSessionShares(
-      { id: run.id, requestedByUserId: owner.id },
-      { everyone: "none", users: [{ userId: eze.id, access: "read" }] },
-      owner.id,
-    );
-    const mine = async (opts: Call) => {
-      const list = await call(
-        "sessions",
-        "GET",
-        "/api/sessions?limit=200&scope=tree&showSource=workflow",
-        opts,
+
+    test("a requester who opts in gets the usual filter, until a role grants session.read.all", async () => {
+      const { root, child } = await session(owner.id);
+      const scoped = { auth: requesterAuth, sessionScope: "all" };
+
+      expect(await taskIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
+      expect(await sessionIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
+      expect(await taskIds("", scoped)).not.toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+
+      await setUserRoles(requester.id, ["requester", "auditor"], null);
+      try {
+        expect(await taskIds("&scope=all", { auth: requesterAuth })).toContain(root.id);
+        expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
+        expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(true);
+      } finally {
+        await setUserRoles(requester.id, ["requester"], null);
+      }
+    });
+
+    test("with RBAC off a user still needs a stored session.read.all grant", async () => {
+      const { root, child } = await session(owner.id);
+      const previous = process.env.RBAC_ENABLED;
+      process.env.RBAC_ENABLED = "false";
+      try {
+        for (const opts of [{ auth: requesterAuth }, { dashboardUserId: requester.id }]) {
+          const scoped = { ...opts, sessionScope: "all" };
+          expect(await taskIds("&scope=all", opts)).not.toContain(root.id);
+          expect(await taskIds("", scoped)).not.toContain(child.id);
+          expect(await sessionIds("&scope=all", opts)).not.toContain(root.id);
+          expect(await sessionIds("&scope=tree&show=all", scoped)).not.toContain(root.id);
+          expect(await sessionIds("&scope=tree", scoped)).not.toContain(root.id);
+          expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+          expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(
+            403,
+          );
+          expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(
+            false,
+          );
+        }
+        // A stored session.read.all grant still opts in with RBAC off.
+        expect(await taskIds("&scope=all", { auth: ezeAuth })).toContain(root.id);
+        const ezeScoped = { auth: ezeAuth, sessionScope: "all" };
+        expect((await call("users", "GET", "/api/whoami", ezeScoped)).body.sessionReadAll).toBe(
+          true,
+        );
+      } finally {
+        if (previous === undefined) delete process.env.RBAC_ENABLED;
+        else process.env.RBAC_ENABLED = previous;
+      }
+    });
+
+    test("Mine keeps a shared machine-started session when the scope turns on: list, tree and counts", async () => {
+      const run = await createTaskExtended("SHARED WORKFLOW RUN", {
+        requestedByUserId: owner.id,
+        source: "workflow",
+      });
+      await setSessionShares(
+        { id: run.id, requestedByUserId: owner.id },
+        { everyone: "none", users: [{ userId: eze.id, access: "read" }] },
+        owner.id,
       );
-      const tree = await call("sessions", "GET", "/api/session-tree?showSource=workflow", opts);
-      expect(list.status).toBe(200);
-      expect(tree.status).toBe(200);
-      return {
-        ids: list.body.sessions.map((s: { root: { id: string } }) => s.root.id) as string[],
-        total: list.body.total as number,
-        workflowTotal:
-          (tree.body.sources as { source: string; total: number }[]).find(
-            (s) => s.source === "workflow",
-          )?.total ?? 0,
+      const mine = async (opts: Call) => {
+        const list = await call(
+          "sessions",
+          "GET",
+          "/api/sessions?limit=200&scope=tree&showSource=workflow",
+          opts,
+        );
+        const tree = await call("sessions", "GET", "/api/session-tree?showSource=workflow", opts);
+        expect(list.status).toBe(200);
+        expect(tree.status).toBe(200);
+        return {
+          ids: list.body.sessions.map((s: { root: { id: string } }) => s.root.id) as string[],
+          total: list.body.total as number,
+          workflowTotal:
+            (tree.body.sources as { source: string; total: number }[]).find(
+              (s) => s.source === "workflow",
+            )?.total ?? 0,
+        };
       };
-    };
-    for (const opts of [{ auth: ezeAuth }, { dashboardUserId: eze.id }]) {
-      const off = await mine(opts);
-      const on = await mine({ ...opts, sessionScope: "all" });
-      expect(off.ids).toContain(run.id);
-      expect(on.ids).toContain(run.id);
-      expect(off.workflowTotal).toBeGreaterThan(0);
-      expect(on.workflowTotal).toBeGreaterThanOrEqual(off.workflowTotal);
-      expect(on.total).toBeGreaterThanOrEqual(off.total);
-    }
-    // An unshared machine-started run of another user stays out of Mine.
-    const unshared = await createTaskExtended("UNSHARED WORKFLOW RUN", {
-      requestedByUserId: owner.id,
-      source: "workflow",
+      for (const opts of [{ auth: ezeAuth }, { dashboardUserId: eze.id }]) {
+        const off = await mine(opts);
+        const on = await mine({ ...opts, sessionScope: "all" });
+        expect(off.ids).toContain(run.id);
+        expect(on.ids).toContain(run.id);
+        expect(off.workflowTotal).toBeGreaterThan(0);
+        expect(on.workflowTotal).toBeGreaterThanOrEqual(off.workflowTotal);
+        expect(on.total).toBeGreaterThanOrEqual(off.total);
+      }
+      // An unshared machine-started run of another user stays out of Mine.
+      const unshared = await createTaskExtended("UNSHARED WORKFLOW RUN", {
+        requestedByUserId: owner.id,
+        source: "workflow",
+      });
+      expect((await mine({ auth: ezeAuth, sessionScope: "all" })).ids).not.toContain(unshared.id);
     });
-    expect((await mine({ auth: ezeAuth, sessionScope: "all" })).ids).not.toContain(unshared.id);
-  });
 
-  test("whoami reports the opt-in for the picked user on the operator key", async () => {
-    const asPicked = async (userId?: string) =>
-      (await call("users", "GET", "/api/whoami", userId ? { dashboardUserId: userId } : {})).body;
-    expect((await asPicked(eze.id)).sessionReadAll).toBe(true);
-    expect((await asPicked(requester.id)).sessionReadAll).toBe(false);
-    // The bare operator key already reads everything.
-    expect((await asPicked()).sessionReadAll).toBe(true);
-  });
-
-  test("the scope is read-only: follow-ups in someone else's session still need a write share", async () => {
-    const { child } = await session(owner.id);
-    const followUp = await call("tasks", "POST", "/api/tasks", {
-      dashboardUserId: eze.id,
-      sessionScope: "all",
-      body: { task: "please also check the logs", parentTaskId: child.id, source: "ui" },
+    test("whoami reports the opt-in for the picked user on the operator key", async () => {
+      const asPicked = async (userId?: string) =>
+        (await call("users", "GET", "/api/whoami", userId ? { dashboardUserId: userId } : {})).body;
+      expect((await asPicked(eze.id)).sessionReadAll).toBe(true);
+      expect((await asPicked(requester.id)).sessionReadAll).toBe(false);
+      // The bare operator key already reads everything.
+      expect((await asPicked()).sessionReadAll).toBe(true);
     });
-    expect(followUp.status).toBe(403);
-    expect(followUp.body.error).toContain("can't write in this session");
+
+    test("the scope is read-only: follow-ups in someone else's session still need a write share", async () => {
+      const { child } = await session(owner.id);
+      const followUp = await call("tasks", "POST", "/api/tasks", {
+        dashboardUserId: eze.id,
+        sessionScope: "all",
+        body: { task: "please also check the logs", parentTaskId: child.id, source: "ui" },
+      });
+      expect(followUp.status).toBe(403);
+      expect(followUp.body.error).toContain("can't write in this session");
+    });
   });
 });
 

@@ -185,6 +185,27 @@ function parseDatabaseGrantVerb(roleId: string, verb: string): PermissionVerb | 
   return null;
 }
 
+/**
+ * Whether one of the user's roles lists `verb` in `role_permissions`. Unlike
+ * `getUserGrant`, a grant-all role does not count: it holds no rows, and
+ * every new user gets one (`trg_users_default_role`). Use it for a verb that
+ * must be granted on purpose.
+ */
+export async function userHoldsExplicitVerb(
+  userId: string,
+  verb: PermissionVerb,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found
+     FROM principal_roles pr
+     JOIN role_permissions rp ON rp.roleId = pr.roleId
+     WHERE pr.principalType = 'user' AND pr.principalId = ? AND rp.verb = ?
+     LIMIT 1`,
+    [userId, verb],
+  );
+  return row != null;
+}
+
 export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
   const rows = await getDbClient().query<GrantRow>(
     `SELECT r.id AS roleId, r.grantsAll, rp.verb

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getSteeringMessageById } from "../be/db";
 import { getActiveSessionById } from "../be/db/active-sessions";
-import { getUserGrant } from "../be/rbac-roles";
+import { getUserGrant, userHoldsExplicitVerb } from "../be/rbac-roles";
 import {
   getSessionRoot,
   hasSessionAccess,
@@ -51,14 +51,14 @@ function requestsAllUsersScope(req: IncomingMessage): boolean {
 }
 
 /**
- * Whether `userId` may opt in to read every user's sessions: a stored
- * grant-all role (admin), or a role holding `session.read.all`. The stored
- * grant decides with RBAC on or off: RBAC off opens the admission gate, not
- * other users' private sessions, so `grantsAll` on whoami is no answer here.
+ * Whether `userId` may opt in to read every user's sessions: one of its roles
+ * lists `session.read.all` explicitly. The grant-all `admin` role is not
+ * enough, because every new user gets it (`trg_users_default_role`). The
+ * stored grant decides with RBAC on or off: RBAC off opens the admission
+ * gate, not other users' private sessions.
  */
 export async function canReadAllSessions(userId: string): Promise<boolean> {
-  const grant = await getUserGrant(userId);
-  return grant.grantsAll || grant.verbs.has("session.read.all");
+  return userHoldsExplicitVerb(userId, "session.read.all");
 }
 
 /**
