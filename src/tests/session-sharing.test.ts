@@ -612,6 +612,9 @@ describe("all-users read scope", () => {
       expect(await taskIds("", scoped)).toContain(root.id);
       expect(await sessionIds("&scope=tree&show=all", scoped)).toContain(root.id);
       expect(await sessionIds("&scope=tree&show=all", opts)).not.toContain(root.id);
+      // Mine (the default tree view) becomes every user's human-started sessions.
+      expect(await sessionIds("&scope=tree", scoped)).toContain(root.id);
+      expect(await sessionIds("&scope=tree", opts)).not.toContain(root.id);
       expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
       const detail = await call("sessions", "GET", `/api/sessions/${root.id}`, scoped);
       expect(detail.status).toBe(200);

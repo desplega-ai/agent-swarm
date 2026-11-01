@@ -115,17 +115,13 @@ export function FilterMenu({
             {allUsers.available ? (
               <DropdownMenuCheckboxItem
                 checked={allUsers.enabled}
-                onCheckedChange={(on) => {
-                  // Mine lists only the picked user's sessions: All users needs All.
-                  if (on) setShow("all");
-                  allUsers.setEnabled(on);
-                }}
+                onCheckedChange={allUsers.setEnabled}
                 onSelect={keepOpen}
               >
                 <span className="flex min-w-0 flex-col">
                   <span>All users</span>
                   <span className="text-xs text-muted-foreground">
-                    Admins: every user's sessions, read-only
+                    Admins: Mine and All for every user, read-only
                   </span>
                 </span>
               </DropdownMenuCheckboxItem>

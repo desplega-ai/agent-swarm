@@ -53,12 +53,23 @@ const HUMAN_SYSTEM_TASK_TYPES = ["kapso-inbound"] as const;
  * sessions shared with this user or everyone. A list filter only: it narrows
  * what a list shows and never changes who can open a session.
  */
-export function sessionMineCondition(userId: string | null): {
+export function sessionMineCondition(
+  userId: string | null,
+  readAll?: boolean,
+): {
   sql: string;
   params: (string | null)[];
 } {
   const machine = MACHINE_SESSION_SOURCES.map(() => "?").join(",");
   const humanSystem = HUMAN_SYSTEM_TASK_TYPES.map(() => "?").join(",");
+  if (readAll) {
+    // The all-users read scope: every user's human-started roots.
+    return {
+      sql: `(r.source NOT IN (${machine})
+        OR (r.source = 'system' AND r.taskType IN (${humanSystem})))`,
+      params: [...MACHINE_SESSION_SOURCES, ...HUMAN_SYSTEM_TASK_TYPES],
+    };
+  }
   return {
     sql: `((r.requestedByUserId = ? AND (r.source NOT IN (${machine})
         OR (r.source = 'system' AND r.taskType IN (${humanSystem}))))

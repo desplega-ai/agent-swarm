@@ -305,7 +305,7 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     add(sessionViewerCondition(opts.viewer));
     // Unary +: a full pass over the narrow summaries beats the partial thread index here.
     if (opts.tree) conditions.push("+r.requestedByUserId IS NOT NULL");
-    if (opts.mine) add(sessionMineCondition(opts.viewer.userId));
+    if (opts.mine) add(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll));
   }
   if (opts.keyPrefix) {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
