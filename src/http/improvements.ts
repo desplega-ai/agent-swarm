@@ -14,6 +14,7 @@ import {
   isImprovementsEnabled,
   listImprovements,
 } from "../be/improvements";
+import { can } from "../rbac";
 import { approvalResponder, responderKey } from "./person-responder";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
@@ -96,6 +97,7 @@ const createRoute = route({
       schema: z.object({ improvement: ImprovementSchema }),
     },
     400: { description: "Invalid text or email" },
+    403: { description: "The caller may not draft improvements" },
     409: { description: "Improvements are turned off" },
   },
   auth: { apiKey: true },
@@ -206,6 +208,11 @@ export async function handleImprovements(
     if (!parsed) return true;
     const { text, email, sendNow, source } = parsed.body;
     const principal = await agentFirstPrincipal(req, headerAgentId(req));
+    const decision = can({ principal, verb: "improvement.submit", source: "http" });
+    if (!decision.allow) {
+      jsonError(res, decision.reason, 403);
+      return true;
+    }
     const agentId = principal.kind === "agent" ? principal.agentId || null : null;
     const userId = principal.kind === "user" ? principal.userId : null;
     try {

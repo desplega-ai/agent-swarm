@@ -60414,6 +60414,16 @@
               }
             }
           },
+          "403": {
+            "description": "The caller may not draft improvements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Improvements are turned off",
             "content": {

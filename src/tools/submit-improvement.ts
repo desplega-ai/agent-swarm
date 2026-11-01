@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { getAgentById } from "@/be/db";
 import { createImprovement, IMPROVEMENT_TEXT_MAX, ImprovementError } from "@/be/improvements";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const submitImprovementInputSchema = z.object({
@@ -34,9 +36,19 @@ export const registerSubmitImprovementTool = (server: McpServer) => {
       outputSchema: submitImprovementOutputSchema,
     },
     async ({ text }, info) => {
+      if (info.callOrigin === "script-sdk" || info.callOrigin === "extension") {
+        return toolErr("Scripts and extensions cannot draft improvements.");
+      }
       if (!info.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
+      const agent = await getAgentById(info.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: info.agentId, isLead: agent?.isLead ?? false },
+        verb: "improvement.submit",
+        source: "mcp",
+      });
+      if (!decision.allow) return toolErr(decision.reason);
       try {
         const { improvement } = await createImprovement({
           text,
