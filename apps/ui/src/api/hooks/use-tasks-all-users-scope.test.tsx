@@ -126,6 +126,9 @@ describe("a kept page never outlives an all-users opt-out", () => {
 
   test("a QueryObserver keeps a memoized placeholder after resetQueries; withinAllUsersScope drops it", async () => {
     setAllUsersScope(admin, true);
+    // A placeholder needs data fetched strictly after the last scope change,
+    // and page 0 answers at once: let the clock move past the opt-in first.
+    await tick();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const unbind = bindAllUsersScopeCache(client);
     const options = (offset: number, placeholderData: typeof keepPreviousData) => ({
