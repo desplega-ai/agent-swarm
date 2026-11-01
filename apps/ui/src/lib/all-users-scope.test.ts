@@ -6,6 +6,7 @@ import {
   allUsersScopeEnabled,
   allUsersScopeKey,
   bindAllUsersScopeCache,
+  noteAllUsersScopeUserSwitch,
   setAllUsersScope,
 } from "./all-users-scope";
 import { CURRENT_USER_CARD_KEY } from "./dashboard-user";
@@ -121,6 +122,31 @@ describe("all-users read scope across tabs", () => {
       setAllUsersScope(admin, true);
       await Promise.resolve();
       expect(client.getQueryData(["tasks", "list"])).toBeUndefined();
+    } finally {
+      unbind();
+    }
+  });
+});
+
+describe("all-users read scope on a picked-user switch", () => {
+  test("a switch away from a user who had it on drops cached results; between two users without it, nothing drops", async () => {
+    const client = new QueryClient();
+    const unbind = bindAllUsersScopeCache(client);
+    try {
+      pick("user-a");
+      setAllUsersScope(operator, true);
+      client.setQueryData(["tasks", "list"], ["someone else's private task"]);
+      pick("user-b");
+      noteAllUsersScopeUserSwitch(operator, "user-a", "user-b");
+      await Promise.resolve();
+      expect(client.getQueryData(["tasks", "list"])).toBeUndefined();
+      expect(allUsersScopeEnabled(operator)).toBe(false);
+
+      client.setQueryData(["tasks", "list"], ["user-b's task"]);
+      pick("user-c");
+      noteAllUsersScopeUserSwitch(operator, "user-b", "user-c");
+      await Promise.resolve();
+      expect(client.getQueryData(["tasks", "list"])).toEqual(["user-b's task"]);
     } finally {
       unbind();
     }

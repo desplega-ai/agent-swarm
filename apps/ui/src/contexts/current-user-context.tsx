@@ -54,6 +54,7 @@ import { useWhoami } from "@/api/hooks/use-whoami";
 import type { User, WhoamiGrants } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
+import { noteAllUsersScopeUserSwitch } from "@/lib/all-users-scope";
 import { isUserTokenApiKey } from "@/lib/config";
 import { CURRENT_USER_CARD_KEY } from "@/lib/dashboard-user";
 import { uiDeploymentConfig } from "@/lib/deployment-config";
@@ -142,13 +143,17 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 
   // Favorites belong to the picked user (the API client sends it), so a
   // switch here or in another tab refetches every starred list and detail.
+  // The "All users" scope is stored per user too: a switch to or from a user
+  // who had it on drops every cached result and kept page.
   const queryClient = useQueryClient();
   const previousStoredUserId = useRef(storedUserId);
   useEffect(() => {
     if (previousStoredUserId.current === storedUserId) return;
+    const previous = previousStoredUserId.current;
     previousStoredUserId.current = storedUserId;
     invalidateFavoriteQueries(queryClient);
-  }, [storedUserId, queryClient]);
+    noteAllUsersScopeUserSwitch(config, previous, storedUserId);
+  }, [storedUserId, queryClient, config]);
 
   const setUserId = useCallback(
     (id: string) => {

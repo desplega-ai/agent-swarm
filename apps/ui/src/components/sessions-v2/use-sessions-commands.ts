@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlarmClock,
   Archive,
@@ -26,6 +26,7 @@ import {
 } from "@/components/shared/command-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import { searchableGroups } from "@/lib/session-groups";
 import {
   paletteSearchParams,
@@ -67,9 +68,10 @@ export function useServerSessionSearch(
     const searchGroups = groups ? searchableGroups(groups, me, nameOf) : [];
     return paletteSearchParams(text, { people, groups: searchGroups });
   }, [text, idle, users.data, groups, me]);
+  const keepPrevious = useWithinAllUsersScope(keepPreviousData);
   const found = useQuery({
     ...sessionsQueryOptions(me, { ...params, scope: "tree", limit, enabled: params !== null }),
-    placeholderData: (previous) => previous,
+    placeholderData: keepPrevious,
   });
   return {
     params,
