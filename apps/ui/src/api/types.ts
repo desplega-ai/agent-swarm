@@ -428,6 +428,8 @@ export interface AgentTask {
   resolvedEffort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
+  /** The task whose session dispatched this one (send-task). Unset on older rows. */
+  dispatchedByTaskId?: string;
   dir?: string;
   claudeSessionId?: string;
   workflowRunId?: string;

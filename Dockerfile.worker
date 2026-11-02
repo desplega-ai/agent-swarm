@@ -382,7 +382,6 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
 # Runtime environment shared by all leaf stages
 ENV AGENT_ROLE=worker
 ENV HARNESS_PROVIDER=claude
-ENV WORKER_YOLO=false
 ENV MCP_BASE_URL=http://host.docker.internal:3013
 ENV WORKER_LOG_DIR=/logs
 ENV LEAD_LOG_DIR=/logs

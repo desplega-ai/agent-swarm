@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { notePromptSent } from "../../lib/github-star-nudge-toast";
 import { api } from "../client";
 
 export function useChannels() {
@@ -105,6 +106,7 @@ export function usePostMessage(channelId: string) {
         mentions: params.mentions,
       }),
     onSuccess: (_data, variables) => {
+      notePromptSent();
       queryClient.invalidateQueries({ queryKey: ["messages", channelId] });
       queryClient.invalidateQueries({ queryKey: ["infiniteMessages", channelId] });
       if (variables.replyToId) {

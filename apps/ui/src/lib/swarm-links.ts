@@ -1,6 +1,7 @@
 // Links in agent output that name something of this swarm: a dashboard page
-// (a task, a session, a page, ...) or an agent-fs file. Markdown renders them
-// as chips (`components/shared/markdown-link-chip.tsx`).
+// (a task, a session, a page, ...), an agent-fs file, or a GitHub PR, issue,
+// commit or repo. Markdown renders them as chips
+// (`components/shared/markdown-link-chip.tsx`), and so do app link cells.
 //
 // No host is built in: a self-hosted swarm has its own URLs. The caller passes
 // the origins the dashboard knows (`SwarmLinkOrigins`).
@@ -45,7 +46,20 @@ export const DASHBOARD_ROUTES = {
 
 export type DashboardRoute = keyof typeof DASHBOARD_ROUTES;
 
+/** What a GitHub link points at. `ref` is a bare `owner/repo#N`, which GitHub resolves to a PR or an issue. */
+export type GithubKind = "pull" | "issue" | "commit" | "repo" | "ref";
+
 export type SwarmLink =
+  /** `number` is set for pull / issue / ref, `sha` for commit. `href` is the github.com URL. */
+  | {
+      type: "github";
+      kind: GithubKind;
+      owner: string;
+      repo: string;
+      number: number | null;
+      sha: string | null;
+      href: string;
+    }
   /** `path` is root-relative, for the router: the same path on this dashboard. */
   | { type: "dashboard"; route: DashboardRoute; id: string; path: string; href: string }
   /** `path` is the decoded drive path. */
@@ -82,6 +96,130 @@ function fileFromCombRoute(route: string, href: string): SwarmLink | null {
   return { type: "file", name, path: `/${names.join("/")}${folder ? "/" : ""}`, folder, href };
 }
 
+const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
+const GITHUB_NAME = /^[A-Za-z0-9_.-]+$/;
+/** First path segments that are GitHub pages, not an owner. */
+const GITHUB_RESERVED_OWNERS = new Set([
+  "about",
+  "apps",
+  "codespaces",
+  "collections",
+  "events",
+  "explore",
+  "features",
+  "issues",
+  "login",
+  "marketplace",
+  "new",
+  "notifications",
+  "orgs",
+  "pricing",
+  "pulls",
+  "search",
+  "settings",
+  "sponsors",
+  "topics",
+  "trending",
+]);
+
+function githubLink(
+  kind: GithubKind,
+  owner: string,
+  repo: string,
+  rest: { number?: number; sha?: string },
+  href: string,
+): SwarmLink | null {
+  if (!GITHUB_NAME.test(owner) || !GITHUB_NAME.test(repo) || /^\.+$/.test(repo)) return null;
+  if (GITHUB_RESERVED_OWNERS.has(owner.toLowerCase())) return null;
+  return {
+    type: "github",
+    kind,
+    owner,
+    repo: repo.replace(/\.git$/, ""),
+    number: rest.number ?? null,
+    sha: rest.sha ?? null,
+    href,
+  };
+}
+
+/** A github.com PR, issue, commit or repo URL. Any other github.com page is not a smart link. */
+function parseGithubUrl(url: URL, href: string): SwarmLink | null {
+  if (!GITHUB_HOSTS.has(url.hostname.toLowerCase())) return null;
+  const [owner, repo, section, id] = url.pathname.split("/").filter(Boolean);
+  if (!owner || !repo) return null;
+  if (!section) return githubLink("repo", owner, repo, {}, href);
+  if ((section === "pull" || section === "issues") && id && /^\d{1,9}$/.test(id)) {
+    return githubLink(
+      section === "pull" ? "pull" : "issue",
+      owner,
+      repo,
+      { number: Number(id) },
+      href,
+    );
+  }
+  if (section === "commit" && id && /^[0-9a-f]{7,40}$/i.test(id)) {
+    return githubLink("commit", owner, repo, { sha: id.toLowerCase() }, href);
+  }
+  return null;
+}
+
+/**
+ * `owner/repo#N` (a PR or an issue) and `owner/repo@<sha>` (a commit), the
+ * shorthand an agent or a data column writes instead of a URL. Null for any
+ * other text, so a path like `src/foo#1` is only matched when it has the exact
+ * owner/repo shape.
+ */
+export function parseGithubShorthand(raw: string): SwarmLink | null {
+  const text = raw.trim();
+  const ref = /^([\w.-]+)\/([\w.-]+)#(\d{1,9})$/.exec(text);
+  if (ref) {
+    const [, owner = "", repo = "", n = ""] = ref;
+    return githubLink(
+      "ref",
+      owner,
+      repo,
+      { number: Number(n) },
+      `https://github.com/${owner}/${repo}/issues/${n}`,
+    );
+  }
+  const commit = /^([\w.-]+)\/([\w.-]+)@([0-9a-f]{7,40})$/i.exec(text);
+  if (commit) {
+    const [, owner = "", repo = "", sha = ""] = commit;
+    return githubLink(
+      "commit",
+      owner,
+      repo,
+      { sha: sha.toLowerCase() },
+      `https://github.com/${owner}/${repo}/commit/${sha.toLowerCase()}`,
+    );
+  }
+  return null;
+}
+
+/** The short chip label of a GitHub link: `agent-swarm#2605`, `agent-swarm@a1b2c3d`, or `owner/repo`. */
+export function githubLabel(link: Extract<SwarmLink, { type: "github" }>): string {
+  if (link.kind === "commit") return `${link.repo}@${(link.sha ?? "").slice(0, 7)}`;
+  if (link.kind === "repo") return `${link.owner}/${link.repo}`;
+  return `${link.repo}#${link.number}`;
+}
+
+/** The hover text of a GitHub link: the full `owner/repo#N`. */
+export function githubTitle(link: Extract<SwarmLink, { type: "github" }>): string {
+  if (link.kind === "commit") return `${link.owner}/${link.repo}@${link.sha}`;
+  if (link.kind === "repo") return `${link.owner}/${link.repo}`;
+  const noun = link.kind === "pull" ? "PR " : link.kind === "issue" ? "Issue " : "";
+  return `${noun}${link.owner}/${link.repo}#${link.number}`;
+}
+
+/**
+ * What a table cell, a detail field or a card field holds: a link (URL) or
+ * the GitHub shorthand. Null for anything else, so the caller falls back to
+ * plain text.
+ */
+export function parseSwarmLinkOrRef(raw: string, origins: SwarmLinkOrigins): SwarmLink | null {
+  return parseGithubShorthand(raw) ?? parseSwarmLink(raw, origins);
+}
+
 /**
  * What a link names, or null for any other link. A Slack-style `<url|label>`
  * ends at the "|": the returned `href` is the URL alone.
@@ -109,6 +247,9 @@ export function parseSwarmLink(raw: string, origins: SwarmLinkOrigins): SwarmLin
     const path = `${url.pathname}${url.search}${url.hash}`;
     return { type: "dashboard", route: route as DashboardRoute, id, path, href };
   }
+
+  const github = parseGithubUrl(url, href);
+  if (github) return github;
 
   const agentFs = [originOf(origins.agentFsLive), originOf(origins.agentFsApi)];
   if (!agentFs.includes(url.origin)) return null;

@@ -104,7 +104,6 @@ poolDefaults:
     sharedSizeLimit: 1Gi
     logsSizeLimit: 1Gi
   harnessProvider: claude    # claude | codex | opencode | pi | claude-managed | devin
-  yolo: true
   terminationGracePeriodSeconds: 120
   updateStrategy:
     maxUnavailable: 50%

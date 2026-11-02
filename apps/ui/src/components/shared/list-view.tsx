@@ -32,6 +32,8 @@ export interface ListViewMobileRow {
   };
   /** Inline controls (checkbox, switch) beside the row, each in its own 44px tap target. */
   controls?: ReactNode[];
+  /** Links and buttons shown under the row. Kept outside the row, which is a button when `onRowClick` is set. */
+  extras?: ReactNode;
 }
 
 export interface ListViewProps<TData>
@@ -165,6 +167,7 @@ export function ListView<TData>({
               leading={mobile.leading}
               check={mobile.check}
               controls={mobile.controls}
+              extras={mobile.extras}
               selected={selectedId !== undefined && selectedId !== null && id === selectedId}
               onClick={onRowClick ? () => onRowClick(row, index) : undefined}
             />
