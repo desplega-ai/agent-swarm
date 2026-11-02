@@ -664,6 +664,7 @@ value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
 value:getTasksCount
+value:getTasksDispatchedFrom
 value:giveUpStaleChatRelays
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild

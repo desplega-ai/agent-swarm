@@ -718,6 +718,26 @@ export async function getTasksByAgentId(
 }
 
 /**
+ * Tasks that one of `taskIds` dispatched (send-task) and that are not in
+ * `taskIds`. A continuation keeps parentTaskId on an earlier task, so the
+ * task that sent it does not reach it by the parentTaskId walk.
+ */
+export async function getTasksDispatchedFrom(taskIds: string[]): Promise<AgentTask[]> {
+  if (taskIds.length === 0) return [];
+  const ids = JSON.stringify(taskIds);
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.*,
+       (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
+     FROM agent_tasks t
+     WHERE t.dispatchedByTaskId IN (SELECT value FROM json_each(?))
+       AND t.id NOT IN (SELECT value FROM json_each(?))
+     ORDER BY t.createdAt, t.rowid`,
+    [ids, ids],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
  * Get the most recently updated in-progress task for an agent.
  * Used as a fallback when X-Source-Task-Id header is missing (e.g. lead agent HITL requests).
  *
