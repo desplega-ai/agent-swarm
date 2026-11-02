@@ -88,6 +88,7 @@ import {
   normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
+import { parseEnvFlag } from "../utils/env-flag.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
@@ -5885,7 +5886,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   await mkdir(logDir, { recursive: true });
 
   const prompt = opts.prompt || defaultPrompt;
-  const isYolo = opts.yolo || process.env.YOLO === "true";
+  const isYolo =
+    opts.yolo ||
+    parseEnvFlag(
+      process.env.YOLO ?? (role === "lead" ? process.env.LEAD_YOLO : process.env.WORKER_YOLO),
+      false,
+    );
 
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";

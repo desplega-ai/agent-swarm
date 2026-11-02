@@ -485,12 +485,13 @@ chown worker:worker /logs 2>/dev/null || true
 # Get version from compiled binary (extract just the version number)
 VERSION=$(/usr/local/bin/agent-swarm version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
 
-# Determine YOLO mode based on role
+# Determine YOLO mode based on role; an explicit YOLO value takes precedence.
 if [ "$ROLE" = "lead" ]; then
-    YOLO_MODE="${LEAD_YOLO:-false}"
+    YOLO_MODE="${YOLO-${LEAD_YOLO:-false}}"
 else
-    YOLO_MODE="${WORKER_YOLO:-false}"
+    YOLO_MODE="${YOLO-${WORKER_YOLO:-false}}"
 fi
+export YOLO="$YOLO_MODE"
 
 echo "=== Agent Swarm ${ROLE^} v${VERSION} ==="
 echo "Agent ID: ${AGENT_ID:-<not set>}"

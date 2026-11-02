@@ -57,6 +57,18 @@ Codex access depends on account, client, and sign-in method. GPT-5.5 retires fro
 ChatGPT-authenticated Codex on October 14, 2026, but its API availability is
 unchanged. Keep API and ChatGPT lifecycle decisions separate.
 
+## YOLO mode
+
+YOLO mode keeps the runner accepting work after a task fails. Enable it with
+`--yolo`, `YOLO=true`, or `YOLO=1`. Environment values are case-insensitive and
+trimmed. `false`, `0`, empty, and unrecognized values disable it.
+
+When `YOLO` is unset, workers use `WORKER_YOLO` and leads use `LEAD_YOLO`, both
+defaulting to `false`. This applies to containers and direct CLI launches.
+An explicit `YOLO=false` overrides a role default of `true`; `--yolo` takes
+precedence over environment values. The Docker banner uses the same selected
+environment value passed to the runner.
+
 ## Worker exit limit
 
 `SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed assigned or resumed task executions.
