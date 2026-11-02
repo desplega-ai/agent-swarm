@@ -173,8 +173,6 @@ async function startWorker(
     "-e",
     "AGENT_ROLE=worker",
     "-e",
-    "YOLO=true",
-    "-e",
     "STARTUP_SCRIPT_STRICT=false",
     "-e",
     "SLACK_DISABLE=true",

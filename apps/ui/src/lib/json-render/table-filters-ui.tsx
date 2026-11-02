@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { CatalogIcon } from "./icons";
 import type { ColumnFilterMode, ColumnFilters, FacetOption, FilterPill } from "./table-filters";
 import { TableCheckbox } from "./table-selection-ui";
+import { OverflowTip } from "./tip";
 
 // ─── Per-table filter store ─────────────────────────────────────────────────
 
@@ -241,20 +242,40 @@ function ColumnFilterMenu({ target, store }: { target: ColumnFilterTarget; store
 /**
  * AG Grid's inner header component: the label (with its optional icon) and,
  * for a filterable column, the filter menu button. AG Grid keeps sorting and
- * the resize handle around it.
+ * the resize handle around it. A label cut by the column width shows in full
+ * in a tooltip, and a column `hint` adds its explanation under it.
  */
 export function ColumnHeader(params: {
   displayName: string;
   icon?: string;
+  hint?: string;
   store?: FilterStore;
   filter?: ColumnFilterTarget;
 }) {
+  const content = params.hint ? (
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium">{params.displayName}</span>
+      <span>{params.hint}</span>
+    </span>
+  ) : (
+    params.displayName
+  );
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {params.icon ? (
-        <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
-      ) : null}
-      <span className="ag-header-cell-text">{params.displayName}</span>
+    <span className="flex min-w-0 items-center gap-1">
+      <OverflowTip
+        content={content}
+        always={Boolean(params.hint)}
+        className="flex min-w-0 items-center gap-1.5"
+      >
+        {params.icon ? (
+          <CatalogIcon
+            name={params.icon}
+            size="sm"
+            className="size-3 shrink-0 text-muted-foreground"
+          />
+        ) : null}
+        <span className="ag-header-cell-text min-w-0">{params.displayName}</span>
+      </OverflowTip>
       {params.store && params.filter ? (
         <ColumnFilterMenu target={params.filter} store={params.store} />
       ) : null}

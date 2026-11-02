@@ -8,7 +8,11 @@
  * camelCase.
  */
 
+import { mkdir, open, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
 const DEFAULT_DASHBOARD_BASE = "https://app.agent-swarm.dev";
+export const SETUP_URL_PATH = ".agent-swarm/setup-url";
 
 export type DashboardUrlParts = {
   apiUrl: string;
@@ -26,4 +30,31 @@ export function buildOnboardDashboardUrl(parts: DashboardUrlParts): string {
   if (parts.name) params.set("name", parts.name);
   const base = (parts.base ?? DEFAULT_DASHBOARD_BASE).replace(/\/+$/, "");
   return `${base}?${params.toString()}`;
+}
+
+/** Generated keys may not be in the scrubber's environment, or may be URL-encoded. */
+export function maskDashboardUrlApiKey(url: string): string {
+  return url.replace(/([?&]apiKey=)[^&#]*/g, "$1[REDACTED:apiKey]");
+}
+
+/** Save the credential-bearing link without exposing it to terminal output. */
+export async function writeDashboardSetupUrl(outputDir: string, url: string): Promise<void> {
+  const path = join(outputDir, SETUP_URL_PATH);
+  const tmp = `${path}.${crypto.randomUUID()}.tmp`;
+  // A private temporary file plus rename also fixes permissions on an existing
+  // file and replaces a symlink instead of writing through it.
+  await mkdir(dirname(path), { recursive: true });
+  try {
+    const file = await open(tmp, "wx", 0o600);
+    try {
+      await Bun.write(Bun.file(file.fd), `${url}\n`);
+    } finally {
+      await file.close();
+    }
+    await rename(tmp, path);
+  } finally {
+    await Bun.file(tmp)
+      .delete()
+      .catch(() => {});
+  }
 }

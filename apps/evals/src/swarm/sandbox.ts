@@ -298,7 +298,6 @@ export function workerRuntimeEnv(opts: {
     // and applies it through its harness adapter; a level the model does not take is a
     // no-op there, which the attempt's applied-effort capture surfaces.
     ...(config.reasoningEffort ? { REASONING_EFFORT_OVERRIDE: config.reasoningEffort } : {}),
-    YOLO: "true",
     MAX_CONCURRENT_TASKS: role === "lead" ? "2" : "1",
     WORKER_LOG_DIR: "/logs",
     LEAD_LOG_DIR: "/logs",

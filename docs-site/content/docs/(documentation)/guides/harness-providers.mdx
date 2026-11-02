@@ -57,6 +57,12 @@ Codex access depends on account, client, and sign-in method. GPT-5.5 retires fro
 ChatGPT-authenticated Codex on October 14, 2026, but its API availability is
 unchanged. Keep API and ChatGPT lifecycle decisions separate.
 
+## Task failures
+
+A non-zero task exit is written to the session's `errors.jsonl` and logged to
+stderr. The worker or lead stays running and continues polling for work. A task
+failure does not require a restart or a special runner mode to accept the next task.
+
 ## Worker exit limit
 
 `SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed assigned or resumed task executions.

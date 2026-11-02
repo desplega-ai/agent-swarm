@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { parseSwarmLink, type SwarmLinkOrigins } from "./swarm-links";
+import {
+  githubLabel,
+  githubTitle,
+  parseGithubShorthand,
+  parseSwarmLink,
+  parseSwarmLinkOrRef,
+  type SwarmLink,
+  type SwarmLinkOrigins,
+} from "./swarm-links";
 
 const ORIGINS: SwarmLinkOrigins = {
   dashboard: "https://swarm.example.com",
@@ -130,5 +138,101 @@ describe("parseSwarmLink: agent-fs", () => {
     const none = { ...ORIGINS, agentFsLive: null, agentFsApi: null };
     expect(parse(`${FILE}/a.md`, none)).toBeNull();
     expect(parse("https://fs-api.example.com/share/AbC123", none)).toBeNull();
+  });
+});
+
+type GithubLink = Extract<SwarmLink, { type: "github" }>;
+const github = (href: string) => parse(href) as GithubLink;
+
+describe("parseSwarmLink: github", () => {
+  test("a PR, with and without a sub-page or a hash", () => {
+    expect(github("https://github.com/desplega-ai/agent-swarm/pull/2605")).toEqual({
+      type: "github",
+      kind: "pull",
+      owner: "desplega-ai",
+      repo: "agent-swarm",
+      number: 2605,
+      sha: null,
+      href: "https://github.com/desplega-ai/agent-swarm/pull/2605",
+    });
+    expect(github("https://github.com/o/r/pull/7/files#diff-1")).toMatchObject({
+      kind: "pull",
+      number: 7,
+    });
+    expect(github("https://github.com/o/r/pull/7#pullrequestreview-9").href).toBe(
+      "https://github.com/o/r/pull/7#pullrequestreview-9",
+    );
+  });
+
+  test("an issue, a commit and a repo", () => {
+    expect(github("https://github.com/o/r/issues/12")).toMatchObject({ kind: "issue", number: 12 });
+    expect(github("https://github.com/o/r/commit/A1B2C3D4E5F6")).toMatchObject({
+      kind: "commit",
+      sha: "a1b2c3d4e5f6",
+    });
+    expect(github("https://github.com/o/r")).toMatchObject({ kind: "repo", owner: "o", repo: "r" });
+    expect(github("https://www.github.com/o/r/")).toMatchObject({ kind: "repo" });
+  });
+
+  test("other github.com pages and hosts are plain links", () => {
+    expect(parse("https://github.com/o/r/tree/main/src")).toBeNull();
+    expect(parse("https://github.com/o/r/pull/abc")).toBeNull();
+    expect(parse("https://github.com/o/r/commit/xyz")).toBeNull();
+    expect(parse("https://github.com/o")).toBeNull();
+    expect(parse("https://github.com/orgs/desplega-ai")).toBeNull();
+    expect(parse("https://github.com/settings/profile")).toBeNull();
+    expect(parse("https://gist.github.com/o/r/pull/1")).toBeNull();
+    expect(parse("https://github.com.evil.example/o/r/pull/1")).toBeNull();
+    expect(parse("https://example.com/o/r/pull/1")).toBeNull();
+  });
+
+  test("labels and hover titles", () => {
+    expect(githubLabel(github("https://github.com/desplega-ai/agent-swarm/pull/2605"))).toBe(
+      "agent-swarm#2605",
+    );
+    expect(githubLabel(github("https://github.com/o/r/issues/3"))).toBe("r#3");
+    expect(githubLabel(github("https://github.com/o/r/commit/a1b2c3d4e5f6"))).toBe("r@a1b2c3d");
+    expect(githubLabel(github("https://github.com/o/r"))).toBe("o/r");
+    expect(githubTitle(github("https://github.com/o/r/pull/3"))).toBe("PR o/r#3");
+    expect(githubTitle(github("https://github.com/o/r/issues/3"))).toBe("Issue o/r#3");
+    expect(githubTitle(github("https://github.com/o/r/commit/a1b2c3d4e5f6"))).toBe(
+      "o/r@a1b2c3d4e5f6",
+    );
+  });
+});
+
+describe("parseGithubShorthand", () => {
+  test("owner/repo#N is a ref to the issues URL, which GitHub redirects for a PR", () => {
+    expect(parseGithubShorthand("desplega-ai/agent-swarm#2605")).toMatchObject({
+      type: "github",
+      kind: "ref",
+      number: 2605,
+      href: "https://github.com/desplega-ai/agent-swarm/issues/2605",
+    });
+    expect(githubLabel(parseGithubShorthand(" o/r#4 ") as GithubLink)).toBe("r#4");
+  });
+
+  test("owner/repo@sha is a commit", () => {
+    expect(parseGithubShorthand("o/r@A1B2C3D")).toMatchObject({
+      kind: "commit",
+      sha: "a1b2c3d",
+      href: "https://github.com/o/r/commit/a1b2c3d",
+    });
+  });
+
+  test("anything else is not shorthand", () => {
+    expect(parseGithubShorthand("agent-swarm#2605")).toBeNull();
+    expect(parseGithubShorthand("o/r#")).toBeNull();
+    expect(parseGithubShorthand("o/r#12 fixes")).toBeNull();
+    expect(parseGithubShorthand("a/b/c#1")).toBeNull();
+    expect(parseGithubShorthand("o/r@abc")).toBeNull();
+    expect(parseGithubShorthand("orgs/r#1")).toBeNull();
+    expect(parseGithubShorthand("https://github.com/o/r/pull/1")).toBeNull();
+  });
+
+  test("parseSwarmLinkOrRef takes shorthand, then URLs", () => {
+    expect(parseSwarmLinkOrRef("o/r#1", ORIGINS)).toMatchObject({ type: "github" });
+    expect(parseSwarmLinkOrRef(`/tasks/${TASK_ID}`, ORIGINS)).toMatchObject({ type: "dashboard" });
+    expect(parseSwarmLinkOrRef("hello", ORIGINS)).toBeNull();
   });
 });

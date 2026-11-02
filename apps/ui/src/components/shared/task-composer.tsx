@@ -59,6 +59,7 @@ import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
+import { notePromptSent } from "../../lib/github-star-nudge-toast";
 
 export interface TaskComposerProps {
   /**
@@ -347,6 +348,7 @@ export function TaskComposer({
       return { created, promoted, failed: [] as File[], startedWithout: null };
     },
     onSuccess: ({ created, promoted, failed, startedWithout }, input) => {
+      notePromptSent();
       if (startedWithout) {
         toast.error(startedWithout);
       } else if (!promoted) {

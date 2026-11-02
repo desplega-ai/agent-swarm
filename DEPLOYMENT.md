@@ -547,7 +547,6 @@ The bundled agent-fs service uses version 0.18.14. Provisioning seeds agent disp
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
 | `MULTI_RUNTIME_ENABLED` | No | Allow multiple worker processes to serve one logical `AGENT_ID` (default: `true`). Set consistently on the API server and every worker; shared-agent runtimes need compatible workspace state. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
-| `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | Path to system prompt file |
 | `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `false`) |

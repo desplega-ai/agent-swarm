@@ -115,8 +115,6 @@ Common env vars for every pool pod.
 {{- define "agent-swarm.poolEnv" -}}
 - name: MCP_BASE_URL
   value: "http://{{ include "agent-swarm.fullname" . }}-api:{{ .Values.api.port }}"
-- name: YOLO
-  value: {{ .Values.poolDefaults.yolo | quote }}
 {{- if .Values.agentFs.enabled }}
 - name: AGENT_FS_API_URL
   value: "http://{{ include "agent-swarm.fullname" . }}-agent-fs:{{ .Values.agentFs.port }}"
