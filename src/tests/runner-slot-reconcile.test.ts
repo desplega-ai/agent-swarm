@@ -285,3 +285,41 @@ describe("completed session deletion", () => {
     }
   });
 });
+
+describe("reconcileActiveTasks: several active tasks", () => {
+  test("checks every task's cancellation together, not one after another", async () => {
+    const first = setup(1_000_000);
+    const second = setup(1_000_000);
+    const state = first.state;
+    state.activeTasks.set(second.taskId, second.task);
+    state.maxConcurrent = 2;
+
+    // Each cancellation read resolves only once both reads are in flight, so a
+    // sequential loop would wait out the fallback timer instead.
+    const started: string[] = [];
+    let releaseAll: () => void = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseAll = resolve;
+    });
+    let ranAlone = false;
+    const cancelledSignaled = new Set<string>();
+    await reconcileActiveTasks(state, "worker", {
+      cancelledSignaled,
+      isCancelled: async (taskId) => {
+        started.push(taskId);
+        if (started.length === 2) releaseAll();
+        await Promise.race([bothStarted, Bun.sleep(500)]);
+        if (started.length < 2) ranAlone = true;
+        return taskId === second.taskId;
+      },
+      fetchStatus: async () => null,
+      intervalMs: INTERVAL_MS,
+      now: () => 1_000_000,
+    });
+
+    expect(ranAlone).toBe(false);
+    expect([...cancelledSignaled]).toEqual([second.taskId]);
+    expect(second.session.abortReasons).toEqual(["cancelled"]);
+    expect(first.session.abortReasons).toEqual([]);
+  });
+});

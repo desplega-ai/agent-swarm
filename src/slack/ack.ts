@@ -116,20 +116,26 @@ export async function finalizeSlackMessageReaction(
   event?: SlackReactionEvent,
 ): Promise<void> {
   const names = new Set(ACCEPTANCE_EVENTS.map((acceptanceEvent) => reactionName(acceptanceEvent)));
-  for (const name of names) {
-    try {
-      await client.reactions.remove({ channel, name, timestamp });
-    } catch (error) {
-      const code = slackErrorCode(error);
-      if (code === "no_reaction" || code === "message_not_found" || code === "invalid_name")
-        continue;
-      console.log(
-        scrubSecrets(
-          `[Slack] ${name} acknowledgement reaction removal failed: ${error instanceof Error ? error.message : error}`,
-        ),
-      );
-    }
-  }
+  // Each removal targets a different name and absorbs its own error, so the
+  // (at most ACCEPTANCE_EVENTS.length) calls run together. The outcome
+  // reaction still waits for all of them: an outcome name that matches an
+  // acceptance name must not be removed after it is added.
+  await Promise.all(
+    Array.from(names, async (name) => {
+      try {
+        await client.reactions.remove({ channel, name, timestamp });
+      } catch (error) {
+        const code = slackErrorCode(error);
+        if (code === "no_reaction" || code === "message_not_found" || code === "invalid_name")
+          return;
+        console.log(
+          scrubSecrets(
+            `[Slack] ${name} acknowledgement reaction removal failed: ${error instanceof Error ? error.message : error}`,
+          ),
+        );
+      }
+    }),
+  );
 
   await addReaction(client, channel, timestamp, outcome, event);
 }

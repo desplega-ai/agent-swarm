@@ -151,8 +151,12 @@ async function backdateLastUpdated(taskIds: string[], secondsAgo: number): Promi
   }
 }
 
+/** Lets a test hold one Slack call open (after it is recorded) to observe overlap. */
+let apiCallGate: ((method: string) => Promise<void>) | undefined;
+
 const mockApiCall = mock(async (method: string, payload: Record<string, unknown>) => {
   calls.push({ method, payload });
+  await apiCallGate?.(method);
   if (method === disableRenderAfterMethod) {
     disableRenderAfterMethod = undefined;
     process.env.SLACK_RENDER_V2 = "false";
@@ -316,6 +320,7 @@ beforeEach(async () => {
   initDb(TEST_DB_PATH);
   await ensureSlackRenderV2Activation();
   calls.length = 0;
+  apiCallGate = undefined;
   remoteMessages.clear();
   treeCounter = 0;
   outcomeCounter = 0;
@@ -444,6 +449,48 @@ describe("Slack renderer v2", () => {
       methods.indexOf("chat.stopStream"),
     );
     expect(methods).not.toContain("assistant.threads.setStatus");
+  });
+
+  test("writes the native status while the tree and the outcome permalink are in flight", async () => {
+    const lead = await createAgent({ name: "Overlap Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_OVERLAP");
+    const ask = await createTaskExtended("overlap ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+
+    // Hold each status write until `partner` has been sent since the last
+    // `since` call (or a fallback timer fires). Serial code sends `partner`
+    // only after the status write returns.
+    const overlapsWith = (partner: string, since?: string) => {
+      const seen: boolean[] = [];
+      apiCallGate = async (method) => {
+        if (method !== "agents.sessions.setStatus") return;
+        const from = since
+          ? calls.findLastIndex((call) => call.method === since) + 1
+          : calls.length - 1;
+        const sent = () => calls.slice(from).some((call) => call.method === partner);
+        await waitFor(sent, 500).catch(() => {});
+        seen.push(sent());
+      };
+      return seen;
+    };
+
+    calls.length = 0;
+    const treeOverlap = overlapsWith("chat.postMessage");
+    await ensureSlackThreadTree([ask.id]);
+    expect(treeOverlap).toEqual([true]);
+
+    await completeTask(ask.id, "Done");
+    calls.length = 0;
+    const permalinkOverlap = overlapsWith("chat.getPermalink", "chat.stopStream");
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(permalinkOverlap).toEqual([true]);
   });
 
   describe("native status budget across one render tick", () => {

@@ -742,19 +742,37 @@ export async function ensureSlackThreadTree(
   );
   if (!task?.slackChannelId || !task.slackThreadTs) return null;
   // Every accepted ask passes through here: start Slack's own "working" state
-  // with the tree. A no-op when the thread is already showing it.
-  await reconcileSlackSessionStatus({
-    channelId: task.slackChannelId,
-    threadTs: task.slackThreadTs,
-    budget: statusBudget,
-  });
+  // with the tree. A no-op when the thread is already showing it. The native
+  // status is not cleared by a bot post and never throws, so it is written
+  // while the tree is found or posted instead of before it. allSettled keeps
+  // the old guarantee that the status write has finished before a tree
+  // failure propagates.
+  const [tree] = await Promise.allSettled([
+    findOrCreateThreadTree(task, task.slackChannelId, task.slackThreadTs, taskIds, statusBudget),
+    reconcileSlackSessionStatus({
+      channelId: task.slackChannelId,
+      threadTs: task.slackThreadTs,
+      budget: statusBudget,
+    }),
+  ]);
+  if (tree.status === "rejected") throw tree.reason;
+  return tree.value;
+}
+
+async function findOrCreateThreadTree(
+  task: AgentTask,
+  channelId: string,
+  threadTs: string,
+  taskIds: string[],
+  statusBudget: StatusBudget | undefined,
+): Promise<SlackMessageRecord | null> {
   const contextKey =
     task.contextKey ??
     slackContextKey({
-      channelId: task.slackChannelId,
-      threadTs: task.slackThreadTs,
+      channelId,
+      threadTs,
     });
-  const existing = await findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
+  const existing = await findThreadTree(contextKey, channelId, threadTs);
   if (existing && !isPendingSlackMessage(existing)) {
     const app = getSlackApp();
     try {
@@ -767,7 +785,7 @@ export async function ensureSlackThreadTree(
       return ensureSlackThreadTree(taskIds, statusBudget);
     }
   }
-  const creationKey = physicalThreadKey(task.slackChannelId, task.slackThreadTs);
+  const creationKey = physicalThreadKey(channelId, threadTs);
   const inFlight = treeCreationPromises.get(creationKey);
   if (inFlight) return inFlight;
   const creation = createThreadTree(task).finally(() => treeCreationPromises.delete(creationKey));
@@ -1450,13 +1468,20 @@ export async function streamOutcomeCard(
   // what normally clears Slack's own "is working…" assistant indicator.
   // Clear it explicitly too, so a delivery that only ever fails still
   // doesn't leave the thread stuck spinning.
-  await clearAssistantStatus(
-    app.client,
-    task.slackChannelId,
-    task.slackThreadTs,
-    options?.statusBudget,
-  );
-  const permalink = await resolvePermalink(app.client, task.slackChannelId, outcome.ts);
+  // The permalink needs only `outcome.ts`, so it is fetched while the status
+  // clears. allSettled keeps the old order of effects: the status write (which
+  // never throws) has finished before a permalink failure propagates.
+  const [, permalinkResult] = await Promise.allSettled([
+    clearAssistantStatus(
+      app.client,
+      task.slackChannelId,
+      task.slackThreadTs,
+      options?.statusBudget,
+    ),
+    resolvePermalink(app.client, task.slackChannelId, outcome.ts),
+  ]);
+  if (permalinkResult.status === "rejected") throw permalinkResult.reason;
+  const permalink = permalinkResult.value;
   return await updateSlackMessageRecord(outcome.id, {
     permalink,
     finalized: true,
