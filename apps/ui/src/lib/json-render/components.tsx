@@ -223,7 +223,6 @@ import {
   PhoneFilterButton,
 } from "./table-filters-ui";
 import {
-  actionSlotFailed,
   applyRange,
   headerCheckState,
   hiddenSelectedCount,
@@ -239,6 +238,7 @@ import {
   SelectAllHeader,
   SelectCell,
   TableCheckbox,
+  useBulkRunner,
 } from "./table-selection-ui";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { TreeComponent } from "./tree";
@@ -1415,7 +1415,6 @@ function TableComponent({ props }: { props: TableProps }) {
   const themeAttr = useJsonRenderThemeAttr();
   const [pendingRowAction, setPendingRowAction] = useState<PendingRowAction | null>(null);
   const [pendingBulkAction, setPendingBulkAction] = useState<number | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const isMobile = useIsMobile();
 
   const propsRef = useRef(props);
@@ -1606,6 +1605,25 @@ function TableComponent({ props }: { props: TableProps }) {
   // Last row toggled: the fixed end of a shift-click range.
   const anchorRef = useRef<string | null>(null);
 
+  // Runs one bulk action's chain against a frozen selection and clears the
+  // acted-on rows only when every step truly succeeded (see `useBulkRunner`).
+  const {
+    busy: bulkBusy,
+    busyRef: bulkBusyRef,
+    run: runBulkAction,
+  } = useBulkRunner({
+    actions: bulkActions,
+    selectionPath,
+    outcomePath: `/ui/${selectionId ?? ""}/bulkOutcome`,
+    execute: (binding) => executeRef.current(binding),
+    getSnapshot: () => snapshotRef.current(),
+    get: (path) => getRef.current(path),
+    set: (path, value) => setRef.current(path, value),
+    onSettled: () => {
+      anchorRef.current = null;
+    },
+  });
+
   // Seed the slot so `{ "$state": "/ui/<id>/selected" }` reads `[]`, not nothing.
   useEffect(() => {
     if (selectable && getRef.current(selectionPath) === undefined) {
@@ -1616,51 +1634,24 @@ function TableComponent({ props }: { props: TableProps }) {
   // Rows that left the data (a sync, a delete) cannot stay selected: a bulk
   // chain would act on ids nobody can see. Waits out loading and errors, when
   // `data` is not trustworthy.
+  // Not while a bulk chain runs: its steps read the selection, and a refetch
+  // between two steps must not shrink the ids the later ones act on.
   const dataReady = Array.isArray(props.data) && !props.loading && !props.error;
   useEffect(() => {
-    if (!selectable || !dataReady || selected.length === 0) return;
+    if (!selectable || !dataReady || bulkBusy || selected.length === 0) return;
     const next = pruneSelection(selected, new Set(allRows.map(rowId)));
     if (next !== selected) setRef.current(selectionPath, next);
-  }, [selectable, dataReady, selected, allRows, rowId, selectionPath]);
+  }, [selectable, dataReady, bulkBusy, selected, allRows, rowId, selectionPath]);
 
   useEffect(() => {
-    selectionStore.update({ selected, visibleIds });
-  }, [selectionStore, selected, visibleIds]);
+    selectionStore.update({ selected, visibleIds, locked: bulkBusy });
+  }, [selectionStore, selected, visibleIds, bulkBusy]);
 
   const clearSelection = useCallback(() => {
+    if (bulkBusyRef.current) return;
     anchorRef.current = null;
     setRef.current(`/ui/${propsRef.current.id}/selected`, []);
-  }, []);
-
-  /**
-   * Runs one bulk action's chain, then clears the selection when it finished
-   * clean. The app runtime's handlers swallow their own errors (they surface
-   * a banner and the action slot), so "clean" means: nothing threw and no
-   * `app.action` step left its `/actions/<name>` slot in `error`. A failed
-   * `app.mutate` is not visible from here and counts as clean.
-   */
-  const runBulkAction = useCallback(
-    async (index: number) => {
-      const action = propsRef.current.bulkActions?.[index] as TableBulkAction | undefined;
-      if (!action) return;
-      setBulkBusy(true);
-      try {
-        for (const binding of action.actions as ActionChain) {
-          await executeRef.current({
-            ...binding,
-            params: resolveScopedParams(binding.params, { state: snapshotRef.current() }),
-          });
-          if (actionSlotFailed(binding, getRef.current)) return;
-        }
-        clearSelection();
-      } catch {
-        // Keep the selection so the user can retry.
-      } finally {
-        setBulkBusy(false);
-      }
-    },
-    [clearSelection],
-  );
+  }, [bulkBusyRef]);
 
   const requestBulkAction = useCallback(
     (index: number) => {
@@ -2018,6 +2009,17 @@ function TableComponent({ props }: { props: TableProps }) {
   const statusKey =
     mobileFields?.status ??
     columns.find((column) => column.kind === "status" || column.kind === "badge")?.key;
+  // An editable checkbox / switch column cannot be a line of card text: the
+  // phone list gives it a real control beside the row (see `controls` below).
+  const editableKeys = new Set(
+    columns
+      .filter(
+        (column) =>
+          (column.kind === "checkbox" || column.kind === "switch") &&
+          (column.onChange as ActionChain | undefined)?.length,
+      )
+      .map((column) => column.key),
+  );
   const metaKeys: string[] = mobileFields
     ? [
         ...(mobileFields.subtitle ? [mobileFields.subtitle] : []),
@@ -2026,10 +2028,10 @@ function TableComponent({ props }: { props: TableProps }) {
           : mobileFields.meta
             ? [mobileFields.meta]
             : []),
-      ]
+      ].filter((key) => !editableKeys.has(key))
     : columns
         .map((column) => column.key)
-        .filter((key) => key !== titleKey && key !== statusKey)
+        .filter((key) => key !== titleKey && key !== statusKey && !editableKeys.has(key))
         .slice(0, 2);
   // Same text as the desktop cell: a templated column renders its `format`.
   const mobileCellText = (key: string, row: Record<string, unknown>): string => {
@@ -2075,6 +2077,7 @@ function TableComponent({ props }: { props: TableProps }) {
   selectionStore.rowLabel = rowLabel;
   selectionStore.handlers = {
     toggleRow: (id, checked, displayOrder) => {
+      if (bulkBusyRef.current) return;
       const current = selectionFromState(getRef.current(selectionPath));
       const next = displayOrder
         ? applyRange(current, displayOrder, anchorRef.current, id, checked)
@@ -2083,17 +2086,19 @@ function TableComponent({ props }: { props: TableProps }) {
       setRef.current(selectionPath, next);
     },
     toggleAll: () => {
+      if (bulkBusyRef.current) return;
       const current = selectionFromState(getRef.current(selectionPath));
       setRef.current(selectionPath, toggleAllVisible(current, visibleIds));
     },
   };
   const mobileRow =
     mobileMode === "list"
-      ? (row: Record<string, unknown>): ListViewMobileRow => ({
+      ? (row: Record<string, unknown>, rowIndex: number): ListViewMobileRow => ({
           check: selectable
             ? {
                 checked: selectedSet.has(rowId(row)),
                 label: rowLabel(row),
+                disabled: bulkBusy,
                 onChange: () =>
                   selectionStore.handlers.toggleRow(rowId(row), !selectedSet.has(rowId(row)), null),
               }
@@ -2106,6 +2111,28 @@ function TableComponent({ props }: { props: TableProps }) {
               )
             : undefined,
           meta: metaKeys.map((key) => mobileCellText(key, row)),
+          controls: columns
+            .filter((column) => editableKeys.has(column.key))
+            .map((column) => {
+              const on = toFilterBoolean(row[column.key]);
+              const name = `${column.label ?? column.key}: ${mobileCellText(titleKey ?? "", row) || "row"}`;
+              const toggle = (checked: boolean) =>
+                void runChain(
+                  column.onChange as ActionChain,
+                  { ...row, [column.key]: checked },
+                  rowIndex,
+                );
+              return column.kind === "switch" ? (
+                <Switch key={column.key} checked={on} aria-label={name} onCheckedChange={toggle} />
+              ) : (
+                <TableCheckbox
+                  key={column.key}
+                  checked={on}
+                  label={name}
+                  onToggle={() => toggle(!on)}
+                />
+              );
+            }),
         })
       : undefined;
 
@@ -2156,6 +2183,7 @@ function TableComponent({ props }: { props: TableProps }) {
           <TableCheckbox
             checked={headerCheckState(visibleIds, selectedSet)}
             label="Select all rows"
+            disabled={bulkBusy}
             onToggle={() => selectionStore.handlers.toggleAll()}
           />
           Select all

@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { OUTCOME_PARAM } from "./assemble";
 import {
-  actionSlotFailed,
+  actionSlotPath,
   applyRange,
+  type BulkBinding,
+  dropActedIds,
   headerCheckState,
   hiddenSelectedCount,
   pruneSelection,
+  runBulkChain,
   sameSelection,
   selectionFromState,
   setRowSelected,
@@ -116,37 +120,164 @@ describe("pruneSelection / hiddenSelectedCount / sameSelection", () => {
   });
 });
 
-describe("actionSlotFailed", () => {
-  const slots: Record<string, unknown> = {
-    "/actions/enqueue/status": "error",
-    "/actions/askReview/status": "ok",
-    "/refs/app2/actions/sync/status": "error",
-  };
-  const read = (path: string) => slots[path];
-
-  test("an app.action whose slot ended in error failed", () => {
-    expect(actionSlotFailed({ action: "app.action", params: { name: "enqueue" } }, read)).toBe(
-      true,
+describe("actionSlotPath / dropActedIds", () => {
+  test("an app.action maps to its slot; a borrowed one to its /refs slot", () => {
+    expect(actionSlotPath({ action: "app.action", params: { name: "sync" } })).toBe(
+      "/actions/sync",
+    );
+    expect(actionSlotPath({ action: "app.action", params: { name: "sync", $app: "app2" } })).toBe(
+      "/refs/app2/actions/sync",
     );
   });
 
-  test("a clean, running or unknown slot did not", () => {
-    expect(actionSlotFailed({ action: "app.action", params: { name: "askReview" } }, read)).toBe(
-      false,
+  test("other steps and nameless actions have no slot", () => {
+    expect(actionSlotPath({ action: "app.mutate", params: { name: "sync" } })).toBeNull();
+    expect(actionSlotPath({ action: "app.action", params: {} })).toBeNull();
+  });
+
+  test("a finished action drops only the rows it acted on", () => {
+    expect(dropActedIds(["a", "b", "late"], ["a", "b"])).toEqual(["late"]);
+  });
+});
+
+describe("runBulkChain", () => {
+  const OUT = "/ui/t/bulkOutcome";
+
+  /** A fake runtime: the slots, and a scripted handler per step. */
+  function harness(handler: (binding: BulkBinding, slots: Map<string, unknown>) => Promise<void>) {
+    const slots = new Map<string, unknown>();
+    const executed: string[] = [];
+    let cancelled = false;
+    let sleeps = 0;
+    const deps = (chain: BulkBinding[], onSleep?: () => void) => ({
+      chain,
+      outcomePath: OUT,
+      execute: async (binding: BulkBinding, extra?: Record<string, unknown>) => {
+        executed.push(binding.action);
+        await handler({ ...binding, params: { ...binding.params, ...extra } }, slots);
+      },
+      read: (path: string) => slots.get(path),
+      write: (path: string, value: unknown) => void slots.set(path, value),
+      cancelled: () => cancelled,
+      sleep: async () => {
+        sleeps++;
+        onSleep?.();
+      },
+    });
+    return {
+      slots,
+      executed,
+      deps,
+      cancel: () => {
+        cancelled = true;
+      },
+      sleeps: () => sleeps,
+    };
+  }
+
+  const mutate: BulkBinding = { action: "app.mutate", params: { model: "pr", op: "update" } };
+  const action = (name: string): BulkBinding => ({ action: "app.action", params: { name } });
+
+  test("a failed app.mutate (swallowed by its handler) fails the chain and stops it", async () => {
+    const h = harness(async (b, slots) => {
+      if (b.action === "app.mutate") {
+        slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "error", error: "boom" });
+      }
+    });
+    expect(await runBulkChain(h.deps([mutate, action("after")]))).toBe("failed");
+    expect(h.executed).toEqual(["app.mutate"]);
+  });
+
+  test("a mutate that reports ok lets the chain finish", async () => {
+    const h = harness(async (b, slots) => {
+      if (b.action === "app.mutate")
+        slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "ok" });
+    });
+    expect(await runBulkChain(h.deps([mutate, mutate]))).toBe("ok");
+    expect(h.executed).toEqual(["app.mutate", "app.mutate"]);
+  });
+
+  test("a mutate whose renderer reports nothing is a failure, not a success", async () => {
+    const h = harness(async () => {});
+    expect(await runBulkChain(h.deps([mutate]))).toBe("failed");
+  });
+
+  test("a stale ok from an earlier step cannot vouch for the next mutate", async () => {
+    let calls = 0;
+    const h = harness(async (b, slots) => {
+      calls++;
+      if (calls === 1) slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "ok" });
+    });
+    expect(await runBulkChain(h.deps([mutate, mutate]))).toBe("failed");
+  });
+
+  test("a task-backed action waits for the task to finish before the chain continues", async () => {
+    const h = harness(async (b, slots) => {
+      if (b.params?.name === "enqueue")
+        slots.set("/actions/enqueue", { status: "running", taskId: "t1" });
+    });
+    // The task completes on the third poll.
+    let polls = 0;
+    const result = await runBulkChain(
+      h.deps([action("enqueue"), action("after")], () => {
+        polls++;
+        if (polls === 3) h.slots.set("/actions/enqueue", { status: "ok", taskId: "t1" });
+      }),
     );
-    expect(actionSlotFailed({ action: "app.action", params: { name: "nope" } }, read)).toBe(false);
+    expect(result).toBe("ok");
+    expect(h.sleeps()).toBe(3);
+    expect(h.executed).toEqual(["app.action", "app.action"]);
   });
 
-  test("a borrowed action reads its /refs slot", () => {
-    expect(
-      actionSlotFailed({ action: "app.action", params: { name: "sync", $app: "app2" } }, read),
-    ).toBe(true);
+  test("a task that fails after the handler returned fails the chain", async () => {
+    const h = harness(async (b, slots) => {
+      if (b.params?.name === "enqueue")
+        slots.set("/actions/enqueue", { status: "running", taskId: "t1" });
+    });
+    const result = await runBulkChain(
+      h.deps([action("enqueue"), action("after")], () =>
+        h.slots.set("/actions/enqueue", { status: "error", taskId: "t1", error: "task failed" }),
+      ),
+    );
+    expect(result).toBe("failed");
+    expect(h.executed).toEqual(["app.action"]);
   });
 
-  test("other steps never read as failed", () => {
-    expect(actionSlotFailed({ action: "app.refresh" }, read)).toBe(false);
-    expect(actionSlotFailed({ action: "app.mutate", params: { name: "enqueue" } }, read)).toBe(
-      false,
+  test("a borrowed action is watched on its /refs slot", async () => {
+    const h = harness(async (b, slots) => {
+      slots.set("/refs/app2/actions/sync", { status: "error" });
+      void b;
+    });
+    const borrowed: BulkBinding = { action: "app.action", params: { name: "sync", $app: "app2" } };
+    expect(await runBulkChain(h.deps([borrowed]))).toBe("failed");
+  });
+
+  test("an inline script action that ended ok finishes without waiting", async () => {
+    const h = harness(async (b, slots) => {
+      slots.set(`/actions/${b.params?.name}`, { status: "ok" });
+    });
+    expect(await runBulkChain(h.deps([action("a")]))).toBe("ok");
+    expect(h.sleeps()).toBe(0);
+  });
+
+  test("a handler that throws fails the chain", async () => {
+    const h = harness(async () => {
+      throw new Error("network");
+    });
+    expect(await runBulkChain(h.deps([mutate]))).toBe("failed");
+  });
+
+  test("unmounting while a task runs cancels the wait", async () => {
+    const h = harness(async (b, slots) => {
+      slots.set(`/actions/${b.params?.name}`, { status: "running", taskId: "t1" });
+    });
+    expect(await runBulkChain(h.deps([action("slow")], () => h.cancel()))).toBe("cancelled");
+  });
+
+  test("steps without a slot (toast, refresh) are not judged", async () => {
+    const h = harness(async () => {});
+    expect(await runBulkChain(h.deps([{ action: "app.refresh" }, { action: "ui.toast" }]))).toBe(
+      "ok",
     );
   });
 });

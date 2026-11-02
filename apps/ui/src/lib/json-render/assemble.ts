@@ -97,6 +97,15 @@ const APP_SCOPED_ACTIONS = new Set(["app.mutate", "app.refresh", "app.action"]);
  */
 export const DEFINING_APP_PARAM = "$app";
 
+/**
+ * Reserved `app.mutate` param: a state path the handler reports its result to
+ * (`{ status: "ok" }` or `{ status: "error", error }`). The handlers swallow
+ * their own failures, so a runner that must know whether a mutate worked
+ * (Table bulk actions) asks for the outcome here. Runtime-owned like `$app`:
+ * the assembler strips any occurrence app JSON authored.
+ */
+export const OUTCOME_PARAM = "$outcome";
+
 // ─── Input shapes ───────────────────────────────────────────────────────────
 // Structural, deliberately loose: `AppDetail` / `AppDefinition` from
 // `@/api/types` satisfy these without this module importing an aliased path.
@@ -518,6 +527,14 @@ function rewriteActionStep(step: Record<string, unknown>, scope: Scope): void {
   } else if (params && DEFINING_APP_PARAM in params) {
     delete params[DEFINING_APP_PARAM];
     step.params = params;
+  }
+  // `$outcome` is the runtime's private channel too (a Table bulk runner asks
+  // `app.mutate` to report where it can read the result): app JSON cannot aim
+  // a handler at a state path of its choosing.
+  const authored = isPlainObject(step.params) ? step.params : undefined;
+  if (authored && OUTCOME_PARAM in authored) {
+    const { [OUTCOME_PARAM]: _dropped, ...rest } = authored;
+    step.params = rest;
   }
 
   if (action !== "app.mutate" || !scope.instanceKey) return;

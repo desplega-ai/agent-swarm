@@ -636,8 +636,9 @@ const tableProps = z.object({
    * Buttons in a bar that shows while the selection is non-empty ("N selected",
    * the actions, Clear). Same shape and confirm rules as `rowActions`, minus
    * `placement`. Chains have no `$row`; read the ids with
-   * `{ "$state": "/ui/<id>/selected" }`. The selection clears after the chain
-   * finishes without an `app.action` step ending in error. Needs `id`.
+   * `{ "$state": "/ui/<id>/selected" }`. The selection is locked while the chain
+   * runs and clears (only the rows it acted on) once every step succeeded: a
+   * failed `app.mutate`, or an `app.action` whose task fails, keeps it. Needs `id`.
    */
   bulkActions: z.array(tableBulkActionSchema).optional(),
   /**

@@ -91,6 +91,8 @@ function notesApp(): AppRecordLike {
                         params: {
                           name: "sync",
                           input: { ids: { $state: "/ui/notesTable/selected" } },
+                          // Runtime-owned: app JSON must not aim a handler at a state path.
+                          $outcome: "/queries/all/data",
                         },
                       },
                     ],
@@ -288,7 +290,7 @@ describe("assemblePageSpec — rewrite coverage across ELEMENT_KEYS", () => {
     });
   });
 
-  test("props — a Table's selection id is namespaced and its bulk chain follows it", () => {
+  test("props — a Table's selection id is namespaced, its bulk chain follows it, and an authored $outcome is stripped", () => {
     const table = node(spec, "ref:notes:table");
     expect(table?.props.id).toBe("instances/notes/notesTable");
     expect(table?.props.bulkActions[0].actions[0].params).toEqual({

@@ -13,13 +13,29 @@
  */
 
 import type { GridApi } from "ag-grid-community";
-import { type ReactNode, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { resolveScopedParams } from "./action-params";
 import type { TableBulkAction } from "./catalog";
 import { CatalogIcon } from "./icons";
-import { type CheckState, headerCheckState, sameSelection } from "./table-selection";
+import {
+  type BulkBinding,
+  type CheckState,
+  dropActedIds,
+  headerCheckState,
+  runBulkChain,
+  sameSelection,
+  selectionFromState,
+} from "./table-selection";
 
 // ─── Shared checkbox primitive ──────────────────────────────────────────────
 
@@ -64,6 +80,8 @@ export interface SelectionSnapshot {
   selected: ReadonlySet<string>;
   /** Ids of the rows left after `search` / `filters`, in data order. */
   visibleIds: readonly string[];
+  /** A bulk chain is running: the selection cannot change until it settles. */
+  locked: boolean;
 }
 
 /** What the select cell and header call back into; the Table swaps these in on every render. */
@@ -77,7 +95,11 @@ export interface SelectionStore {
   getSnapshot: () => SelectionSnapshot;
   subscribe: (listener: () => void) => () => void;
   /** Replaces the snapshot; a no-op (no notification) when nothing changed. */
-  update: (next: { selected: readonly string[]; visibleIds: readonly string[] }) => void;
+  update: (next: {
+    selected: readonly string[];
+    visibleIds: readonly string[];
+    locked?: boolean;
+  }) => void;
   handlers: SelectionHandlers;
   rowId: (row: Record<string, unknown>) => string;
   /** Accessible name of one row's checkbox. */
@@ -85,7 +107,7 @@ export interface SelectionStore {
 }
 
 export function createSelectionStore(): SelectionStore {
-  let snapshot: SelectionSnapshot = { selected: new Set(), visibleIds: [] };
+  let snapshot: SelectionSnapshot = { selected: new Set(), visibleIds: [], locked: false };
   const listeners = new Set<() => void>();
   return {
     getSnapshot: () => snapshot,
@@ -95,13 +117,15 @@ export function createSelectionStore(): SelectionStore {
     },
     update: (next) => {
       const current = [...snapshot.selected];
+      const locked = next.locked ?? false;
       if (
         sameSelection(current, next.selected) &&
-        sameSelection(snapshot.visibleIds, next.visibleIds)
+        sameSelection(snapshot.visibleIds, next.visibleIds) &&
+        snapshot.locked === locked
       ) {
         return;
       }
-      snapshot = { selected: new Set(next.selected), visibleIds: [...next.visibleIds] };
+      snapshot = { selected: new Set(next.selected), visibleIds: [...next.visibleIds], locked };
       for (const listener of listeners) listener();
     },
     handlers: { toggleRow: () => {}, toggleAll: () => {} },
@@ -138,7 +162,7 @@ export function SelectCell({
   data: Record<string, unknown> | undefined;
   api: GridApi<Record<string, unknown>>;
 }) {
-  const { selected } = useSelectionSnapshot(store);
+  const { selected, locked } = useSelectionSnapshot(store);
   if (!data) return null;
   const id = store.rowId(data);
   const checked = selected.has(id);
@@ -147,6 +171,7 @@ export function SelectCell({
       <TableCheckbox
         checked={checked}
         label={store.rowLabel(data)}
+        disabled={locked}
         onToggle={({ shiftKey }) =>
           store.handlers.toggleRow(id, !checked, shiftKey ? gridDisplayOrder(api, store) : null)
         }
@@ -156,17 +181,99 @@ export function SelectCell({
 }
 
 export function SelectAllHeader({ store }: { store: SelectionStore }) {
-  const { selected, visibleIds } = useSelectionSnapshot(store);
+  const { selected, visibleIds, locked } = useSelectionSnapshot(store);
   return (
     <div className="flex h-full w-full items-center justify-center">
       <TableCheckbox
         checked={headerCheckState(visibleIds, selected)}
-        disabled={visibleIds.length === 0}
+        disabled={locked || visibleIds.length === 0}
         label="Select all rows"
         onToggle={() => store.handlers.toggleAll()}
       />
     </div>
   );
+}
+
+// ─── Bulk runner ────────────────────────────────────────────────────────────
+
+export interface BulkRunnerDeps {
+  actions: readonly TableBulkAction[];
+  selectionPath: string;
+  /** State path an `app.mutate` step reports its result to. */
+  outcomePath: string;
+  execute: (binding: BulkBinding) => Promise<void>;
+  getSnapshot: () => Record<string, unknown>;
+  get: (path: string) => unknown;
+  set: (path: string, value: unknown) => void;
+  /** The chain finished clean and the acted-on rows left the selection. */
+  onSettled?: () => void;
+  /** Task poll interval; the default suits the runtime's own task polling. */
+  pollMs?: number;
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Runs one bulk action at a time against a frozen selection.
+ *
+ * While a chain runs the selection is locked (`busy`; `busyRef` for handlers
+ * that must refuse at once). The chain reads the same ids at every step, and
+ * on success only the rows it acted on leave the selection. On a failed step
+ * (including a task that fails after its handler returned) or an unmount the
+ * selection stays exactly as the user left it, so they can retry.
+ */
+export function useBulkRunner(deps: BulkRunnerDeps) {
+  const latest = useRef(deps);
+  latest.current = deps;
+  const busyRef = useRef(false);
+  const unmounted = useRef(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
+
+  const run = useCallback(async (index: number) => {
+    if (busyRef.current) return;
+    const d = latest.current;
+    const action = d.actions[index];
+    if (!action) return;
+    const acted = selectionFromState(d.get(d.selectionPath));
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const outcome = await runBulkChain({
+        chain: action.actions as BulkBinding[],
+        outcomePath: d.outcomePath,
+        execute: (binding, extra) =>
+          latest.current.execute({
+            ...binding,
+            params: {
+              ...resolveScopedParams(binding.params, { state: latest.current.getSnapshot() }),
+              ...extra,
+            },
+          }),
+        read: (path) => latest.current.get(path),
+        write: (path, value) => latest.current.set(path, value),
+        cancelled: () => unmounted.current,
+        sleep: wait,
+        pollMs: d.pollMs,
+      });
+      if (outcome === "ok") {
+        const current = selectionFromState(latest.current.get(d.selectionPath));
+        latest.current.set(d.selectionPath, dropActedIds(current, acted));
+        latest.current.onSettled?.();
+      }
+    } finally {
+      busyRef.current = false;
+      if (!unmounted.current) setBusy(false);
+    }
+  }, []);
+
+  return { busy, busyRef, run };
 }
 
 // ─── Bulk-action bar ────────────────────────────────────────────────────────

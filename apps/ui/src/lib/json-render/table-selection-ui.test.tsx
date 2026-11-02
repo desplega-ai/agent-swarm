@@ -12,8 +12,14 @@ mock.module("@/components/ui/checkbox", () => require("../../components/ui/check
 mock.module("@/components/ui/skeleton", () => require("../../components/ui/skeleton"));
 
 const { MobileListRow } = await import("../../components/shared/mobile-list");
-const { BulkActionBar, SelectAllHeader, SelectCell, TableCheckbox, createSelectionStore } =
-  await import("./table-selection-ui");
+const {
+  BulkActionBar,
+  SelectAllHeader,
+  SelectCell,
+  TableCheckbox,
+  createSelectionStore,
+  useBulkRunner,
+} = await import("./table-selection-ui");
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -209,4 +215,222 @@ test("a phone row's checkbox sits beside the row button, never inside it", async
   await click(box);
   expect(changes).toEqual(["x"]);
   expect(opened).toEqual([]);
+});
+
+test("a phone row's editable columns render as real controls beside the row, not as text", async () => {
+  const toggled: boolean[] = [];
+  const opened: string[] = [];
+  const { host } = await mount(
+    <ul>
+      <MobileListRow
+        title="proxy#88"
+        meta={["open"]}
+        onClick={() => opened.push("row")}
+        controls={[
+          <TableCheckbox
+            key="done"
+            checked={false}
+            label="Done: proxy#88"
+            onToggle={() => toggled.push(true)}
+          />,
+        ]}
+      />
+    </ul>,
+  );
+  const box = checkboxes(host).find((b) => b.getAttribute("aria-label") === "Done: proxy#88")!;
+  expect(box).toBeDefined();
+  const rowButton = host.querySelector('li button:not([role="checkbox"])')!;
+  expect(rowButton).not.toBeNull();
+  // The control is a sibling of the row's button, never inside it.
+  expect(rowButton.contains(box)).toBe(false);
+  expect(rowButton.textContent).not.toContain("Done");
+
+  await click(box);
+  expect(toggled).toEqual([true]);
+  expect(opened).toEqual([]);
+});
+
+test("a phone row's selection checkbox is disabled while a bulk chain runs", async () => {
+  const { host } = await mount(
+    <ul>
+      <MobileListRow
+        title="proxy#88"
+        check={{ checked: false, label: "Select proxy#88", onChange: () => {}, disabled: true }}
+      />
+    </ul>,
+  );
+  expect(checkboxes(host)[0]!.hasAttribute("disabled")).toBe(true);
+});
+
+test("a locked store disables the select cell and the select-all header", async () => {
+  const store = storeWith(["a"], ["a", "b"]);
+  store.update({ selected: ["a"], visibleIds: ["a", "b"], locked: true });
+  const calls: string[] = [];
+  store.handlers = { toggleRow: (id) => calls.push(id), toggleAll: () => calls.push("all") };
+  const api = { getDisplayedRowCount: () => 0, getDisplayedRowAtIndex: () => undefined } as never;
+  const { host } = await mount(
+    <>
+      <SelectAllHeader store={store} />
+      <SelectCell store={store} data={{ id: "a" }} api={api} />
+    </>,
+  );
+  const boxes = checkboxes(host);
+  expect(boxes.map((b) => b.hasAttribute("disabled"))).toEqual([true, true]);
+  await click(boxes[0]!);
+  await click(boxes[1]!);
+  expect(calls).toEqual([]);
+});
+
+// ─── Bulk runner ────────────────────────────────────────────────────────────
+
+type Binding = { action: string; params?: Record<string, unknown> };
+
+/** A fake app runtime: a state map plus a scripted handler per step. */
+function runtime(
+  initial: string[],
+  handler: (binding: Binding, state: Map<string, unknown>) => Promise<void> | void,
+) {
+  const state = new Map<string, unknown>([["/ui/t/selected", initial]]);
+  const executed: Binding[] = [];
+  let bulk!: ReturnType<typeof useBulkRunner>;
+  const actions = [
+    {
+      label: "Go",
+      actions: [
+        { action: "app.mutate", params: { model: "pr", op: "update" } },
+        { action: "app.action", params: { name: "after" } },
+      ],
+    },
+  ];
+  function Harness() {
+    bulk = useBulkRunner({
+      actions,
+      selectionPath: "/ui/t/selected",
+      outcomePath: "/ui/t/bulkOutcome",
+      pollMs: 1,
+      execute: async (binding) => {
+        executed.push(binding);
+        await handler(binding, state);
+      },
+      getSnapshot: () => Object.fromEntries(state),
+      get: (path) => state.get(path),
+      set: (path, value) => void state.set(path, value),
+    });
+    return <span data-testid="busy">{String(bulk.busy)}</span>;
+  }
+  const selected = () => state.get("/ui/t/selected") as string[];
+  return { Harness, state, executed, selected, bulk: () => bulk };
+}
+
+const run = (rt: ReturnType<typeof runtime>) => act(async () => void (await rt.bulk().run(0)));
+const mutateOk = (b: Binding, state: Map<string, unknown>) => {
+  if (b.action === "app.mutate") state.set(b.params?.$outcome as string, { status: "ok" });
+};
+
+test("a failed app.mutate keeps the selection and stops the chain", async () => {
+  const rt = runtime(["a", "b"], (b, state) => {
+    if (b.action === "app.mutate") {
+      state.set(b.params?.$outcome as string, { status: "error", error: "boom" });
+    }
+  });
+  await mount(<rt.Harness />);
+  await run(rt);
+  expect(rt.selected()).toEqual(["a", "b"]);
+  expect(rt.executed.map((b) => b.action)).toEqual(["app.mutate"]);
+});
+
+test("a task-backed action holds the selection until the task ends, and a later failure keeps it", async () => {
+  let release!: () => void;
+  const rt = runtime(["a", "b"], (b, state) => {
+    mutateOk(b, state);
+    if (b.params?.name === "after")
+      state.set("/actions/after", { status: "running", taskId: "t1" });
+  });
+  const { host } = await mount(<rt.Harness />);
+  const settled = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let running!: Promise<void>;
+  await act(async () => {
+    running = rt
+      .bulk()
+      .run(0)
+      .then(() => release());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  // The handler returned long ago, but the task has not: still busy, nothing cleared.
+  expect(host.querySelector('[data-testid="busy"]')?.textContent).toBe("true");
+  expect(rt.selected()).toEqual(["a", "b"]);
+
+  await act(async () => {
+    rt.state.set("/actions/after", { status: "error", taskId: "t1", error: "task failed" });
+    await running;
+    await settled;
+  });
+  expect(host.querySelector('[data-testid="busy"]')?.textContent).toBe("false");
+  expect(rt.selected()).toEqual(["a", "b"]);
+});
+
+test("a task-backed action that completes clears the selection", async () => {
+  const rt = runtime(["a"], (b, state) => {
+    mutateOk(b, state);
+    if (b.params?.name === "after")
+      state.set("/actions/after", { status: "running", taskId: "t1" });
+  });
+  await mount(<rt.Harness />);
+  let running!: Promise<void>;
+  await act(async () => {
+    running = rt.bulk().run(0);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(rt.selected()).toEqual(["a"]);
+    rt.state.set("/actions/after", { status: "ok", taskId: "t1" });
+    await running;
+  });
+  expect(rt.selected()).toEqual([]);
+});
+
+test("rows picked while the chain ran survive it; only the acted-on rows leave", async () => {
+  const rt = runtime(["a"], (b, state) => {
+    mutateOk(b, state);
+    // A write that slipped past the UI lock (another component, a state binding).
+    if (b.action === "app.mutate") state.set("/ui/t/selected", ["a", "late"]);
+    if (b.params?.name === "after") state.set("/actions/after", { status: "ok" });
+  });
+  await mount(<rt.Harness />);
+  await run(rt);
+  expect(rt.selected()).toEqual(["late"]);
+});
+
+test("a second run while one is in flight is ignored", async () => {
+  const rt = runtime(["a"], async (b, state) => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    mutateOk(b, state);
+    if (b.params?.name === "after") state.set("/actions/after", { status: "ok" });
+  });
+  await mount(<rt.Harness />);
+  await act(async () => {
+    const first = rt.bulk().run(0);
+    expect(rt.bulk().busyRef.current).toBe(true);
+    await rt.bulk().run(0);
+    await first;
+  });
+  expect(rt.executed.filter((b) => b.action === "app.mutate")).toHaveLength(1);
+  expect(rt.selected()).toEqual([]);
+});
+
+test("unmounting mid-task leaves the selection untouched", async () => {
+  const rt = runtime(["a"], (b, state) => {
+    mutateOk(b, state);
+    if (b.params?.name === "after")
+      state.set("/actions/after", { status: "running", taskId: "t1" });
+  });
+  const { root } = await mount(<rt.Harness />);
+  let running!: Promise<void>;
+  await act(async () => {
+    running = rt.bulk().run(0);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  await act(async () => root.unmount());
+  await running;
+  expect(rt.selected()).toEqual(["a"]);
 });

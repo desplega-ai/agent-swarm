@@ -25,7 +25,14 @@ export interface ListViewMobileRow {
   meta?: ReactNode[];
   leading?: ReactNode;
   /** Selection checkbox beside the row (see `MobileListRow`). */
-  check?: { checked: boolean | "indeterminate"; onChange: () => void; label: string };
+  check?: {
+    checked: boolean | "indeterminate";
+    onChange: () => void;
+    label: string;
+    disabled?: boolean;
+  };
+  /** Inline controls (checkbox, switch) beside the row, each in its own 44px tap target. */
+  controls?: ReactNode[];
 }
 
 export interface ListViewProps<TData>
@@ -179,6 +186,7 @@ export function ListView<TData>({
               meta={mobile.meta}
               leading={mobile.leading}
               check={mobile.check}
+              controls={mobile.controls}
               selected={selectedId !== undefined && selectedId !== null && id === selectedId}
               onClick={onRowClick ? () => onRowClick(row, index) : undefined}
             />
