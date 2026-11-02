@@ -104,6 +104,7 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
 | `dependsOn` | Array of task IDs that must complete first; non-success terminal parents cascade-fail their dependents |
 | `parentTaskId` | For follow-up continuity — child tasks inherit a bounded prior-task context preamble rebuilt from the task chain, so continuity survives restarts and works the same across every harness |
+| `outputSchema` | Optional JSON Schema the final `output` must match. An empty schema (`{}`) means no schema: the task runs free-text and does not inherit the parent's schema |
 | `followUpConfig` | Optional control over the lead follow-up created when this task completes or fails. Useful for long-running flows that need custom completion instructions or no follow-up at all |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Concrete provider-specific model override. Wins over `modelTier` when both are present. |

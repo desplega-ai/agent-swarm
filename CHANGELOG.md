@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.8] - 2026-11-02
+
+### Added
+- Tasks: a terminal `skipped` status. `store-progress status: "skipped"` with a one-line reason ends a task that is not the agent's to handle without posting to Slack or creating a lead follow-up; the trigger message gets `SLACK_REACTION_SKIPPED` (default `mute`) (#2571).
+- Sessions: an opt-in All users read scope (`scope=all` or the `X-Swarm-Session-Scope: all` header) for users holding the `session.read.all` grant (#2630).
+- E2E: a strict black-box coverage contract for every route, MCP tool and workflow node type, run by the merge gate (#2605).
+
+### Changed
+- Docs: model tier selection for tasks (#2629) and the heartbeat spec (#2622).
+- Evals: benchmark 1.0 published from the weekly run (#2621).
+- Docker: bumped amp and qwen (#2620).
+
+### Fixed
+- Tasks: an empty `outputSchema` (`{}`) means no schema, so workers no longer complete with the literal output `{}` (#2633).
+- Usage: pi and Codex usage and context windows are recorded correctly (#2618).
+- CLI: `claude-managed-setup` help documents `AGENT_SWARM_API_KEY` (#2627).
+
 ## [2.7.7] - 2026-11-01
 
 ### Added
