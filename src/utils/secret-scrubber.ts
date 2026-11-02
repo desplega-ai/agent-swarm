@@ -250,15 +250,36 @@ function isSensitiveKeyPath(key: string): boolean {
 }
 
 /**
- * An unquoted value that opens with a bracket or a statement separator is
- * code, not a credential: a sensitive key name inside a regex group such
- * as `([?&]<key>=)[^&#]*`, a call or index argument, a list item.
+ * A sensitive `KEY=` that is source code, not a credential: a key name inside
+ * a regex such as `([?&]<key>=)[^&#]*` or `(?:a|<key>=)`. Three conditions
+ * must all hold, so a real punctuation-led secret (`PASSWORD=(Tr0ub4dor&3)`,
+ * `?token=[…]`) still redacts:
+ * - the key follows a regex or call opener (`]`, `(`, `|`), never a space,
+ *   line start, `?` or `&` as in a shell assignment or a URL query;
+ * - the bare value opens with a bracket or a statement separator;
+ * - the value holds no run of 6+ letters or digits, i.e. no credential body.
  */
+const CODE_KEY_OPENER_RE = /[\]()|]$/;
 const CODE_PUNCT_START_RE = /^[()[\]{},;|]/;
+const CREDENTIAL_RUN_RE = /[A-Za-z0-9]{6,}/;
 
-function redactAssignment(match: string, key: string, value: string): string {
+function isCodeAssignment(value: string, before: string): boolean {
+  return (
+    CODE_KEY_OPENER_RE.test(before) &&
+    CODE_PUNCT_START_RE.test(value) &&
+    !CREDENTIAL_RUN_RE.test(value)
+  );
+}
+
+function redactAssignment(
+  match: string,
+  key: string,
+  value: string,
+  offset: number,
+  input: string,
+): string {
   if (!isSensitiveKeyPath(key)) return match;
-  if (CODE_PUNCT_START_RE.test(value)) return match;
+  if (isCodeAssignment(value, input.slice(Math.max(0, offset - 1), offset))) return match;
   let open = "";
   let close = "";
   for (const quote of ['\\"', '"', "'"]) {

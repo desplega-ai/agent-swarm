@@ -934,7 +934,8 @@ describe("scrubSecrets — over-redaction guards", () => {
       regexLine,
       regexLine.replace(`[REDACTED:${key}]`, "***"),
       `const re = /[?&]${key}=([^&]+)/;`,
-      `pick(token=(a), PASSWORD={b}, secret=], api_key=,x, TOKEN=;)`,
+      `const re = /(?:sig|token=)[^&]*/;`,
+      `pick(token=(a), f(secret=],x))`,
     ];
     for (const line of lines) {
       expect(scrubSecrets(line)).toBe(line);
@@ -959,6 +960,29 @@ describe("scrubSecrets — over-redaction guards", () => {
     for (const [input, expected] of cases) {
       expect(scrubSecrets(input)).toBe(expected);
       expect(scrubSecrets(jsonBody(input))).not.toContain(tok);
+    }
+  });
+
+  // The code guard needs a code position, a punctuation-led value and no
+  // credential body; a real secret that opens with punctuation fails one.
+  test("punctuation-led credentials redact in shell, URL and call context", () => {
+    const key = ["api", "Key"].join("");
+    const pw = ["PASS", "WORD"].join("");
+    const tok = randomToken(32);
+    const cases: Array<[string, string, string]> = [
+      [`${pw}=(${tok})`, `${pw}=[REDACTED:${pw}]`, tok],
+      [`export DB_${pw}=;${tok}`, `export DB_${pw}=[REDACTED:DB_${pw}]`, tok],
+      [`TOKEN={${tok}}`, `TOKEN=[REDACTED:TOKEN]`, tok],
+      [`echo secret=|${tok}`, `echo secret=[REDACTED:secret]`, tok],
+      [`${pw}=(!@#%^&*-)`, `${pw}=[REDACTED:${pw}]`, "!@#%^&*-"],
+      [`https://x.example/d?${key}=(${tok})`, `https://x.example/d?${key}=[REDACTED:${key}]`, tok],
+      [`https://x.example/d?token=[${tok}]&b=2`, `https://x.example/d?token=[REDACTED:token]`, tok],
+      [`connect(password=(${tok}))`, `connect(password=[REDACTED:password]`, tok],
+      [`/[?&]${key}=(${tok})/`, `/[?&]${key}=[REDACTED:${key}]`, tok],
+    ];
+    for (const [input, expected, secret] of cases) {
+      expect(scrubSecrets(input)).toBe(expected);
+      expect(scrubSecrets(jsonBody(input))).not.toContain(secret);
     }
   });
 
