@@ -573,7 +573,14 @@ export async function buildCodexConfig(
   // Same entry shape as the swarm + installed-server stdio entries above.
   // When disabled, the installed Codex plugin is turned off too: it registers
   // its own `context-mode` MCP server, skills and hooks.
-  const contextModeDisabled = isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false);
+  // Read `config.env` first: production builds this config inside the
+  // `codex-session-runner` subprocess, whose `process.env` is a minimal
+  // allowlist. Swarm config rows (agent-scoped included) only arrive there
+  // through `config.env`.
+  const contextModeDisabled = isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false, {
+    ...process.env,
+    ...config.env,
+  });
   if (!contextModeDisabled) {
     mcpServers["context-mode"] = {
       command: "context-mode",
