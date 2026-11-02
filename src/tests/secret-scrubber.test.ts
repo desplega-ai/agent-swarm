@@ -925,6 +925,43 @@ describe("scrubSecrets — over-redaction guards", () => {
     expect(scrubSecrets(jsonBody(all))).toBe(jsonBody(all));
   });
 
+  // A sensitive key name followed by `=` inside a regex literal is code. The
+  // line is built at runtime so the repo secret hooks do not rewrite it.
+  test("a KEY= followed by code punctuation stays intact", () => {
+    const key = ["api", "Key"].join("");
+    const regexLine = `  return url.replace(/([?&]${key}=)[^&#]*/g, "$1[REDACTED:${key}]");`;
+    const lines = [
+      regexLine,
+      regexLine.replace(`[REDACTED:${key}]`, "***"),
+      `const re = /[?&]${key}=([^&]+)/;`,
+      `pick(token=(a), PASSWORD={b}, secret=], api_key=,x, TOKEN=;)`,
+    ];
+    for (const line of lines) {
+      expect(scrubSecrets(line)).toBe(line);
+      expect(scrubSecrets(jsonBody(line))).toBe(jsonBody(line));
+    }
+  });
+
+  test("real KEY=value credentials still redact next to the code guard", () => {
+    const key = ["api", "Key"].join("");
+    const tok = randomToken(32);
+    const cases: Array<[string, string]> = [
+      [`https://x.example/d?${key}=${tok}`, `https://x.example/d?${key}=[REDACTED:${key}]`],
+      [
+        `curl 'https://x.example/d?access_token=${tok}'`,
+        `curl 'https://x.example/d?access_token=[REDACTED:access_token]'`,
+      ],
+      [`${key}="${tok}"`, `${key}="[REDACTED:${key}]"`],
+      [`${key}='${tok}'`, `${key}='[REDACTED:${key}]'`],
+      [`API_KEY=${tok}`, `API_KEY=[REDACTED:API_KEY]`],
+      [`export DB_PASSWORD=p4ss(${tok})`, `export DB_PASSWORD=[REDACTED:DB_PASSWORD]`],
+    ];
+    for (const [input, expected] of cases) {
+      expect(scrubSecrets(input)).toBe(expected);
+      expect(scrubSecrets(jsonBody(input))).not.toContain(tok);
+    }
+  });
+
   // Each input is ~200 KB and built to make a naive pattern backtrack.
   // Allow shared-runner headroom; a real ReDoS on these inputs takes seconds.
   // retry: tolerate transient contention without weakening the per-input guard.

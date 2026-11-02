@@ -249,8 +249,16 @@ function isSensitiveKeyPath(key: string): boolean {
   return dot >= 0 && isSensitiveKey(key.slice(dot + 1));
 }
 
+/**
+ * An unquoted value that opens with a bracket or a statement separator is
+ * code, not a credential: a sensitive key name inside a regex group such
+ * as `([?&]<key>=)[^&#]*`, a call or index argument, a list item.
+ */
+const CODE_PUNCT_START_RE = /^[()[\]{},;|]/;
+
 function redactAssignment(match: string, key: string, value: string): string {
   if (!isSensitiveKeyPath(key)) return match;
+  if (CODE_PUNCT_START_RE.test(value)) return match;
   let open = "";
   let close = "";
   for (const quote of ['\\"', '"', "'"]) {
