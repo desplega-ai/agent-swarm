@@ -192,21 +192,27 @@ export const registerManageUserTool = (server: McpServer) => {
           }
           try {
             const metadata = mergeComms(input.metadata, input.comms) ?? undefined;
-            const user = await createUser({
-              name: input.name,
-              email: input.email,
-              role: input.role,
-              notes: input.notes,
-              emailAliases: input.emailAliases,
-              preferredChannel: input.preferredChannel,
-              timezone: input.timezone,
-              dailyBudgetUsd: input.dailyBudgetUsd ?? undefined,
-              status: input.status,
-              metadata,
+            // Create and link in one write transaction: an operator grant on the
+            // new user cannot land before its identities.
+            const name = input.name;
+            const user = await getDbClient().transaction(async () => {
+              const created = await createUser({
+                name,
+                email: input.email,
+                role: input.role,
+                notes: input.notes,
+                emailAliases: input.emailAliases,
+                preferredChannel: input.preferredChannel,
+                timezone: input.timezone,
+                dailyBudgetUsd: input.dailyBudgetUsd ?? undefined,
+                status: input.status,
+                metadata,
+              });
+              for (const ident of input.identities ?? []) {
+                await linkIdentity(created.id, ident.kind, ident.externalId, operatorActor);
+              }
+              return created;
             });
-            for (const ident of input.identities ?? []) {
-              await linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
-            }
             return toolOk(`User created: "${user.name}" (${user.id}).`, {
               details: JSON.stringify(user, null, 2),
               data: { user },

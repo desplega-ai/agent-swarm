@@ -41,6 +41,11 @@ import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 export type IdentityActor = {
   kind: "system" | "operator" | "user";
   id: string;
+  /**
+   * For a user actor: the `user_tokens` row the request authenticated with.
+   * Unset for a page session. Not recorded in events.
+   */
+  tokenId?: string;
 };
 
 function actorString(actor: IdentityActor): string {
@@ -553,6 +558,13 @@ export async function revokeAllUserCredentials(
  * People page can surface "last seen".
  */
 export async function resolveUserByToken(plaintext: string): Promise<User | null> {
+  return (await resolveUserToken(plaintext))?.user ?? null;
+}
+
+/** Like `resolveUserByToken`, plus the id of the `user_tokens` row that matched. */
+export async function resolveUserToken(
+  plaintext: string,
+): Promise<{ user: User | null; tokenId: string } | null> {
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
 
@@ -573,7 +585,20 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
     // Never let a `lastUsedAt` update failure leak to the caller.
   }
 
-  return findUserById(row.userId);
+  return { user: await findUserById(row.userId), tokenId: row.id };
+}
+
+/**
+ * Whether `tokenId` is an unrevoked token of `userId`. Run it inside the
+ * write transaction it guards: `setUserRoles` revokes tokens under the same
+ * write lock.
+ */
+export async function isLiveUserToken(tokenId: string, userId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    "SELECT 1 AS found FROM user_tokens WHERE id = ? AND userId = ? AND revokedAt IS NULL",
+    [tokenId, userId],
+  );
+  return row != null;
 }
 
 // ---------------------------------------------------------------------------

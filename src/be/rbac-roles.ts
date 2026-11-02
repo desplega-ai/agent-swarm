@@ -4,7 +4,7 @@ import { invalidateTelemetryUserRole } from "../telemetry-identity";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb, getDbClient } from "./db";
 import { isInTransaction } from "./db-client";
-import { revokeAllUserCredentials } from "./users";
+import { isLiveUserToken, revokeAllUserCredentials } from "./users";
 
 export const DEFAULT_ROLE_ID = "rbac-role-admin";
 
@@ -258,14 +258,22 @@ export class OperatorGrantedTargetError extends Error {
  * caller (the Lead's `manage-user` tool), keyed on the agent rather than the
  * operator actor it records in the audit log.
  */
-export type CredentialCaller = { kind: "operator" | "user" | "system" | "agent"; id: string };
+export type CredentialCaller = {
+  kind: "operator" | "user" | "system" | "agent";
+  id: string;
+  /** For a user caller: the `user_tokens` row the request authenticated with. */
+  tokenId?: string;
+};
 
 /**
  * Throws OperatorGrantedTargetError when `caller` would get a credential for,
  * or bind an identity to, another user holding an operator-granted role.
- * The operator key and the user itself pass. `system` callers (integration
- * webhooks attributing their own events by email or external id) pass too:
- * they hand no credential to a caller.
+ * The operator key passes. The user itself passes only with a token that is
+ * still live: the grant revokes every token issued before it, and a request
+ * authenticated with one of them may still be in flight. A page session
+ * (no `tokenId`) cannot be revoked, so it does not pass. `system` callers
+ * (integration webhooks attributing their own events by email or external
+ * id) pass too: they hand no credential to a caller.
  *
  * Call it inside the write transaction that issues the credential or binds
  * the identity. Adding an operator-granted role takes the same write lock
@@ -276,11 +284,13 @@ export async function assertMayActOnOperatorGrantedTarget(
   targetUserId: string,
 ): Promise<void> {
   if (caller.kind === "operator" || caller.kind === "system") return;
-  if (caller.kind === "user" && caller.id === targetUserId) return;
   if (!isInTransaction()) {
     throw new Error("assertMayActOnOperatorGrantedTarget must run inside the write transaction");
   }
-  if (await userHoldsOperatorGrantedRole(targetUserId)) throw new OperatorGrantedTargetError();
+  if (!(await userHoldsOperatorGrantedRole(targetUserId))) return;
+  const self = caller.kind === "user" && caller.id === targetUserId;
+  if (self && caller.tokenId && (await isLiveUserToken(caller.tokenId, caller.id))) return;
+  throw new OperatorGrantedTargetError();
 }
 
 export async function getUserGrant(userId: string): Promise<EffectiveGrant> {

@@ -15,8 +15,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createConnectorCode, exchangeConnectorCode } from "../be/connector-codes";
 import { closeDb, createAgent, createUser, getDbClient, getUserById, initDb } from "../be/db";
+import { isInTransaction } from "../be/db-client";
 import { ensureRbacSeedsSynced } from "../be/rbac-roles";
 import { getUserIdentities, resolveUserByToken } from "../be/users";
+import { resolveHttpRequestAuth } from "../http/auth";
 import { canReadAllSessions } from "../http/session-access";
 import { handleUserRoles } from "../http/user-roles";
 import { handleUsers } from "../http/users";
@@ -376,5 +378,184 @@ describe("manage-user (Lead MCP tool)", () => {
     const result = await callManageUser({ action: "update", userId: target.id, notes: "hi" });
     expect(result.isError).toBeFalsy();
     expect((await getUserById(target.id))?.notes).toBe("hi");
+  });
+});
+
+describe("a request authenticated before the grant", () => {
+  /** Resolves the request auth for `plaintext` the way the HTTP server does. */
+  async function authFor(plaintext: string): Promise<HttpRequestAuth> {
+    const req = jsonReq("POST", "/", {});
+    req.headers.authorization = `Bearer ${plaintext}`;
+    const auth = await resolveHttpRequestAuth(req as never, undefined);
+    if (auth?.kind !== "user") throw new Error("token did not resolve to a user");
+    return auth;
+  }
+
+  async function mintFor(userId: string): Promise<string> {
+    const res = await call("users", "POST", `/api/users/${userId}/mcp-tokens`, { body: {} });
+    expect(res.status).toBe(200);
+    return res.body.plaintext;
+  }
+
+  test("an in-flight self-mint with a token the grant revoked is refused", async () => {
+    const target = await createUser({ name: unique("in-flight self-mint") });
+    const auth = await authFor(await mintFor(target.id));
+    await operatorSetRoles(target.id, ["admin", "auditor"]);
+    const res = await call("users", "POST", `/api/users/${target.id}/mcp-tokens`, {
+      auth,
+      body: {},
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain("operator key");
+    expect(await liveTokenCount(target.id)).toBe(0);
+  });
+
+  test("an in-flight self identity link with a token the grant revoked is refused", async () => {
+    const target = await createUser({ name: unique("in-flight self-link") });
+    const auth = await authFor(await mintFor(target.id));
+    await operatorSetRoles(target.id, ["admin", "auditor"]);
+    const externalId = unique("U");
+    const res = await call("users", "POST", `/api/users/${target.id}/identities`, {
+      auth,
+      body: { kind: "slack", externalId },
+    });
+    expect(res.status).toBe(403);
+    expect(await hasIdentity(target.id, externalId)).toBe(false);
+  });
+
+  test("a self-mint without a token (page session) is refused for an auditor", async () => {
+    const target = await createUser({ name: unique("page-session self-mint") });
+    await operatorSetRoles(target.id, ["admin", "auditor"]);
+    const res = await call("users", "POST", `/api/users/${target.id}/mcp-tokens`, {
+      auth: { kind: "user", userId: target.id, user: target as never },
+      body: {},
+    });
+    expect(res.status).toBe(403);
+    expect(await liveTokenCount(target.id)).toBe(0);
+  });
+
+  test("control: a self-mint with a token the operator issued after the grant succeeds", async () => {
+    const target = await createUser({ name: unique("post-grant self-mint") });
+    await operatorSetRoles(target.id, ["admin", "auditor"]);
+    const auth = await authFor(await mintFor(target.id));
+    const res = await call("users", "POST", `/api/users/${target.id}/mcp-tokens`, {
+      auth,
+      body: {},
+    });
+    expect(res.status).toBe(200);
+    expect((await resolveUserByToken(res.body.plaintext))?.id).toBe(target.id);
+  });
+
+  test("control: a self-mint with a pre-change token survives a grant without auditor", async () => {
+    const target = await createUser({ name: unique("plain self-mint") });
+    const auth = await authFor(await mintFor(target.id));
+    await operatorSetRoles(target.id, ["requester"]);
+    const res = await call("users", "POST", `/api/users/${target.id}/mcp-tokens`, {
+      auth,
+      body: {},
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("an operator grant landing while a user is created with identities", () => {
+  async function userIdByName(name: string): Promise<string | null> {
+    const row = await getDbClient().get<{ id: string }>("SELECT id FROM users WHERE name = ?", [
+      name,
+    ]);
+    return row?.id ?? null;
+  }
+
+  async function identityKeys(userId: string): Promise<string[]> {
+    return (await getUserIdentities(userId)).map((i) => `${i.kind}:${i.externalId}`).sort();
+  }
+
+  /**
+   * Runs `create`, and before each top-level transaction it opens, grants
+   * auditor to the new user as soon as it exists, recording the identities
+   * the operator sees at that moment. Afterwards the user must hold no
+   * identity the operator did not see.
+   */
+  async function raceCreate(name: string, create: () => Promise<unknown>) {
+    const client = getDbClient();
+    const original = client.transaction.bind(client);
+    let seenAtGrant: string[] | null = null;
+    let granting = false;
+    const grant = async (userId: string) => {
+      granting = true;
+      try {
+        await operatorSetRoles(userId, ["admin", "auditor"]);
+        seenAtGrant = await identityKeys(userId);
+      } finally {
+        granting = false;
+      }
+    };
+    const spy = spyOn(client, "transaction").mockImplementation((async (
+      fn: (tx: never) => Promise<unknown>,
+      opts?: never,
+    ) => {
+      if (!granting && seenAtGrant === null && !isInTransaction()) {
+        const id = await userIdByName(name);
+        if (id) await grant(id);
+      }
+      return original(fn, opts);
+    }) as never);
+    try {
+      await create();
+    } finally {
+      spy.mockRestore();
+    }
+    const userId = await userIdByName(name);
+    expect(userId).not.toBeNull();
+    if (seenAtGrant === null) await grant(userId as string);
+    expect(await identityKeys(userId as string)).toEqual(seenAtGrant as unknown as string[]);
+    return userId as string;
+  }
+
+  test("POST /api/users: identities land before any grant can", async () => {
+    const name = unique("created over HTTP");
+    const externalId = unique("U");
+    const userId = await raceCreate(name, async () => {
+      const res = await call("users", "POST", "/api/users", {
+        auth: adminAuth,
+        body: { name, identities: [{ kind: "slack", externalId }] },
+      });
+      expect(res.status).toBe(200);
+    });
+    expect(await hasIdentity(userId, externalId)).toBe(true);
+  });
+
+  test("POST /api/users/unmapped/{kind}/{externalId}/resolve with a new user: identity lands before any grant can", async () => {
+    const name = unique("created by resolve");
+    const externalId = unique("U");
+    const userId = await raceCreate(name, async () => {
+      const res = await call("users", "POST", `/api/users/unmapped/slack/${externalId}/resolve`, {
+        auth: adminAuth,
+        body: { name },
+      });
+      expect(res.status).toBe(200);
+    });
+    expect(await hasIdentity(userId, externalId)).toBe(true);
+  });
+
+  test("manage-user create: identities land before any grant can", async () => {
+    const name = unique("created by Lead");
+    const externalId = unique("U");
+    const tools = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (a: unknown, e: unknown) => Promise<CallToolResult> }
+        >;
+      }
+    )._registeredTools;
+    const userId = await raceCreate(name, async () => {
+      const res = await tools["manage-user"]?.handler(
+        { action: "create", name, identities: [{ kind: "slack", externalId }] },
+        { sessionId: "test-session", requestInfo: { headers: { "x-agent-id": LEAD_ID } } },
+      );
+      expect(res?.isError).toBeFalsy();
+    });
+    expect(await hasIdentity(userId, externalId)).toBe(true);
   });
 });

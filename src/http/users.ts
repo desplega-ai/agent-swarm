@@ -938,16 +938,22 @@ export async function handleUsers(
 
     try {
       const { identities, ...userFields } = parsed.body;
-      const user = await createUser(userFields);
-      await syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
-      for (const ident of identities ?? []) {
-        await linkIdentity(user.id, ident.kind, ident.externalId, actor);
-      }
-      if (userFields.dailyBudgetUsd !== undefined) {
-        await recordIdentityEvent(user.id, "budget_changed", actor, null, {
-          dailyBudgetUsd: userFields.dailyBudgetUsd,
-        });
-      }
+      // Create and link in one write transaction: an operator grant on the new
+      // user cannot land before its identities, so the grant-time review sees
+      // them all.
+      const user = await getDbClient().transaction(async () => {
+        const created = await createUser(userFields);
+        await syncUserBudgetMirror(created.id, userFields.dailyBudgetUsd);
+        for (const ident of identities ?? []) {
+          await linkIdentity(created.id, ident.kind, ident.externalId, actor);
+        }
+        if (userFields.dailyBudgetUsd !== undefined) {
+          await recordIdentityEvent(created.id, "budget_changed", actor, null, {
+            dailyBudgetUsd: userFields.dailyBudgetUsd,
+          });
+        }
+        return created;
+      });
       const composed = await composeUser(user.id);
       createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
@@ -1000,17 +1006,23 @@ export async function handleUsers(
           return true;
         }
         targetUserId = existing.id;
+        await writeGuarded(actor, targetUserId, () =>
+          linkIdentity(targetUserId, kind, externalId, actor),
+        );
       } else {
-        const created = await createUser({
-          name: parsed.body.name,
-          email: parsed.body.email,
-          notes: parsed.body.notes,
+        // Create and link in one write transaction, so an operator grant on
+        // the new user cannot land before the identity.
+        const body = parsed.body;
+        targetUserId = await getDbClient().transaction(async () => {
+          const created = await createUser({
+            name: body.name,
+            email: body.email,
+            notes: body.notes,
+          });
+          await linkIdentity(created.id, kind, externalId, actor);
+          return created.id;
         });
-        targetUserId = created.id;
       }
-      await writeGuarded(actor, targetUserId, () =>
-        linkIdentity(targetUserId, kind, externalId, actor),
-      );
       // Clear both kv rows (best-effort — DELETE is idempotent).
       const ns = `integration:unmapped:${kind}`;
       await deleteKv(ns, `${externalId}:meta`);
