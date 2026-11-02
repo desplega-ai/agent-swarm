@@ -104,11 +104,12 @@ describe("isClipped", () => {
 });
 
 describe("cellHasControls", () => {
-  test("link, copy and switch cells render their own controls", () => {
+  test("link, copy, switch and checkbox cells render their own controls", () => {
     expect(cellHasControls({ kind: "link" })).toBe(true);
     expect(cellHasControls({ kind: "text", href: "url" })).toBe(true);
     expect(cellHasControls({ kind: "copy" })).toBe(true);
     expect(cellHasControls({ kind: "switch" })).toBe(true);
+    expect(cellHasControls({ kind: "checkbox" })).toBe(true);
   });
 
   test("plain kinds do not", () => {
@@ -120,6 +121,7 @@ describe("cellHasControls", () => {
   test("a templated column is text unless it links", () => {
     expect(cellHasControls({ kind: "copy", format: "{{a}}" })).toBe(false);
     expect(cellHasControls({ kind: "switch", format: "{{a}}" })).toBe(false);
+    expect(cellHasControls({ kind: "checkbox", format: "{{a}}" })).toBe(false);
     expect(cellHasControls({ format: "{{repo}}#{{number}}", href: "url" })).toBe(true);
   });
 
