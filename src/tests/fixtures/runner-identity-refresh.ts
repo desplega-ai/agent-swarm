@@ -59,6 +59,9 @@ mock.module("../../commands/profile-sync", () => ({
   async prependProfileSyncRejectionBanner(prompt: string) {
     return { prompt, injected: false };
   },
+  async fetchProfileSyncRejectionBanner() {
+    return "";
+  },
 }));
 mock.module("../../utils/skills-refresh", () => ({
   async refreshSkillsIfChanged() {

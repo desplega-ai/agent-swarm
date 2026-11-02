@@ -32,13 +32,21 @@ let fsDir: string;
 const slackFiles = new Map<string, SlackFile>();
 const bytesById = new Map<string, Uint8Array>();
 let threadMessages: Array<Record<string, unknown>> = [];
+/** users.info calls, and a hook a test can use to hold one open. */
+const usersInfoCalls: string[] = [];
+let usersInfoGate: (() => Promise<void>) | null = null;
+async function usersInfo(user: string) {
+  usersInfoCalls.push(user);
+  await usersInfoGate?.();
+  return { user: { real_name: `name-${user}` } };
+}
 
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
       token: BOT_TOKEN,
       auth: { test: async () => ({ user_id: "U_BOT" }) },
-      users: { info: async ({ user }: { user: string }) => ({ user: { real_name: user } }) },
+      users: { info: async ({ user }: { user: string }) => usersInfo(user) },
       files: {
         info: async ({ file }: { file: string }) =>
           slackFiles.has(file) ? { ok: true, file: slackFiles.get(file) } : { ok: false },
@@ -149,6 +157,8 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM agent_tasks");
   slackFiles.clear();
   bytesById.clear();
+  usersInfoCalls.length = 0;
+  usersInfoGate = null;
   taskId = (
     await createTaskExtended("look at the thread", {
       agentId: AGENT_ID,
@@ -338,6 +348,39 @@ describe("slack-download-file", () => {
 });
 
 describe("slack-read", () => {
+  test("resolves each human author once, with the lookups in flight together", async () => {
+    threadMessages = [
+      { user: "U_ANA", text: "one", ts: "1700000000.000100" },
+      { user: "U_BEN", text: "two", ts: "1700000000.000200" },
+      { user: "U_ANA", text: "three", ts: "1700000000.000300" },
+      { user: "U_BOT", text: "from the bot", ts: "1700000000.000400" },
+    ];
+    // Each lookup waits until both are in flight, so serial lookups would
+    // each wait out the fallback timer and leave `ranAlone` set.
+    let release: () => void = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let ranAlone = false;
+    usersInfoGate = async () => {
+      if (usersInfoCalls.length === 2) release();
+      await Promise.race([bothStarted, Bun.sleep(500)]);
+      if (usersInfoCalls.length < 2) ranAlone = true;
+    };
+
+    const result = await readTool({ taskId }, extra({}));
+
+    expect(ranAlone).toBe(false);
+    expect(usersInfoCalls.sort()).toEqual(["U_ANA", "U_BEN"]);
+    const messages = result.structuredContent.messages as Array<{ username?: string }>;
+    expect(messages.map((m) => m.username)).toEqual([
+      "name-U_ANA",
+      "name-U_BEN",
+      "name-U_ANA",
+      "Agent",
+    ]);
+  });
+
   test("stores the thread's files as attachments of the task, with a fetch command each", async () => {
     const file = addSlackFile("F0THREAD01", "diagram.png", PNG);
     threadMessages = [

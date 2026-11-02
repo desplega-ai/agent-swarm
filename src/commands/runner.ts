@@ -137,6 +137,7 @@ import {
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   bootIdentityBaselines,
+  fetchProfileSyncRejectionBanner,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
@@ -548,8 +549,12 @@ export async function ensureRepoForTask(
 
     await installRepoHooksForTask(repoConfig, role);
 
-    const claudeMd = await readClaudeMd(clonePath, role);
-    const autoStashes = await listSwarmAutostashes(clonePath, role);
+    // Independent: a file read and a `git stash list` subprocess. The stash
+    // lister never rejects, so a failed CLAUDE.md read still reaches the catch.
+    const [claudeMd, autoStashes] = await Promise.all([
+      readClaudeMd(clonePath, role),
+      listSwarmAutostashes(clonePath, role),
+    ]);
     return { clonePath, claudeMd, warning, autoStashes };
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
@@ -5379,8 +5384,11 @@ export async function reconcileActiveTasks(
   const now = opts.now ?? Date.now;
   const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
 
-  for (const [taskId, task] of state.activeTasks) {
-    if (task.result !== null) continue;
+  // Each task touches only its own entry (plus an add to the shared
+  // cancelledSignaled set), and both API reads swallow their errors, so the
+  // per-task checks run together. The fan-out is bounded by maxConcurrent.
+  const reconcileOne = async (taskId: string, task: RunningTask): Promise<void> => {
+    if (task.result !== null) return;
 
     if (
       !opts.cancelledSignaled.has(taskId) &&
@@ -5430,7 +5438,9 @@ export async function reconcileActiveTasks(
         failureReason: "runner exited without result: provider session did not settle after abort",
       };
     }
-  }
+  };
+
+  await Promise.all(Array.from(state.activeTasks, ([taskId, task]) => reconcileOne(taskId, task)));
 }
 
 /** Fetch whether the server holds a task as cancelled. Throws on network failure. */
@@ -7375,26 +7385,68 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           { hasMcp: adapter.traits.hasMcp },
         );
 
+        const memoryTask =
+          (trigger.type === "task_assigned" || trigger.type === "task_offered") &&
+          trigger.task &&
+          typeof trigger.task === "object" &&
+          "task" in trigger.task
+            ? (trigger.task as { task: string; id?: string; contextKey?: string })
+            : null;
+        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const isResumeTask = taskObj?.taskType === "resume";
+        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+
+        // The prompt enrichment below needs several API reads that do not
+        // depend on each other. Issue them together; each helper resolves
+        // null/"" on failure, and the results are applied in the original
+        // order, so the composed prompt is unchanged.
+        const [
+          memoryContext,
+          contextPreamble,
+          profileSyncBanner,
+          parentSession,
+          repoConfig,
+          isFirstKickoff,
+        ] = await Promise.all([
+          memoryTask?.task
+            ? fetchRelevantMemories(
+                apiUrl,
+                apiKey,
+                agentId,
+                memoryTask.task,
+                memoryTask.id,
+                memoryTask.contextKey,
+              )
+            : null,
+          taskObj?.parentTaskId && apiUrl
+            ? isResumeTask
+              ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          fetchProfileSyncRejectionBanner({
+            ...apiConfig,
+            claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
+          }),
+          taskObj?.parentTaskId
+            ? fetchProviderSessionInfo(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          taskVcsRepo && apiUrl ? fetchRepoConfig(apiUrl, apiKey, taskVcsRepo) : null,
+          // First kickoff = a genuinely new root task: not a continuation
+          // task-type, and not parent-linked to a still-active task (Slack
+          // follow-ups / sibling-awareness wire parentTaskId with no
+          // reserved taskType). See isFirstKickoffTask() for the full
+          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
+          taskVcsRepo && apiUrl
+            ? isFirstKickoffTask(taskObj, (parentTaskId) =>
+                fetchTaskStatus(apiUrl, apiKey, parentTaskId),
+              )
+            : false,
+        ]);
+
         // Enrich prompt with relevant memories from past sessions
-        if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
-          const task =
-            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-              ? (trigger.task as { task: string; id?: string; contextKey?: string })
-              : null;
-          if (task?.task) {
-            const memoryContext = await fetchRelevantMemories(
-              apiUrl,
-              apiKey,
-              agentId,
-              task.task,
-              task.id,
-              task.contextKey,
-            );
-            if (memoryContext) {
-              triggerPrompt += memoryContext;
-              console.log(`[${role}] Injected relevant memories into task prompt`);
-            }
-          }
+        if (memoryContext) {
+          triggerPrompt += memoryContext;
+          console.log(`[${role}] Injected relevant memories into task prompt`);
         }
 
         // Universal context preamble: inject for all providers when task is a follow-up.
@@ -7402,12 +7454,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // acts as a bounded safety net for resumable ones (claude/codex).
         // For taskType="resume" (created by supersedeTaskViaAPI), use the
         // larger resume preamble that includes a session-log tool-call summary.
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
         if (taskObj?.parentTaskId && apiUrl) {
-          const isResumeTask = taskObj.taskType === "resume";
-          const contextPreamble = isResumeTask
-            ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-            : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
           if (contextPreamble) {
             triggerPrompt = prependContextPreamble(triggerPrompt, contextPreamble);
             console.log(
@@ -7418,23 +7465,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(triggerPrompt, {
-          ...apiConfig,
-          claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
-        });
-        triggerPrompt = triggerWithSyncWarning.prompt;
-        if (triggerWithSyncWarning.injected) {
+        if (profileSyncBanner) {
+          triggerPrompt = prependContextPreamble(triggerPrompt, profileSyncBanner);
           console.warn(`[${role}] Injected persisted profile sync rejection warning`);
         }
 
         // Resolve provider-aware resume for child tasks with parentTaskId.
         let resumeSessionId: string | undefined;
         if (taskObj?.parentTaskId) {
-          const parentSession = await fetchProviderSessionInfo(
-            apiUrl,
-            apiKey,
-            taskObj.parentTaskId,
-          );
           if (parentSession?.sessionId) {
             const resumeResolution = resolveResumeSession(state.harnessProvider, [
               {
@@ -7471,9 +7509,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
         let currentRepoContext: RepoContext | undefined;
-        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
         if (taskVcsRepo && apiUrl) {
-          const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
           // Fall back to convention-based config if repo is not registered
           const effectiveConfig = repoConfig ?? {
             url: taskVcsRepo,
@@ -7481,14 +7517,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          // First kickoff = a genuinely new root task: not a continuation
-          // task-type, and not parent-linked to a still-active task (Slack
-          // follow-ups / sibling-awareness wire parentTaskId with no
-          // reserved taskType). See isFirstKickoffTask() for the full
-          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
-          const isFirstKickoff = await isFirstKickoffTask(taskObj, (parentTaskId) =>
-            fetchTaskStatus(apiUrl, apiKey, parentTaskId),
-          );
           const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,
@@ -7539,33 +7567,34 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // probe short-circuits when nothing changed. Skipped for
         // `claude-managed`. Read state.harnessProvider live so an adapter
         // swap mid-loop honors the new provider.
-        if (state.harnessProvider !== "claude-managed") {
-          const skillResult = await refreshSkillsIfChanged(
-            { apiUrl, swarmUrl, apiKey, agentId, role },
-            lastSkillHash,
-          );
-          if (skillResult.changed && skillResult.summary) {
-            agentSkillsSummary = skillResult.summary;
-            console.log(
-              `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
-            );
-          }
-        }
-
+        //
         // Refresh prompt inputs per task without rewriting files shared with
         // active sessions. A failed or bounded-out /me read keeps the cache.
-        const identityResult = await refreshIdentityIfChanged(
-          { apiUrl, apiKey, agentId, role },
-          {
-            soulMd: agentSoulMd,
-            identityMd: agentIdentityMd,
-            toolsMd: agentToolsMd,
-            claudeMd: agentClaudeMd,
-            heartbeatMd: agentHeartbeatMd,
-            name: agentProfileName,
-            description: agentDescription,
-          },
-        );
+        // Neither refresh reads the other's output and neither throws, so the
+        // two reads run together.
+        const [skillResult, identityResult] = await Promise.all([
+          state.harnessProvider !== "claude-managed"
+            ? refreshSkillsIfChanged({ apiUrl, swarmUrl, apiKey, agentId, role }, lastSkillHash)
+            : null,
+          refreshIdentityIfChanged(
+            { apiUrl, apiKey, agentId, role },
+            {
+              soulMd: agentSoulMd,
+              identityMd: agentIdentityMd,
+              toolsMd: agentToolsMd,
+              claudeMd: agentClaudeMd,
+              heartbeatMd: agentHeartbeatMd,
+              name: agentProfileName,
+              description: agentDescription,
+            },
+          ),
+        ]);
+        if (skillResult?.changed && skillResult.summary) {
+          agentSkillsSummary = skillResult.summary;
+          console.log(
+            `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
+          );
+        }
         if (identityResult.changed) {
           agentSoulMd = identityResult.fields.soulMd;
           agentIdentityMd = identityResult.fields.identityMd;
