@@ -207,8 +207,11 @@ export const registerSlackReadTool = (server: McpServer) => {
         };
 
         // The bot user id (for identification) does not depend on the messages,
-        // so auth.test runs alongside the history read.
-        const [fetched, authResult] = await Promise.all([
+        // so auth.test runs alongside the history read. allSettled, not all:
+        // an early auth.test failure must not return while withAutoJoin can
+        // still join the channel, and a history error keeps precedence over an
+        // auth error, as when the two ran in sequence.
+        const [fetchedSettled, authSettled] = await Promise.allSettled([
           slackThreadTs
             ? // Fetch thread replies — auto-join public channels on not_in_channel
               withAutoJoin(client, slackChannelId, () =>
@@ -220,8 +223,10 @@ export const registerSlackReadTool = (server: McpServer) => {
               ),
           client.auth.test(),
         ]);
-        const rawMessages = (fetched.messages || []) as RawMessage[];
-        const botUserId = authResult.user_id as string;
+        if (fetchedSettled.status === "rejected") throw fetchedSettled.reason;
+        if (authSettled.status === "rejected") throw authSettled.reason;
+        const rawMessages = (fetchedSettled.value.messages || []) as RawMessage[];
+        const botUserId = authSettled.value.user_id as string;
 
         // One users.info per distinct user, shared by every message they wrote.
         const userNameCache = new Map<string, Promise<string>>();

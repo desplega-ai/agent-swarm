@@ -40,19 +40,25 @@ async function usersInfo(user: string) {
   await usersInfoGate?.();
   return { user: { real_name: `name-${user}` } };
 }
+/** Per-test overrides for auth.test, conversations.replies and conversations.join. */
+let authTestImpl: (() => Promise<{ user_id: string }>) | null = null;
+let repliesImpl: (() => Promise<{ messages: Array<Record<string, unknown>> }>) | null = null;
+let joinImpl: (() => Promise<unknown>) | null = null;
 
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
       token: BOT_TOKEN,
-      auth: { test: async () => ({ user_id: "U_BOT" }) },
+      auth: { test: async () => (authTestImpl ? authTestImpl() : { user_id: "U_BOT" }) },
       users: { info: async ({ user }: { user: string }) => usersInfo(user) },
       files: {
         info: async ({ file }: { file: string }) =>
           slackFiles.has(file) ? { ok: true, file: slackFiles.get(file) } : { ok: false },
       },
       conversations: {
-        replies: async () => ({ messages: threadMessages }),
+        replies: async () => (repliesImpl ? repliesImpl() : { messages: threadMessages }),
+        join: async () => joinImpl?.(),
+        info: async () => ({ ok: true, channel: { id: "C0THREAD", is_ext_shared: false } }),
         history: async () => ({ messages: threadMessages }),
       },
     },
@@ -159,6 +165,9 @@ beforeEach(async () => {
   bytesById.clear();
   usersInfoCalls.length = 0;
   usersInfoGate = null;
+  authTestImpl = null;
+  repliesImpl = null;
+  joinImpl = null;
   taskId = (
     await createTaskExtended("look at the thread", {
       agentId: AGENT_ID,
@@ -379,6 +388,46 @@ describe("slack-read", () => {
       "name-U_ANA",
       "Agent",
     ]);
+  });
+
+  test("an auth.test failure waits for a slow auto-join to settle before returning", async () => {
+    const notInChannel = Object.assign(new Error("An API error occurred: not_in_channel"), {
+      data: { error: "not_in_channel" },
+    });
+    let joined = false;
+    repliesImpl = async () => {
+      if (!joined) throw notInChannel;
+      return { messages: threadMessages };
+    };
+    joinImpl = async () => {
+      await Bun.sleep(50);
+      joined = true;
+    };
+    authTestImpl = async () => {
+      throw new Error("auth boom");
+    };
+
+    const result = await readTool({ taskId }, extra({}));
+
+    expect(joined).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(String(result.structuredContent.message)).toContain("auth boom");
+  });
+
+  test("when both reads fail, the history error wins even if auth.test fails first", async () => {
+    repliesImpl = async () => {
+      await Bun.sleep(30);
+      throw new Error("history boom");
+    };
+    authTestImpl = async () => {
+      throw new Error("auth boom");
+    };
+
+    const result = await readTool({ taskId }, extra({}));
+
+    expect(result.isError).toBe(true);
+    expect(String(result.structuredContent.message)).toContain("history boom");
+    expect(String(result.structuredContent.message)).not.toContain("auth boom");
   });
 
   test("stores the thread's files as attachments of the task, with a fetch command each", async () => {
