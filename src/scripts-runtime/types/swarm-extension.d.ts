@@ -66,6 +66,7 @@ declare module "swarm-extension" {
     workflowRunId?: string | undefined;
     workflowRunStepId?: string | undefined;
     sourceTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     outputSchema?: Record<string, unknown> | undefined;
     inheritParentOutputSchema?: boolean | undefined;
     inheritParentRequester?: boolean | undefined;
@@ -192,6 +193,7 @@ declare module "swarm-extension" {
     mentionChannelId?: string | undefined;
     dir?: string | undefined;
     parentTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     claudeSessionId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
