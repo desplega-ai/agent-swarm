@@ -10,9 +10,9 @@
 import { ChevronRight } from "lucide-react";
 import { Children, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "../ui/checkbox";
 
 export function MobileList({
   children,

@@ -9,7 +9,9 @@ const { createRoot } = await import("react-dom/client");
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/components/ui/button", () => require("../../components/ui/button"));
 mock.module("@/components/ui/checkbox", () => require("../../components/ui/checkbox"));
+mock.module("@/components/ui/skeleton", () => require("../../components/ui/skeleton"));
 
+const { MobileListRow } = await import("../../components/shared/mobile-list");
 const { BulkActionBar, SelectAllHeader, SelectCell, TableCheckbox, createSelectionStore } =
   await import("./table-selection-ui");
 
@@ -180,4 +182,31 @@ test("the bulk bar shows the count, hidden rows, the actions and Clear", async (
   const busy = [...host.querySelectorAll("button")];
   expect(busy.every((b) => b.hasAttribute("disabled"))).toBe(true);
   expect(host.textContent).not.toContain("hidden");
+});
+
+test("a phone row's checkbox sits beside the row button, never inside it", async () => {
+  const changes: string[] = [];
+  const opened: string[] = [];
+  const { host } = await mount(
+    <ul>
+      <MobileListRow
+        title="proxy#88"
+        onClick={() => opened.push("row")}
+        check={{
+          checked: "indeterminate",
+          label: "Select proxy#88",
+          onChange: () => changes.push("x"),
+        }}
+      />
+    </ul>,
+  );
+  const box = checkboxes(host)[0]!;
+  expect(box.getAttribute("aria-label")).toBe("Select proxy#88");
+  expect(box.getAttribute("aria-checked")).toBe("mixed");
+  // A checkbox is a button: nesting it in the row's own button is invalid HTML.
+  expect(box.closest("li > div > button")).toBeNull();
+
+  await click(box);
+  expect(changes).toEqual(["x"]);
+  expect(opened).toEqual([]);
 });

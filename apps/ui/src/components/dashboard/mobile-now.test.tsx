@@ -17,7 +17,6 @@ mock.module("@/components/shared/status-badge", () => require("../shared/status-
 mock.module("@/components/shared/task-status-icon", () => require("../shared/task-status-icon"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
-mock.module("@/components/ui/checkbox", () => require("../ui/checkbox"));
 mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/lib/config", () => require("../../lib/config"));
