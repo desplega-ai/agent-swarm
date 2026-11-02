@@ -257,14 +257,21 @@ write_files:
 
       write_setup_link() {
         local link
-        link="$(grep -aoE 'https://app\.agent-swarm\.dev/setup\?apiUrl=[^[:space:]]+' "$LOG" | tail -n 1 || true)"
+        if [ -f "${INSTALL_DIR}/.agent-swarm/setup-url" ]; then
+          link="$(cat "${INSTALL_DIR}/.agent-swarm/setup-url")"
+        else
+          # Older installers only provide the full link in this root-only log.
+          link="$(grep -aoE 'https://app\.agent-swarm\.dev/setup\?apiUrl=[^[:space:]]+' "$LOG" | tail -n 1 || true)"
+        fi
         case "$link" in
+          *"apiKey=<redacted>"* | *"apiKey=[REDACTED"*) die "install.sh did not save a full setup link. See ${LOG}" ;;
           *"apiUrl=https%3A%2F%2F"*) ;;
-          *) die "install.sh did not print an https /setup link. See ${LOG}" ;;
+          *) die "install.sh did not provide an https /setup link. See ${LOG}" ;;
         esac
         (
           umask 077
           printf '%s\n' "$link" >"$LINK_FILE"
+          chmod 600 "$LINK_FILE"
         )
       }
 

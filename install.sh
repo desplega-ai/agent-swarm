@@ -112,7 +112,8 @@ What it does:
      onboarding and only runs \`docker compose up -d\`, so an existing install
      keeps its services.
   4. Waits for http://localhost:<port>/health.
-  5. Prints the dashboard link to /setup with the API URL and key filled in. The
+  5. Prints a dashboard link to /setup with the API key redacted. Saves the full
+     link in .agent-swarm/setup-url (mode 600) and prints a command to show it. The
      link uses the public URL (tunnel, --public-url, or PUBLIC_MCP_BASE_URL in .env)
      when there is one, else http://localhost:<port>.
 
@@ -280,7 +281,7 @@ onboard() {
   local extra=()
   [ "$NO_AGENT_FS" -eq 1 ] && extra+=(--no-agent-fs)
   say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
-  run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
+  run env AGENT_SWARM_INSTALLER=1 bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
     --container-engine docker ${extra[@]+"${extra[@]}"} </dev/null
 }
 
@@ -536,6 +537,19 @@ urlencode() {
   printf '%s' "$out"
 }
 
+# Write privately from the first byte, including when replacing an old file.
+# Keep the full URL out of run(), which echoes its arguments to the terminal.
+save_setup_url() (
+  umask 077
+  local dir="${INSTALL_DIR}/.agent-swarm" tmp
+  mkdir -p "$dir"
+  [ ! -d "${dir}/setup-url" ] || die "${dir}/setup-url is a directory"
+  tmp="$(mktemp "${dir}/setup-url.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  printf '%s\n' "$1" >"$tmp"
+  mv -f "$tmp" "${dir}/setup-url"
+)
+
 lt_command() {
   if have lt && lt --help 2>/dev/null | grep -q "lt.desplega.ai"; then
     echo "lt"
@@ -720,9 +734,12 @@ main() {
     [ -z "$PUBLIC_URL" ] || apply_public_url "$PUBLIC_URL" "$port"
   fi
 
-  api_key="$(env_value API_KEY)"
-  [ -n "$api_key" ] || api_key="<API_KEY from ${INSTALL_DIR}/.env>"
-  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${PUBLIC_URL:-$local_url}")&apiKey=$(urlencode "$api_key")"
+  api_key="$(env_value AGENT_SWARM_API_KEY)"
+  [ -n "$api_key" ] || api_key="$(env_value API_KEY)"
+  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${PUBLIC_URL:-$local_url}")&apiKey="
+  if [ "$DRY_RUN" -eq 0 ]; then
+    save_setup_url "${dash_url}$(urlencode "$api_key")"
+  fi
 
   printf '\n'
   say "Agent Swarm is running"
@@ -730,7 +747,10 @@ main() {
   [ -n "$PUBLIC_URL" ] && printf '  Public API: %s\n' "$PUBLIC_URL"
   printf '  Files:      %s\n' "$INSTALL_DIR"
   printf '\n  Finish setup (harness credentials, integrations) in the dashboard:\n'
-  printf '  %s\n\n' "$dash_url"
+  printf '  %s<redacted>\n\n' "$dash_url"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    printf '  Full link (contains API key): cat %q\n\n' "${INSTALL_DIR}/.agent-swarm/setup-url"
+  fi
   printf '  Logs: cd %s && docker compose logs -f\n' "$INSTALL_DIR"
   printf '  Stop: cd %s && docker compose down\n' "$INSTALL_DIR"
 }
