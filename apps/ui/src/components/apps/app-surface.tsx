@@ -106,6 +106,7 @@ import {
   assemblePageSpec,
   collectElementRefAppIds,
   DEFINING_APP_PARAM,
+  OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
@@ -911,6 +912,11 @@ export function AppSurface({
           if (!params) return;
           const ctx = ctxRef.current;
           const targetAppId = definingAppOf(params, ctx.app.id);
+          // A caller that must know whether the write landed (Table bulk
+          // actions) names a state path; this handler swallows its own errors.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
           try {
             if (params.op === "create") {
               setLastResponse(
@@ -935,8 +941,10 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
             // A mutate dispatched from a Form carries its formId — scope the
             // failure to that form (`/forms/<id>/$error`, rendered inline
             // under the fields) instead of the page-level banner.

@@ -80,6 +80,7 @@ export function MobileListRow({
   meta,
   live,
   check,
+  controls,
 }: {
   /** Row link. Without it, `onClick` makes the row a button. */
   to?: string;
@@ -99,7 +100,18 @@ export function MobileListRow({
    * Selection checkbox in its own 44px tap target BESIDE the row, never inside
    * it (a checkbox is a button; the row may be a button or a link).
    */
-  check?: { checked: boolean | "indeterminate"; onChange: () => void; label: string };
+  check?: {
+    checked: boolean | "indeterminate";
+    onChange: () => void;
+    label: string;
+    disabled?: boolean;
+  };
+  /**
+   * Interactive cells (a checkbox or switch column) in a trailing 44px tap
+   * target each. Beside the row for the same reason as `check`: a control
+   * inside a button or link row would nest interactive elements.
+   */
+  controls?: ReactNode[];
 }) {
   const facts = (meta ?? []).filter(
     (fact) => fact !== null && fact !== undefined && fact !== false && fact !== "",
@@ -160,17 +172,27 @@ export function MobileListRow({
     ) : (
       <div className={rowClass}>{content}</div>
     );
-  if (!check) return <li>{row}</li>;
+  const trailing = (controls ?? []).filter(Boolean);
+  if (!check && trailing.length === 0) return <li>{row}</li>;
   return (
     <li className="flex items-stretch">
-      <label className="flex w-11 shrink-0 cursor-pointer items-center justify-center pl-2">
-        <Checkbox
-          checked={check.checked}
-          aria-label={check.label}
-          onCheckedChange={() => check.onChange()}
-        />
-      </label>
+      {check ? (
+        <label className="flex w-11 shrink-0 cursor-pointer items-center justify-center pl-2">
+          <Checkbox
+            checked={check.checked}
+            disabled={check.disabled}
+            aria-label={check.label}
+            onCheckedChange={() => check.onChange()}
+          />
+        </label>
+      ) : null}
       <div className="min-w-0 flex-1">{row}</div>
+      {trailing.map((control, index) => (
+        // Controls are positional (one per editable column), never reordered.
+        <div key={index} className="flex min-h-11 w-11 shrink-0 items-center justify-center">
+          {control}
+        </div>
+      ))}
     </li>
   );
 }
