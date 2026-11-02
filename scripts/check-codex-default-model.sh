@@ -42,8 +42,8 @@ if [ -z "$documented_default" ] || [ "$documented_default" != "$ts_default" ]; t
   echo "  CODEX_DEFAULT_MODEL: $ts_default" >&2
   exit 1
 fi
-if ! grep -Fq '`MODEL_OVERRIDE`' "$DOC_FILE" || ! grep -Fq 'task-level `model`' "$DOC_FILE"; then
-  echo "check-codex-default-model: Codex docs must describe MODEL_OVERRIDE and task-level model overrides" >&2
+if ! grep -Eq 'MODEL_OVERRIDE.*task-level `model`' "$DOC_FILE"; then
+  echo "check-codex-default-model: Codex docs must keep MODEL_OVERRIDE and task-level model override guidance together on one line" >&2
   exit 1
 fi
 
