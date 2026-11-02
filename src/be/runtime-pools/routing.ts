@@ -42,7 +42,7 @@ async function eligibleRuntimeSlots(agentId?: string): Promise<Map<string, numbe
        AND r.last_seen_at >= ?
        AND (a.runtime_pool_id IS NULL OR p.enabled = 1)
        AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
-         OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded'))
+         OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped'))
        ${agentId ? "AND r.agent_id = ?" : ""}
      GROUP BY r.agent_id`,
     [

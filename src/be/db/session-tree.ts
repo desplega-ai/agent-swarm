@@ -305,7 +305,7 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     add(sessionViewerCondition(opts.viewer));
     // Unary +: a full pass over the narrow summaries beats the partial thread index here.
     if (opts.tree) conditions.push("+r.requestedByUserId IS NOT NULL");
-    if (opts.mine) add(sessionMineCondition(opts.viewer.userId));
+    if (opts.mine) add(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll));
   }
   if (opts.keyPrefix) {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
@@ -504,8 +504,9 @@ export async function getSessionReadState(
   rootId: string,
   userId: string,
   now?: string,
+  readAll?: boolean,
 ): Promise<{ readState: SessionReadState; lastActivityAt: string } | null> {
-  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all" }, now });
+  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all", readAll }, now });
   const row = await getDbClient().get<{ readState: SessionReadState; lastActivityAt: string }>(
     `SELECT readState, lastActivityAt FROM (${query.sql})`,
     query.params,
@@ -662,14 +663,16 @@ function threadPromptPreview(prompt: string): string {
 }
 
 export async function getSessionTree(
-  actor: { kind: "bypass" } | { kind: "user"; userId: string | null },
+  actor: { kind: "bypass" } | { kind: "user"; userId: string | null; readAll?: boolean },
   now?: string,
   opts: { mine?: boolean; hideSource?: string[]; showSource?: string[] } = {},
 ): Promise<SessionTree> {
   // No source filter in SQL: the source counts must include hidden sources,
   // so the filter menu can offer them back. The loop skips them instead.
   const query = sessionSummaryQuery({
-    ...(actor.kind === "user" ? { viewer: { userId: actor.userId, scope: "all" } as const } : {}),
+    ...(actor.kind === "user"
+      ? { viewer: { userId: actor.userId, scope: "all", readAll: actor.readAll } as const }
+      : {}),
     now,
     tree: true,
     mine: opts.mine,
@@ -795,12 +798,13 @@ export async function triageSessionList(
     "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "showSource" | "now"
   >,
   action: SessionListTriage,
+  readAll?: boolean,
 ): Promise<number> {
   const now = filters.now ?? new Date().toISOString();
   const query = sessionSummaryQuery({
     ...filters,
     now,
-    viewer: { userId, scope: "all" },
+    viewer: { userId, scope: "all", readAll },
     tree: true,
   });
   const status = action === "done" ? "done" : "open";

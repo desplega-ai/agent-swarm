@@ -35,8 +35,9 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseJsonOutput } from "@/lib/json-output";
+import { taskReason } from "@/lib/task-reason";
 import { taskListTitle } from "@/lib/task-title";
-import { normalizeNewlines } from "@/lib/utils";
+import { cn, normalizeNewlines } from "@/lib/utils";
 import { parseSessionLogs } from "@/logs-parser";
 
 export interface TaskDetailSheetProps {
@@ -77,10 +78,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
   const totalSessions = costs?.length ?? 0;
   const outputJson = task?.status === "completed" ? parseJsonOutput(task.output) : null;
   const output = task?.status === "completed" ? task.output?.trim() : undefined;
-  const failure =
-    task && (task.status === "failed" || task.status === "cancelled")
-      ? task.failureReason?.trim()
-      : undefined;
+  const reason = task ? taskReason(task) : null;
   // The outcome, the transcript's last message: the answer as plain text, or
   // the error in the error color, clamped with "Show more".
   const outcome = output ? (
@@ -97,14 +95,24 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
         </ShowMore>
       )}
     </div>
-  ) : failure ? (
+  ) : reason ? (
     <div data-slot="transcript-outcome" className="min-w-0 px-1">
-      <p className="text-xs font-medium text-status-error-strong">
-        {task?.status === "cancelled" ? "Cancelled" : "Failed"}
+      <p
+        className={cn(
+          "text-xs font-medium",
+          reason.tone === "error" ? "text-status-error-strong" : "text-muted-foreground",
+        )}
+      >
+        {reason.label === "Failure" ? "Failed" : reason.label}
       </p>
       <ShowMore>
-        <div className="text-sm leading-relaxed text-status-error-strong min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-          <Streamdown>{normalizeNewlines(failure)}</Streamdown>
+        <div
+          className={cn(
+            "text-sm leading-relaxed min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full",
+            reason.tone === "error" ? "text-status-error-strong" : "text-foreground/90",
+          )}
+        >
+          <Streamdown>{normalizeNewlines(reason.text)}</Streamdown>
         </div>
       </ShowMore>
     </div>

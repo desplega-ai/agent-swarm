@@ -579,10 +579,10 @@ describe("Codex app-server session", () => {
     expect(snapshots).toHaveLength(2);
     expect(snapshots[0]).toMatchObject({ contextUsedTokens: 51_000, contextTotalTokens: 258_400 });
     expect(snapshots[0]?.contextPercent).toBeCloseTo((51_000 / 258_400) * 100, 6);
-    // A null window falls back to the models.dev window for the model.
+    // Missing updates retain the last window the running harness reported.
     expect(snapshots[1]).toMatchObject({
       contextUsedTokens: 61_000,
-      contextTotalTokens: 1_050_000,
+      contextTotalTokens: 258_400,
     });
   });
 
@@ -2013,6 +2013,36 @@ describe("buildCodexConfig — context-mode + features", () => {
 
     // The plugin registers its own MCP server, skills and hooks.
     expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
+  });
+
+  // Production builds this config in the codex-session-runner subprocess,
+  // whose process.env lacks swarm config rows; they arrive via config.env.
+  test("honors CONTEXT_MODE_DISABLED from config.env when process.env lacks it", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(
+      cfg({ env: { CONTEXT_MODE_DISABLED: "true" } }),
+      "gpt-5.4",
+      () => {},
+    );
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+    expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
+  });
+
+  test("config.env CONTEXT_MODE_DISABLED=false overrides a process.env true", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(
+      cfg({ env: { CONTEXT_MODE_DISABLED: "false" } }),
+      "gpt-5.4",
+      () => {},
+    );
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
+    expect(merged.plugins).toBeUndefined();
   });
 
   test("leaves the installed context-mode plugin alone by default", async () => {

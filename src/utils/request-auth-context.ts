@@ -4,7 +4,12 @@ import type { User } from "../types";
 
 export type HttpRequestAuth = (
   | { kind: "operator"; fingerprint: string }
-  | { kind: "user"; userId: string; user: User }
+  /**
+   * `tokenId` is the `user_tokens` row the request authenticated with, unset
+   * for a page session. Credential and identity writes recheck it in their
+   * write transaction (`assertMayActOnOperatorGrantedTarget`).
+   */
+  | { kind: "user"; userId: string; user: User; tokenId?: string }
   /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
   | { kind: "guest" }
   | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }

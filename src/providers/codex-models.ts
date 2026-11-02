@@ -24,9 +24,10 @@ export function listCodexModels(): string[] {
 }
 
 /**
- * The baseline default when neither MODEL_OVERRIDE nor task.model is set:
- * the codex `regular` tier default (operators move it with
- * `MODEL_TIER_CODEX_REGULAR`, resolved server-side at claim time).
+ * The compile-time no-tier fallback when no worker override, task model,
+ * task modelTier, or task/agent model profile selects a model. This fallback
+ * is not changed by MODEL_TIER_CODEX_REGULAR; that setting applies only when
+ * a task explicitly resolves the regular tier.
  */
 export const CODEX_DEFAULT_MODEL: string = DEFAULT_MODEL_TIER_MAP.codex.regular;
 

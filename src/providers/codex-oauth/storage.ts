@@ -451,7 +451,7 @@ export async function getValidCodexOAuth(
         throw new CodexOAuthRefreshError(
           slot,
           "lock_timeout",
-          deriveCodexKeySuffix(creds.access, creds.accountId),
+          deriveCodexKeySuffix(creds.access, creds.accountId, slot),
         );
       }
       await sleep(REFRESH_LOCK_POLL_MS);
@@ -472,7 +472,7 @@ export async function getValidCodexOAuth(
         throw new CodexOAuthRefreshError(
           slot,
           "refresh_rejected",
-          deriveCodexKeySuffix(lockedCreds.access, lockedCreds.accountId),
+          deriveCodexKeySuffix(lockedCreds.access, lockedCreds.accountId, slot),
           result.status,
           result.error,
         );

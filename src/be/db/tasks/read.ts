@@ -20,6 +20,7 @@ import {
   RoutingAffinitySchema,
   TERMINAL_TASK_STATUSES,
 } from "../../../types";
+import { normalizeOutputSchema } from "../../../utils/output-schema";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
@@ -359,7 +360,11 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
-    outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    // A stored '{}' (legacy rows, defer-task resumes that copied it) means no
+    // schema: expose it as absent so no harness or validator treats it as one.
+    outputSchema: row.outputSchema
+      ? normalizeOutputSchema(JSON.parse(row.outputSchema))
+      : undefined,
     followUpConfig,
     contextKey: row.contextKey ?? undefined,
     compactionCount: row.compactionCount ?? undefined,
@@ -595,7 +600,7 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
     `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'resume'
-         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        LIMIT 1`,
     [parentId],
   );
@@ -691,7 +696,7 @@ export async function hasNonTerminalRerouteDecisionChild(parentId: string): Prom
     `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'reroute-decision'
-         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        LIMIT 1`,
     [parentId],
   );
@@ -759,7 +764,7 @@ export async function findTaskByVcs(
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY createdAt DESC
        LIMIT 1`,
     [vcsRepo, vcsNumber, vcsProvider],
@@ -782,7 +787,7 @@ export async function findActiveTasksByVcs(
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY createdAt DESC`,
     [vcsRepo, vcsNumber, vcsProvider],
   );
@@ -1683,7 +1688,7 @@ export async function findExistingLinearTrackerContextWork(
      SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND id NOT IN (SELECT id FROM lineage)
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
     [...lineageParams, contextKey],

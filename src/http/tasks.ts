@@ -30,6 +30,7 @@ import {
   recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
+  skipTask,
   supersedeTask,
   TASK_LINEAGE_LIMITS,
   updateAgentStatusFromCapacity,
@@ -55,6 +56,7 @@ import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rb
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
@@ -234,7 +236,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -275,6 +277,12 @@ const listTasks = route({
     fields: z.enum(["full", "slim", "timeline"]).optional(),
     /** `true` adds `total`, a filtered COUNT(*) that pagers need. Omitted by default. */
     includeTotal: z.enum(["true", "false"]).optional(),
+    scope: z
+      .enum(["all"])
+      .optional()
+      .describe(
+        "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
+      ),
   }),
   responses: {
     200: {
@@ -655,11 +663,13 @@ const finishTask = route({
   path: "/api/tasks/{id}/finish",
   pattern: ["api", "tasks", null, "finish"],
   session: { taskParam: "id" },
-  summary: "Mark task as completed or failed (runner endpoint)",
+  summary: "Mark task as completed, failed, or skipped (runner endpoint)",
+  description:
+    "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    status: z.enum(["completed", "failed"]),
+    status: z.enum(["completed", "failed", "skipped"]),
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
@@ -669,7 +679,7 @@ const finishTask = route({
   auth: { apiKey: true, agentId: true },
   responses: {
     200: { description: "Task finished", schema: FinishTaskSuccessSchema },
-    400: { description: "Invalid status" },
+    400: { description: "Invalid status, or a skip without a reason" },
     403: { description: "Not assigned to this agent" },
     404: { description: "Task not found" },
     409: {
@@ -993,7 +1003,9 @@ export async function handleTasks(
 
     // Every shape carries task text, so a user sees only sessions they can
     // read, and `total` counts the same rows.
-    const actor = await resolveSessionActor(req, myAgentId);
+    const actor = await resolveSessionActor(req, myAgentId, {
+      allUsers: parsed.query.scope === "all",
+    });
     const filters = {
       status,
       agentId: parsed.query.agentId || undefined,
@@ -1014,7 +1026,7 @@ export async function handleTasks(
       orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
-      readableBy: actor.kind === "user" ? { userId: actor.userId } : undefined,
+      readableBy: readableByFor(actor),
     };
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
@@ -1771,7 +1783,23 @@ export async function handleTasks(
           return { error: "Task is assigned to another agent", status: 403 };
         }
 
-        const terminalResultGuard = await guardTerminalTaskResultWrite(task, parsed.body);
+        const skipReason =
+          parsed.body.status === "skipped"
+            ? skipReasonFrom(parsed.body.failureReason, parsed.body.output)
+            : undefined;
+        if (parsed.body.status === "skipped" && !skipReason) {
+          return {
+            error: 'Status "skipped" needs a one-line reason in failureReason',
+            status: 400,
+          };
+        }
+
+        const terminalResultGuard = await guardTerminalTaskResultWrite(
+          task,
+          parsed.body.status === "skipped"
+            ? { status: "skipped", failureReason: skipReason, force: parsed.body.force }
+            : parsed.body,
+        );
         if (terminalResultGuard.handled) {
           const { handled: _handled, ...guardResult } = terminalResultGuard;
           return { ...guardResult, alreadyFinished: true };
@@ -1795,6 +1823,12 @@ export async function handleTasks(
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
+          }
+          updatedTask = result;
+        } else if (parsed.body.status === "skipped") {
+          const result = await skipTask(parsed.params.id, skipReason!);
+          if (!result) {
+            return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
@@ -1829,7 +1863,9 @@ export async function handleTasks(
       return true;
     }
 
-    if (result.task && isFreshFinishResult(result)) {
+    if (result.task && isFreshFinishResult(result) && parsed.body.status === "skipped") {
+      finalizeSkippedTaskReaction(result.task, "tasks.finish");
+    } else if (result.task && isFreshFinishResult(result)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
 
       ensure({
@@ -1854,7 +1890,7 @@ export async function handleTasks(
       try {
         const followUp = await createWorkerTaskFollowUp({
           task: result.task,
-          status: parsed.body.status,
+          status: finishEventId,
           output: parsed.body.output,
           failureReason: parsed.body.failureReason,
         });
@@ -2090,6 +2126,9 @@ export async function handleTasks(
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      if (task.agentId) {
+        await updateAgentStatusFromCapacity(task.agentId);
+      }
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",
@@ -2130,6 +2169,11 @@ export async function handleTasks(
         resumeTaskId: null,
       });
       return true;
+    }
+
+    // Cancel and finish recompute the agent status; a superseded task frees its slot too.
+    if (task.agentId) {
+      await updateAgentStatusFromCapacity(task.agentId);
     }
 
     // Parent is now superseded. Create the resume child.

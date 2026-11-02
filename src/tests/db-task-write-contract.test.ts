@@ -593,6 +593,7 @@ value:setTaskTitleIfUnset
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
+value:skipTask
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv
@@ -662,6 +663,7 @@ value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
 value:setTaskTitleIfUnset
 value:settleSupersededTaskDependents
+value:skipTask
 value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId

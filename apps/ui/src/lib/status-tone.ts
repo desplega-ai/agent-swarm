@@ -20,6 +20,7 @@ export function statusTextClass(status: string | null | undefined): string {
       return "text-status-success-strong";
     case "offline":
     case "superseded":
+    case "skipped":
       return "text-status-neutral-strong";
     case "pending":
     case "offered":

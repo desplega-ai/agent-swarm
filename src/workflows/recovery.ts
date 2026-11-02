@@ -254,6 +254,12 @@ async function completeIfSettled(runId: string, ctx: Record<string, unknown>): P
  * Check waiting runs whose linked tasks may have completed/failed/cancelled
  * while the server was down.
  */
+function recoveredTaskReason(taskStatus: string): string {
+  if (taskStatus === "failed") return "Task failed (recovered)";
+  if (taskStatus === "skipped") return "Task skipped (recovered)";
+  return "Task cancelled (recovered)";
+}
+
 async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
   const stuckRuns = await getStuckWorkflowRuns();
   let recovered = 0;
@@ -288,8 +294,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         // Claimed: this sweep runs on every heartbeat, so the live task.failed
         // bus event may already have routed this step — a blind write here
         // would kill a run that is already advancing.
-        const reason =
-          stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
+        const reason = recoveredTaskReason(stuck.taskStatus);
         const failed = await failStepAndRunIfWaiting(
           workflow.definition,
           stuck.stepId,
@@ -304,8 +309,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       }
 
       const ctx = (run.context ?? {}) as Record<string, unknown>;
-      const reason =
-        stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
+      const reason = recoveredTaskReason(stuck.taskStatus);
       const stepOutput = {
         taskId: stuck.taskId,
         taskOutput: taskCompleted

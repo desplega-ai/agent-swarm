@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -156,6 +157,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
+import { isEffectiveOutputSchema } from "../utils/output-schema";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
@@ -416,6 +418,7 @@ export {
   resumeTask,
   setTaskTitleIfUnset,
   settleSupersededTaskDependents,
+  skipTask,
   startTask,
   supersedeTask,
   updateTaskClaudeSessionId,
@@ -897,7 +900,7 @@ export async function getResolvableDeferralOutcomes(
            WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled')
+         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
     [limit],
@@ -992,7 +995,7 @@ export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
            AND task.createdAt >= state.activated_at
-           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          )
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
@@ -2381,7 +2384,7 @@ export async function findRecentSimilarTasks(opts: {
 
   // Exclude all terminal statuses — only active or recently created.
   // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2521,6 +2524,12 @@ export async function createTaskExtended(
     throw new Error(
       "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
     );
+  }
+  // An explicit empty `outputSchema: {}` means "no output schema": it stores
+  // NULL and blocks the parent-schema inheritance below. Callers pass `{}` on
+  // purpose to keep a delegated child free of their own output contract.
+  if (options.outputSchema !== undefined && !isEffectiveOutputSchema(options.outputSchema)) {
+    options = { ...options, outputSchema: undefined, inheritParentOutputSchema: false };
   }
   let requestedByUserIdInherited = false;
   // The parent key is read again inside the INSERT transaction (see below).
@@ -2671,7 +2680,7 @@ export async function createTaskExtended(
       // Lead reroute-decision) that must not be held to the original work's
       // output contract.
       if (
-        parent.outputSchema &&
+        isEffectiveOutputSchema(parent.outputSchema) &&
         !options.outputSchema &&
         options.inheritParentOutputSchema !== false
       ) {
@@ -3657,7 +3666,9 @@ export async function checkDependencies(taskId: string): Promise<{
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
     const depTask = await getTaskById(depId);
-    if (!depTask || depTask.status !== "completed") {
+    // A skipped dependency settled without work to hand on; it does not
+    // block, the same as a completed one.
+    if (!depTask || (depTask.status !== "completed" && depTask.status !== "skipped")) {
       blockedBy.push(depId);
     }
   }
@@ -4409,11 +4420,12 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
  */
 export async function claimMentions(
   agentId: string,
-): Promise<{ channelId: string; lastReadAt: string | null }[]> {
+): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const client = getDbClient();
   const channels = await getAllChannels();
-  const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
+  const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
+    [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
@@ -4457,7 +4469,11 @@ export async function claimMentions(
 
       // Only add to claimed list if we actually claimed it (not already processing)
       if (result.changes > 0) {
-        claimedChannels.push({ channelId: channel.id, lastReadAt });
+        claimedChannels.push({
+          channelId: channel.id,
+          lastReadAt,
+          mentionsCount: mentionCountRow.count,
+        });
       }
     }
   }
@@ -5027,13 +5043,22 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
       thinkingTokens,
       input.durationMs,
       input.numTurns,
-      input.model,
+      // Cost rows group by the underlying model, while task configuration and
+      // session logs retain the pi route used to select credentials.
+      chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
       input.isError ? 1 : 0,
       costSource,
       input.harnessCostUsd ?? null,
       input.cacheWrite5mTokens ?? null,
       input.cacheWrite1hTokens ?? null,
-      input.modelBreakdown ? JSON.stringify(input.modelBreakdown) : null,
+      input.modelBreakdown
+        ? JSON.stringify(
+            input.modelBreakdown.map((entry) => ({
+              ...entry,
+              model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
+            })),
+          )
+        : null,
     ],
   );
 
@@ -7197,24 +7222,29 @@ export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapp
   );
 }
 
+/**
+ * Map an inbox to an agent. Re-registering an inbox the same agent already owns
+ * refreshes its email. Returns null, and changes nothing, when the inbox is
+ * already mapped to a different agent.
+ */
 export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): Promise<AgentMailInboxMapping> {
+): Promise<AgentMailInboxMapping | null> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = await getDbClient().get<AgentMailInboxMapping>(
     `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
+       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
+         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
        RETURNING *`,
     [id, inboxId, agentId, inboxEmail ?? null, now],
   );
 
-  if (!row) throw new Error("Failed to create AgentMail inbox mapping");
-  return row;
+  return row ?? null;
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
@@ -8343,7 +8373,7 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
       CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wrs.status = 'waiting'
         AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')
+        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );
 }
@@ -14244,8 +14274,8 @@ export async function createScriptRun(data: {
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
-         created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         created_by, updated_by, startedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14261,6 +14291,8 @@ export async function createScriptRun(data: {
       data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      new Date().toISOString(),
     ],
   );
   if (!row) throw new Error("Failed to create script run");

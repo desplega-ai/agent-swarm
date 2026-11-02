@@ -14,7 +14,7 @@ describe("TERMINAL_STATUSES", () => {
   // is a deliberate, visible diff rather than a silent behavior shift.
   test("covers exactly the finished statuses", () => {
     expect([...TERMINAL_STATUSES].sort()).toEqual(
-      ["cancelled", "completed", "failed", "superseded"].sort(),
+      ["cancelled", "completed", "failed", "skipped", "superseded"].sort(),
     );
   });
 

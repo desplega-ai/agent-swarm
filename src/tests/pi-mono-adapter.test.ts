@@ -1869,7 +1869,7 @@ describe("PiMonoSession — per-call usage line", () => {
   }
 
   test("one call_usage raw_log line per assistant message_end with usage", async () => {
-    const { events } = await runWithEvents([
+    const { events, result } = await runWithEvents([
       assistantEnd([{ type: "toolCall", id: "call-1", name: "bash", arguments: {} }], {
         input: 120,
         cacheRead: 9_000,
@@ -1880,11 +1880,20 @@ describe("PiMonoSession — per-call usage line", () => {
       }),
       {
         type: "message_end",
-        message: { role: "user", content: [{ type: "text", text: "tool output" }] },
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "tool output" }],
+          usage: { reasoning: 999 },
+        },
       } as unknown as AgentSessionEvent,
       // No usage (some providers omit it): no line.
       assistantEnd([{ type: "text", text: "thinking out loud" }]),
-      assistantEnd([{ type: "text", text: "Done" }], { input: 5, cacheRead: 9_500, output: 3 }),
+      assistantEnd([{ type: "text", text: "Done" }], {
+        input: 5,
+        cacheRead: 9_500,
+        output: 3,
+        reasoning: 2,
+      }),
     ]);
 
     const raw = events.flatMap((e) =>
@@ -1900,9 +1909,13 @@ describe("PiMonoSession — per-call usage line", () => {
       {
         type: "call_usage",
         harness: "pi",
-        usage: { input: 5, cacheRead: 9_500, cacheWrite: 0, output: 3, reasoning: 0 },
+        usage: { input: 5, cacheRead: 9_500, cacheWrite: 0, output: 3, reasoning: 2 },
       },
     ]);
+    expect(result.cost?.reasoningOutputTokens).toBe(14);
+    expect(events.findLast((event) => event.type === "result")?.cost.reasoningOutputTokens).toBe(
+      14,
+    );
     // The usage line precedes the call's own text line.
     const done = raw.findIndex(
       (line) => line.type === "assistant" && JSON.stringify(line).includes('"Done"'),
@@ -1911,5 +1924,27 @@ describe("PiMonoSession — per-call usage line", () => {
     expect(raw[done - 1]).toEqual(usageLines[1]);
     // Token counts only: no message content rides on the line.
     expect(JSON.stringify(usageLines)).not.toContain("tool output");
+  });
+
+  test("retains partial reasoning usage when the assistant fails", async () => {
+    const { result } = await runWithEvents([
+      assistantEnd([{ type: "text", text: "Partial reply" }], {
+        input: 5,
+        output: 20,
+        reasoning: 12,
+      }),
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "request failed",
+          usage: { input: 5, output: 10, reasoning: 8 },
+        },
+      } as unknown as AgentSessionEvent,
+    ]);
+    expect(result.isError).toBe(true);
+    expect(result.cost?.reasoningOutputTokens).toBe(20);
   });
 });

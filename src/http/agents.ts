@@ -556,7 +556,7 @@ const updateAgentProfileRoute = route({
         profileSyncRejection: ProfileSyncRejectionSchema.optional(),
       }),
     },
-    404: { description: "Agent not found" },
+    404: { description: "Agent not found, or changedByAgentId names no agent" },
   },
 });
 
@@ -991,6 +991,12 @@ export async function handleAgentsRest(
         "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, avatar, or slackIcon) must be provided",
         400,
       );
+      return true;
+    }
+
+    // context_versions.changed_by_agent_id is a foreign key: answer 404 instead of a bare 500.
+    if (body.changedByAgentId && !(await getAgentById(body.changedByAgentId))) {
+      jsonError(res, "changed_by_agent_not_found", 404);
       return true;
     }
 

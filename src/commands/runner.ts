@@ -94,6 +94,7 @@ import {
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -139,6 +140,7 @@ import {
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   bootIdentityBaselines,
+  fetchProfileSyncRejectionBanner,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
@@ -550,8 +552,12 @@ export async function ensureRepoForTask(
 
     await installRepoHooksForTask(repoConfig, role);
 
-    const claudeMd = await readClaudeMd(clonePath, role);
-    const autoStashes = await listSwarmAutostashes(clonePath, role);
+    // Independent: a file read and a `git stash list` subprocess. The stash
+    // lister never rejects, so a failed CLAUDE.md read still reaches the catch.
+    const [claudeMd, autoStashes] = await Promise.all([
+      readClaudeMd(clonePath, role),
+      listSwarmAutostashes(clonePath, role),
+    ]);
     return { clonePath, claudeMd, warning, autoStashes };
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
@@ -1358,6 +1364,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "read-messages": "💬 Reading messages",
   "request-human-input": "🙋 Requesting human input",
   "cancel-approval-request": "🚫 Cancelling approval request",
+  "submit-improvement": "💡 Drafting improvement",
   "cancel-task": "🚫 Cancelling task",
   "db-query": "🗃️ Querying database",
   "inject-learning": "🧠 Storing learning",
@@ -1662,7 +1669,7 @@ export async function handleStructuredOutputFallback(
       logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
     };
 
-    if (!taskData.outputSchema) {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       // No structured output required — extract last progress as context
       const lastProgressLog = (taskData.logs ?? [])
         .filter((l) => l.eventType === "task_progress")
@@ -1751,7 +1758,7 @@ async function validateProviderOutputIfNeeded(
     const taskData = (await taskRes.json()) as {
       outputSchema?: Record<string, unknown>;
     };
-    if (!taskData.outputSchema || typeof taskData.outputSchema !== "object") {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       return { ok: true };
     }
 
@@ -2080,11 +2087,14 @@ export async function resolveCodexOAuthCredentialInfo(
     try {
       const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
       if (slots.length > 0) {
+        const allSlotIndices = slots.map((s) => s.slot);
+        // The index-based API needs the slot-id range, including gaps.
+        const totalKeys = Math.max(...allSlotIndices) + 1;
         let availableIndices: number[] | undefined;
         let authFailureFence: number | undefined;
         try {
           const resp = await fetch(
-            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${slots.length}`,
+            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${totalKeys}`,
             { headers: { Authorization: `Bearer ${apiKey}` } },
           );
           if (resp.ok) {
@@ -2094,9 +2104,12 @@ export async function resolveCodexOAuthCredentialInfo(
             };
             availableIndices = data.availableIndices;
             authFailureFence = data.authFailureFence;
-            if (availableIndices.length < slots.length) {
+            const availableSlots = allSlotIndices.filter((i) =>
+              availableIndices!.includes(i),
+            ).length;
+            if (availableSlots < slots.length) {
               console.log(
-                `[credentials] CODEX_OAUTH: ${availableIndices.length}/${slots.length} slots available (${slots.length - availableIndices.length} rate-limited)`,
+                `[credentials] CODEX_OAUTH: ${availableSlots}/${slots.length} slots available (${slots.length - availableSlots} rate-limited)`,
               );
             }
           }
@@ -2104,7 +2117,6 @@ export async function resolveCodexOAuthCredentialInfo(
           // Non-critical — fall through to random selection
         }
 
-        const allSlotIndices = slots.map((s) => s.slot);
         let selectedSlot: number;
         if (availableIndices && availableIndices.length > 0) {
           const eligible = allSlotIndices.filter((i) => availableIndices!.includes(i));
@@ -3804,12 +3816,13 @@ async function buildTaskOutputInstructions(
   hasMcp: boolean,
 ): Promise<string> {
   if (!hasMcp) return "";
-  const result =
-    outputSchema && typeof outputSchema === "object"
-      ? await resolveTemplateAsync("task.output.schema", {
-          schema: JSON.stringify(outputSchema, null, 2),
-        })
-      : await resolveTemplateAsync("task.output.generic", {});
+  // An empty `{}` schema means no schema; rendering it as a contract makes the
+  // worker complete with the literal output "{}".
+  const result = isEffectiveOutputSchema(outputSchema)
+    ? await resolveTemplateAsync("task.output.schema", {
+        schema: JSON.stringify(outputSchema, null, 2),
+      })
+    : await resolveTemplateAsync("task.output.generic", {});
   return result.text;
 }
 
@@ -4737,6 +4750,7 @@ export async function spawnProviderProcess(
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
   const CONTEXT_THROTTLE_MS = 30_000;
+  let latestContextWindow: number | undefined;
 
   // Phase 10: accumulate per-turn output tokens across the session so progress
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
@@ -4995,6 +5009,14 @@ export async function spawnProviderProcess(
           });
           break;
         case "context_usage": {
+          // Observe every live window, including events whose HTTP post is throttled.
+          if (
+            event.contextTotalTokens != null &&
+            Number.isFinite(event.contextTotalTokens) &&
+            event.contextTotalTokens > 0
+          ) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           const now2 = Date.now();
           if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
             lastContextPostTime = now2;
@@ -5031,6 +5053,9 @@ export async function spawnProviderProcess(
           break;
         }
         case "compaction": {
+          if (Number.isFinite(event.contextTotalTokens) && event.contextTotalTokens > 0) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           // Always record compaction events (no throttle)
           telemetry.compaction("triggered", {
             compactTrigger: event.compactTrigger,
@@ -5206,7 +5231,10 @@ export async function spawnProviderProcess(
               sessionId: opts.runnerSessionId,
               cumulativeInputTokens: result.cost.inputTokens ?? 0,
               cumulativeOutputTokens: result.cost.outputTokens ?? 0,
-              contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+              contextTotalTokens: getContextWindowSize(
+                result.cost.model || "default",
+                latestContextWindow,
+              ),
             }),
           }).catch(() => {});
         }
@@ -5456,8 +5484,11 @@ export async function reconcileActiveTasks(
   const now = opts.now ?? Date.now;
   const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
 
-  for (const [taskId, task] of state.activeTasks) {
-    if (task.result !== null) continue;
+  // Each task touches only its own entry (plus an add to the shared
+  // cancelledSignaled set), and both API reads swallow their errors, so the
+  // per-task checks run together. The fan-out is bounded by maxConcurrent.
+  const reconcileOne = async (taskId: string, task: RunningTask): Promise<void> => {
+    if (task.result !== null) return;
 
     if (
       !opts.cancelledSignaled.has(taskId) &&
@@ -5507,7 +5538,9 @@ export async function reconcileActiveTasks(
         failureReason: "runner exited without result: provider session did not settle after abort",
       };
     }
-  }
+  };
+
+  await Promise.all(Array.from(state.activeTasks, ([taskId, task]) => reconcileOne(taskId, task)));
 }
 
 /** Fetch whether the server holds a task as cancelled. Throws on network failure. */
@@ -7457,27 +7490,69 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           { hasMcp: adapter.traits.hasMcp },
         );
 
+        const memoryTask =
+          (trigger.type === "task_assigned" || trigger.type === "task_offered") &&
+          trigger.task &&
+          typeof trigger.task === "object" &&
+          "task" in trigger.task
+            ? (trigger.task as { task: string; id?: string; contextKey?: string })
+            : null;
+        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const isResumeTask = taskObj?.taskType === "resume";
+        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+
+        // The prompt enrichment below needs several API reads that do not
+        // depend on each other. Issue them together; each helper resolves
+        // null/"" on failure, and the results are applied in the original
+        // order, so the composed prompt is unchanged.
+        const [
+          memoryContext,
+          contextPreamble,
+          profileSyncBanner,
+          parentSession,
+          repoConfig,
+          isFirstKickoff,
+        ] = await Promise.all([
+          memoryTask?.task
+            ? fetchRelevantMemories(
+                apiUrl,
+                apiKey,
+                agentId,
+                memoryTask.task,
+                memoryTask.id,
+                memoryTask.contextKey,
+              )
+            : null,
+          taskObj?.parentTaskId && apiUrl
+            ? isResumeTask
+              ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          fetchProfileSyncRejectionBanner({
+            ...apiConfig,
+            claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
+          }),
+          taskObj?.parentTaskId
+            ? fetchProviderSessionInfo(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          taskVcsRepo && apiUrl ? fetchRepoConfig(apiUrl, apiKey, taskVcsRepo) : null,
+          // First kickoff = a genuinely new root task: not a continuation
+          // task-type, and not parent-linked to a still-active task (Slack
+          // follow-ups / sibling-awareness wire parentTaskId with no
+          // reserved taskType). See isFirstKickoffTask() for the full
+          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
+          taskVcsRepo && apiUrl
+            ? isFirstKickoffTask(taskObj, (parentTaskId) =>
+                fetchTaskStatus(apiUrl, apiKey, parentTaskId),
+              )
+            : false,
+        ]);
+
         // Enrich prompt with relevant memories from past sessions
-        if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
-          const task =
-            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-              ? (trigger.task as { task: string; id?: string; contextKey?: string })
-              : null;
-          if (task?.task) {
-            const memoryContext = await fetchRelevantMemories(
-              apiUrl,
-              apiKey,
-              agentId,
-              task.task,
-              task.id,
-              task.contextKey,
-            );
-            if (memoryContext) {
-              triggerPrompt += memoryContext;
-              taskMemoryChars = memoryContext.length;
-              console.log(`[${role}] Injected relevant memories into task prompt`);
-            }
-          }
+        if (memoryContext) {
+          triggerPrompt += memoryContext;
+          taskMemoryChars = memoryContext.length;
+          console.log(`[${role}] Injected relevant memories into task prompt`);
         }
 
         // Universal context preamble: inject for all providers when task is a follow-up.
@@ -7485,12 +7560,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // acts as a bounded safety net for resumable ones (claude/codex).
         // For taskType="resume" (created by supersedeTaskViaAPI), use the
         // larger resume preamble that includes a session-log tool-call summary.
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
         if (taskObj?.parentTaskId && apiUrl) {
-          const isResumeTask = taskObj.taskType === "resume";
-          const contextPreamble = isResumeTask
-            ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-            : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
           if (contextPreamble) {
             triggerPrompt = prependContextPreamble(triggerPrompt, contextPreamble);
             console.log(
@@ -7501,23 +7571,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(triggerPrompt, {
-          ...apiConfig,
-          claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
-        });
-        triggerPrompt = triggerWithSyncWarning.prompt;
-        if (triggerWithSyncWarning.injected) {
+        if (profileSyncBanner) {
+          triggerPrompt = prependContextPreamble(triggerPrompt, profileSyncBanner);
           console.warn(`[${role}] Injected persisted profile sync rejection warning`);
         }
 
         // Resolve provider-aware resume for child tasks with parentTaskId.
         let resumeSessionId: string | undefined;
         if (taskObj?.parentTaskId) {
-          const parentSession = await fetchProviderSessionInfo(
-            apiUrl,
-            apiKey,
-            taskObj.parentTaskId,
-          );
           if (parentSession?.sessionId) {
             const resumeResolution = resolveResumeSession(state.harnessProvider, [
               {
@@ -7554,9 +7615,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
         let currentRepoContext: RepoContext | undefined;
-        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
         if (taskVcsRepo && apiUrl) {
-          const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
           // Fall back to convention-based config if repo is not registered
           const effectiveConfig = repoConfig ?? {
             url: taskVcsRepo,
@@ -7564,14 +7623,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          // First kickoff = a genuinely new root task: not a continuation
-          // task-type, and not parent-linked to a still-active task (Slack
-          // follow-ups / sibling-awareness wire parentTaskId with no
-          // reserved taskType). See isFirstKickoffTask() for the full
-          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
-          const isFirstKickoff = await isFirstKickoffTask(taskObj, (parentTaskId) =>
-            fetchTaskStatus(apiUrl, apiKey, parentTaskId),
-          );
           const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,
@@ -7622,33 +7673,34 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // probe short-circuits when nothing changed. Skipped for
         // `claude-managed`. Read state.harnessProvider live so an adapter
         // swap mid-loop honors the new provider.
-        if (state.harnessProvider !== "claude-managed") {
-          const skillResult = await refreshSkillsIfChanged(
-            { apiUrl, swarmUrl, apiKey, agentId, role },
-            lastSkillHash,
-          );
-          if (skillResult.changed && skillResult.summary) {
-            agentSkillsSummary = skillResult.summary;
-            console.log(
-              `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
-            );
-          }
-        }
-
+        //
         // Refresh prompt inputs per task without rewriting files shared with
         // active sessions. A failed or bounded-out /me read keeps the cache.
-        const identityResult = await refreshIdentityIfChanged(
-          { apiUrl, apiKey, agentId, role },
-          {
-            soulMd: agentSoulMd,
-            identityMd: agentIdentityMd,
-            toolsMd: agentToolsMd,
-            claudeMd: agentClaudeMd,
-            heartbeatMd: agentHeartbeatMd,
-            name: agentProfileName,
-            description: agentDescription,
-          },
-        );
+        // Neither refresh reads the other's output and neither throws, so the
+        // two reads run together.
+        const [skillResult, identityResult] = await Promise.all([
+          state.harnessProvider !== "claude-managed"
+            ? refreshSkillsIfChanged({ apiUrl, swarmUrl, apiKey, agentId, role }, lastSkillHash)
+            : null,
+          refreshIdentityIfChanged(
+            { apiUrl, apiKey, agentId, role },
+            {
+              soulMd: agentSoulMd,
+              identityMd: agentIdentityMd,
+              toolsMd: agentToolsMd,
+              claudeMd: agentClaudeMd,
+              heartbeatMd: agentHeartbeatMd,
+              name: agentProfileName,
+              description: agentDescription,
+            },
+          ),
+        ]);
+        if (skillResult?.changed && skillResult.summary) {
+          agentSkillsSummary = skillResult.summary;
+          console.log(
+            `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
+          );
+        }
         if (identityResult.changed) {
           agentSoulMd = identityResult.fields.soulMd;
           agentIdentityMd = identityResult.fields.identityMd;

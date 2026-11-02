@@ -33,7 +33,7 @@ CONSTANTS
 
 None == "none"
 Tasks == 1..NTasks
-Terminal == {"completed", "failed", "cancelled", "superseded"}
+Terminal == {"completed", "failed", "cancelled", "superseded", "skipped"}
 Active   == {"unassigned", "offered", "pending", "in_progress"}
 Status   == Terminal \cup Active \cup {"free"}
 
@@ -209,9 +209,12 @@ Progress(w, t) ==
                    hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* completeTask: WHERE status NOT IN terminal; worker then drops the session.
+\* skipTask (#2571, /finish or store-progress with status 'skipped', owner
+\* only) is the same terminal CAS with another label, so it is a choice here.
 Complete(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w]
-    /\ st' = [st EXCEPT ![t] = IF ~G_TERMINAL_CAS \/ @ \notin Terminal THEN "completed" ELSE @]
+    /\ \E out \in {"completed", "skipped"} :
+         st' = [st EXCEPT ![t] = IF ~G_TERMINAL_CAS \/ @ \notin Terminal THEN out ELSE @]
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, alive, cl, acc,
@@ -557,10 +560,10 @@ AcceptOwnOffer == ~badAcc
 \* S6 (action): terminal is absorbing.
 TerminalAbsorbing == [][\A t \in Tasks : st[t] \in Terminal => st'[t] = st[t]]_vars
 
-\* L1: the work is eventually finished (completed or failed) or given up by
+\* L1: the work is eventually finished (completed, skipped or failed) or given up by
 \* recovery with a recorded failure; a lineage never sits forever with no
 \* active row and no finished row.
-Finished == \E t \in Tasks : st[t] \in {"completed", "failed"}
+Finished == \E t \in Tasks : st[t] \in {"completed", "failed", "skipped"}
 EventuallyFinished == <>Finished
 \* L2: a superseded task eventually has a resume.
 SupersededGetsResume == \A t \in Tasks : (st[t] = "superseded") ~> (\E s \in Tasks : par[s] = t)

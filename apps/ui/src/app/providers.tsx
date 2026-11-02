@@ -2,11 +2,12 @@ import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persist
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { MotionConfig } from "motion/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CurrentUserProvider } from "@/contexts/current-user-context";
 import { ConfigContext, useConfigProvider } from "@/hooks/use-config";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { bindAllUsersScopeCache } from "@/lib/all-users-scope";
 import { shouldPersistQuery } from "./query-persistence";
 
 const queryClient = new QueryClient({
@@ -36,6 +37,9 @@ function ConfigProvider({ children }: { children: ReactNode }) {
 // `IdentityGate` lives in `RootLayout` (the configured app shell), so the
 // identity modal never pops over the `/setup` onboarding flow.
 export function Providers({ children }: { children: ReactNode }) {
+  // The "All users" scope changes what every list and page returns. A change
+  // in this tab or another drops this tab's cached results.
+  useEffect(() => bindAllUsersScopeCache(queryClient), []);
   const content = (
     // `reducedMotion="user"`: every motion/react animation (animated icons
     // included) drops transform/movement for prefers-reduced-motion users

@@ -2,6 +2,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
 import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
+import { allUsersScopeEnabled, SESSION_SCOPE_HEADER } from "../lib/all-users-scope";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
 import { type AccessConnection, noteUnauthorized } from "./access-rejection";
@@ -68,6 +69,8 @@ import type {
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
+  Improvement,
+  ImprovementsResponse,
   InboxItemState,
   InboxItemStatus,
   InboxItemType,
@@ -157,6 +160,7 @@ import type {
   SteeringMessagesResponse,
   SteerMode,
   SteerResult,
+  SubmitImprovementInput,
   SubscriptionPlansResponse,
   SwarmConfig,
   SwarmConfigsResponse,
@@ -485,6 +489,11 @@ class ApiClient {
     const dashboardUserId = dashboardUserIdFor(config);
     if (dashboardUserId) {
       headers[DASHBOARD_USER_HEADER] = dashboardUserId;
+    }
+    // The admin "All users" read scope. The server ignores it for anyone it
+    // does not let read every session.
+    if (allUsersScopeEnabled(config)) {
+      headers[SESSION_SCOPE_HEADER] = "all";
     }
     return headers;
   }
@@ -3892,6 +3901,40 @@ class ApiClient {
       throw new Error(err.error || `Failed to update the consent: ${res.status}`);
     }
     return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
+  async fetchImprovements(): Promise<ImprovementsResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/improvements`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load improvements: ${res.status}`);
+    return (await res.json()) as ImprovementsResponse;
+  }
+
+  private async improvementWrite(path: string, body: unknown): Promise<Improvement> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Improvement request failed: ${res.status}`);
+    }
+    return ((await res.json()) as { improvement: Improvement }).improvement;
+  }
+
+  /** Draft an improvement, or approve and send it in one call with `sendNow`. */
+  submitImprovement(input: SubmitImprovementInput): Promise<Improvement> {
+    return this.improvementWrite("/api/improvements", input);
+  }
+
+  approveImprovement(id: string, email: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/approve`, { email });
+  }
+
+  discardImprovement(id: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/discard`, {});
   }
 
   /** Whether this install can join, or is in, the public agent-swarm.dev ranking. */

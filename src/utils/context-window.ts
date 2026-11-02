@@ -64,9 +64,14 @@ function catalogContext(provider: string, model: string): number | undefined {
  * (`src/utils/runtime-model-catalog.ts`: live `model_catalog` + overlay,
  * vendored models.dev snapshot offline). Accepts Anthropic ids (dated or
  * not), Claude CLI shortnames, OpenAI/Codex ids and `provider/model` ids.
+ * A positive finite `reportedWindow` from the running harness takes precedence.
  * Unknown models get a conservative 200k so percent math stays finite.
  */
-export function getContextWindowSize(model: string): number {
+export function getContextWindowSize(model: string, reportedWindow?: number | null): number {
+  // Harness limits can be smaller than the model's API/catalog maximum.
+  if (reportedWindow != null && Number.isFinite(reportedWindow) && reportedWindow > 0) {
+    return reportedWindow;
+  }
   return getKnownContextWindowSize(model) ?? DEFAULT_CONTEXT_WINDOW;
 }
 

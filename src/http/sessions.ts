@@ -84,6 +84,7 @@ import {
   resolveSessionActor,
   type SessionActor,
   sessionAccessFor,
+  withReadAll,
 } from "./session-access";
 import { jsonError } from "./utils";
 
@@ -593,12 +594,17 @@ const listSessions = route({
      * an empty list for mine or shared.
      * tree: Sessions that GET /api/session-tree counts: mine plus shared with me,
      * no ownerless roots. A bypass actor sees every root.
+     * all: every user's sessions, read-only. Honored for a user whose role
+     * lists `session.read.all` (the built-in `auditor` role; grant-all admin
+     * alone does not count); anyone else gets the default list. The
+     * `X-Swarm-Session-Scope: all` header opts in the same way and also lifts
+     * the tree scope.
      */
     scope: z
-      .enum(["mine", "shared", "tree"])
+      .enum(["mine", "shared", "tree", "all"])
       .optional()
       .describe(
-        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
+        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
       ),
     /** With `scope=tree`: `mine` (default) or `all`. Must match the tree's `show`. */
     show: SessionShowSchema,
@@ -862,7 +868,9 @@ async function accessForRoot(
   actor: SessionActor,
   root: { id: string; requestedByUserId: string | null },
 ): Promise<SessionAccess> {
-  return actor.kind === "bypass" ? "owner" : sessionAccessForRoot(actor.userId, root);
+  return actor.kind === "bypass"
+    ? "owner"
+    : withReadAll(actor, await sessionAccessForRoot(actor.userId, root));
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -972,9 +980,13 @@ export async function handleSessions(
           .map((s) => s.trim())
           .filter(Boolean)
       : undefined;
-    const actor = await resolveSessionActor(req, myAgentId);
+    const allUsers = parsed.query.scope === "all";
+    const actor = await resolveSessionActor(req, myAgentId, { allUsers });
     const limit = Math.min(200, Math.max(0, parsed.query.limit ?? 25));
-    if (actor.kind === "bypass" && parsed.query.scope && parsed.query.scope !== "tree") {
+    if (
+      actor.kind === "bypass" &&
+      (parsed.query.scope === "mine" || parsed.query.scope === "shared")
+    ) {
       // No user to own or receive a share.
       listSessions.respond(res, 200, {
         sessions: [],
@@ -1004,7 +1016,11 @@ export async function handleSessions(
         ? {
             viewer: {
               userId: actor.userId,
-              scope: parsed.query.scope === "tree" ? "all" : (parsed.query.scope ?? "all"),
+              scope:
+                parsed.query.scope === "mine" || parsed.query.scope === "shared"
+                  ? parsed.query.scope
+                  : "all",
+              readAll: actor.readAll,
             } as const,
           }
         : {}),
@@ -1067,6 +1083,7 @@ export async function handleSessions(
       actor.userId,
       { ...list, mine: show !== "all" },
       action,
+      actor.readAll,
     );
     triageSessionListRoute.respond(res, 200, { updated });
     return true;
@@ -1219,7 +1236,7 @@ export async function handleSessions(
       // The viewer's read state, so a client marks a session read on open
       // without the list row (the same rule as `GET /api/sessions`).
       actor.kind === "user" && actor.userId
-        ? getSessionReadState(sessionRoot.id, actor.userId)
+        ? getSessionReadState(sessionRoot.id, actor.userId, undefined, actor.readAll)
         : Promise.resolve(null),
       getSessionGroupKey(root),
     ]);

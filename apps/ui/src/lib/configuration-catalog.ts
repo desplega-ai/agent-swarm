@@ -1225,6 +1225,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REACTION_SKIPPED",
+        label: "Skipped-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "mute",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_STATUS_ICON_COMPLETED",
         label: "Completed status icon",
         description:
@@ -1766,6 +1775,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Send anonymized usage telemetry to help improve Agent Swarm. Set to false to opt out. Turning it on applies without a restart.",
         kind: "boolean",
         defaultValue: "true",
+      },
+      {
+        key: "IMPROVEMENTS_ENABLED",
+        label: "Improvements",
+        description:
+          "Let people and agents draft product improvements for the Agent Swarm team. Agents can only draft; nothing is sent until a person approves it. Only the text, the approver's email (required) and the install id are sent. Drafts wait for approval in the lightbulb popover in the header. Set to false to turn drafting and sending off.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#improvements`,
       },
     ],
   },

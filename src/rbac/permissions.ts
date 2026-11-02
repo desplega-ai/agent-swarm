@@ -54,6 +54,16 @@ export const PERMISSIONS = {
       "Approve or reject a pending approval request as a person. Agents never hold it; the request's approvers list still applies.",
     namespace: "approval",
   },
+  "improvement.submit": {
+    description:
+      "Draft a product improvement for desplega. An agent's draft stays pending until a person approves it.",
+    namespace: "improvement",
+  },
+  "improvement.approve": {
+    description:
+      "Approve and send a drafted product improvement to desplega as a person. Agents never hold it.",
+    namespace: "improvement",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",
@@ -104,6 +114,11 @@ export const PERMISSIONS = {
   },
   "session.presence": {
     description: "Join the presence room of a session the principal can view.",
+    namespace: "task",
+  },
+  "session.read.all": {
+    description:
+      "Opt in to read every user's tasks and sessions (the dashboard's All users scope). Read-only: writes and steering still need the principal's own access.",
     namespace: "task",
   },
   "favorite.write.own": {

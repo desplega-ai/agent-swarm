@@ -43,7 +43,9 @@ import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils
 import {
   extractAndVerifyCookie,
   isLocalDevPageRequest,
+  LEGACY_PAGE_SESSION_COOKIE,
   pageSessionSetCookies,
+  verifyPageSession,
 } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -377,7 +379,9 @@ function buildCsp(page: Page): string {
  * payload names this page (the cookie is the proof once the user has
  * successfully unlocked once). For password pages, when the cookie is
  * absent/invalid the caller falls through to the `?key=` + Basic-auth
- * resolution path; for authed pages the caller surfaces 401.
+ * resolution path; for authed pages the caller surfaces 401 (403 when the
+ * request carries a valid session for a different page, see
+ * `hasSessionForOtherPage`).
  *
  * The caller passes the cookie payload (already verified by
  * `extractAndVerifyCookie`, which ignores sessions for other pages) — `null`
@@ -415,6 +419,29 @@ function isAccessible(
     reason: "password required",
     needsPassword: true,
   };
+}
+
+/**
+ * True when the request carries a verified page-session cookie (per-page or
+ * legacy name) whose signed payload names a page other than `pageId`. Lets an
+ * authed page tell "your session is for another page" (403) from "no usable
+ * session" (401). Missing, tampered, or expired cookies never count.
+ */
+async function hasSessionForOtherPage(req: IncomingMessage, pageId: string): Promise<boolean> {
+  const header = req.headers.cookie;
+  if (!header) return false;
+  const pairs = (Array.isArray(header) ? header.join("; ") : header).split(";");
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const name = pair.slice(0, eq).trim();
+    if (name !== LEGACY_PAGE_SESSION_COOKIE && !name.startsWith(`${LEGACY_PAGE_SESSION_COOKIE}_`)) {
+      continue;
+    }
+    const payload = await verifyPageSession(pair.slice(eq + 1).trim());
+    if (payload && payload.pageId !== pageId) return true;
+  }
+  return false;
 }
 
 /**
@@ -545,6 +572,16 @@ export async function handlePagesPublic(
         return true;
       }
     } else {
+      // A valid session for ANOTHER page is a mismatch (403), not a missing session (401).
+      if (await hasSessionForOtherPage(req, page.id)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: "page-session cookie does not match this page id; POST /api/pages/:id/launch",
+          }),
+        );
+        return true;
+      }
       res.writeHead(access.status, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: scrubSecrets(access.reason) }));
       return true;

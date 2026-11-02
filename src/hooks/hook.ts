@@ -1033,11 +1033,20 @@ export async function handleHook(): Promise<void> {
     return lines.join("\n");
   };
 
-  // Ping the server to indicate activity
-  await ping();
+  const isToolEvent = msg.hook_event_name === "PreToolUse" || msg.hook_event_name === "PostToolUse";
 
-  // Get current agent info
-  const agentInfo = await getAgentInfo();
+  // Ping the server to indicate activity, then get current agent info.
+  // Ping can move an `offline` agent to `idle`; the status line printed on
+  // non-tool events shows that status, so those events keep the order. Tool
+  // events print no status line and only read `busy`, which ping never sets,
+  // so they issue both requests together and save one round trip per call.
+  let agentInfo: AgentWithInbox | undefined;
+  if (isToolEvent) {
+    [, agentInfo] = await Promise.all([ping(), getAgentInfo()]);
+  } else {
+    await ping();
+    agentInfo = await getAgentInfo();
+  }
 
   // A block must be the only stdout of the event, so a cancelled task is
   // checked before the status line goes out.
@@ -1054,7 +1063,6 @@ export async function handleHook(): Promise<void> {
 
   // Output agent status with system tray. Skipped on tool events: their plain
   // stdout never reaches the model and would break a JSON decision.
-  const isToolEvent = msg.hook_event_name === "PreToolUse" || msg.hook_event_name === "PostToolUse";
   if (agentInfo && !isToolEvent) {
     // Base status line
     console.log(

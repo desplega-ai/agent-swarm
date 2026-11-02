@@ -46,7 +46,8 @@ export function getOperatorActor(req: IncomingMessage, res: ServerResponse): Ide
   const auth = getRequestAuth(req);
   const userId = authUserId(auth);
   if (userId) {
-    return { kind: "user", id: userId };
+    const tokenId = auth?.kind === "user" ? auth.tokenId : undefined;
+    return tokenId ? { kind: "user", id: userId, tokenId } : { kind: "user", id: userId };
   }
   if (isOperatorAuth(auth)) {
     return { kind: "operator", id: auth.fingerprint };
