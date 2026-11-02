@@ -42,6 +42,7 @@ import {
   hasSessionAccess,
   listActiveSessionShares,
   type SessionAccess,
+  type SessionRoot,
   sessionAccessForRoot,
   setSessionShares,
   toSessionSharesState,
@@ -791,22 +792,37 @@ async function checkSessionMove(
 }
 
 /**
- * The chain plus the tasks it dispatched that hang elsewhere in the same
- * session: a continuation's parentTaskId points at an earlier task, so the
- * walk from a non-root task misses it. Tasks in another session stay out, so
- * the route grants no access beyond the session it checked.
+ * The chain plus the tasks it dispatched that hang elsewhere: a
+ * continuation's parentTaskId points at an earlier task, so the walk from a
+ * non-root task misses it, and that task can sit in another session. A task
+ * in another session joins only when the viewer can read that session, so
+ * the route grants no access beyond what the viewer already has.
  */
 async function withDispatchedTasks(
   chain: AgentTask[],
   sessionRootId: string,
+  actor: SessionActor,
 ): Promise<AgentTask[]> {
   const dispatched = await getTasksDispatchedFrom(chain.map((task) => task.id));
   if (dispatched.length === 0) return chain;
   const roots = await getSessionRoots(dispatched.map((task) => task.id));
-  const inSession = dispatched.filter((task) => roots.get(task.id)?.id === sessionRootId);
-  if (inSession.length === 0) return chain;
+  const foreignRoots = new Map<string, SessionRoot>();
+  for (const root of roots.values()) {
+    if (root.id !== sessionRootId) foreignRoots.set(root.id, root);
+  }
+  const readable = new Set<string>([sessionRootId]);
+  await Promise.all(
+    [...foreignRoots.values()].map(async (root) => {
+      if ((await accessForRoot(actor, root)) !== "none") readable.add(root.id);
+    }),
+  );
+  const visible = dispatched.filter((task) => {
+    const root = roots.get(task.id);
+    return root !== undefined && readable.has(root.id);
+  });
+  if (visible.length === 0) return chain;
   // A stable sort keeps the chain's insertion order on equal timestamps.
-  return [...chain, ...inSession].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return [...chain, ...visible].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 const getSession = route({
@@ -820,7 +836,7 @@ const getSession = route({
   responses: {
     200: {
       description:
-        "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere in the same session.",
+        "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read.",
       schema: z.object({
         root: TaskWithSteeringSchema,
         chain: z.array(TaskWithSteeringSchema),
@@ -1250,6 +1266,7 @@ export async function handleSessions(
     const chain = await withDispatchedTasks(
       await getRootTaskChain(parsed.params.rootTaskId),
       sessionRoot.id,
+      actor,
     );
     // Load steering, citations and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];

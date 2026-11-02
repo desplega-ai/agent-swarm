@@ -50,13 +50,21 @@ describe("directChildren", () => {
     expect(ids("turn1")).toEqual(["r1", "turn2"]);
   });
 
-  test("older rows and dispatchers outside the chain fall back to parentTaskId", () => {
+  test("older rows fall back to parentTaskId", () => {
     const old = chain.map(({ dispatchedByTaskId: _drop, ...t }) => t as AgentTask);
     expect(ids("turn2", old)).toEqual(["coder"]);
     expect(ids("r1", old)).toEqual(["r2"]);
+  });
+
+  test("a recorded dispatcher outside the chain still owns the task", () => {
+    // GET /api/sessions/r1 returns r1's subtree: the continuation r2 comes
+    // back, its dispatcher turn2 does not.
+    const scoped = chain.filter((t) => t.id === "r1" || t.id === "r2");
+    expect(ids("r1", scoped)).toEqual([]);
     const foreign = chain.map((t) =>
       t.dispatchedByTaskId ? { ...t, dispatchedByTaskId: "other-session" } : t,
     );
-    expect(ids("turn2", foreign)).toEqual(["coder"]);
+    expect(ids("turn2", foreign)).toEqual([]);
+    expect(ids("r1", foreign)).toEqual([]);
   });
 });
