@@ -23,6 +23,8 @@ export interface ListViewMobileRow {
   status?: ReactNode;
   meta?: ReactNode[];
   leading?: ReactNode;
+  /** Links and buttons shown under the row. Kept outside the row, which is a button when `onRowClick` is set. */
+  extras?: ReactNode;
 }
 
 export interface ListViewProps<TData>
@@ -154,6 +156,7 @@ export function ListView<TData>({
               status={mobile.status}
               meta={mobile.meta}
               leading={mobile.leading}
+              extras={mobile.extras}
               selected={selectedId !== undefined && selectedId !== null && id === selectedId}
               onClick={onRowClick ? () => onRowClick(row, index) : undefined}
             />

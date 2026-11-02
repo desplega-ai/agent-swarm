@@ -699,6 +699,66 @@ function fieldBindingIssue(
   return issue(path, `unknown or hidden column "${columnName}" on model "${modelName}"`);
 }
 
+/** Most fields a Table cell popover lists. */
+const POPOVER_MAX_FIELDS = 12;
+
+/** Props of each component holding items whose `href` (and a column's popover fields) name row fields. */
+const LINK_FIELD_PROPS: Record<string, string> = {
+  Table: "columns",
+  DetailList: "fields",
+  CardGrid: "fields",
+};
+
+/**
+ * `href` on Table columns, DetailList fields and CardGrid fields, and the
+ * `key` / `href` of a Table column's popover fields, name row fields of the
+ * bound query's model. A typo'd name would render a link with no target, so
+ * cross-check them like the other row-field props.
+ */
+function collectLinkFieldIssues(
+  definition: AppDefinition,
+  type: unknown,
+  props: Record<string, unknown>,
+  elementPath: string,
+  issues: AppValidationIssue[],
+): void {
+  const itemsProp = typeof type === "string" ? LINK_FIELD_PROPS[type] : undefined;
+  const items = itemsProp ? props[itemsProp] : undefined;
+  if (!itemsProp || !Array.isArray(items)) return;
+  // The JSON-schema subset this validator evaluates has no `minItems` / `maxItems`.
+  for (const [index, item] of items.entries()) {
+    const fields = isPlainObject(item) && isPlainObject(item.popover) ? item.popover.fields : null;
+    if (Array.isArray(fields) && (fields.length === 0 || fields.length > POPOVER_MAX_FIELDS)) {
+      issues.push(
+        issue(
+          `${elementPath}.props.${itemsProp}.${index}.popover.fields`,
+          `must list 1 to ${POPOVER_MAX_FIELDS} fields`,
+        ),
+      );
+    }
+  }
+  const queryModel = queryModelFromDataBinding(definition, props.data);
+  if (!queryModel) return;
+  const check = (name: unknown, path: string) => {
+    if (typeof name !== "string") return;
+    const found = fieldBindingIssue(queryModel.modelName, queryModel.model, name, path);
+    if (found) issues.push(found);
+  };
+  for (const [index, item] of items.entries()) {
+    if (!isPlainObject(item)) continue;
+    const itemPath = `${elementPath}.props.${itemsProp}.${index}`;
+    check(item.href, `${itemPath}.href`);
+    const popoverFields = isPlainObject(item.popover) ? item.popover.fields : undefined;
+    if (!Array.isArray(popoverFields)) continue;
+    for (const [fieldIndex, field] of popoverFields.entries()) {
+      if (!isPlainObject(field)) continue;
+      const fieldPath = `${itemPath}.popover.fields.${fieldIndex}`;
+      check(field.key, `${fieldPath}.key`);
+      check(field.href, `${fieldPath}.href`);
+    }
+  }
+}
+
 function collectRowFieldIssues(
   value: unknown,
   path: string,
@@ -1377,6 +1437,7 @@ export function validatePage(
           ),
         );
       }
+      collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
       if (type === "Table") {
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {

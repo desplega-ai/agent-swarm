@@ -44,7 +44,6 @@ import {
   ArrowRight,
   Bot,
   CheckCircle,
-  ExternalLink,
   Image as ImageIcon,
   Inbox,
   Info,
@@ -94,6 +93,7 @@ import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { JsonViewer } from "@/components/shared/json-viewer";
 import { ListView, type ListViewMobileRow } from "@/components/shared/list-view";
+import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
 import { SearchBox } from "@/components/shared/search-box";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ChipButton } from "@/components/shared/suggestion-chips";
@@ -131,11 +131,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/searchable-select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -197,8 +199,11 @@ import type {
 } from "./catalog";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
+import { cellHasControls, isLinkColumn, linkCell, tipText } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
+import { SmartLink } from "./smart-link";
 import { useJsonRenderThemeAttr } from "./theme-scope";
+import { OverflowTip, Tip } from "./tip";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
 
@@ -336,12 +341,25 @@ function SentencePill({
 function WithHint({ hint, children }: { hint?: string; children: ReactNode }) {
   if (!hint) return children;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">{children}</span>
-      </TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
+    <Tip content={hint} className="inline-flex">
+      {children}
+    </Tip>
+  );
+}
+
+/**
+ * Middle-truncated text with the dashboard's tooltip carrying the full value
+ * while (and only while) it is cut. `MiddleTruncation` still sets a native
+ * `title`, so it is cleared here.
+ */
+function MiddleText({ text, className }: { text: string; className?: string }) {
+  const [cut, setCut] = useState(false);
+  return (
+    <Tip content={cut ? text : null} className="flex min-w-0 flex-1">
+      <MiddleTruncation className={className} title={undefined} onTruncatedChange={setCut}>
+        {text}
+      </MiddleTruncation>
+    </Tip>
   );
 }
 
@@ -360,11 +378,11 @@ function CopyCell({ value, middle }: { value: string; middle?: boolean }) {
       onKeyDown={stop}
     >
       {middle ? (
-        <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">{value}</MiddleTruncation>
+        <MiddleText text={value} className="min-w-0 flex-1 font-mono text-xs" />
       ) : (
-        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
+        <OverflowTip content={value} className="min-w-0 flex-1 truncate font-mono text-xs">
           {value}
-        </span>
+        </OverflowTip>
       )}
       <CopyValueButton value={value} label={`Copy ${value}`} size="icon-xs" />
     </span>
@@ -1284,14 +1302,212 @@ function rowIdOf(row: Record<string, unknown>, field: string): string {
   return JSON.stringify(row);
 }
 
-/** Header label with a leading icon (AG Grid inner header component). */
-function IconHeader(params: { displayName: string; icon?: string }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
-      <span className="ag-header-cell-text">{params.displayName}</span>
+/**
+ * Column header (AG Grid inner header component): the label with an optional
+ * leading icon. A label cut by the column width shows in full in a tooltip,
+ * and a column `hint` adds its explanation under it.
+ */
+function ColumnHeader(params: { displayName: string; icon?: string; hint?: string }) {
+  const hasIcon = Boolean(catalogIcon(params.icon));
+  const content = params.hint ? (
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium">{params.displayName}</span>
+      <span>{params.hint}</span>
     </span>
+  ) : (
+    params.displayName
   );
+  return (
+    <OverflowTip
+      content={content}
+      always={Boolean(params.hint)}
+      className="flex min-w-0 items-center gap-1.5"
+    >
+      {hasIcon ? (
+        <CatalogIcon
+          name={params.icon}
+          size="sm"
+          className="size-3 shrink-0 text-muted-foreground"
+        />
+      ) : null}
+      <span className="ag-header-cell-text min-w-0">{params.displayName}</span>
+    </OverflowTip>
+  );
+}
+
+type CellPopoverConfig = NonNullable<TableColumn["popover"]>;
+
+// Tall enough for the 12 fields a popover can list; it scrolls when the viewport is shorter.
+const POPOVER_SIZE_CLASS = "w-80 overflow-auto";
+const POPOVER_POPOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-popover-content-available-height))]`;
+const POPOVER_HOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-hover-card-content-available-height))]`;
+
+/** The popover's body: an optional heading, then the row fields rendered like a `DetailList`. */
+function CellPopoverBody({
+  popover,
+  row,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+}) {
+  const title = popover.title ? applyTemplate(popover.title, row).trim() : "";
+  return (
+    <div className="flex flex-col gap-3">
+      {title ? <p className="m-0 text-sm font-medium break-words">{title}</p> : null}
+      <DetailFieldsView fields={popover.fields as DetailListField[]} data={row} />
+    </div>
+  );
+}
+
+/**
+ * A click popover opened from its own button. It sits beside a cell's content
+ * (a link, a copy button) or under a phone row, so no control ever wraps
+ * another and a tap or Enter on the button always reaches it.
+ */
+function DetailsButton({
+  popover,
+  row,
+  label,
+  text,
+  className,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  /** Accessible name; says which column's details open. */
+  label: string;
+  /** Visible text next to the icon; omit for an icon-only button. */
+  text?: string;
+  className?: string;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-slot="cell-details"
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-sm text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+            text ? "min-h-8 px-2" : "size-6",
+            className,
+          )}
+        >
+          <Info aria-hidden className="size-3.5" />
+          {text}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className={POPOVER_POPOVER_CLASS} {...themeAttr}>
+        <CellPopoverBody popover={popover} row={row} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * A popover on a Table cell that lists fields of the cell's row, rendered like
+ * a `DetailList`. Hover (default) opens it on pointer rest or keyboard focus and
+ * lets the pointer move into it; `click` toggles it from a button. A cell that
+ * has its own controls (`interactive`) gets a separate details button beside
+ * the content instead of one that wraps it.
+ */
+function CellPopover({
+  popover,
+  row,
+  endAligned,
+  interactive,
+  label,
+  children,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  endAligned: boolean;
+  interactive: boolean;
+  /** Column name, for the details button's accessible name. */
+  label: string;
+  children: ReactNode;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const triggerClass = cn(
+    "flex w-full min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+    endAligned && "justify-end",
+  );
+  const content = <CellPopoverBody popover={popover} row={row} />;
+  if (popover.trigger === "click") {
+    if (interactive) {
+      return (
+        <span className="flex w-full min-w-0 max-w-full items-center gap-1">
+          <span className={cn("flex min-w-0 flex-1", endAligned && "justify-end")}>{children}</span>
+          <DetailsButton popover={popover} row={row} label={`Details: ${label}`} />
+        </span>
+      );
+    }
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button type="button" className={cn(triggerClass, "cursor-pointer text-left")}>
+            {children}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className={POPOVER_POPOVER_CLASS} {...themeAttr}>
+          {content}
+        </PopoverContent>
+      </Popover>
+    );
+  }
+  return (
+    <HoverCard openDelay={300} closeDelay={120}>
+      <HoverCardTrigger asChild>
+        {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the hover card also opens on keyboard focus */}
+        <span tabIndex={0} className={triggerClass}>
+          {children}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className={POPOVER_HOVER_CLASS} {...themeAttr}>
+        {content}
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+/** Cell decorations from the column config: a popover with row fields, then a styled tooltip with one row field. */
+function CellExtras({
+  column,
+  row,
+  endAligned,
+  children,
+}: {
+  column: TableColumn;
+  row: Record<string, unknown>;
+  endAligned: boolean;
+  children: ReactNode;
+}) {
+  let node = children;
+  if (column.popover) {
+    node = (
+      <CellPopover
+        popover={column.popover}
+        row={row}
+        endAligned={endAligned}
+        interactive={cellHasControls(column)}
+        label={column.label ?? column.key}
+      >
+        {node}
+      </CellPopover>
+    );
+  }
+  const tip = column.tooltip ? tipText(row[column.tooltip]) : "";
+  if (tip) {
+    node = (
+      <Tip
+        content={tip}
+        className={cn("flex w-full min-w-0 max-w-full", endAligned && "justify-end")}
+      >
+        {node}
+      </Tip>
+    );
+  }
+  return node;
 }
 
 /** The phone row's status slot, rendered like the grid cell. */
@@ -1541,10 +1757,11 @@ function TableComponent({ props }: { props: TableProps }) {
       type: endAligned ? "rightAligned" : undefined,
       // `cellClass` replaces the `rightAligned` type's own class, so keep it.
       cellClass: endAligned ? ["ag-right-aligned-cell", "tabular-nums"] : undefined,
-      tooltipField: column.tooltip,
-      headerComponentParams: catalogIcon(column.icon)
-        ? { innerHeaderComponent: IconHeader, icon: column.icon }
-        : undefined,
+      headerComponentParams: {
+        innerHeaderComponent: ColumnHeader,
+        icon: column.icon,
+        hint: column.hint,
+      },
       // AG Grid's cell-data-type inference turns a boolean column into a disabled
       // checkbox renderer, which contradicts the documented `formatCell` contract
       // (yes / no text) and reads as a broken toggle. Opt every app column out of
@@ -1556,67 +1773,91 @@ function TableComponent({ props }: { props: TableProps }) {
         const value = params.value;
         const row = (params.data ?? {}) as Record<string, unknown>;
         const raw = value === null || value === undefined ? "" : String(value);
-        switch (kind) {
-          case "badge":
-            return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
-          case "status":
-            return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
-          case "user":
-          case "agent":
-            return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
-          case "date":
-          case "relative":
-            return raw ? <RelativeTimeCell value={value} /> : null;
-          case "progress":
-            return <ProgressCell value={value} max={column.max} />;
-          case "copy":
-            return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
-          case "switch": {
-            const chain = column.onChange as ActionChain | undefined;
+        const body = ((): ReactNode => {
+          // `href` names a row field with the URL, so the cell shows its own text over it.
+          // A templated column reads the key's raw value: its cell value is the composed text.
+          if (isLinkColumn(column)) {
             return (
-              <Switch
-                checked={toFilterBoolean(value)}
-                disabled={!chain?.length}
-                aria-label={column.label ?? column.key}
-                onCheckedChange={(checked) =>
-                  void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0)
-                }
+              <SmartLink
+                // The popover already describes the row; a tooltip on the chip would stack on it.
+                noTip={Boolean(column.popover)}
+                cell={linkCell({
+                  value: template ? row[column.key] : value,
+                  row,
+                  href: column.href,
+                  linkLabel: column.linkLabel,
+                  text: column.href || template ? (params.valueFormatted ?? raw) : undefined,
+                })}
               />
             );
           }
-          case "link": {
-            const href = safeHttpUrl(value);
-            if (!href) return raw ? <span className="block min-w-0 truncate">{raw}</span> : null;
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-primary hover:underline"
-              >
-                <span className="min-w-0 truncate">{raw}</span>
-                <ExternalLink aria-hidden className="size-3 shrink-0" />
-              </a>
-            );
-          }
-          default: {
-            // AG Grid drops a plain value straight into the cell, which is a flex
-            // row — the text becomes an anonymous flex item, and `text-overflow`
-            // never applies to one, so long titles hard-clip mid-word. Wrapping
-            // the value in a real element gives the ellipsis something to bite on
-            // (and a native tooltip carrying the full text).
-            const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
-            if (!text) return null;
-            if (column.truncate === "middle") {
-              return <MiddleTruncation className="block w-full">{text}</MiddleTruncation>;
+          switch (kind) {
+            case "badge":
+              return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
+            case "status":
+              return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
+            case "user":
+            case "agent":
+              return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
+            case "date":
+            case "relative":
+              return raw ? <RelativeTimeCell value={value} /> : null;
+            case "progress":
+              return <ProgressCell value={value} max={column.max} />;
+            case "copy":
+              return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
+            case "switch": {
+              const chain = column.onChange as ActionChain | undefined;
+              return (
+                <Switch
+                  checked={toFilterBoolean(value)}
+                  disabled={!chain?.length}
+                  aria-label={column.label ?? column.key}
+                  onCheckedChange={(checked) =>
+                    void runChain(
+                      chain,
+                      { ...row, [column.key]: checked },
+                      params.node.rowIndex ?? 0,
+                    )
+                  }
+                />
+              );
             }
-            return (
-              <span className="block w-full truncate" title={column.tooltip ? undefined : text}>
-                {text}
-              </span>
-            );
+            default: {
+              // AG Grid drops a plain value straight into the cell, which is a flex
+              // row — the text becomes an anonymous flex item, and `text-overflow`
+              // never applies to one, so long titles hard-clip mid-word. Wrapping
+              // the value in a real element gives the ellipsis something to bite on
+              // (and a tooltip carrying the full text while it is cut).
+              const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
+              if (!text) return null;
+              // A column tooltip or popover already speaks for the cell.
+              const hasOwnTip = Boolean(column.tooltip || column.popover);
+              if (column.truncate === "middle") {
+                return hasOwnTip ? (
+                  <MiddleTruncation className="block w-full" title={undefined}>
+                    {text}
+                  </MiddleTruncation>
+                ) : (
+                  <MiddleText text={text} className="block w-full" />
+                );
+              }
+              return hasOwnTip ? (
+                <span className="block w-full truncate">{text}</span>
+              ) : (
+                <OverflowTip content={text} className="block w-full truncate">
+                  {text}
+                </OverflowTip>
+              );
+            }
           }
-        }
+        })();
+        if (body === null) return null;
+        return (
+          <CellExtras column={column} row={row} endAligned={endAligned}>
+            {body}
+          </CellExtras>
+        );
       },
     };
   });
@@ -1730,6 +1971,51 @@ function TableComponent({ props }: { props: TableProps }) {
     const column = columnByKey.get(key);
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
   };
+  // A link column leaves the meta text (it renders as a chip below) and a
+  // popover column gets a details button. Those actions cover every column of
+  // the table, not only the ones that show text: a PR column behind Owner and
+  // Date would otherwise be unreachable on a phone.
+  const metaTextKeys = metaKeys.filter((key) => {
+    const column = columnByKey.get(key);
+    return !column || !isLinkColumn(column);
+  });
+  // The row itself is one button when `onRowClick` is set, so links and popover
+  // buttons sit under it, never inside it. Hover cards do not open on touch, so
+  // every phone popover opens from a button, whatever its `trigger`.
+  const mobileExtras = (row: Record<string, unknown>): ReactNode => {
+    const items: ReactNode[] = [];
+    for (const column of columns) {
+      const key = column.key;
+      if (isLinkColumn(column)) {
+        const cell = linkCell({
+          value: row[column.key],
+          row,
+          href: column.href,
+          linkLabel: column.linkLabel,
+          text: column.href || column.format ? mobileCellText(key, row) : undefined,
+        });
+        if (cell.target || cell.label) {
+          items.push(
+            <span key={`link:${key}`} className="inline-flex min-w-0 max-w-full">
+              <SmartLink cell={cell} noTip={Boolean(column.popover)} />
+            </span>,
+          );
+        }
+      }
+      if (column.popover) {
+        items.push(
+          <DetailsButton
+            key={`details:${key}`}
+            popover={column.popover}
+            row={row}
+            label={`Details: ${column.label ?? column.key}`}
+            text="Details"
+          />,
+        );
+      }
+    }
+    return items.length > 0 ? items : undefined;
+  };
   const mobileRow =
     mobileMode === "list"
       ? (row: Record<string, unknown>): ListViewMobileRow => ({
@@ -1740,7 +2026,8 @@ function TableComponent({ props }: { props: TableProps }) {
                 row[statusKey],
               )
             : undefined,
-          meta: metaKeys.map((key) => mobileCellText(key, row)),
+          meta: metaTextKeys.map((key) => mobileCellText(key, row)),
+          extras: mobileExtras(row),
         })
       : undefined;
 
@@ -2282,6 +2569,26 @@ function DrawerActionsFooter({ actions }: { actions: DrawerAction[] }) {
   );
 }
 
+// ─── Markdown ───────────────────────────────────────────────────────────────
+
+const MARKDOWN_COMPONENTS = { "swarm-link": SwarmLinkChip };
+
+/**
+ * The `Markdown` block. Links to a GitHub PR / issue / commit / repo, a
+ * dashboard page or an agent-fs file render as the dashboard's link chips, the
+ * same as agent output in a session; `[text](url)` keeps its text.
+ */
+function MarkdownBlock({ content }: { content: string }) {
+  const rehypePlugins = useSwarmLinkPlugins();
+  return (
+    <div className="prose-doc min-w-0 text-foreground">
+      <Streamdown rehypePlugins={rehypePlugins} components={MARKDOWN_COMPONENTS}>
+        {content}
+      </Streamdown>
+    </div>
+  );
+}
+
 // ─── DetailList ─────────────────────────────────────────────────────────────
 
 /** A JSON-ish field value as a tree: objects as-is, a JSON string parsed. */
@@ -2299,10 +2606,29 @@ function jsonFieldData(value: unknown): unknown {
  * (status chip, person, relative time, copy). `code` gets a monospace block;
  * `json` the collapsible `JsonViewer` tree.
  */
-function DetailFieldValue({ field, value }: { field: DetailListField; value: unknown }) {
+function DetailFieldValue({
+  field,
+  value,
+  data,
+}: {
+  field: DetailListField;
+  value: unknown;
+  /** The record the field reads, for `href`. */
+  data?: Record<string, unknown>;
+}) {
   const raw = value === null || value === undefined ? "" : String(value);
   const dash = <span className="text-muted-foreground">—</span>;
   switch (field.kind) {
+    case "link": {
+      const cell = linkCell({
+        value,
+        row: data ?? {},
+        href: field.href,
+        linkLabel: field.linkLabel,
+        text: field.href ? raw : undefined,
+      });
+      return cell.target || cell.label ? <SmartLink cell={cell} /> : dash;
+    }
     case "badge":
       return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : dash;
     case "status":
@@ -2373,13 +2699,32 @@ function DetailListComponent({ props }: { props: DetailListComponentProps }) {
   }
 
   return (
-    <DefinitionList
+    <DetailFieldsView
+      fields={fields}
+      data={data}
       className={cn(props.columns === 2 && "grid grid-cols-1 gap-3 space-y-0 sm:grid-cols-2")}
-      data-testid="json-render-detail-list"
-    >
-      {fields.map((field) => (
-        <InfoRow key={field.key} label={field.label ?? field.key}>
-          <DetailFieldValue field={field} value={data[field.key]} />
+      testId="json-render-detail-list"
+    />
+  );
+}
+
+/** Label/value rows for the fields of one record: the body of `DetailList` and of a Table cell popover. */
+function DetailFieldsView({
+  fields,
+  data,
+  className,
+  testId,
+}: {
+  fields: DetailListField[];
+  data: Record<string, unknown>;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <DefinitionList className={className} data-testid={testId}>
+      {fields.map((field, index) => (
+        <InfoRow key={`${index}:${field.key}`} label={field.label ?? field.key}>
+          <DetailFieldValue field={field} value={data[field.key]} data={data} />
         </InfoRow>
       ))}
     </DefinitionList>
@@ -2575,7 +2920,11 @@ function KanbanComponent({ props }: { props: KanbanComponentProps }) {
                         key={field.key}
                       >
                         <span className="text-muted-foreground">{field.label ?? field.key}</span>
-                        <DetailFieldValue field={field} value={item.row[field.key]} />
+                        <DetailFieldValue
+                          field={field}
+                          value={item.row[field.key]}
+                          data={item.row}
+                        />
                       </div>
                     ))}
                   </div>
@@ -2747,7 +3096,21 @@ const CARD_GRID_SKELETON_COUNT = 3;
 const CARD_GRID_DEFAULT_COLUMNS: GridColumns = { base: 1, sm: 2, md: 3 };
 
 /** One `CardGrid.fields[]` entry rendered into the `·`-joined meta line, or `null` to skip it (empty value). */
-function cardGridMetaItem(field: CardGridField, value: unknown): ReactNode | null {
+function cardGridMetaItem(
+  field: CardGridField,
+  value: unknown,
+  row: Record<string, unknown>,
+): ReactNode | null {
+  if (field.kind === "link") {
+    const cell = linkCell({
+      value,
+      row,
+      href: field.href,
+      linkLabel: field.linkLabel,
+      text: field.href ? cardGridCapText(formatValue(undefined, value)) : undefined,
+    });
+    return cell.target || cell.label ? <SmartLink cell={cell} /> : null;
+  }
   if (field.kind === "badge") {
     const raw = value === null || value === undefined ? "" : cardGridCapText(String(value));
     return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : null;
@@ -2860,7 +3223,7 @@ function CardGridComponent({ props }: { props: CardGridComponentProps }) {
           const metaItems = fields
             .map((field, itemIndex) => ({
               key: `${itemIndex}:${field.key}`,
-              node: cardGridMetaItem(field, row[field.key]),
+              node: cardGridMetaItem(field, row[field.key], row),
             }))
             .filter((item): item is { key: string; node: ReactNode } => item.node !== null);
           const activate = clickable ? () => void runChain(onClick, row, index) : undefined;
@@ -2891,12 +3254,11 @@ function CardGridComponent({ props }: { props: CardGridComponentProps }) {
             >
               {props.imageKey ? <CardGridImage value={row[props.imageKey]} /> : null}
               <CardContent className="flex flex-col gap-1.5 p-4">
-                <p
-                  className="m-0 line-clamp-2 text-sm font-medium text-foreground"
-                  title={titleText}
-                >
-                  {titleText}
-                </p>
+                <OverflowTip content={titleText} className="block">
+                  <p className="m-0 line-clamp-2 text-sm font-medium text-foreground">
+                    {titleText}
+                  </p>
+                </OverflowTip>
                 {metaItems.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     {metaItems.map((item, itemIndex) => (
@@ -3209,11 +3571,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,
-  Markdown: ({ props }) => (
-    <div className="prose-doc min-w-0 text-foreground">
-      <Streamdown>{props.content}</Streamdown>
-    </div>
-  ),
+  Markdown: ({ props }) => <MarkdownBlock content={props.content} />,
   Container: ({ props, children }) => {
     const direction = props.direction ?? "column";
     const gap = props.gap ?? "md";

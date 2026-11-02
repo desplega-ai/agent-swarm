@@ -495,6 +495,71 @@ const sectionProps = z.object({
   defaultOpen: z.boolean().optional(),
 });
 
+/** Link cell options shared by Table columns, DetailList fields and CardGrid fields. */
+const linkOptions = {
+  /**
+   * Row field holding the URL the cell links to, so the cell can show one
+   * field and link with another (a `repo#number` cell over the PR `url`).
+   * Without it a `link` cell's own value is the URL.
+   */
+  href: z.string().optional(),
+  /**
+   * `{{field}}` template for the text a link shows instead of its derived
+   * label (`"{{repo}}#{{number}}"`, `"Lead review"`). Same placeholder rules
+   * as Table `format`.
+   */
+  linkLabel: z.string().optional(),
+};
+
+const detailListFieldSchema = z.object({
+  /** Property key in the bound `data` object (usually a model column name). */
+  key: z.string(),
+  /** Display label; defaults to the key. */
+  label: z.string().optional(),
+  /**
+   * Same rendering kinds as Table columns (`badge` → status pill, `date` →
+   * smart relative time; `string`/`enum` are aliases of `text`), plus `code`
+   * for a monospace block (raw JSON / provenance values), and `link`: a
+   * smart link chip (GitHub PR / issue / commit / repo, dashboard, agent-fs)
+   * from the value or from `href`.
+   */
+  kind: z
+    .enum([
+      "text",
+      "string",
+      "number",
+      "boolean",
+      "date",
+      "badge",
+      "enum",
+      "code",
+      "status",
+      "user",
+      "relative",
+      "copy",
+      "link",
+      "json",
+    ])
+    .optional(),
+  /** For `kind: "badge"` / `"status"` — value → badge tone. Falls back to `neutral`. */
+  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  ...linkOptions,
+});
+
+/**
+ * A popover on a Table cell. Opens on hover (and focus) by default, or on
+ * click; it lists several fields of the cell's row with the DetailList field
+ * shape.
+ */
+const cellPopoverSchema = z.object({
+  /** `{{field}}` template for the popover heading. */
+  title: z.string().optional(),
+  /** Row fields to list, same shape as `DetailList.fields`. */
+  fields: z.array(detailListFieldSchema).min(1).max(12),
+  /** `hover` (default, also opens on keyboard focus) or `click`, which keeps it open until dismissed. */
+  trigger: z.enum(["hover", "click"]).optional(),
+});
+
 const tableColumnSchema = z.object({
   key: z.string(),
   label: z.string().optional(),
@@ -548,6 +613,11 @@ const tableColumnSchema = z.object({
   icon: iconName.optional(),
   /** Row field shown as a hover tooltip on the cell. */
   tooltip: z.string().optional(),
+  /** Explanation shown in a tooltip on the column header (which also shows a truncated label in full). */
+  hint: z.string().optional(),
+  /** Hover or click popover listing several fields of the row. */
+  popover: cellPopoverSchema.optional(),
+  ...linkOptions,
   /** For `kind: "progress"` — the value that means 100%. Defaults to 100. */
   max: z.number().positive().optional(),
   /**
@@ -713,37 +783,6 @@ const drawerProps = z.object({
   actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
 });
 
-const detailListFieldSchema = z.object({
-  /** Property key in the bound `data` object (usually a model column name). */
-  key: z.string(),
-  /** Display label; defaults to the key. */
-  label: z.string().optional(),
-  /**
-   * Same rendering kinds as Table columns (`badge` → status pill, `date` →
-   * smart relative time; `string`/`enum` are aliases of `text`), plus `code`
-   * for a monospace block (raw JSON / provenance values).
-   */
-  kind: z
-    .enum([
-      "text",
-      "string",
-      "number",
-      "boolean",
-      "date",
-      "badge",
-      "enum",
-      "code",
-      "status",
-      "user",
-      "relative",
-      "copy",
-      "json",
-    ])
-    .optional(),
-  /** For `kind: "badge"` / `"status"` — value → badge tone. Falls back to `neutral`. */
-  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
-});
-
 const detailListProps = z.object({
   /** Usually `{ "$state": "/queries/<name>/data/0" }` — one record object. */
   data: z.record(z.string(), z.unknown()).nullish(),
@@ -829,12 +868,15 @@ const cardGridFieldSchema = z.object({
   key: z.string(),
   /**
    * One of `text`, `string`, `enum`, `number`, `boolean`, `date` (smart
-   * relative time), `badge` (status pill) or `json` (truncated single-line
-   * preview). Without a kind, an object/array value renders like `json`.
+   * relative time), `badge` (status pill), `link` (smart link chip) or `json`
+   * (truncated single-line preview). Without a kind, an object/array value renders like `json`.
    */
-  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum", "json"]).optional(),
+  kind: z
+    .enum(["text", "string", "number", "boolean", "date", "badge", "enum", "link", "json"])
+    .optional(),
   /** For `kind: "badge"` — value → badge tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  ...linkOptions,
 });
 
 const cardGridProps = z.object({
@@ -951,7 +993,7 @@ export const swarmCatalogSpec = {
     Markdown: {
       props: markdownProps,
       description:
-        "Rendered markdown block — headings, lists, links, tables, fenced code. Use it for prose (about/help sections, instructions); use `Text` for a single plain paragraph.",
+        "Rendered markdown block — headings, lists, links, tables, fenced code. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip with an icon and a short label (`[text](url)` keeps its text). Use it for prose (about/help sections, instructions); use `Text` for a single plain paragraph.",
     },
     SearchInput: {
       props: searchInputProps,
@@ -1042,7 +1084,7 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu).',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu).',
     },
     Form: {
       props: formProps,
@@ -1058,12 +1100,12 @@ export const swarmCatalogSpec = {
     DetailList: {
       props: detailListProps,
       description:
-        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
     CardGrid: {
       props: cardGridProps,
       description:
-        "Responsive grid of data-bound cards, one per row \u2014 the visual counterpart to `Table` for record browsers (projects, documents, media). Bind `data`/`loading`/`error` to a named query like Table. `titleKey` picks the row field shown as the card title. `imageKey` picks a row field holding an absolute http(s) image URL and adds an image tile to every card (a non-URL value or a failed load shows a placeholder); omit it for text-only cards. `fields` render as an unlabeled `\u00b7`-joined meta line under the title; each field's `kind` is one of `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`) or `json`. `onClick` is an action chain (params may use `$row` / `$rowIndex`) dispatched on card click or Enter/Space, commonly `app.navigate` into a detail page. `columns` is the same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). Renders 200 cards at a time with a Show more button.",
+        "Responsive grid of data-bound cards, one per row \u2014 the visual counterpart to `Table` for record browsers (projects, documents, media). Bind `data`/`loading`/`error` to a named query like Table. `titleKey` picks the row field shown as the card title. `imageKey` picks a row field holding an absolute http(s) image URL and adds an image tile to every card (a non-URL value or a failed load shows a placeholder); omit it for text-only cards. `fields` render as an unlabeled `\u00b7`-joined meta line under the title; each field's `kind` is one of `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`), `link` (a smart link chip, with `href` / `linkLabel` like a Table column) or `json`. `onClick` is an action chain (params may use `$row` / `$rowIndex`) dispatched on card click or Enter/Space, commonly `app.navigate` into a detail page. `columns` is the same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). Renders 200 cards at a time with a Show more button.",
     },
     Kanban: {
       props: kanbanProps,

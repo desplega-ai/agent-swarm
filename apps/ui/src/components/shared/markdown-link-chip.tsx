@@ -2,12 +2,15 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   Cable,
+  CircleDot,
   ClipboardCheck,
   Clock,
   Contact,
   FileClock,
   FileText,
   FolderGit,
+  GitCommitHorizontal,
+  GitPullRequest,
   Globe,
   LayoutGrid,
   Link2,
@@ -17,7 +20,7 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { defaultRehypePlugins, type ExtraProps, type StreamdownProps } from "streamdown";
 import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
@@ -30,11 +33,14 @@ import { shortId } from "@/lib/short-id";
 import {
   DASHBOARD_ROUTES,
   type DashboardRoute,
+  githubLabel,
+  githubTitle,
   parseSwarmLink,
   type SwarmLink,
   type SwarmLinkOrigins,
 } from "@/lib/swarm-links";
 import { taskListTitle } from "@/lib/task-title";
+import { cn } from "@/lib/utils";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 
 /** The sidebar's icon for each route. */
@@ -174,25 +180,42 @@ function textOf(node: HastNode | undefined): string {
 
 const withoutScheme = (value: string) => value.replace(/^https?:\/\//i, "").replace(/\/$/, "");
 
-/**
- * A link to this swarm as a chip: the kind's icon and a short label. A
- * dashboard link reads as its name when the dashboard has it ("Page
- * cfd9bc4b" otherwise) and opens in the same tab. A drive file reads as its
- * name, with the path in the tooltip, and opens in Comb while Comb is
- * connected, else in a new tab. A share link reads "Shared file". Link text
- * that is not the URL stays as written.
- */
-export function SwarmLinkChip({ href, children, node }: Record<string, unknown> & ExtraProps) {
-  const origins = useSwarmLinkOrigins();
-  const link = typeof href === "string" ? parseSwarmLink(href, origins) : null;
-  const name = useLinkName(link);
-  const combTo = useCombLinks()(link?.type === "file" ? link.href : null);
-  if (!link) return <>{children as ReactNode}</>;
+const GITHUB_ICONS = {
+  pull: GitPullRequest,
+  ref: GitPullRequest,
+  issue: CircleDot,
+  commit: GitCommitHorizontal,
+  repo: FolderGit,
+} as const;
 
-  const written = textOf(node as HastNode | undefined).trim();
-  const isUrl = !written || written === href || withoutScheme(written) === withoutScheme(link.href);
+/**
+ * One parsed link as a chip: the kind's icon and a short label. A dashboard
+ * link reads as its name when the dashboard has it ("Page cfd9bc4b" otherwise)
+ * and opens in the same tab. A drive file reads as its name, with the path in
+ * the tooltip, and opens in Comb while Comb is connected, else in a new tab. A
+ * share link reads "Shared file". A GitHub PR / issue / commit / repo reads
+ * `repo#N`, `repo@sha` or `owner/repo` and opens in a new tab. `label`
+ * replaces the derived text (a cell that shows `agent-swarm#2605` over a PR
+ * URL, or markdown link text that is not the URL).
+ */
+export function SwarmLinkView({
+  link,
+  label: override,
+  className,
+  onClick,
+  noTip = false,
+}: {
+  link: SwarmLink;
+  label?: ReactNode;
+  className?: string;
+  /** Skip the hover tooltip, for a chip inside something that already explains it. */
+  noTip?: boolean;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
+}) {
+  const name = useLinkName(link);
+  const combTo = useCombLinks()(link.type === "file" ? link.href : null);
   let icon: ReactNode;
-  let label: string;
+  let label: ReactNode;
   let tip: string;
   let to: string | null = null;
   const iconClass = "size-3.5 shrink-0 self-center text-muted-foreground";
@@ -207,28 +230,51 @@ export function SwarmLinkChip({ href, children, node }: Record<string, unknown> 
     label = link.name;
     tip = link.path;
     to = combTo;
+  } else if (link.type === "github") {
+    const Icon = GITHUB_ICONS[link.kind];
+    icon = <Icon aria-hidden className={iconClass} />;
+    label = githubLabel(link);
+    tip = githubTitle(link);
   } else {
     icon = <Link2 aria-hidden className={iconClass} />;
     label = link.name ?? "Shared file";
     tip = "Shared agent-fs file";
   }
   return (
-    <Tooltip>
+    <Tooltip open={noTip ? false : undefined}>
       <TooltipTrigger asChild>
         <InAppOrExternalLink
           to={to}
           href={link.href}
           data-slot="swarm-link"
+          onClick={onClick}
           // `!`: the unlayered `.prose-chat a` rules would underline it on hover.
-          className="hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
+          className={cn(
+            "hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60",
+            className,
+          )}
         >
           {icon}
           <span className="min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap">
-            {isUrl ? label : (children as ReactNode)}
+            {override ?? label}
           </span>
         </InAppOrExternalLink>
       </TooltipTrigger>
       <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
   );
+}
+
+/**
+ * A markdown link to something of this swarm or GitHub as a chip
+ * (`SwarmLinkView`). Link text that is not the URL stays as written.
+ */
+export function SwarmLinkChip({ href, children, node }: Record<string, unknown> & ExtraProps) {
+  const origins = useSwarmLinkOrigins();
+  const link = typeof href === "string" ? parseSwarmLink(href, origins) : null;
+  if (!link) return <>{children as ReactNode}</>;
+
+  const written = textOf(node as HastNode | undefined).trim();
+  const isUrl = !written || written === href || withoutScheme(written) === withoutScheme(link.href);
+  return <SwarmLinkView link={link} label={isUrl ? undefined : (children as ReactNode)} />;
 }
