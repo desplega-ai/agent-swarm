@@ -1,0 +1,64 @@
+---
+title: "Release Notes — Week of October 26 to November 2, 2026"
+description: "Agent Swarm 2.7 makes the first hour one click: cloud-init, DigitalOcean and Railway deploys, a short install URL with an automatic tunnel, and onboarding that bundles agent-fs and local embeddings, across eight releases and 179 commits."
+---
+
+Eight releases shipped this week, v2.7.0 through v2.7.7, on 179 commits. Of the 150 commits inside this week's audit window, 36 are features and 52 are fixes. The through-line: the first hour of a new swarm got short, then the thousandth task got easier to find, run and review.
+
+> **Heads up: no API removals this week, but five defaults moved.** Tasks have a new terminal status, `skipped`, so a client that switches on task status should treat it as terminal ([#2571](https://github.com/desplega-ai/agent-swarm/pull/2571)). pi now defers tools by default, including installed MCP servers, so tools load on demand ([#2453](https://github.com/desplega-ai/agent-swarm/pull/2453)). The Files page turns on by default when the browser can reach agent-fs ([#2544](https://github.com/desplega-ai/agent-swarm/pull/2544)). New installs seed fewer default schedules, and the update check runs as a script now; existing schedules are untouched ([#2612](https://github.com/desplega-ai/agent-swarm/pull/2612)). An empty `outputSchema` object now means "no schema" instead of a validation error ([#2633](https://github.com/desplega-ai/agent-swarm/pull/2633)).
+
+## Highlights
+
+### Deploy with one click
+
+[#2528](https://github.com/desplega-ai/agent-swarm/pull/2528) gives you three deploy paths that need no terminal: cloud-init user data on any VM, a DigitalOcean image, and a Railway template. Setup shows the deploy buttons, and the instance lands with the stack already configured.
+
+### One short command, an automatic tunnel
+
+[#2498](https://github.com/desplega-ai/agent-swarm/pull/2498) shortens the install to a single curl to a short URL, then opens a tunnel automatically. Webhooks and the UI work from a laptop, so a first swarm no longer needs a public host before you can test a Slack integration. Walkthrough: [Getting started](/docs/getting-started).
+
+### Onboarding that ships with the batteries
+
+[#2442](https://github.com/desplega-ai/agent-swarm/pull/2442) is the largest change of the week at 323 files. New swarms come up with agent-fs provisioned and local embeddings running, so shared files and memory search work before you configure anything, and setup can invite teammates through a join link. Six follow-ups closed the rough edges: the first task step finishes when its task tree settles ([#2497](https://github.com/desplega-ai/agent-swarm/pull/2497)), the default lead profile saves on first boot ([#2537](https://github.com/desplega-ai/agent-swarm/pull/2537)), the first session is prepared before you leave setup ([#2542](https://github.com/desplega-ai/agent-swarm/pull/2542)), saved model configs are awaited ([#2559](https://github.com/desplega-ai/agent-swarm/pull/2559)), every agent switches to the first credential's harness ([#2460](https://github.com/desplega-ai/agent-swarm/pull/2460)), and `members/invite` returns pending invite state with an accept link ([#2478](https://github.com/desplega-ai/agent-swarm/pull/2478)). Docs: [agent-fs co-deployment](/docs/guides/agent-fs-co-deployment), [team collaboration](/docs/features/team-collaboration).
+
+### Sessions and tasks, rebuilt for review
+
+A session and a task no longer tell you different stories: the transcript, the review round and the created task all resolve to the same place.
+
+- Sessions and task details share one transcript, so a thread reads the same in both places ([#2587](https://github.com/desplega-ai/agent-swarm/pull/2587)).
+- Review rounds arrive on the sessions and task pages, with dev review notes attached ([#2595](https://github.com/desplega-ai/agent-swarm/pull/2595)).
+- Task creation gets simpler, and a session draft keeps the half-written task you navigated away from ([#2609](https://github.com/desplega-ai/agent-swarm/pull/2609)).
+- Groups sit under the Inbox, no longer duplicate, and close themselves with auto-Done ([#2566](https://github.com/desplega-ai/agent-swarm/pull/2566)).
+- Cmd+K is rebuilt from the route table and a search provider registry, so every page is reachable without a second list to maintain ([#2514](https://github.com/desplega-ai/agent-swarm/pull/2514)).
+- Admins get an opt-in All users read scope ([#2630](https://github.com/desplega-ai/agent-swarm/pull/2630)).
+
+Docs: [Sessions](/docs/ui/sessions).
+
+### Tasks that are easier to find and close
+
+Every new task gets a generated display title, so a list of prompts becomes a list of names ([#2604](https://github.com/desplega-ai/agent-swarm/pull/2604)). Task search runs on an FTS5 token index instead of a substring scan ([#2553](https://github.com/desplega-ai/agent-swarm/pull/2553)). A task can end as `skipped`, with a configurable Slack reaction for the message that triggered it ([#2571](https://github.com/desplega-ai/agent-swarm/pull/2571)). Docs: [task lifecycle](/docs/concepts/task-lifecycle).
+
+## Improvements
+
+- **Runtimes, harnesses and models** — fx is a native harness provider ([#2576](https://github.com/desplega-ai/agent-swarm/pull/2576)); boxd joins as a runtime-pool provider ([#2354](https://github.com/desplega-ai/agent-swarm/pull/2354), fix in [#2594](https://github.com/desplega-ai/agent-swarm/pull/2594)); runtime pools take optional persistent caches ([#2577](https://github.com/desplega-ai/agent-swarm/pull/2577)); pi runs ChatGPT models on the `codex_oauth` subscription pool ([#2574](https://github.com/desplega-ai/agent-swarm/pull/2574)); credential availability matches by key suffix instead of the global pool index, so removing one key stops shifting every slot after it ([#2436](https://github.com/desplega-ai/agent-swarm/pull/2436)). Docs: [harness providers](/docs/guides/harness-providers).
+- **Slack and agents** — an agent leaves a thread until the next @mention, and a person can say `!leave` ([#2570](https://github.com/desplega-ai/agent-swarm/pull/2570), [#2585](https://github.com/desplega-ai/agent-swarm/pull/2585)); `SLACK_THREAD_WAKE_ON_ANY_MESSAGE` opts into waking on any thread reply ([#2567](https://github.com/desplega-ai/agent-swarm/pull/2567)); each agent can carry its own Slack icon ([#2551](https://github.com/desplega-ai/agent-swarm/pull/2551)). Docs: [Slack](/docs/integrations/slack).
+- **Workflows, scripts and memory** — workflow script nodes read environment variables ([#2560](https://github.com/desplega-ai/agent-swarm/pull/2560)); the follow-up re-delegation guard now covers `ctx.step.agentTask` ([#2596](https://github.com/desplega-ai/agent-swarm/pull/2596)); extension hooks can block and rewrite task steering ([#2575](https://github.com/desplega-ai/agent-swarm/pull/2575)); stored memory vectors re-embed when the embedding space changes, so a model swap does not silently break search ([#2487](https://github.com/desplega-ai/agent-swarm/pull/2487)); `store-progress` takes an optional `learning` that writes a swarm memory, and skips it when it near-duplicates one you already have ([#2472](https://github.com/desplega-ai/agent-swarm/pull/2472), [#2485](https://github.com/desplega-ai/agent-swarm/pull/2485)); the dreaming loop ships seeded with a daily schedule and a guide ([#2443](https://github.com/desplega-ai/agent-swarm/pull/2443), [#2572](https://github.com/desplega-ai/agent-swarm/pull/2572), [#2552](https://github.com/desplega-ai/agent-swarm/pull/2552)). Docs: [memory](/docs/architecture/memory), [dreaming](/docs/guides/dreaming), [task steering](/docs/guides/task-steering).
+- **Pages, Files and UI** — Pages get a token-based design system ([#2607](https://github.com/desplega-ai/agent-swarm/pull/2607)); Files is on by default ([#2544](https://github.com/desplega-ai/agent-swarm/pull/2544)), a file's contents copy from the header button ([#2555](https://github.com/desplega-ai/agent-swarm/pull/2555)), and sends from the Files page are attributed to the comment author and shown in sessions ([#2545](https://github.com/desplega-ai/agent-swarm/pull/2545)). Docs: [comb](/docs/ui/comb).
+- **Performance** — synchronous SQLite work and queued writers no longer starve the API event loop ([#2588](https://github.com/desplega-ai/agent-swarm/pull/2588), [#2614](https://github.com/desplega-ai/agent-swarm/pull/2614)); the slow queries from a query audit are indexed and rewritten ([#2531](https://github.com/desplega-ai/agent-swarm/pull/2531), [#2489](https://github.com/desplega-ai/agent-swarm/pull/2489), [#2615](https://github.com/desplega-ai/agent-swarm/pull/2615)); session lists, counts and trees read from trigger-kept summary tables ([#2534](https://github.com/desplega-ai/agent-swarm/pull/2534), [#2569](https://github.com/desplega-ai/agent-swarm/pull/2569), [#2535](https://github.com/desplega-ai/agent-swarm/pull/2535)); the native script executor starts faster ([#2484](https://github.com/desplega-ai/agent-swarm/pull/2484)).
+- **Benchmarks** — the benchmark publishes dated snapshots rather than overwriting one page, and 1.0 is out ([#2491](https://github.com/desplega-ai/agent-swarm/pull/2491), [#2621](https://github.com/desplega-ai/agent-swarm/pull/2621)).
+- **Docs and playbooks** — two new playbooks, [Linear Delivery Loop](/docs/playbooks/linear-delivery-loop) and [Slack Reply Gate](/docs/playbooks/slack-reply-gate) ([#2463](https://github.com/desplega-ai/agent-swarm/pull/2463), [#2492](https://github.com/desplega-ai/agent-swarm/pull/2492)); [host requirements and Docker disk cleanup](/docs/guides/host-requirements) ([#2475](https://github.com/desplega-ai/agent-swarm/pull/2475)); model tier selection in the [task lifecycle](/docs/concepts/task-lifecycle) ([#2629](https://github.com/desplega-ai/agent-swarm/pull/2629)).
+
+## Bug Fixes
+
+- Usage and cost are recorded correctly for pi and Codex, including a long lead session that settles or aborts ([#2618](https://github.com/desplega-ai/agent-swarm/pull/2618), [#2480](https://github.com/desplega-ai/agent-swarm/pull/2480)).
+- Codex sub-agent spawns fork context by persisting app-server threads, the app-server launches on the gateway provider, and a duplicate login or an OAuth pool failure now names the slot in the error ([#2506](https://github.com/desplega-ai/agent-swarm/pull/2506), [#2606](https://github.com/desplega-ai/agent-swarm/pull/2606), [#2508](https://github.com/desplega-ai/agent-swarm/pull/2508), [#2482](https://github.com/desplega-ai/agent-swarm/pull/2482)).
+- A model output limit is classified as a model output limit, not as a credential failure ([#2592](https://github.com/desplega-ai/agent-swarm/pull/2592)).
+- Profile sync never overwrites a DB edit with a profile file nobody touched ([#2600](https://github.com/desplega-ai/agent-swarm/pull/2600)).
+- Follow-up sessions dispatch their own distinct next steps, a deferred completion creates no worker follow-up, and the promoted task's status is read before claiming a follow-up started ([#2589](https://github.com/desplega-ai/agent-swarm/pull/2589), [#2558](https://github.com/desplega-ai/agent-swarm/pull/2558), [#2590](https://github.com/desplega-ai/agent-swarm/pull/2590)).
+- Slack keeps table blocks and shared-message files on inbound messages, and processes an event whose socket ack failed because the client was not ready ([#2561](https://github.com/desplega-ai/agent-swarm/pull/2561), [#2490](https://github.com/desplega-ai/agent-swarm/pull/2490)).
+- Steering receipts appear in session timelines ([#2613](https://github.com/desplega-ai/agent-swarm/pull/2613)).
+- Pages fail closed on cookies and `frame-ancestors` when `NODE_ENV` is unset ([#2610](https://github.com/desplega-ai/agent-swarm/pull/2610), [#2608](https://github.com/desplega-ai/agent-swarm/pull/2608)).
+- Test and demo swarms stay out of production telemetry ([#2499](https://github.com/desplega-ai/agent-swarm/pull/2499)).
+- The task search backfill keeps converging when it meets a locked database ([#2556](https://github.com/desplega-ai/agent-swarm/pull/2556)).
+
+About 52 fixes merged this week. The rest are smaller correctness and rendering repairs across the harness adapters, the scheduler and the dashboard.
