@@ -42,7 +42,7 @@
                 {
                   "key": "author",
                   "label": "Author",
-                  "width": 130,
+                  "width": 136,
                   "filter": "values"
                 },
                 {
@@ -53,7 +53,7 @@
                     "draft": "paused",
                     "ready": "neutral"
                   },
-                  "width": 96
+                  "width": 112
                 },
                 {
                   "key": "ci",
@@ -65,7 +65,7 @@
                     "pending": "pending",
                     "none": "neutral"
                   },
-                  "width": 122,
+                  "width": 136,
                   "muted": [
                     "none"
                   ]
@@ -85,7 +85,7 @@
                     "stack-needs-rebase": "error",
                     "draft": "paused"
                   },
-                  "width": 156
+                  "width": 168
                 },
                 {
                   "key": "queue",
@@ -95,7 +95,7 @@
                     "no": "neutral",
                     "no MQ": "paused"
                   },
-                  "width": 132,
+                  "width": 146,
                   "muted": [
                     "no"
                   ]
@@ -110,7 +110,7 @@
                     "failed": "error",
                     "none": "neutral"
                   },
-                  "width": 122,
+                  "width": 138,
                   "muted": [
                     "none"
                   ]
@@ -119,7 +119,7 @@
                   "key": "jevFindings",
                   "label": "Findings",
                   "kind": "number",
-                  "width": 92
+                  "width": 104
                 },
                 {
                   "key": "lead",
@@ -132,7 +132,7 @@
                     "changes requested, head moved": "warning",
                     "none": "neutral"
                   },
-                  "width": 196,
+                  "width": 200,
                   "muted": [
                     "none"
                   ]
