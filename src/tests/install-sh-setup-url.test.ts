@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { generateCompose } from "../commands/onboard/compose-generator.ts";
 import { type DeployStubs, makeDeployStubs } from "./deploy-stubs";
+import { baselineState } from "./fixtures/onboard/baseline-states.ts";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const INSTALL_SH = resolve(import.meta.dir, "../../install.sh");
@@ -16,6 +18,17 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  const pidFile = join(installDir, ".agent-swarm/tunnel.pid");
+  if (await Bun.file(pidFile).exists()) {
+    const pid = Number((await Bun.file(pidFile).text()).trim());
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // The tunnel fixture already exited.
+      }
+    }
+  }
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -71,9 +84,19 @@ describe("install.sh setup link", () => {
     async () => {
       const out = await install(["--tunnel"], async () => {
         const lt = join(dir, "bin/lt");
+        // Stay up after printing. A stub that exits immediately lets the
+        // installer read an empty log, notice the process is gone, and fail
+        // with "tunnel did not report a URL".
         await Bun.write(
           lt,
-          '#!/bin/sh\nif [ "$1" = --help ]; then echo lt.desplega.ai; else echo https://fixture.lt.desplega.ai; fi\n',
+          `#!/bin/sh
+if [ "$1" = --help ]; then
+  echo lt.desplega.ai
+  exit 0
+fi
+echo "https://fixture.lt.desplega.ai"
+exec sleep 300
+`,
         );
         await chmod(lt, 0o755);
         const curl = join(dir, "bin/curl");
@@ -97,15 +120,53 @@ describe("install.sh setup link", () => {
   );
 
   test(
-    "a re-run reads the preferred API key from the existing .env",
+    "a re-run uses the API_KEY the generated compose passes into the server",
     async () => {
-      await Bun.write(join(installDir, "docker-compose.yml"), "services: {}\n");
+      const compose = generateCompose(baselineState("solo"));
+      const swarmApi = compose.slice(
+        compose.indexOf("\n  swarm-api:"),
+        compose.indexOf("\n  worker-"),
+      );
+      expect(swarmApi).toContain("API_KEY=");
+      expect(swarmApi).not.toContain("AGENT_SWARM_API_KEY");
+      const serverKey = "compose-passed-api-key";
+      await Bun.write(join(installDir, "docker-compose.yml"), compose);
       await Bun.write(
         join(installDir, ".env"),
-        `AGENT_SWARM_API_KEY=${API_KEY}\nAPI_KEY=legacy-fixture\n`,
+        `AGENT_SWARM_API_KEY=${API_KEY}\nAPI_KEY=${serverKey}\n`,
       );
       const out = await install(["--no-tunnel"]);
       expect(out).not.toContain(API_KEY);
+      expect(out).not.toContain(serverKey);
+      const url = new URL(
+        (await Bun.file(join(installDir, ".agent-swarm/setup-url")).text()).trim(),
+      );
+      expect(url.searchParams.get("apiKey")).toBe(serverKey);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "a re-run prefers AGENT_SWARM_API_KEY when compose injects it into the server",
+    async () => {
+      const serverKey = "compose-passed-api-key";
+      await Bun.write(
+        join(installDir, "docker-compose.yml"),
+        generateCompose(baselineState("solo")),
+      );
+      const injected = ["      - AGENT_SWARM_API_KEY=", "{AGENT_SWARM_API_KEY}"].join("$");
+      await Bun.write(
+        join(installDir, "docker-compose.override.yml"),
+        `services:\n  swarm-api:\n    environment:\n${injected}\n`,
+      );
+      await Bun.write(
+        join(installDir, ".env"),
+        `AGENT_SWARM_API_KEY=${API_KEY}\nAPI_KEY=${serverKey}\n`,
+      );
+      const out = await install(["--no-tunnel"]);
+      expect(out).not.toContain(API_KEY);
+      expect(out).not.toContain(encodeURIComponent(API_KEY));
+      expect(out).not.toContain(serverKey);
       const url = new URL(
         (await Bun.file(join(installDir, ".agent-swarm/setup-url")).text()).trim(),
       );
