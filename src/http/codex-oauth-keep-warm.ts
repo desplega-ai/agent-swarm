@@ -106,7 +106,7 @@ export async function handleCodexOAuthKeepWarm(
   const results: SlotOutcome[] = [];
 
   for (const { slot, creds } of slots) {
-    const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId);
+    const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId, slot);
 
     if (await getKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(keySuffix))) {
       results.push({ slot, keySuffix, outcome: "skipped-benched" });

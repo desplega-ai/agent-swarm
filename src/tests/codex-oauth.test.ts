@@ -3,6 +3,7 @@ import {
   authJsonToCredentialSelection,
   authJsonToCredentials,
   credentialsToAuthJson,
+  deriveCodexKeySuffix,
 } from "../providers/codex-oauth/auth-json.js";
 import {
   AUTHORIZE_URL,
@@ -410,8 +411,28 @@ describe("authJsonToCredentialSelection", () => {
     expect(selection.keyType).toBe("CODEX_OAUTH");
     expect(selection.index).toBe(0);
     expect(selection.total).toBe(1);
-    expect(selection.keySuffix).toBe(userId.slice(-5));
+    expect(selection.keySuffix).toBe(`${userId.slice(-5)}-0`);
     expect(selection.selected).toBe(creds.accountId);
+  });
+
+  it("two slots signed in by the same ChatGPT user get distinct suffixes", () => {
+    const access = tokenFor({
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acc-shared",
+        chatgpt_user_id: "user-same-person",
+      },
+    });
+    const creds: CodexOAuthCredentials = {
+      access,
+      refresh: "rt_x",
+      expires: Date.now() + 3600000,
+      accountId: "acc-shared",
+    };
+    const slot0 = authJsonToCredentialSelection(credentialsToAuthJson(creds), 0, 2);
+    const slot1 = authJsonToCredentialSelection(credentialsToAuthJson(creds), 1, 2);
+    expect([slot0.keySuffix, slot1.keySuffix]).toEqual(["erson-0", "erson-1"]);
+    // Login, storage, keep-warm and the account list derive the same identity.
+    expect(deriveCodexKeySuffix(access, "acc-shared", 1)).toBe(slot1.keySuffix);
   });
 
   it("two slots on the same account get distinct suffixes when user_ids differ", () => {
@@ -442,8 +463,8 @@ describe("authJsonToCredentialSelection", () => {
       2,
     );
 
-    expect(selDaniel.keySuffix).toBe(userIdDaniel.slice(-5));
-    expect(selLorenzo.keySuffix).toBe(userIdLorenzo.slice(-5));
+    expect(selDaniel.keySuffix).toBe(`${userIdDaniel.slice(-5)}-0`);
+    expect(selLorenzo.keySuffix).toBe(`${userIdLorenzo.slice(-5)}-1`);
     expect(selDaniel.keySuffix).not.toBe(selLorenzo.keySuffix);
   });
 
@@ -457,7 +478,7 @@ describe("authJsonToCredentialSelection", () => {
 
     const selection = authJsonToCredentialSelection(credentialsToAuthJson(creds));
     expect(selection.keyType).toBe("CODEX_OAUTH");
-    expect(selection.keySuffix).toBe("8c965");
+    expect(selection.keySuffix).toBe("8c965-0");
     expect(selection.selected).toBe(creds.accountId);
     expect(selection.plan).toBeNull();
   });

@@ -367,9 +367,9 @@ describe("runCodexLogin", () => {
       exit: () => {},
     });
 
-    // at_test has no chatgpt_user_id claim, so the suffix falls back to accountId.
+    // at_test has no chatgpt_user_id claim, so the suffix uses the accountId tail plus the slot.
     // The fence is read BEFORE the credential write, so failures on the fresh login survive.
-    expect(calls).toEqual(["read-fence", "store", "clear:d3Ove@2 fence 7"]);
+    expect(calls).toEqual(["read-fence", "store", "clear:d3Ove-2@2 fence 7"]);
   });
 
   it("skips the unfenced clear when the fence cannot be read", async () => {
