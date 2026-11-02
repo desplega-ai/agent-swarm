@@ -288,7 +288,6 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | `90` | Positive-integer deadline for `docker-entrypoint.sh` to reach `${MCP_BASE_URL}/health` before provider-specific setup. This is bootstrap-only: set it in the worker/lead container environment rather than only in `swarm_config`. |
 | `SESSION_ID` | No | Auto-generated | Log folder name |
 | `LOG_DIR` | No | `/logs` | Base directory for session `.jsonl` log files (`<LOG_DIR>/<sessionId>/<timestamp>-<taskId8>.jsonl`) |
-| `YOLO` | No | `false` | Continue on errors |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
 | `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to turn context-mode off for local Claude Code, Codex, and opencode workers. Drops the `ctx_*` MCP server and disables the installed Claude Code and Codex context-mode plugins for the session, so their hooks (SessionStart guidance, tool tips, WebFetch redirect) do not run either. |

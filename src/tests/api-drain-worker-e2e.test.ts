@@ -17,6 +17,7 @@ import {
 } from "../../scripts/e2e/http";
 import { minimalEnv, repoRoot, type Sut, startSut, stopSut } from "../../scripts/e2e/sut";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const AGENT_ID = "1b111111-1111-4111-8111-111111111111";
 const SESSION_ID = "1b333333-3333-4333-8333-333333333333";
@@ -57,7 +58,9 @@ for await (const chunk of Bun.stdin.stream()) {
         emit({ type: "system", subtype: "init", session_id: sessionId, model: "claude-haiku-4-5", uuid: crypto.randomUUID() });
       }
     }
-    // A "user" message is the task prompt: take it and never finish.
+    // Let the failure-continuation test finish the process with an error.
+    if (message.type === "user" && process.env.CLAUDE_FIXTURE_FAIL === "1") process.exit(7);
+    // Otherwise take the task prompt and never finish, for the drain test.
   }
 }
 `;
@@ -101,6 +104,70 @@ describe("API drain with a real worker", () => {
     if (fixtureDir) await rm(fixtureDir, { recursive: true, force: true });
   });
 
+  test(
+    "logs a non-zero task exit and polls for the next task",
+    async () => {
+      const agentId = crypto.randomUUID();
+      const sessionId = crypto.randomUUID();
+      const home = await mkdtemp(join(fixtureDir, "failure-worker-"));
+      const taskIds: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const created = await api("POST", "/api/tasks", {
+          body: {
+            task: `Run deterministic failure fixture ${i + 1}.`,
+            routingReason: "human_pinned",
+            agentId,
+            dir: home,
+            source: "api",
+          },
+        });
+        expectStatus(created, [201], "failure task creation");
+        taskIds.push(String(asRecord(created.json).id));
+      }
+      const worker = expectChildOk(
+        await runChild([process.execPath, "run", join(repoRoot, "src/cli.tsx"), "worker"], {
+          cwd: home,
+          env: {
+            ...minimalEnv(),
+            HOME: home,
+            AGENT_SWARM_API_KEY: sut.apiKey,
+            MCP_BASE_URL: sut.baseUrl,
+            AGENT_ID: agentId,
+            SESSION_ID: sessionId,
+            HARNESS_PROVIDER: "claude",
+            CLAUDE_TRANSPORT: "sdk",
+            CLAUDE_BINARY: fixturePath,
+            CLAUDE_FIXTURE_FAIL: "1",
+            CLAUDE_CODE_OAUTH_TOKEN: FIXTURE_OAUTH,
+            ANTHROPIC_API_KEY: FIXTURE_API_KEY,
+            CRED_CHECK_DISABLE: "1",
+            CLAUDE_QUEUE_STEERING: "0",
+            SKIP_SESSION_SUMMARY: "1",
+            ANONYMIZED_TELEMETRY: "false",
+            MAX_CONCURRENT_TASKS: "1",
+            SWARM_EXIT_AFTER_TASKS: "2",
+          },
+        }),
+        "failure-continuation worker",
+      );
+      const errors = (await Bun.file(join(home, "logs", sessionId, "errors.jsonl")).text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { taskId: string; exitCode: number });
+      expect(errors.map((entry) => entry.taskId).sort()).toEqual([...taskIds].sort());
+      expect(errors.every((entry) => entry.exitCode !== 0)).toBe(true);
+      for (const taskId of taskIds) {
+        const task = await api("GET", `/api/tasks/${taskId}`);
+        expect(asRecord(task.json).status).toBe("failed");
+        expect(worker.stderr).toContain(`Task ${taskId.slice(0, 8)} exited with code`);
+      }
+      expect(worker.stdout).toContain("Max concurrent tasks: 1");
+      expect(worker.stdout).toContain("SWARM_EXIT_AFTER_TASKS");
+      await rm(home, { recursive: true, force: true });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
   test("the worker hands its task off while the API drains, and the API exits on it", async () => {
     expectStatus(
       await api("POST", "/api/agents", {
@@ -129,7 +196,7 @@ describe("API drain with a real worker", () => {
     const taskId = String(asRecord(created.json).id);
 
     const home = await mkdtemp(join(fixtureDir, "home-"));
-    const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker", "--yolo"], {
+    const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker"], {
       cwd: repoRoot,
       env: {
         ...minimalEnv(),

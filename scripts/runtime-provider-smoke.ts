@@ -135,7 +135,6 @@ const handle = await provider.provision(target, {
     HARNESS_PROVIDER: "claude",
     CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "",
     MAX_CONCURRENT_TASKS: "1",
-    YOLO: "true",
   },
 });
 mark("infra_accepted");

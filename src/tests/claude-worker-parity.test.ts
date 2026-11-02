@@ -270,7 +270,7 @@ async function runTransport(transport: "cli" | "sdk", agentId: string): Promise<
     JIRA_DISABLE: "true",
     AGENTMAIL_DISABLE: "true",
   };
-  const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker", "--yolo"], {
+  const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker"], {
     cwd: repoRoot,
     env: workerEnv,
     stdout: "pipe",
@@ -411,7 +411,7 @@ async function runCredentialRotation(): Promise<void> {
     JIRA_DISABLE: "true",
     AGENTMAIL_DISABLE: "true",
   };
-  const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker", "--yolo"], {
+  const worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker"], {
     cwd: repoRoot,
     env: workerEnv,
     stdout: "pipe",
