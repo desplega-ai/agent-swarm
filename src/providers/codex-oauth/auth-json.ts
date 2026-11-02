@@ -28,25 +28,21 @@ import { decodeJwt, extractChatgptPlanType, extractChatgptUserId } from "./flow.
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
 /**
- * Derive the slot-unique `keySuffix` used to identify a Codex OAuth
- * credential in logs, failure messages, and the `codex-auth-watch` KV bench
- * namespace. Prefers the per-grant `chatgpt_user_id` so two slots
- * authenticated against the same ChatGPT Team workspace get distinct
- * suffixes; falls back to `accountId` when the token can't be decoded or
- * lacks the claim — preserves callers for any unexpected token shape, at the
- * cost of re-introducing the slot-collision bug for that specific slot only.
- * The warn is a deliberate canary.
+ * Derive the slot-unique `keySuffix` that identifies a Codex OAuth pool slot
+ * in `api_key_status`, the `codex-auth-watch` KV bench namespace, task
+ * history, logs and failure messages: `<last 5 of chatgpt_user_id>-<slot>`.
+ *
+ * The slot is part of the identity because two slots signed in by the same
+ * ChatGPT user carry the same `chatgpt_user_id`, and a shared suffix made
+ * them share one status row and one bench marker: an auth failure on one slot
+ * benched the other. Slot keys (`codex_oauth_<n>`) are stable; deleting an
+ * account never renumbers the others. The user tail keeps the suffix
+ * readable and gives a re-login by a different user a fresh status row.
+ * `accountId` stands in for the tail when the token has no user claim.
  */
-export function deriveCodexKeySuffix(accessToken: string, accountId: string): string {
+export function deriveCodexKeySuffix(accessToken: string, accountId: string, slot: number): string {
   const userId = extractChatgptUserId(accessToken);
-  const suffixSource = userId ?? accountId;
-  if (!userId) {
-    console.warn(
-      "[codex-oauth] No chatgpt_user_id in JWT — falling back to account_id for keySuffix derivation. " +
-        "If two slots share an account, their suffixes will collide.",
-    );
-  }
-  return suffixSource.slice(-5);
+  return `${(userId ?? accountId).slice(-5)}-${slot}`;
 }
 
 export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, total = 1) {
@@ -57,7 +53,7 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
     selected: auth.tokens.account_id,
     index: slot,
     total,
-    keySuffix: deriveCodexKeySuffix(auth.tokens.access_token, auth.tokens.account_id),
+    keySuffix: deriveCodexKeySuffix(auth.tokens.access_token, auth.tokens.account_id, slot),
     keyType: "CODEX_OAUTH",
     isRateLimitFallback: false,
     // The ChatGPT plan rides in the token itself (`chatgpt_plan_type`).

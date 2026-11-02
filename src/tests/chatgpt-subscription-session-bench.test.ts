@@ -86,7 +86,7 @@ function serveSlot(slot: number, accountId: string): string {
     accountId,
   };
   pool = [{ slot, creds }];
-  return deriveCodexKeySuffix(creds.access, accountId);
+  return deriveCodexKeySuffix(creds.access, accountId, slot);
 }
 
 /** A pi adapter whose session start revalidates the slot with `getValid`. */

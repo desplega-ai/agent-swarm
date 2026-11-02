@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, getEncryptionKey } from "../be/crypto";
 import { deleteKv, deleteSwarmConfigByKey, getDbClient, getKeyStatuses, getKv } from "../be/db";
-import { retirePoolKeyStatus } from "../be/db/api-keys";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json";
 import { decodeJwt, extractChatgptPlanType } from "../providers/codex-oauth/flow";
 import { MAX_CODEX_OAUTH_SLOT } from "../providers/codex-oauth/storage";
@@ -92,11 +91,6 @@ function readCredentials(row: AccountRow): z.infer<typeof AccountCredentialsSche
   }
 }
 
-function accountSuffix(row: AccountRow): string | null {
-  const credentials = readCredentials(row);
-  return credentials ? deriveCodexKeySuffix(credentials.access, credentials.accountId) : null;
-}
-
 async function accountsResponse(): Promise<CodexAccountsResponse> {
   const rows = await accountRows();
   const statuses = await getKeyStatuses("CODEX_OAUTH", "global", null);
@@ -116,18 +110,24 @@ async function accountsResponse(): Promise<CodexAccountsResponse> {
       accounts.push(account);
       continue;
     }
-    account.suffix = deriveCodexKeySuffix(credentials.access, credentials.accountId);
+    account.suffix = deriveCodexKeySuffix(credentials.access, credentials.accountId, row.slot);
     account.plan = extractChatgptPlanType(credentials.access);
     const profile = decodeJwt(credentials.access)?.["https://api.openai.com/profile"];
     if (profile && typeof profile === "object" && "email" in profile) {
       account.email = typeof profile.email === "string" && profile.email ? profile.email : null;
     }
-    const status = statuses.find((entry) => entry.keySuffix === account.suffix);
+    // Pool availability reads Codex rows by keyIndex, so a row stored at this
+    // slot under an older suffix format still decides whether it is benched.
+    const slotStatuses = statuses.filter(
+      (entry) => entry.keySuffix === account.suffix || entry.keyIndex === row.slot,
+    );
+    const status = slotStatuses.find((entry) => entry.keySuffix === account.suffix);
     const marker = await getKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(account.suffix));
-    const statusBenched =
-      status &&
-      status.consecutiveAuthFailures >= CODEX_AUTH_FAILURE_BENCH_THRESHOLD &&
-      status.status === "rate_limited";
+    const statusBenched = slotStatuses.some(
+      (entry) =>
+        entry.consecutiveAuthFailures >= CODEX_AUTH_FAILURE_BENCH_THRESHOLD &&
+        entry.status === "rate_limited",
+    );
     account.status = marker || statusBenched ? "needs_login" : status ? "ok" : "unchecked";
     accounts.push(account);
   }
@@ -165,17 +165,25 @@ export async function handleCodexOAuthAccounts(
       const account = rows.find((row) => row.slot === parsed.params.slot);
       if (!account || !(await deleteSwarmConfigByKey("global", null, account.key))) return null;
       // A new sign-in takes the first free slot, so it must not inherit this
-      // account's auth bench (keyed by slot) or its bench marker.
-      const suffix = accountSuffix(account);
-      if (suffix) {
-        const remaining = rows.flatMap((row) => {
-          const keySuffix = row === account ? null : accountSuffix(row);
-          return keySuffix ? [{ keySuffix, keyIndex: row.slot }] : [];
-        });
-        await retirePoolKeyStatus("CODEX_OAUTH", suffix, remaining);
-        if (!remaining.some((row) => row.keySuffix === suffix)) {
-          await deleteKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(suffix));
-        }
+      // account's auth bench or its bench marker. Suffixes carry the slot, so
+      // every status row at this slot index is this account's, including rows
+      // stored under the pre-slot suffix format.
+      const credentials = readCredentials(account);
+      const suffix = credentials
+        ? deriveCodexKeySuffix(credentials.access, credentials.accountId, account.slot)
+        : null;
+      const retired = await getDbClient().query<{ keySuffix: string }>(
+        `DELETE FROM api_key_status
+           WHERE keyType = 'CODEX_OAUTH' AND scope = 'global' AND scopeId = ''
+             AND (keyIndex = ? OR keySuffix = ?)
+           RETURNING keySuffix`,
+        [account.slot, suffix],
+      );
+      for (const keySuffix of new Set([
+        ...(suffix ? [suffix] : []),
+        ...retired.map((r) => r.keySuffix),
+      ])) {
+        await deleteKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(keySuffix));
       }
       return account.key;
     });

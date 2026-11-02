@@ -172,9 +172,9 @@ describe("Scenario 1 — 3-slot round-trip with availability filter", () => {
     expect(sel.index).toBe(selectedSlot);
     expect(sel.total).toBe(3);
     expect(sel.keyType).toBe("CODEX_OAUTH");
-    // keySuffix is derived from chatgpt_user_id (slot-unique), not accountId.
+    // keySuffix is the chatgpt_user_id tail plus the slot, so it is slot-unique.
     const expectedUserId = `user-slot${selectedSlot}`;
-    expect(sel.keySuffix).toBe(expectedUserId.slice(-5));
+    expect(sel.keySuffix).toBe(`${expectedUserId.slice(-5)}-${selectedSlot}`);
   });
 });
 

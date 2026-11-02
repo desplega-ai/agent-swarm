@@ -822,8 +822,8 @@ export const platformCodexAccounts: Scenario = {
         `the account carries plan and email decoded from the JWT: ${JSON.stringify(account)}`,
       );
       expect(
-        account.suffix === userId.slice(-5),
-        "the key suffix derives from the chatgpt user id",
+        account.suffix === `${userId.slice(-5)}-${slot}`,
+        "the key suffix is the chatgpt user id tail plus the slot",
       );
       expect(account.status === "unchecked", "an account no worker has used is unchecked");
       expect(
