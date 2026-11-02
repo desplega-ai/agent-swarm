@@ -157,6 +157,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
+import { isEffectiveOutputSchema } from "../utils/output-schema";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
@@ -2524,6 +2525,12 @@ export async function createTaskExtended(
       "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
     );
   }
+  // An explicit empty `outputSchema: {}` means "no output schema": it stores
+  // NULL and blocks the parent-schema inheritance below. Callers pass `{}` on
+  // purpose to keep a delegated child free of their own output contract.
+  if (options.outputSchema !== undefined && !isEffectiveOutputSchema(options.outputSchema)) {
+    options = { ...options, outputSchema: undefined, inheritParentOutputSchema: false };
+  }
   let requestedByUserIdInherited = false;
   // The parent key is read again inside the INSERT transaction (see below).
   let keyInherited = false;
@@ -2673,7 +2680,7 @@ export async function createTaskExtended(
       // Lead reroute-decision) that must not be held to the original work's
       // output contract.
       if (
-        parent.outputSchema &&
+        isEffectiveOutputSchema(parent.outputSchema) &&
         !options.outputSchema &&
         options.inheritParentOutputSchema !== false
       ) {
