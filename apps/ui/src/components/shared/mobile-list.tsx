@@ -78,6 +78,7 @@ export function MobileListRow({
   status,
   meta,
   live,
+  extras,
 }: {
   /** Row link. Without it, `onClick` makes the row a button. */
   to?: string;
@@ -93,6 +94,11 @@ export function MobileListRow({
   meta?: ReactNode[];
   /** Amber rail for rows that are working or waiting on the viewer. */
   live?: boolean;
+  /**
+   * Links and buttons under the row. They sit outside the row, which is a
+   * link or a button, so no control nests inside another.
+   */
+  extras?: ReactNode;
 }) {
   const facts = (meta ?? []).filter(
     (fact) => fact !== null && fact !== undefined && fact !== false && fact !== "",
@@ -136,8 +142,9 @@ export function MobileListRow({
       ) : null}
     </>
   );
+  const hasExtras = extras !== null && extras !== undefined && extras !== false;
   return (
-    <li>
+    <li className={cn(hasExtras && selected && "bg-accent/50")}>
       {to !== undefined ? (
         <Link to={to} className={rowClass}>
           {content}
@@ -154,6 +161,11 @@ export function MobileListRow({
       ) : (
         <div className={rowClass}>{content}</div>
       )}
+      {hasExtras ? (
+        <div className="-mt-1 flex min-w-0 flex-wrap items-center gap-2 px-4 pb-3 text-sm">
+          {extras}
+        </div>
+      ) : null}
     </li>
   );
 }

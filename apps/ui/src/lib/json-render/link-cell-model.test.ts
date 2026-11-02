@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { isClipped, linkCell, TIP_MAX_CHARS, tipText } from "./link-cell-model";
+import {
+  cellHasControls,
+  isClipped,
+  isLinkColumn,
+  linkCell,
+  TIP_MAX_CHARS,
+  tipText,
+} from "./link-cell-model";
 
 const ROW = {
   repo: "agent-swarm",
@@ -93,5 +100,32 @@ describe("isClipped", () => {
   test("false when it fits, and for a one-pixel rounding gap", () => {
     expect(isClipped(box(100, 100))).toBe(false);
     expect(isClipped(box(101, 100, 21, 20))).toBe(false);
+  });
+});
+
+describe("cellHasControls", () => {
+  test("link, copy and switch cells render their own controls", () => {
+    expect(cellHasControls({ kind: "link" })).toBe(true);
+    expect(cellHasControls({ kind: "text", href: "url" })).toBe(true);
+    expect(cellHasControls({ kind: "copy" })).toBe(true);
+    expect(cellHasControls({ kind: "switch" })).toBe(true);
+  });
+
+  test("plain kinds do not", () => {
+    for (const kind of [undefined, "text", "badge", "status", "date", "number", "progress"]) {
+      expect(cellHasControls({ kind })).toBe(false);
+    }
+  });
+
+  test("a templated column is text unless it links", () => {
+    expect(cellHasControls({ kind: "copy", format: "{{a}}" })).toBe(false);
+    expect(cellHasControls({ kind: "switch", format: "{{a}}" })).toBe(false);
+    expect(cellHasControls({ format: "{{repo}}#{{number}}", href: "url" })).toBe(true);
+  });
+
+  test("isLinkColumn is kind link or href", () => {
+    expect(isLinkColumn({ kind: "link" })).toBe(true);
+    expect(isLinkColumn({ href: "url" })).toBe(true);
+    expect(isLinkColumn({ kind: "copy" })).toBe(false);
   });
 });

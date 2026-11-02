@@ -199,7 +199,7 @@ import type {
 } from "./catalog";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
-import { linkCell, tipText } from "./link-cell-model";
+import { cellHasControls, isLinkColumn, linkCell, tipText } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { SmartLink } from "./smart-link";
 import { useJsonRenderThemeAttr } from "./theme-scope";
@@ -1342,35 +1342,106 @@ const POPOVER_SIZE_CLASS = "w-80 overflow-auto";
 const POPOVER_POPOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-popover-content-available-height))]`;
 const POPOVER_HOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-hover-card-content-available-height))]`;
 
-/**
- * A popover on a Table cell that lists fields of the cell's row, rendered like
- * a `DetailList`. Hover (default) opens it on pointer rest or keyboard focus and
- * lets the pointer move into it; `click` toggles it from a button.
- */
-function CellPopover({
+/** The popover's body: an optional heading, then the row fields rendered like a `DetailList`. */
+function CellPopoverBody({
   popover,
   row,
-  endAligned,
-  children,
 }: {
   popover: CellPopoverConfig;
   row: Record<string, unknown>;
-  endAligned: boolean;
-  children: ReactNode;
 }) {
-  const themeAttr = useJsonRenderThemeAttr();
   const title = popover.title ? applyTemplate(popover.title, row).trim() : "";
-  const triggerClass = cn(
-    "flex w-full min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-    endAligned && "justify-end",
-  );
-  const content = (
+  return (
     <div className="flex flex-col gap-3">
       {title ? <p className="m-0 text-sm font-medium break-words">{title}</p> : null}
       <DetailFieldsView fields={popover.fields as DetailListField[]} data={row} />
     </div>
   );
+}
+
+/**
+ * A click popover opened from its own button. It sits beside a cell's content
+ * (a link, a copy button) or under a phone row, so no control ever wraps
+ * another and a tap or Enter on the button always reaches it.
+ */
+function DetailsButton({
+  popover,
+  row,
+  label,
+  text,
+  className,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  /** Accessible name; says which column's details open. */
+  label: string;
+  /** Visible text next to the icon; omit for an icon-only button. */
+  text?: string;
+  className?: string;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-slot="cell-details"
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-sm text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+            text ? "min-h-8 px-2" : "size-6",
+            className,
+          )}
+        >
+          <Info aria-hidden className="size-3.5" />
+          {text}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className={POPOVER_POPOVER_CLASS} {...themeAttr}>
+        <CellPopoverBody popover={popover} row={row} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * A popover on a Table cell that lists fields of the cell's row, rendered like
+ * a `DetailList`. Hover (default) opens it on pointer rest or keyboard focus and
+ * lets the pointer move into it; `click` toggles it from a button. A cell that
+ * has its own controls (`interactive`) gets a separate details button beside
+ * the content instead of one that wraps it.
+ */
+function CellPopover({
+  popover,
+  row,
+  endAligned,
+  interactive,
+  label,
+  children,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  endAligned: boolean;
+  interactive: boolean;
+  /** Column name, for the details button's accessible name. */
+  label: string;
+  children: ReactNode;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const triggerClass = cn(
+    "flex w-full min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+    endAligned && "justify-end",
+  );
+  const content = <CellPopoverBody popover={popover} row={row} />;
   if (popover.trigger === "click") {
+    if (interactive) {
+      return (
+        <span className="flex w-full min-w-0 max-w-full items-center gap-1">
+          <span className={cn("flex min-w-0 flex-1", endAligned && "justify-end")}>{children}</span>
+          <DetailsButton popover={popover} row={row} label={`Details: ${label}`} />
+        </span>
+      );
+    }
     return (
       <Popover>
         <PopoverTrigger asChild>
@@ -1414,7 +1485,13 @@ function CellExtras({
   let node = children;
   if (column.popover) {
     node = (
-      <CellPopover popover={column.popover} row={row} endAligned={endAligned}>
+      <CellPopover
+        popover={column.popover}
+        row={row}
+        endAligned={endAligned}
+        interactive={cellHasControls(column)}
+        label={column.label ?? column.key}
+      >
         {node}
       </CellPopover>
     );
@@ -1699,7 +1776,7 @@ function TableComponent({ props }: { props: TableProps }) {
         const body = ((): ReactNode => {
           // `href` names a row field with the URL, so the cell shows its own text over it.
           // A templated column reads the key's raw value: its cell value is the composed text.
-          if (column.href || column.kind === "link") {
+          if (isLinkColumn(column)) {
             return (
               <SmartLink
                 // The popover already describes the row; a tooltip on the chip would stack on it.
@@ -1894,6 +1971,53 @@ function TableComponent({ props }: { props: TableProps }) {
     const column = columnByKey.get(key);
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
   };
+  // Columns the phone row shows, in order. A link column leaves the meta text
+  // (it renders as a chip below) and a popover column gets a details button.
+  const shownKeys = [titleKey, statusKey, ...metaKeys].filter(
+    (key, index, all): key is string => Boolean(key) && all.indexOf(key) === index,
+  );
+  const metaTextKeys = metaKeys.filter((key) => {
+    const column = columnByKey.get(key);
+    return !column || !isLinkColumn(column);
+  });
+  // The row itself is one button when `onRowClick` is set, so links and popover
+  // buttons sit under it, never inside it. Hover cards do not open on touch, so
+  // every phone popover opens from a button, whatever its `trigger`.
+  const mobileExtras = (row: Record<string, unknown>): ReactNode => {
+    const items: ReactNode[] = [];
+    for (const key of shownKeys) {
+      const column = columnByKey.get(key);
+      if (!column) continue;
+      if (isLinkColumn(column)) {
+        const cell = linkCell({
+          value: row[column.key],
+          row,
+          href: column.href,
+          linkLabel: column.linkLabel,
+          text: column.href || column.format ? mobileCellText(key, row) : undefined,
+        });
+        if (cell.target || cell.label) {
+          items.push(
+            <span key={`link:${key}`} className="inline-flex min-w-0 max-w-full">
+              <SmartLink cell={cell} noTip={Boolean(column.popover)} />
+            </span>,
+          );
+        }
+      }
+      if (column.popover) {
+        items.push(
+          <DetailsButton
+            key={`details:${key}`}
+            popover={column.popover}
+            row={row}
+            label={`Details: ${column.label ?? column.key}`}
+            text="Details"
+          />,
+        );
+      }
+    }
+    return items.length > 0 ? items : undefined;
+  };
   const mobileRow =
     mobileMode === "list"
       ? (row: Record<string, unknown>): ListViewMobileRow => ({
@@ -1904,7 +2028,8 @@ function TableComponent({ props }: { props: TableProps }) {
                 row[statusKey],
               )
             : undefined,
-          meta: metaKeys.map((key) => mobileCellText(key, row)),
+          meta: metaTextKeys.map((key) => mobileCellText(key, row)),
+          extras: mobileExtras(row),
         })
       : undefined;
 

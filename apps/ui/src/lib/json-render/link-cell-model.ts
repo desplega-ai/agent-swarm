@@ -67,3 +67,27 @@ interface Measured {
 export function isClipped(el: Measured): boolean {
   return el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
 }
+
+/** The slice of a Table column `cellHasControls` and `isLinkColumn` read. */
+export interface ControlColumn {
+  kind?: string;
+  format?: string;
+  href?: string;
+}
+
+/** A column whose cell is a smart link (`kind: "link"`, or `href` naming the URL field). */
+export function isLinkColumn(column: ControlColumn): boolean {
+  return Boolean(column.href) || column.kind === "link";
+}
+
+/**
+ * True when the cell renders its own controls: a link, a copy button or a
+ * switch. A popover trigger must sit beside those, never around them, or the
+ * cell would nest one control in another and the inner one would swallow the
+ * click. A templated column renders text, so only `href` / `link` count there.
+ */
+export function cellHasControls(column: ControlColumn): boolean {
+  if (isLinkColumn(column)) return true;
+  if (column.format) return false;
+  return column.kind === "copy" || column.kind === "switch";
+}
