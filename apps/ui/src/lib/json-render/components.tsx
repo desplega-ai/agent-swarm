@@ -1971,11 +1971,10 @@ function TableComponent({ props }: { props: TableProps }) {
     const column = columnByKey.get(key);
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
   };
-  // Columns the phone row shows, in order. A link column leaves the meta text
-  // (it renders as a chip below) and a popover column gets a details button.
-  const shownKeys = [titleKey, statusKey, ...metaKeys].filter(
-    (key, index, all): key is string => Boolean(key) && all.indexOf(key) === index,
-  );
+  // A link column leaves the meta text (it renders as a chip below) and a
+  // popover column gets a details button. Those actions cover every column of
+  // the table, not only the ones that show text: a PR column behind Owner and
+  // Date would otherwise be unreachable on a phone.
   const metaTextKeys = metaKeys.filter((key) => {
     const column = columnByKey.get(key);
     return !column || !isLinkColumn(column);
@@ -1985,9 +1984,8 @@ function TableComponent({ props }: { props: TableProps }) {
   // every phone popover opens from a button, whatever its `trigger`.
   const mobileExtras = (row: Record<string, unknown>): ReactNode => {
     const items: ReactNode[] = [];
-    for (const key of shownKeys) {
-      const column = columnByKey.get(key);
-      if (!column) continue;
+    for (const column of columns) {
+      const key = column.key;
       if (isLinkColumn(column)) {
         const cell = linkCell({
           value: row[column.key],

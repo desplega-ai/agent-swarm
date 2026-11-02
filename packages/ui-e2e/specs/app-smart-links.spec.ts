@@ -115,6 +115,8 @@ async function createLinkApp(
             title: { kind: "string" },
             url: { kind: "string" },
             mergeReason: { kind: "string" },
+            owner: { kind: "string" },
+            opened: { kind: "string" },
           },
         },
       },
@@ -150,6 +152,8 @@ async function createLinkApp(
       title: "feat(apps): smart links",
       url: PR_URL,
       mergeReason: "All required checks passed.",
+      owner: "jackknife",
+      opened: "2026-11-02",
     },
   });
   return app.id;
@@ -229,6 +233,49 @@ test.describe("phone list", () => {
       await expect(page.locator("button a, a button")).toHaveCount(0);
 
       // A hover popover still opens by tap on a phone: it gets a Details button.
+      await list.getByRole("button", { name: "Details: PR" }).tap();
+      await expect(page.getByText("All required checks passed.")).toBeVisible();
+      await expect(page).not.toHaveURL(/detail/);
+      await clean.assertClean();
+    } finally {
+      await api.delete(`/api/apps/${id}`);
+    }
+  });
+
+  test("exposes a link and popover that sit beyond the first two metadata columns", async ({
+    page,
+    api,
+    seed,
+    clean,
+  }) => {
+    test.skip(!seed, "remote run without seed");
+    const id = await createLinkApp(api, {
+      onRowClick: [
+        { action: "app.navigate", params: { page: "detail", params: { row: { $row: "id" } } } },
+      ],
+      // Title is the title and Owner and Date are the two meta fields, so the
+      // PR column is the fourth: the phone row shows no text for it.
+      columns: [
+        { key: "title", label: "Title" },
+        { key: "owner", label: "Owner" },
+        { key: "opened", label: "Date" },
+        {
+          key: "number",
+          label: "PR",
+          format: "{{repo}}#{{number}}",
+          href: "url",
+          popover: { title: "{{title}}", fields: POPOVER_FIELDS },
+        },
+      ],
+    });
+    try {
+      await page.goto(`/apps/${id}`);
+      const list = page.getByRole("list", { name: "Rows" });
+      const chip = list.locator('a[data-slot="swarm-link"]');
+      await expect(chip).toHaveText("agent-swarm#2605");
+      await expect(chip).toHaveAttribute("href", PR_URL);
+      await expect(page.locator("button a, a button")).toHaveCount(0);
+
       await list.getByRole("button", { name: "Details: PR" }).tap();
       await expect(page.getByText("All required checks passed.")).toBeVisible();
       await expect(page).not.toHaveURL(/detail/);
