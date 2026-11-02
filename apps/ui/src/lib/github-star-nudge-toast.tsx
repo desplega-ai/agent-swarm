@@ -22,7 +22,7 @@ export function notePromptSent(): void {
   toast.custom(
     (id) => (
       <div className="flex w-full gap-3">
-        <Star className="mt-0.5 size-4 shrink-0 fill-amber-400 text-amber-400" />
+        <Star className="mt-0.5 size-4 shrink-0 fill-primary text-primary" />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="text-sm font-semibold leading-5">Enjoying agent-swarm?</p>
           <p className="text-[13px] text-muted-foreground">A GitHub star helps others find it.</p>
