@@ -355,7 +355,7 @@
       }
     },
     "Markdown": {
-      "description": "Rendered markdown block — headings, lists, links, tables, fenced code. Use it for prose (about/help sections, instructions); use `Text` for a single plain paragraph.",
+      "description": "Rendered markdown block — headings, lists, links, tables, fenced code. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip with an icon and a short label (`[text](url)` keeps its text). Use it for prose (about/help sections, instructions); use `Text` for a single plain paragraph.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -631,14 +631,7 @@
             "type": "string"
           },
           "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "loading": {
             "type": "boolean"
@@ -802,14 +795,7 @@
         "type": "object",
         "properties": {
           "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "tone": {
             "type": "string",
@@ -1064,14 +1050,7 @@
         "type": "object",
         "properties": {
           "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "label": {
             "type": "string"
@@ -1281,7 +1260,7 @@
       }
     },
     "Table": {
-      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one; an array means \"one of\", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`). Columns take `pinned: \"left\"|\"right\"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: \"compact\"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column's `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: \"middle\"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover), and `format` — a `{{field}}` template (e.g. `\"{{name}} · v{{version}}\"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column's `key`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: \"list\"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: \"scroll\"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: \"menu\"` (collected into a More menu).",
+      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one; an array means \"one of\", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`). Columns take `pinned: \"left\"|\"right\"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: \"compact\"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column's `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: \"middle\"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `\"{{name}} · v{{version}}\"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column's `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: \"number\", format: \"{{repo}}#{{number}}\", href: \"url\" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: \"click\"` for a click) that lists several fields of the row with the DetailList field shape (up to 12). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: \"list\"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: \"scroll\"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: \"menu\"` (collected into a More menu).",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -1412,6 +1391,91 @@
                   ]
                 },
                 "tooltip": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "popover": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "fields": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "string",
+                              "number",
+                              "boolean",
+                              "date",
+                              "badge",
+                              "enum",
+                              "code",
+                              "status",
+                              "user",
+                              "relative",
+                              "copy",
+                              "link",
+                              "json"
+                            ]
+                          },
+                          "tones": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "enum": [
+                                "neutral",
+                                "success",
+                                "active",
+                                "error",
+                                "info",
+                                "pending",
+                                "warning",
+                                "paused"
+                              ]
+                            }
+                          },
+                          "href": {
+                            "type": "string"
+                          },
+                          "linkLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["key"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "enum": ["hover", "click"]
+                    }
+                  },
+                  "required": ["fields"],
+                  "additionalProperties": false
+                },
+                "href": {
+                  "type": "string"
+                },
+                "linkLabel": {
                   "type": "string"
                 },
                 "max": {
@@ -1565,14 +1629,7 @@
             "type": "boolean"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "emptyMessage": {
             "type": "string"
@@ -1601,17 +1658,7 @@
                     {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "boolean"
-                          }
-                        ]
+                        "type": ["string", "number", "boolean"]
                       }
                     }
                   ]
@@ -1653,21 +1700,7 @@
             }
           },
           "selectedId": {
-            "anyOf": [
-              {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "number", "null"]
           },
           "mobile": {
             "type": "string",
@@ -1839,7 +1872,7 @@
       }
     },
     "Drawer": {
-      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl width. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`.",
+      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1982,7 +2015,7 @@
       }
     },
     "DetailList": {
-      "description": "Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ \"$state\": \"/queries/<name>/data/0\" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.",
+      "description": "Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ \"$state\": \"/queries/<name>/data/0\" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -2028,6 +2061,7 @@
                     "user",
                     "relative",
                     "copy",
+                    "link",
                     "json"
                   ]
                 },
@@ -2049,6 +2083,12 @@
                       "paused"
                     ]
                   }
+                },
+                "href": {
+                  "type": "string"
+                },
+                "linkLabel": {
+                  "type": "string"
                 }
               },
               "required": ["key"],
@@ -2079,7 +2119,7 @@
       }
     },
     "CardGrid": {
-      "description": "Responsive grid of data-bound cards, one per row — the visual counterpart to `Table` for record browsers (projects, documents, media). Bind `data`/`loading`/`error` to a named query like Table. `titleKey` picks the row field shown as the card title. `imageKey` picks a row field holding an absolute http(s) image URL and adds an image tile to every card (a non-URL value or a failed load shows a placeholder); omit it for text-only cards. `fields` render as an unlabeled `·`-joined meta line under the title; each field's `kind` is one of `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`) or `json`. `onClick` is an action chain (params may use `$row` / `$rowIndex`) dispatched on card click or Enter/Space, commonly `app.navigate` into a detail page. `columns` is the same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). Renders 200 cards at a time with a Show more button.",
+      "description": "Responsive grid of data-bound cards, one per row — the visual counterpart to `Table` for record browsers (projects, documents, media). Bind `data`/`loading`/`error` to a named query like Table. `titleKey` picks the row field shown as the card title. `imageKey` picks a row field holding an absolute http(s) image URL and adds an image tile to every card (a non-URL value or a failed load shows a placeholder); omit it for text-only cards. `fields` render as an unlabeled `·`-joined meta line under the title; each field's `kind` is one of `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`), `link` (a smart link chip, with `href` / `linkLabel` like a Table column) or `json`. `onClick` is an action chain (params may use `$row` / `$rowIndex`) dispatched on card click or Enter/Space, commonly `app.navigate` into a detail page. `columns` is the same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). Renders 200 cards at a time with a Show more button.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -2110,7 +2150,17 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": ["text", "string", "number", "boolean", "date", "badge", "enum", "json"]
+                  "enum": [
+                    "text",
+                    "string",
+                    "number",
+                    "boolean",
+                    "date",
+                    "badge",
+                    "enum",
+                    "link",
+                    "json"
+                  ]
                 },
                 "tones": {
                   "type": "object",
@@ -2130,6 +2180,12 @@
                       "paused"
                     ]
                   }
+                },
+                "href": {
+                  "type": "string"
+                },
+                "linkLabel": {
+                  "type": "string"
                 }
               },
               "required": ["key"],
@@ -2195,14 +2251,7 @@
             "type": "boolean"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "emptyMessage": {
             "type": "string"
@@ -2287,6 +2336,7 @@
                     "user",
                     "relative",
                     "copy",
+                    "link",
                     "json"
                   ]
                 },
@@ -2308,6 +2358,12 @@
                       "paused"
                     ]
                   }
+                },
+                "href": {
+                  "type": "string"
+                },
+                "linkLabel": {
+                  "type": "string"
                 }
               },
               "required": ["key"],
@@ -2733,17 +2789,7 @@
               "type": "string"
             },
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
+              "type": ["string", "number", "boolean"]
             }
           }
         },
