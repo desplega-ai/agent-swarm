@@ -23,6 +23,8 @@ export interface ListViewMobileRow {
   status?: ReactNode;
   meta?: ReactNode[];
   leading?: ReactNode;
+  /** Selection checkbox beside the row (see `MobileListRow`). */
+  check?: { checked: boolean | "indeterminate"; onChange: () => void; label: string };
 }
 
 export interface ListViewProps<TData>
@@ -154,6 +156,7 @@ export function ListView<TData>({
               status={mobile.status}
               meta={mobile.meta}
               leading={mobile.leading}
+              check={mobile.check}
               selected={selectedId !== undefined && selectedId !== null && id === selectedId}
               onClick={onRowClick ? () => onRowClick(row, index) : undefined}
             />

@@ -10,6 +10,7 @@
 import { ChevronRight } from "lucide-react";
 import { Children, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +79,7 @@ export function MobileListRow({
   status,
   meta,
   live,
+  check,
 }: {
   /** Row link. Without it, `onClick` makes the row a button. */
   to?: string;
@@ -93,12 +95,17 @@ export function MobileListRow({
   meta?: ReactNode[];
   /** Amber rail for rows that are working or waiting on the viewer. */
   live?: boolean;
+  /**
+   * Selection checkbox in its own 44px tap target BESIDE the row, never inside
+   * it (a checkbox is a button; the row may be a button or a link).
+   */
+  check?: { checked: boolean | "indeterminate"; onChange: () => void; label: string };
 }) {
   const facts = (meta ?? []).filter(
     (fact) => fact !== null && fact !== undefined && fact !== false && fact !== "",
   );
   const rowClass = cn(
-    "relative flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
+    "relative flex min-h-11 w-full min-w-0 items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
     selected && "bg-accent/50",
   );
   const content = (
@@ -136,24 +143,34 @@ export function MobileListRow({
       ) : null}
     </>
   );
+  const row =
+    to !== undefined ? (
+      <Link to={to} className={rowClass}>
+        {content}
+      </Link>
+    ) : onClick ? (
+      <button
+        type="button"
+        className={rowClass}
+        onClick={onClick}
+        aria-current={selected ? "true" : undefined}
+      >
+        {content}
+      </button>
+    ) : (
+      <div className={rowClass}>{content}</div>
+    );
+  if (!check) return <li>{row}</li>;
   return (
-    <li>
-      {to !== undefined ? (
-        <Link to={to} className={rowClass}>
-          {content}
-        </Link>
-      ) : onClick ? (
-        <button
-          type="button"
-          className={rowClass}
-          onClick={onClick}
-          aria-current={selected ? "true" : undefined}
-        >
-          {content}
-        </button>
-      ) : (
-        <div className={rowClass}>{content}</div>
-      )}
+    <li className="flex items-stretch">
+      <label className="flex w-11 shrink-0 cursor-pointer items-center justify-center pl-2">
+        <Checkbox
+          checked={check.checked}
+          aria-label={check.label}
+          onCheckedChange={() => check.onChange()}
+        />
+      </label>
+      <div className="min-w-0 flex-1">{row}</div>
     </li>
   );
 }

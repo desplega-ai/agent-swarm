@@ -91,3 +91,12 @@
     animation: none;
   }
 }
+
+/*
+ * App-table selection column: a 44px strip holding one centered checkbox.
+ * The theme's cell padding would leave the checkbox about 8px to sit in.
+ */
+.ag-theme-quartz .ag-cell.json-render-select-cell,
+.ag-theme-quartz .ag-header-cell.json-render-select-header {
+  padding-inline: 0;
+}

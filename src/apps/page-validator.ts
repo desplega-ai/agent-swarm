@@ -53,6 +53,7 @@ const UI_STATE_COMPONENTS = new Set([
   "Tabs",
   "Chips",
   "Tree",
+  "Table",
 ]);
 
 /**
@@ -71,11 +72,12 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
 /**
  * `[arrayProp, chainKey]` pairs: every item of `props[arrayProp]` carries an
  * action chain under `chainKey` (Table `rowActions[].actions`, Table
- * `columns[].onChange`, Drawer footer `actions[].actions`).
+ * `bulkActions[].actions`, Table `columns[].onChange`, Drawer footer `actions[].actions`).
  */
 const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]> = {
   Table: [
     ["rowActions", "actions"],
+    ["bulkActions", "actions"],
     ["columns", "onChange"],
   ],
   Drawer: [["actions", "actions"]],
@@ -1378,6 +1380,23 @@ export function validatePage(
         );
       }
       if (type === "Table") {
+        // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
+        const tableProps = rawElement.props;
+        const selectionProps = ["selectable", "bulkActions"].filter((prop) => {
+          const value = tableProps[prop];
+          return value === true || (Array.isArray(value) && value.length > 0);
+        });
+        if (
+          selectionProps.length > 0 &&
+          (typeof tableProps.id !== "string" || tableProps.id === "")
+        ) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${selectionProps.join(" / ")}: the selection is stored at /ui/<id>/selected`,
+            ),
+          );
+        }
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {
           if (Array.isArray(rawElement.props.columns)) {

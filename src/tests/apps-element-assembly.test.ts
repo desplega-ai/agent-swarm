@@ -78,8 +78,24 @@ function notesApp(): AppRecordLike {
             table: {
               type: "Table",
               props: {
+                id: "notesTable",
+                selectable: true,
                 data: { $state: "/queries/all/data" },
                 search: { $state: "/ui/filter/value" },
+                bulkActions: [
+                  {
+                    label: "Sync selected",
+                    actions: [
+                      {
+                        action: "app.action",
+                        params: {
+                          name: "sync",
+                          input: { ids: { $state: "/ui/notesTable/selected" } },
+                        },
+                      },
+                    ],
+                  },
+                ],
                 rowActions: [
                   {
                     label: "Delete",
@@ -268,6 +284,16 @@ describe("assemblePageSpec — rewrite coverage across ELEMENT_KEYS", () => {
       model: "note",
       op: "delete",
       rowId: { $row: "id" },
+      [DEFINING_APP_PARAM]: NOTES_ID,
+    });
+  });
+
+  test("props — a Table's selection id is namespaced and its bulk chain follows it", () => {
+    const table = node(spec, "ref:notes:table");
+    expect(table?.props.id).toBe("instances/notes/notesTable");
+    expect(table?.props.bulkActions[0].actions[0].params).toEqual({
+      name: "sync",
+      input: { ids: { $state: "/ui/instances/notes/notesTable/selected" } },
       [DEFINING_APP_PARAM]: NOTES_ID,
     });
   });

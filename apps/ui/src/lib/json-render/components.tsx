@@ -163,6 +163,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
@@ -189,6 +190,7 @@ import type {
   SelectOption,
   SpacingToken,
   swarmCatalog,
+  TableBulkAction,
   TableColumn,
   TableFilters,
   TableRowAction,
@@ -198,6 +200,24 @@ import type {
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import { parseNumberInputValue } from "./number-input-value";
+import {
+  actionSlotFailed,
+  applyRange,
+  headerCheckState,
+  hiddenSelectedCount,
+  pruneSelection,
+  selectionFromState,
+  setRowSelected,
+  toggleAllVisible,
+} from "./table-selection";
+import {
+  BulkActionBar,
+  createSelectionStore,
+  SELECT_COLUMN_ID,
+  SelectAllHeader,
+  SelectCell,
+  TableCheckbox,
+} from "./table-selection-ui";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
@@ -1230,6 +1250,7 @@ function minWidthForKind(kind: TableColumn["kind"]): number {
   switch (kind) {
     case "boolean":
     case "switch":
+    case "checkbox":
       return 85;
     case "number":
     case "duration":
@@ -1368,9 +1389,12 @@ function rowMatchesFilters(
 
 function TableComponent({ props }: { props: TableProps }) {
   const { execute } = useActions();
-  const { getSnapshot } = useStateStore();
+  const { state, get, set, getSnapshot } = useStateStore();
   const themeAttr = useJsonRenderThemeAttr();
   const [pendingRowAction, setPendingRowAction] = useState<PendingRowAction | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const isMobile = useIsMobile();
 
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -1378,6 +1402,10 @@ function TableComponent({ props }: { props: TableProps }) {
   executeRef.current = execute;
   const snapshotRef = useRef(getSnapshot);
   snapshotRef.current = getSnapshot;
+  const getRef = useRef(get);
+  getRef.current = get;
+  const setRef = useRef(set);
+  setRef.current = set;
 
   const runChain = useCallback(
     async (chain: ActionChain | undefined, row: Record<string, unknown>, index: number) => {
@@ -1443,6 +1471,8 @@ function TableComponent({ props }: { props: TableProps }) {
         target.querySelector<HTMLButtonElement>("button")?.focus();
         return;
       }
+      // The selection checkbox is its own control: Enter must not open the row.
+      if (event.column.getColId() === SELECT_COLUMN_ID) return;
       // Enter on any other cell opens the row, like a click.
       const chain = propsRef.current.onRowClick as ActionChain | undefined;
       if (chain && event.data) void runChain(chain, event.data, event.rowIndex ?? 0);
@@ -1486,6 +1516,91 @@ function TableComponent({ props }: { props: TableProps }) {
         rowMatchesFilters(row, filters),
     );
   }, [allRows, narrowing, search, columnKeys, filters]);
+
+  // ── Row selection (`selectable` / `bulkActions`) ───────────────────────────
+  //
+  // Client state only: the row ids live at `/ui/<id>/selected`, so a click is
+  // never a server write and never shared with another viewer.
+  const selectionId = typeof props.id === "string" && props.id !== "" ? props.id : null;
+  const bulkActions = (props.bulkActions ?? []) as TableBulkAction[];
+  const selectable = selectionId !== null && (props.selectable === true || bulkActions.length > 0);
+  const selectionPath = `/ui/${selectionId}/selected`;
+  const selectionValue = selectable ? getByPath(state, selectionPath) : undefined;
+  const selected = useMemo(() => selectionFromState(selectionValue), [selectionValue]);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const visibleIds = useMemo(() => rows.map(rowId), [rows, rowId]);
+  const [selectionStore] = useState(createSelectionStore);
+  // Last row toggled: the fixed end of a shift-click range.
+  const anchorRef = useRef<string | null>(null);
+
+  // Seed the slot so `{ "$state": "/ui/<id>/selected" }` reads `[]`, not nothing.
+  useEffect(() => {
+    if (selectable && getRef.current(selectionPath) === undefined) {
+      setRef.current(selectionPath, []);
+    }
+  }, [selectable, selectionPath]);
+
+  // Rows that left the data (a sync, a delete) cannot stay selected: a bulk
+  // chain would act on ids nobody can see. Waits out loading and errors, when
+  // `data` is not trustworthy.
+  const dataReady = Array.isArray(props.data) && !props.loading && !props.error;
+  useEffect(() => {
+    if (!selectable || !dataReady || selected.length === 0) return;
+    const next = pruneSelection(selected, new Set(allRows.map(rowId)));
+    if (next !== selected) setRef.current(selectionPath, next);
+  }, [selectable, dataReady, selected, allRows, rowId, selectionPath]);
+
+  useEffect(() => {
+    selectionStore.update({ selected, visibleIds });
+  }, [selectionStore, selected, visibleIds]);
+
+  const clearSelection = useCallback(() => {
+    anchorRef.current = null;
+    setRef.current(`/ui/${propsRef.current.id}/selected`, []);
+  }, []);
+
+  /**
+   * Runs one bulk action's chain, then clears the selection when it finished
+   * clean. The app runtime's handlers swallow their own errors (they surface
+   * a banner and the action slot), so "clean" means: nothing threw and no
+   * `app.action` step left its `/actions/<name>` slot in `error`. A failed
+   * `app.mutate` is not visible from here and counts as clean.
+   */
+  const runBulkAction = useCallback(
+    async (index: number) => {
+      const action = propsRef.current.bulkActions?.[index] as TableBulkAction | undefined;
+      if (!action) return;
+      setBulkBusy(true);
+      try {
+        for (const binding of action.actions as ActionChain) {
+          await executeRef.current({
+            ...binding,
+            params: resolveScopedParams(binding.params, { state: snapshotRef.current() }),
+          });
+          if (actionSlotFailed(binding, getRef.current)) return;
+        }
+        clearSelection();
+      } catch {
+        // Keep the selection so the user can retry.
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [clearSelection],
+  );
+
+  const requestBulkAction = useCallback(
+    (index: number) => {
+      const action = propsRef.current.bulkActions?.[index] as TableBulkAction | undefined;
+      if (!action) return;
+      if (!confirmConfigFor(action)) {
+        void runBulkAction(index);
+        return;
+      }
+      setPendingBulkAction(index);
+    },
+    [runBulkAction],
+  );
 
   // Distinguish "nothing here yet" from "your search hid everything".
   const narrowedToEmpty = narrowing && rows.length === 0 && allRows.length > 0;
@@ -1571,16 +1686,28 @@ function TableComponent({ props }: { props: TableProps }) {
             return <ProgressCell value={value} max={column.max} />;
           case "copy":
             return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
-          case "switch": {
+          case "switch":
+          case "checkbox": {
             const chain = column.onChange as ActionChain | undefined;
+            const on = toFilterBoolean(value);
+            const toggle = (checked: boolean) =>
+              void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0);
+            if (kind === "checkbox") {
+              return (
+                <TableCheckbox
+                  checked={on}
+                  disabled={!chain?.length}
+                  label={column.label ?? column.key}
+                  onToggle={() => toggle(!on)}
+                />
+              );
+            }
             return (
               <Switch
-                checked={toFilterBoolean(value)}
+                checked={on}
                 disabled={!chain?.length}
                 aria-label={column.label ?? column.key}
-                onCheckedChange={(checked) =>
-                  void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0)
-                }
+                onCheckedChange={toggle}
               />
             );
           }
@@ -1694,7 +1821,37 @@ function TableComponent({ props }: { props: TableProps }) {
     });
   }
 
-  const columnDefs = useStableBySignature(builtColumnDefs, JSON.stringify([columns, rowActions]));
+  if (selectable) {
+    // First, pinned left: a leading checkbox column. The cell and the header
+    // read the selection from the store, so these defs stay stable across polls.
+    builtColumnDefs.unshift({
+      colId: SELECT_COLUMN_ID,
+      headerName: "",
+      width: 44,
+      minWidth: 44,
+      maxWidth: 44,
+      pinned: "left",
+      lockPinned: true,
+      lockPosition: true,
+      resizable: false,
+      sortable: false,
+      filter: false,
+      suppressMovable: true,
+      suppressSizeToFit: true,
+      suppressHeaderMenuButton: true,
+      headerComponent: SelectAllHeader,
+      headerComponentParams: { store: selectionStore },
+      cellRenderer: SelectCell,
+      cellRendererParams: { store: selectionStore },
+      cellClass: "json-render-select-cell",
+      headerClass: "json-render-select-header",
+    });
+  }
+
+  const columnDefs = useStableBySignature(
+    builtColumnDefs,
+    JSON.stringify([columns, rowActions, selectable]),
+  );
   const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
   // Endless-scroll guard: unless the author decided, big row sets paginate.
   const paginated = props.pagination ?? rows.length > 200;
@@ -1730,9 +1887,37 @@ function TableComponent({ props }: { props: TableProps }) {
     const column = columnByKey.get(key);
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
   };
+  const rowLabel = (row: Record<string, unknown>): string => {
+    const text = titleKey ? mobileCellText(titleKey, row) : "";
+    return text ? `Select ${text}` : "Select row";
+  };
+  selectionStore.rowId = rowId;
+  selectionStore.rowLabel = rowLabel;
+  selectionStore.handlers = {
+    toggleRow: (id, checked, displayOrder) => {
+      const current = selectionFromState(getRef.current(selectionPath));
+      const next = displayOrder
+        ? applyRange(current, displayOrder, anchorRef.current, id, checked)
+        : setRowSelected(current, id, checked);
+      anchorRef.current = id;
+      setRef.current(selectionPath, next);
+    },
+    toggleAll: () => {
+      const current = selectionFromState(getRef.current(selectionPath));
+      setRef.current(selectionPath, toggleAllVisible(current, visibleIds));
+    },
+  };
   const mobileRow =
     mobileMode === "list"
       ? (row: Record<string, unknown>): ListViewMobileRow => ({
+          check: selectable
+            ? {
+                checked: selectedSet.has(rowId(row)),
+                label: rowLabel(row),
+                onChange: () =>
+                  selectionStore.handlers.toggleRow(rowId(row), !selectedSet.has(rowId(row)), null),
+              }
+            : undefined,
           title: (titleKey ? mobileCellText(titleKey, row) : "") || "Untitled",
           status: statusKey
             ? statusNode(
@@ -1747,6 +1932,8 @@ function TableComponent({ props }: { props: TableProps }) {
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
     : undefined;
+  const confirmingBulk = pendingBulkAction === null ? undefined : bulkActions[pendingBulkAction];
+  const showMobileSelectAll = selectable && isMobile && mobileMode === "list" && rows.length > 0;
 
   return (
     // `min-w-0` lets the grid shrink below its column total inside flex/grid
@@ -1756,6 +1943,16 @@ function TableComponent({ props }: { props: TableProps }) {
         <AlertCallout tone="error" icon={AlertCircle} title="Query failed">
           {props.error}
         </AlertCallout>
+      ) : null}
+      {showMobileSelectAll ? (
+        <label className="flex min-h-11 items-center gap-3 px-4 text-sm text-muted-foreground">
+          <TableCheckbox
+            checked={headerCheckState(visibleIds, selectedSet)}
+            label="Select all rows"
+            onToggle={() => selectionStore.handlers.toggleAll()}
+          />
+          Select all
+        </label>
       ) : null}
       <ListView
         rows={rows}
@@ -1786,6 +1983,25 @@ function TableComponent({ props }: { props: TableProps }) {
         cellFocus={rowActions.length > 0 || hasRowClick}
         onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
       />
+      {selectable && selected.length > 0 ? (
+        <BulkActionBar
+          count={selected.length}
+          hidden={hiddenSelectedCount(selected, visibleIds)}
+          actions={bulkActions}
+          busy={bulkBusy}
+          onRun={requestBulkAction}
+          onClear={clearSelection}
+        />
+      ) : null}
+      <ChainConfirmDialog
+        action={confirmingBulk ? withSelectionCount(confirmingBulk, selected.length) : undefined}
+        onCancel={() => setPendingBulkAction(null)}
+        onConfirm={() => {
+          const index = pendingBulkAction;
+          setPendingBulkAction(null);
+          if (index !== null) void runBulkAction(index);
+        }}
+      />
       <ChainConfirmDialog
         action={confirmingAction}
         onCancel={() => setPendingRowAction(null)}
@@ -1799,6 +2015,19 @@ function TableComponent({ props }: { props: TableProps }) {
       />
     </div>
   );
+}
+
+/**
+ * A bulk action with the selection size added to its confirm copy, so the
+ * dialog always says how many rows it is about to touch.
+ */
+function withSelectionCount(action: TableBulkAction, count: number): TableBulkAction {
+  const copy = confirmConfigFor(action) ?? {};
+  const scope = `Applies to ${count} selected ${count === 1 ? "row" : "rows"}.`;
+  return {
+    ...action,
+    confirm: { ...copy, description: copy.description ? `${copy.description} ${scope}` : scope },
+  };
 }
 
 /**
