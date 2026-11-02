@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { OUTCOME_PARAM } from "./assemble";
 import {
-  actionSlotPath,
   applyRange,
   type BulkBinding,
   dropActedIds,
@@ -120,21 +119,7 @@ describe("pruneSelection / hiddenSelectedCount / sameSelection", () => {
   });
 });
 
-describe("actionSlotPath / dropActedIds", () => {
-  test("an app.action maps to its slot; a borrowed one to its /refs slot", () => {
-    expect(actionSlotPath({ action: "app.action", params: { name: "sync" } })).toBe(
-      "/actions/sync",
-    );
-    expect(actionSlotPath({ action: "app.action", params: { name: "sync", $app: "app2" } })).toBe(
-      "/refs/app2/actions/sync",
-    );
-  });
-
-  test("other steps and nameless actions have no slot", () => {
-    expect(actionSlotPath({ action: "app.mutate", params: { name: "sync" } })).toBeNull();
-    expect(actionSlotPath({ action: "app.action", params: {} })).toBeNull();
-  });
-
+describe("dropActedIds", () => {
   test("a finished action drops only the rows it acted on", () => {
     expect(dropActedIds(["a", "b", "late"], ["a", "b"])).toEqual(["late"]);
   });
@@ -211,17 +196,24 @@ describe("runBulkChain", () => {
     expect(await runBulkChain(h.deps([mutate, mutate]))).toBe("failed");
   });
 
-  test("a task-backed action waits for the task to finish before the chain continues", async () => {
+  /** What the runtime's app.action handler writes: the shared slot AND the chain's own outcome. */
+  const startTask = (b: BulkBinding, slots: Map<string, unknown>, taskId: string) => {
+    const running = { status: "running", taskId };
+    slots.set(`/actions/${b.params?.name}`, running);
+    slots.set(b.params?.[OUTCOME_PARAM] as string, running);
+  };
+
+  test("a task-backed action waits for its task to finish before the chain continues", async () => {
     const h = harness(async (b, slots) => {
-      if (b.params?.name === "enqueue")
-        slots.set("/actions/enqueue", { status: "running", taskId: "t1" });
+      if (b.params?.name === "enqueue") startTask(b, slots, "t1");
+      else slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "ok" });
     });
     // The task completes on the third poll.
     let polls = 0;
     const result = await runBulkChain(
       h.deps([action("enqueue"), action("after")], () => {
         polls++;
-        if (polls === 3) h.slots.set("/actions/enqueue", { status: "ok", taskId: "t1" });
+        if (polls === 3) h.slots.set(OUT, { status: "ok", taskId: "t1" });
       }),
     );
     expect(result).toBe("ok");
@@ -231,30 +223,63 @@ describe("runBulkChain", () => {
 
   test("a task that fails after the handler returned fails the chain", async () => {
     const h = harness(async (b, slots) => {
-      if (b.params?.name === "enqueue")
-        slots.set("/actions/enqueue", { status: "running", taskId: "t1" });
+      if (b.params?.name === "enqueue") startTask(b, slots, "t1");
     });
     const result = await runBulkChain(
       h.deps([action("enqueue"), action("after")], () =>
-        h.slots.set("/actions/enqueue", { status: "error", taskId: "t1", error: "task failed" }),
+        h.slots.set(OUT, { status: "error", taskId: "t1", error: "task failed" }),
       ),
     );
     expect(result).toBe("failed");
     expect(h.executed).toEqual(["app.action"]);
   });
 
-  test("a borrowed action is watched on its /refs slot", async () => {
+  test("another invocation of the same action finishing first does not end the bulk step", async () => {
     const h = harness(async (b, slots) => {
-      slots.set("/refs/app2/actions/sync", { status: "error" });
-      void b;
+      if (b.params?.name === "enqueue") startTask(b, slots, "t1");
+      else slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "ok" });
     });
-    const borrowed: BulkBinding = { action: "app.action", params: { name: "sync", $app: "app2" } };
-    expect(await runBulkChain(h.deps([borrowed]))).toBe("failed");
+    let polls = 0;
+    const result = await runBulkChain(
+      h.deps([action("enqueue"), action("after")], () => {
+        polls++;
+        // A second click takes the shared slot, and its task succeeds while t1 still runs.
+        if (polls === 1) h.slots.set("/actions/enqueue", { status: "running", taskId: "t2" });
+        if (polls === 2) h.slots.set("/actions/enqueue", { status: "ok", taskId: "t2" });
+        if (polls === 3) h.slots.set(OUT, { status: "error", taskId: "t1", error: "task failed" });
+      }),
+    );
+    expect(result).toBe("failed");
+    expect(h.sleeps()).toBe(3);
+    expect(h.executed).toEqual(["app.action"]);
+  });
+
+  test("an outcome slot that stops naming the bulk task fails the chain", async () => {
+    const h = harness(async (b, slots) => startTask(b, slots, "t1"));
+    const result = await runBulkChain(
+      h.deps([action("enqueue")], () => h.slots.set(OUT, { status: "ok", taskId: "t2" })),
+    );
+    expect(result).toBe("failed");
+  });
+
+  test("a running outcome without a task id is a failure, not a wait", async () => {
+    const h = harness(async (b, slots) => {
+      slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "running" });
+    });
+    expect(await runBulkChain(h.deps([action("enqueue")]))).toBe("failed");
+    expect(h.sleeps()).toBe(0);
+  });
+
+  test("an action that reports no outcome fails, even when its shared slot says ok", async () => {
+    const h = harness(async (b, slots) => {
+      slots.set(`/actions/${b.params?.name}`, { status: "ok" });
+    });
+    expect(await runBulkChain(h.deps([action("a")]))).toBe("failed");
   });
 
   test("an inline script action that ended ok finishes without waiting", async () => {
     const h = harness(async (b, slots) => {
-      slots.set(`/actions/${b.params?.name}`, { status: "ok" });
+      slots.set(b.params?.[OUTCOME_PARAM] as string, { status: "ok" });
     });
     expect(await runBulkChain(h.deps([action("a")]))).toBe("ok");
     expect(h.sleeps()).toBe(0);
@@ -268,9 +293,7 @@ describe("runBulkChain", () => {
   });
 
   test("unmounting while a task runs cancels the wait", async () => {
-    const h = harness(async (b, slots) => {
-      slots.set(`/actions/${b.params?.name}`, { status: "running", taskId: "t1" });
-    });
+    const h = harness(async (b, slots) => startTask(b, slots, "t1"));
     expect(await runBulkChain(h.deps([action("slow")], () => h.cancel()))).toBe("cancelled");
   });
 

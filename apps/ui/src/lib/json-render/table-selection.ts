@@ -94,19 +94,6 @@ export function sameSelection(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
-/** Where an `app.action` step's status slot lives (`/refs/<app>/actions/` for a borrowed action). */
-export function actionSlotPath(binding: {
-  action: string;
-  params?: Record<string, unknown>;
-}): string | null {
-  if (binding.action !== "app.action") return null;
-  const name = binding.params?.name;
-  if (typeof name !== "string" || name === "") return null;
-  const app = binding.params?.$app;
-  const root = typeof app === "string" && app !== "" ? `/refs/${app}/actions` : "/actions";
-  return `${root}/${name}`;
-}
-
 /** What is left selected once a bulk action finished: the late picks, never the rows it acted on. */
 export function dropActedIds(current: readonly string[], acted: readonly string[]) {
   const done = new Set(acted);
@@ -119,7 +106,10 @@ export type BulkOutcome = "ok" | "failed" | "cancelled";
 
 export interface BulkChainDeps {
   chain: readonly BulkBinding[];
-  /** Slot an `app.mutate` step reports its result to (see `OUTCOME_PARAM`). */
+  /**
+   * Slot an `app.mutate` or `app.action` step reports its own result to (see
+   * `OUTCOME_PARAM`). Owned by this chain, so no other invocation writes it.
+   */
   outcomePath: string;
   /** Runs one step. `extra` is merged over the step's resolved params. */
   execute: (binding: BulkBinding, extra?: Record<string, unknown>) => Promise<void>;
@@ -131,9 +121,12 @@ export interface BulkChainDeps {
   pollMs?: number;
 }
 
-function slotStatus(slot: unknown): unknown {
+/** Steps whose handler reports to the outcome slot; every other step is not judged. */
+const TRACKED_ACTIONS = new Set(["app.mutate", "app.action"]);
+
+function slotField(slot: unknown, field: "status" | "taskId"): unknown {
   return typeof slot === "object" && slot !== null
-    ? (slot as { status?: unknown }).status
+    ? (slot as Record<string, unknown>)[field]
     : undefined;
 }
 
@@ -141,14 +134,16 @@ function slotStatus(slot: unknown): unknown {
  * Runs a bulk action's chain and says whether it truly succeeded.
  *
  * The app runtime's handlers swallow their own failures, so a resolved
- * `execute` proves nothing. Each step is checked where the runtime reports it:
+ * `execute` proves nothing. `app.mutate` and `app.action` steps are dispatched
+ * with an outcome slot (`OUTCOME_PARAM`) that only this invocation writes:
  *
- * - `app.mutate` is dispatched with an outcome slot (`OUTCOME_PARAM`) the handler
- *   writes `ok` or `error` to; a missing slot (a renderer that does not report)
- *   counts as failed, never as success.
- * - `app.action` ends with its `/actions/<name>` slot. A task-backed action
- *   returns while the slot is still `running`; the chain waits for the task's
- *   terminal status, so a task that fails later still fails the chain.
+ * - `ok` or `error` ends the step. A missing report (a renderer that does not
+ *   report) counts as failed, never as success.
+ * - A task-backed action reports `running` with its own task id, and the
+ *   runtime's task watcher writes that task's terminal status there. The chain
+ *   waits on that task, not on the shared `/actions/<name>` slot, which a
+ *   second invocation of the same action can take over. If the slot stops
+ *   naming the task, the chain cannot tell how its task ended and fails.
  *
  * Any failure stops the chain: later steps must not run against a failed one.
  */
@@ -156,24 +151,30 @@ export async function runBulkChain(deps: BulkChainDeps): Promise<BulkOutcome> {
   const pollMs = deps.pollMs ?? 250;
   for (const binding of deps.chain) {
     if (deps.cancelled()) return "cancelled";
-    const tracked = binding.action === "app.mutate";
-    if (tracked) deps.write(deps.outcomePath, undefined);
+    if (!TRACKED_ACTIONS.has(binding.action)) {
+      try {
+        await deps.execute(binding);
+      } catch {
+        return "failed";
+      }
+      continue;
+    }
+    deps.write(deps.outcomePath, undefined);
     try {
-      await deps.execute(binding, tracked ? { [OUTCOME_PARAM]: deps.outcomePath } : undefined);
+      await deps.execute(binding, { [OUTCOME_PARAM]: deps.outcomePath });
     } catch {
       return "failed";
     }
-    if (tracked && slotStatus(deps.read(deps.outcomePath)) !== "ok") return "failed";
-
-    const slotPath = actionSlotPath(binding);
-    if (slotPath === null) continue;
-    let status = slotStatus(deps.read(slotPath));
-    while (status === "running") {
+    let slot = deps.read(deps.outcomePath);
+    const taskId = slotField(slot, "taskId");
+    while (slotField(slot, "status") === "running") {
+      if (typeof taskId !== "string" || taskId === "") return "failed";
       await deps.sleep(pollMs);
       if (deps.cancelled()) return "cancelled";
-      status = slotStatus(deps.read(slotPath));
+      slot = deps.read(deps.outcomePath);
+      if (slotField(slot, "taskId") !== taskId) return "failed";
     }
-    if (status === "error") return "failed";
+    if (slotField(slot, "status") !== "ok") return "failed";
   }
   return "ok";
 }
