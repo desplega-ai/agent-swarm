@@ -933,9 +933,9 @@ describe("scrubSecrets — over-redaction guards", () => {
     const lines = [
       regexLine,
       regexLine.replace(`[REDACTED:${key}]`, "***"),
-      `const re = /[?&]${key}=([^&]+)/;`,
       `const re = /(?:sig|token=)[^&]*/;`,
-      `pick(token=(a), f(secret=],x))`,
+      `const re = /[?&](?:a|${key}=)/;`,
+      `pick(token=), f([x|secret=]))`,
     ];
     for (const line of lines) {
       expect(scrubSecrets(line)).toBe(line);
@@ -982,6 +982,31 @@ describe("scrubSecrets — over-redaction guards", () => {
     ];
     for (const [input, expected, secret] of cases) {
       expect(scrubSecrets(input)).toBe(expected);
+      expect(scrubSecrets(jsonBody(input))).not.toContain(secret);
+    }
+  });
+
+  // In code position only an empty value (`=` then the closer of the group
+  // holding the key) is exempt. Value content is never weighed, so short,
+  // separator-split and punctuation-only secrets redact.
+  test("code-position values redact unless the key's group closes at =", () => {
+    const key = ["api", "Key"].join("");
+    const pw = ["pass", "word"].join("");
+    const mixed = ["(Ab12", "Cd34", "Ef56)"].join("!");
+    const punct = "(!@#%^&*-)";
+    const cases: Array<[string, string]> = [
+      [`connect(${pw}=${mixed})`, mixed],
+      [`connect(${pw}=${punct})`, punct],
+      [`connect(host, ${pw}=${punct})`, punct],
+      [`foo(${key}=[a-b-c-d])`, "[a-b-c-d]"],
+      [`foo(${key}=(a-b)c)`, "(a-b)c"],
+      [`connect(${pw}=]!@#$%)`, "]!@#$%"],
+      [`connect([x|${pw}=)!@#$%)`, ")!@#$%"],
+      [`/(?:x|token=(!!--))/`, "(!!--)"],
+      [`/[?&]${key}=([^&]+)/;`, "([^&]+)/;"],
+    ];
+    for (const [input, secret] of cases) {
+      expect(scrubSecrets(input)).not.toContain(secret);
       expect(scrubSecrets(jsonBody(input))).not.toContain(secret);
     }
   });

@@ -250,25 +250,44 @@ function isSensitiveKeyPath(key: string): boolean {
 }
 
 /**
- * A sensitive `KEY=` that is source code, not a credential: a key name inside
- * a regex such as `([?&]<key>=)[^&#]*` or `(?:a|<key>=)`. Three conditions
- * must all hold, so a real punctuation-led secret (`PASSWORD=(Tr0ub4dor&3)`,
- * `?token=[…]`) still redacts:
+ * A sensitive `KEY=` whose value is empty: the key is the last item of a
+ * bracket group, as in the regex `([?&]<key>=)[^&#]*` or `(?:a|<key>=)`. Two
+ * conditions must both hold:
  * - the key follows a regex or call opener (`]`, `(`, `|`), never a space,
  *   line start, `?` or `&` as in a shell assignment or a URL query;
- * - the bare value opens with a bracket or a statement separator;
- * - the value holds no run of 6+ letters or digits, i.e. no credential body.
+ * - the value opens with the `)` or `]` that closes the innermost group still
+ *   open before the key, found by a bounded backward bracket scan on the
+ *   same line.
+ * The text after that closer sits outside the group, so it is not the key's
+ * value in code or shell syntax. Value content is never inspected: any value
+ * that opens with anything else, including `(`, `[`, punctuation-only text or
+ * a closer that does not match, redacts.
  */
 const CODE_KEY_OPENER_RE = /[\]()|]$/;
-const CODE_PUNCT_START_RE = /^[()[\]{},;|]/;
-const CREDENTIAL_RUN_RE = /[A-Za-z0-9]{6,}/;
+const GROUP_SCAN_LIMIT = 256;
+const GROUP_PAIRS: Record<string, string> = { ")": "(", "]": "[" };
 
-function isCodeAssignment(value: string, before: string): boolean {
-  return (
-    CODE_KEY_OPENER_RE.test(before) &&
-    CODE_PUNCT_START_RE.test(value) &&
-    !CREDENTIAL_RUN_RE.test(value)
-  );
+/** The innermost bracket left open before `end` on the same line, or "". */
+function openGroupBefore(input: string, end: number): string {
+  const closers: string[] = [];
+  const stop = Math.max(0, end - GROUP_SCAN_LIMIT);
+  for (let i = end - 1; i >= stop; i--) {
+    const ch = input[i] as string;
+    if (/\s/.test(ch) || (ch === "\\" && /[nr]/.test(input[i + 1] ?? ""))) return "";
+    if (ch === ")" || ch === "]") closers.push(ch);
+    else if (ch === "(" || ch === "[") {
+      const closer = closers.pop();
+      if (closer === undefined) return ch;
+      if (GROUP_PAIRS[closer] !== ch) return "";
+    }
+  }
+  return "";
+}
+
+function isEmptyGroupAssignment(value: string, offset: number, input: string): boolean {
+  if (!CODE_KEY_OPENER_RE.test(input.slice(Math.max(0, offset - 1), offset))) return false;
+  const opener = GROUP_PAIRS[value[0] ?? ""];
+  return opener !== undefined && openGroupBefore(input, offset) === opener;
 }
 
 function redactAssignment(
@@ -279,7 +298,7 @@ function redactAssignment(
   input: string,
 ): string {
   if (!isSensitiveKeyPath(key)) return match;
-  if (isCodeAssignment(value, input.slice(Math.max(0, offset - 1), offset))) return match;
+  if (isEmptyGroupAssignment(value, offset, input)) return match;
   let open = "";
   let close = "";
   for (const quote of ['\\"', '"', "'"]) {
