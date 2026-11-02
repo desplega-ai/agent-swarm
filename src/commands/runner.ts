@@ -2078,11 +2078,14 @@ export async function resolveCodexOAuthCredentialInfo(
     try {
       const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
       if (slots.length > 0) {
+        const allSlotIndices = slots.map((s) => s.slot);
+        // The index-based API needs the slot-id range, including gaps.
+        const totalKeys = Math.max(...allSlotIndices) + 1;
         let availableIndices: number[] | undefined;
         let authFailureFence: number | undefined;
         try {
           const resp = await fetch(
-            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${slots.length}`,
+            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${totalKeys}`,
             { headers: { Authorization: `Bearer ${apiKey}` } },
           );
           if (resp.ok) {
@@ -2092,9 +2095,12 @@ export async function resolveCodexOAuthCredentialInfo(
             };
             availableIndices = data.availableIndices;
             authFailureFence = data.authFailureFence;
-            if (availableIndices.length < slots.length) {
+            const availableSlots = allSlotIndices.filter((i) =>
+              availableIndices!.includes(i),
+            ).length;
+            if (availableSlots < slots.length) {
               console.log(
-                `[credentials] CODEX_OAUTH: ${availableIndices.length}/${slots.length} slots available (${slots.length - availableIndices.length} rate-limited)`,
+                `[credentials] CODEX_OAUTH: ${availableSlots}/${slots.length} slots available (${slots.length - availableSlots} rate-limited)`,
               );
             }
           }
@@ -2102,7 +2108,6 @@ export async function resolveCodexOAuthCredentialInfo(
           // Non-critical — fall through to random selection
         }
 
-        const allSlotIndices = slots.map((s) => s.slot);
         let selectedSlot: number;
         if (availableIndices && availableIndices.length > 0) {
           const eligible = allSlotIndices.filter((i) => availableIndices!.includes(i));
