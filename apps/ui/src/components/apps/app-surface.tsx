@@ -374,6 +374,11 @@ function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
  * still `running`, mirrored into `/actions/<name>`) instead of escaping as an
  * unhandled rejection that would leave the app stuck on "running".
  *
+ * `outcomePath` is the invoking bulk chain's private outcome slot
+ * (`OUTCOME_PARAM`). A newer invocation of the same action takes over
+ * `<path>`, but not the outcome slot, so the watcher keeps going until it can
+ * report this task's terminal status there.
+ *
  * The `PollRegistry` is captured ONCE, at start: it identifies the mount that
  * owns this watcher. Reading it live off `ctxRef` would let a watcher from a
  * disposed mount be revived by the next mount's registry (React StrictMode's
@@ -385,8 +390,11 @@ async function pollActionTask(
   path: string,
   taskId: string,
   onError: (message: string) => void,
+  outcomePath: string | null = null,
 ): Promise<void> {
   const poll = ctxRef.current.poll;
+  const owns = (ctx: RuntimeCtx, slotPath: string | null): boolean =>
+    slotPath !== null && (ctx.store.get(slotPath) as ActionSlot | undefined)?.taskId === taskId;
   try {
     for (;;) {
       if (!(await waitUnlessDisposed(poll, TASK_POLL_MS))) return;
@@ -401,22 +409,32 @@ async function pollActionTask(
       }
       if (poll.disposed) return;
 
-      // A newer invocation of the same action supersedes this watcher.
-      const current = ctx.store.get(path) as ActionSlot | undefined;
-      if (current?.taskId !== taskId) return;
+      // A newer invocation of the same action supersedes this watcher on the
+      // shared slot. It stops only once no slot it reports to names its task.
+      const ownsSlot = owns(ctx, path);
+      const ownsOutcome = owns(ctx, outcomePath);
+      if (!ownsSlot && !ownsOutcome) return;
 
       if (!TERMINAL_TASK_STATUSES.has(status)) {
-        ctx.store.set(path, { status: "running", taskId, taskStatus: status } satisfies ActionSlot);
+        if (ownsSlot) {
+          ctx.store.set(path, {
+            status: "running",
+            taskId,
+            taskStatus: status,
+          } satisfies ActionSlot);
+        }
         continue;
       }
 
       const ok = status === "completed";
-      ctx.store.set(path, {
+      const terminal = {
         status: ok ? "ok" : "error",
         taskId,
         taskStatus: status,
         ...(ok ? {} : { error: `task ${status}` }),
-      } satisfies ActionSlot);
+      } satisfies ActionSlot;
+      if (ownsSlot) ctx.store.set(path, terminal);
+      if (ownsOutcome && outcomePath !== null) ctx.store.set(outcomePath, terminal);
       if (ok) {
         await ctx.refetchAll();
       } else {
@@ -430,16 +448,19 @@ async function pollActionTask(
     const ctx = ctxRef.current;
     if (poll.disposed) return;
     const message = e instanceof Error ? e.message : String(e);
-    // Only claim the slot while it is still this watcher's running slot — a
+    // Only claim a slot while it is still this watcher's running slot — a
     // terminal state already written above (or a newer invocation) wins.
-    const current = ctx.store.get(path) as ActionSlot | undefined;
-    if (current?.taskId === taskId && current.status === "running") {
-      ctx.store.set(path, {
-        status: "error",
-        taskId,
-        ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
-        error: message,
-      } satisfies ActionSlot);
+    for (const slotPath of [path, outcomePath]) {
+      if (slotPath === null) continue;
+      const current = ctx.store.get(slotPath) as ActionSlot | undefined;
+      if (current?.taskId === taskId && current.status === "running") {
+        ctx.store.set(slotPath, {
+          status: "error",
+          taskId,
+          ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
+          error: message,
+        } satisfies ActionSlot);
+      }
     }
     onError(message);
   }
@@ -980,6 +1001,15 @@ export function AppSurface({
             targetAppId === ctx.app.id
               ? `/actions/${name}`
               : `/refs/${targetAppId}/actions/${name}`;
+          // A Table bulk chain names a private outcome slot: `path` is shared
+          // with every other invocation of this action, so it cannot tell the
+          // chain how ITS invocation (and its task) ended.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          const report = (slot: ActionSlot): void => {
+            if (outcomePath) ctx.store.set(outcomePath, slot);
+          };
           // A `$chain` binding only resolves inside a component that publishes
           // chain scope. Elsewhere the sentinel object arrives intact: json-render
           // hands it through, and `resolveScopedValue` keeps an unresolved `$chain`
@@ -995,6 +1025,7 @@ export function AppSurface({
             const message =
               "app.action parentTaskId must resolve to a task id; a $chain binding only resolves inside a component that publishes chain scope";
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
             return;
           }
@@ -1009,12 +1040,14 @@ export function AppSurface({
             setLastResponse(response);
 
             if (response.taskId) {
-              ctx.store.set(path, {
+              const running = {
                 status: "running",
                 taskId: response.taskId,
                 taskStatus: response.status,
-              } satisfies ActionSlot);
-              void pollActionTask(ctxRef, path, response.taskId, setActionError);
+              } satisfies ActionSlot;
+              ctx.store.set(path, running);
+              report(running);
+              void pollActionTask(ctxRef, path, response.taskId, setActionError, outcomePath);
               return;
             }
 
@@ -1025,6 +1058,7 @@ export function AppSurface({
               } satisfies ActionSlot);
               // A script action can touch any model of any app on the surface.
               await ctx.refetchAll();
+              report({ status: "ok" });
               return;
             }
 
@@ -1034,10 +1068,12 @@ export function AppSurface({
               error: message,
               result: response.result,
             } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
           }
         },

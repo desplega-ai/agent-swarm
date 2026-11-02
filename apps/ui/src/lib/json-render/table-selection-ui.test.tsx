@@ -306,7 +306,7 @@ function runtime(
     bulk = useBulkRunner({
       actions,
       selectionPath: "/ui/t/selected",
-      outcomePath: "/ui/t/bulkOutcome",
+      outcomePath: OUTCOME,
       pollMs: 1,
       execute: async (binding) => {
         executed.push(binding);
@@ -323,8 +323,15 @@ function runtime(
 }
 
 const run = (rt: ReturnType<typeof runtime>) => act(async () => void (await rt.bulk().run(0)));
+const OUTCOME = "/ui/t/bulkOutcome";
 const mutateOk = (b: Binding, state: Map<string, unknown>) => {
   if (b.action === "app.mutate") state.set(b.params?.$outcome as string, { status: "ok" });
+};
+/** What the runtime's app.action handler writes for a task: the shared slot AND the chain's outcome. */
+const startTask = (b: Binding, state: Map<string, unknown>, taskId: string) => {
+  const running = { status: "running", taskId };
+  state.set(`/actions/${b.params?.name}`, running);
+  state.set(b.params?.$outcome as string, running);
 };
 
 test("a failed app.mutate keeps the selection and stops the chain", async () => {
@@ -343,8 +350,7 @@ test("a task-backed action holds the selection until the task ends, and a later 
   let release!: () => void;
   const rt = runtime(["a", "b"], (b, state) => {
     mutateOk(b, state);
-    if (b.params?.name === "after")
-      state.set("/actions/after", { status: "running", taskId: "t1" });
+    if (b.params?.name === "after") startTask(b, state, "t1");
   });
   const { host } = await mount(<rt.Harness />);
   const settled = new Promise<void>((resolve) => {
@@ -363,7 +369,7 @@ test("a task-backed action holds the selection until the task ends, and a later 
   expect(rt.selected()).toEqual(["a", "b"]);
 
   await act(async () => {
-    rt.state.set("/actions/after", { status: "error", taskId: "t1", error: "task failed" });
+    rt.state.set(OUTCOME, { status: "error", taskId: "t1", error: "task failed" });
     await running;
     await settled;
   });
@@ -374,8 +380,7 @@ test("a task-backed action holds the selection until the task ends, and a later 
 test("a task-backed action that completes clears the selection", async () => {
   const rt = runtime(["a"], (b, state) => {
     mutateOk(b, state);
-    if (b.params?.name === "after")
-      state.set("/actions/after", { status: "running", taskId: "t1" });
+    if (b.params?.name === "after") startTask(b, state, "t1");
   });
   await mount(<rt.Harness />);
   let running!: Promise<void>;
@@ -383,7 +388,31 @@ test("a task-backed action that completes clears the selection", async () => {
     running = rt.bulk().run(0);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(rt.selected()).toEqual(["a"]);
-    rt.state.set("/actions/after", { status: "ok", taskId: "t1" });
+    rt.state.set(OUTCOME, { status: "ok", taskId: "t1" });
+    await running;
+  });
+  expect(rt.selected()).toEqual([]);
+});
+
+test("another invocation of the same action succeeding does not clear the selection mid-task", async () => {
+  const rt = runtime(["a"], (b, state) => {
+    mutateOk(b, state);
+    if (b.params?.name === "after") startTask(b, state, "t1");
+  });
+  const { host } = await mount(<rt.Harness />);
+  let running!: Promise<void>;
+  await act(async () => {
+    running = rt.bulk().run(0);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // A second click on the same action takes the shared slot and its task succeeds.
+    rt.state.set("/actions/after", { status: "ok", taskId: "t2" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(host.querySelector('[data-testid="busy"]')?.textContent).toBe("true");
+  expect(rt.selected()).toEqual(["a"]);
+
+  await act(async () => {
+    rt.state.set(OUTCOME, { status: "ok", taskId: "t1" });
     await running;
   });
   expect(rt.selected()).toEqual([]);
@@ -394,7 +423,7 @@ test("rows picked while the chain ran survive it; only the acted-on rows leave",
     mutateOk(b, state);
     // A write that slipped past the UI lock (another component, a state binding).
     if (b.action === "app.mutate") state.set("/ui/t/selected", ["a", "late"]);
-    if (b.params?.name === "after") state.set("/actions/after", { status: "ok" });
+    if (b.params?.name === "after") state.set(b.params?.$outcome as string, { status: "ok" });
   });
   await mount(<rt.Harness />);
   await run(rt);
@@ -405,7 +434,7 @@ test("a second run while one is in flight is ignored", async () => {
   const rt = runtime(["a"], async (b, state) => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     mutateOk(b, state);
-    if (b.params?.name === "after") state.set("/actions/after", { status: "ok" });
+    if (b.params?.name === "after") state.set(b.params?.$outcome as string, { status: "ok" });
   });
   await mount(<rt.Harness />);
   await act(async () => {
@@ -421,8 +450,7 @@ test("a second run while one is in flight is ignored", async () => {
 test("unmounting mid-task leaves the selection untouched", async () => {
   const rt = runtime(["a"], (b, state) => {
     mutateOk(b, state);
-    if (b.params?.name === "after")
-      state.set("/actions/after", { status: "running", taskId: "t1" });
+    if (b.params?.name === "after") startTask(b, state, "t1");
   });
   const { root } = await mount(<rt.Harness />);
   let running!: Promise<void>;
