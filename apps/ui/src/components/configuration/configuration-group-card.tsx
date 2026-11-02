@@ -4,6 +4,7 @@ import type { ConfigCatalogEntry, ConfigCatalogGroup } from "@/lib/configuration
 import type { EnvPresence } from "@/lib/integrations-status";
 import { normalizeOrgWebsite } from "../../../../../src/utils/org-website";
 import { ConfigurationRow } from "./configuration-row";
+import { ImprovementsRow } from "./improvements-row";
 import { PublicRankingRow } from "./public-ranking-row";
 import { UsedByConsentRow } from "./used-by-consent-row";
 
@@ -70,6 +71,10 @@ export function ConfigurationGroupCard({
             <UsedByConsentRow />
             <PublicRankingRow />
           </>
+        ) : null}
+        {group.id === "telemetry" &&
+        entries.some((entry) => entry.key === "IMPROVEMENTS_ENABLED") ? (
+          <ImprovementsRow />
         ) : null}
       </CardContent>
     </Card>

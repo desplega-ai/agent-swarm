@@ -24157,6 +24157,376 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/improvements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List product improvements
+         * @description Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Improvements and the switch state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            improvements: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Draft a product improvement, or send one as a person
+         * @description Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        text: string;
+                        /** Format: email */
+                        email?: string;
+                        sendNow?: boolean;
+                        /** @enum {string} */
+                        source?: "ui" | "api";
+                    };
+                };
+            };
+            responses: {
+                /** @description A person's `sendNow` was approved and sent (see `status`) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Draft stored as `pending_approval` */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid text or email, or `sendNow` without an email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller may not draft improvements */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve and send a drafted improvement
+         * @description Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: email
+                         * @description The approver's email, sent with the text.
+                         */
+                        email: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Approved. `status` is `sent`, or `failed` with the proxy status and error. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Missing or invalid email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is an agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent, sending or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a drafted improvement
+         * @description A person may discard any pending or failed improvement. An agent may discard only a draft it requested.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Discarded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Caller is an agent that did not request this draft */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet-benchmark": {
         parameters: {
             query?: never;

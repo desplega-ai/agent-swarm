@@ -43,7 +43,8 @@ import {
 } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ensureConfigAdmin, runConfigWriteSideEffects } from "./config";
-import { agentFirstPrincipal, authUser, authUserId } from "./request-principal";
+import { type ApprovalResponder, approvalResponder, responderKey } from "./person-responder";
+import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -929,49 +930,6 @@ async function approvalCallerPrincipal(
           ? "operator"
           : null;
   return { principal, resolvedBy };
-}
-
-type ApprovalResponder = { kind: "user"; user: User } | { kind: "operator" };
-
-const AGENT_RESPONSE_REFUSED =
-  "Agents cannot answer approval requests. A person must respond with a user token or the dashboard.";
-
-/**
- * The person answering an approval request, taken from the credential and
- * never from the request body. Every agent identity is refused: an `aseph_`
- * session token, the shared key with an `X-Agent-ID`, and a page session with
- * no signed-in user (page code is agent-authored, so it cannot vouch for a
- * person). The shared key alone is the operator.
- */
-async function approvalResponder(
-  req: IncomingMessage,
-): Promise<{ ok: true; responder: ApprovalResponder } | { ok: false; message: string }> {
-  const auth = getRequestAuth(req);
-  const rawAgentId = req.headers["x-agent-id"];
-  const headerAgentId = Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
-  const principal = await agentFirstPrincipal(req, headerAgentId);
-
-  if (principal.kind !== "user" && principal.kind !== "agent" && auth?.page) {
-    return {
-      ok: false,
-      message: "A page session without a signed-in user cannot answer approval requests.",
-    };
-  }
-  const user = authUser(auth);
-  const responder: ApprovalResponder | null =
-    principal.kind === "user" && user
-      ? { kind: "user", user }
-      : principal.kind === "operator"
-        ? { kind: "operator" }
-        : null;
-
-  const decision = can({ principal, verb: "approval.respond", source: "http" });
-  if (!decision.allow || !responder) return { ok: false, message: AGENT_RESPONSE_REFUSED };
-  return { ok: true, responder };
-}
-
-function responderKey(responder: ApprovalResponder): string {
-  return responder.kind === "user" ? responder.user.id : "operator";
 }
 
 function userMatchesListed(user: Pick<User, "id" | "email">, listed: string): boolean {
