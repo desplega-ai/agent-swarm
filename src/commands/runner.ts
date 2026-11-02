@@ -91,6 +91,7 @@ import {
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -1659,7 +1660,7 @@ export async function handleStructuredOutputFallback(
       logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
     };
 
-    if (!taskData.outputSchema) {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       // No structured output required — extract last progress as context
       const lastProgressLog = (taskData.logs ?? [])
         .filter((l) => l.eventType === "task_progress")
@@ -1748,7 +1749,7 @@ async function validateProviderOutputIfNeeded(
     const taskData = (await taskRes.json()) as {
       outputSchema?: Record<string, unknown>;
     };
-    if (!taskData.outputSchema || typeof taskData.outputSchema !== "object") {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       return { ok: true };
     }
 
@@ -3776,12 +3777,13 @@ async function buildTaskOutputInstructions(
   hasMcp: boolean,
 ): Promise<string> {
   if (!hasMcp) return "";
-  const result =
-    outputSchema && typeof outputSchema === "object"
-      ? await resolveTemplateAsync("task.output.schema", {
-          schema: JSON.stringify(outputSchema, null, 2),
-        })
-      : await resolveTemplateAsync("task.output.generic", {});
+  // An empty `{}` schema means no schema; rendering it as a contract makes the
+  // worker complete with the literal output "{}".
+  const result = isEffectiveOutputSchema(outputSchema)
+    ? await resolveTemplateAsync("task.output.schema", {
+        schema: JSON.stringify(outputSchema, null, 2),
+      })
+    : await resolveTemplateAsync("task.output.generic", {});
   return result.text;
 }
 

@@ -17,6 +17,7 @@ const ALL_EVENTS: SlackReactionEvent[] = [
   "steered",
   "completed",
   "failed",
+  "skipped",
 ];
 
 /** The four acceptance-stage names `main` removed as a fixed list at finalize. */

@@ -156,7 +156,7 @@ export async function updateModelProfile(
  * oldest `finishedAt` the repair still covers.
  */
 const TASK_HOLDS_PROFILE_SQL = `(
-  t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+  t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
   OR (t.status = 'superseded'
       AND t.workflowRunStepId IS NULL
       AND (t.finishedAt IS NULL OR t.finishedAt > ?)
