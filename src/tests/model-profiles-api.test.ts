@@ -447,6 +447,7 @@ describe("profile credential allowlist", () => {
   for (const [label, stored] of [
     ["malformed JSON", "{not json"],
     ["schema-invalid JSON", '{"CLAUDE_CODE_OAUTH_TOKEN":[]}'],
+    ["empty string", ""],
   ]) {
     test(`an unreadable stored allowlist (${label}) fails closed; list endpoints still render it`, async () => {
       await createModelProfile({

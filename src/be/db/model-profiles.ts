@@ -56,7 +56,9 @@ function parseCredentialAllowlist(value: string | null): {
   credentials: ModelProfileCredentials | null;
   unreadable: boolean;
 } {
-  if (!value) return { credentials: null, unreadable: false };
+  // Only NULL means "no allowlist". An empty string is malformed: the writer
+  // never stores one, so it fails closed like any other unreadable value.
+  if (value === null) return { credentials: null, unreadable: false };
   try {
     const parsed = ModelProfileCredentialsSchema.safeParse(JSON.parse(value));
     if (parsed.success) return { credentials: parsed.data, unreadable: false };
