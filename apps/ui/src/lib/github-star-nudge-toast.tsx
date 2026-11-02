@@ -55,7 +55,11 @@ export function notePromptSent(): void {
       duration: Number.POSITIVE_INFINITY,
       // Custom toasts skip sonner's box styles; the Toaster adds the colors.
       // Width stays overridable: sonner's phone rule makes it full-width.
-      className: "w-[var(--width)] !rounded-lg !border !p-4 font-sans",
+      // Sonner hides a collapsed toast's contents only for styled toasts, so
+      // the two data variants do it here; otherwise the body spills out below a
+      // newer toast stacked in front.
+      className:
+        "w-[var(--width)] !rounded-lg !border !p-4 font-sans [&[data-expanded=false][data-front=false]>*]:pointer-events-none [&[data-expanded=false][data-front=false]>*]:opacity-0",
       onDismiss: done,
     },
   );
