@@ -7,7 +7,7 @@
  *    pages) is fetched by the caller and handed in as `app`.
  * 2. Every named query runs via `GET /api/apps/:id/queries/<name>` on the
  *    standard 5s react-query poll, and is mirrored into json-render state at
- *    `/queries/<name>` as `{ data, loading, error }` — which is what the
+ *    `/queries/<name>` as `{ data, loading, fetching, error }` — which is what the
  *    catalog's `Table` binds to. A query with `{ "$param": … }` filters is run
  *    with the current route params (and parked, with an explicit error in its
  *    slot, while any of them is missing from the URL).
@@ -87,8 +87,14 @@ import {
   useAppRefresh,
   useAppUserConfig,
 } from "@/api/hooks/use-apps";
-import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
+import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import {
+  buildQuerySlot,
+  errorMessage,
+  type QuerySlot,
+  sameQuerySlot,
+} from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -112,8 +118,6 @@ import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-r
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
-
-const EMPTY_ROWS: AppRow[] = [];
 
 /** Task-backed actions are watched on the same 5s cadence as the app queries. */
 const TASK_POLL_MS = 5000;
@@ -143,12 +147,6 @@ export function viewModeFromParam(mode: string | null): ViewMode {
   if (mode === "full") return "full";
   if (mode === "chromeless") return "chromeless";
   return "default";
-}
-
-interface QuerySlot {
-  data: AppRow[];
-  loading: boolean;
-  error: string | null;
 }
 
 /**
@@ -345,10 +343,7 @@ function definingAppOf(params: { [key: string]: unknown } | undefined, ownAppId:
   return typeof tagged === "string" && tagged ? tagged : ownAppId;
 }
 
-export function errorMessage(error: unknown): string | null {
-  if (!error) return null;
-  return error instanceof Error ? error.message : String(error);
-}
+export { errorMessage };
 
 /** Resolves `true` after `ms`, or `false` if the runtime unmounted first. */
 function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
@@ -794,34 +789,10 @@ export function AppSurface({
     queryPlans.forEach((plan, index) => {
       const result = results[index];
       const prev = store.get(plan.statePath) as QuerySlot | undefined;
-      // A `$param` query whose params aren't all in the route never ran —
-      // say so in the slot instead of leaving it on a permanent spinner. The
-      // previous rows are RETAINED (not blanked) so content driven by the
-      // param — a closing Drawer mid slide-out — doesn't flash empty; a fresh
-      // deep link has no previous rows and still shows the empty state.
-      const next: QuerySlot = plan.missing.length
-        ? {
-            data: prev?.data ?? EMPTY_ROWS,
-            loading: false,
-            error: `missing route param(s): ${plan.missing.join(", ")}`,
-          }
-        : {
-            // `rows` is `[]` for a genuinely empty result, so `??` only falls
-            // through when the query has NO result yet (fresh mount, evicted
-            // cache) — exactly the case where the warm rows should survive
-            // under the spinner.
-            data: result?.data?.rows ?? prev?.data ?? EMPTY_ROWS,
-            loading: result?.isLoading ?? true,
-            error: errorMessage(result?.error),
-          };
-      if (
-        prev &&
-        prev.data === next.data &&
-        prev.loading === next.loading &&
-        prev.error === next.error
-      ) {
-        return;
-      }
+      // A `$param` query whose params aren't all in the route never ran — the
+      // slot says so instead of leaving a permanent spinner.
+      const next = buildQuerySlot(plan.missing, result, prev);
+      if (sameQuerySlot(prev, next)) return;
       store.set(plan.statePath, next);
     });
   }, [queryPlans, results, store]);

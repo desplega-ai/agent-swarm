@@ -69,20 +69,24 @@ export function columnFilterMode(
   return null;
 }
 
-/** The comparable string for one cell: `""` for nothing, `"true"` / `"false"` for a boolean. */
+/**
+ * The comparable string for one cell: `""` for nothing, `"true"` / `"false"` for
+ * a `boolean` column. A boolean column reads exactly as `formatValue` renders it
+ * (null / undefined is blank, anything else is its truthiness), so the filter
+ * list, its counts and the match never disagree with what the cell shows.
+ */
 export function filterKey(column: FilterColumn, cell: unknown): string {
-  if (column.kind === "boolean" || typeof cell === "boolean") {
-    return toFilterBoolean(cell) ? "true" : "false";
-  }
   if (cell === null || cell === undefined) return "";
+  if (column.kind === "boolean") return cell ? "true" : "false";
   if (typeof cell === "object") return JSON.stringify(cell);
   return String(cell);
 }
 
 /** How a value reads in the checkbox list and on a pill. */
 export function filterValueLabel(column: FilterColumn, key: string): string {
+  if (key === "") return "(empty)";
   if (column.kind === "boolean") return key === "true" ? "Yes" : "No";
-  return key === "" ? "(empty)" : key;
+  return key;
 }
 
 /** A `muted` value renders as a dash instead of a pill (case-insensitive). */

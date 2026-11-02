@@ -20,6 +20,8 @@ mock.module("@/components/shared/data-grid", () => ({
     gridProps.push(props as unknown as Record<string, unknown>);
     return (
       <ul data-testid="grid">
+        {/* Stands in for the header filter input that lives inside the real grid. */}
+        <input data-testid="header-filter" aria-label="Filter" />
         {props.rowData.map((row) => (
           <li key={row.id}>{row.id}</li>
         ))}
@@ -117,5 +119,70 @@ test("loading with rows already in hand is not a first load", async () => {
 
 test("no rows shows the empty node, not the grid", async () => {
   const { host } = await mount(<ListView {...base} rows={[]} empty={<p>Nothing here</p>} />);
+  expect(host.textContent).toBe("Nothing here");
+});
+
+const phoneRow = (row: { id: string }) => ({ title: row.id });
+
+test("a refetch on a phone list shows the progress bar over the cards", async () => {
+  isMobile = true;
+  const rows = [{ id: "a" }, { id: "b" }];
+  const { host, rerender } = await mount(<ListView {...base} rows={rows} mobileRow={phoneRow} />);
+  expect(host.querySelector('[data-testid="list-view-refreshing"]')).toBeNull();
+
+  await rerender(<ListView {...base} rows={rows} mobileRow={phoneRow} refreshing />);
+  const bar = host.querySelector('[data-testid="list-view-refreshing"]')!;
+  expect(bar.getAttribute("aria-label")).toBe("Refreshing");
+  expect([...host.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["a", "b"]);
+
+  await rerender(<ListView {...base} rows={rows} mobileRow={phoneRow} />);
+  expect(host.querySelector('[data-testid="list-view-refreshing"]')).toBeNull();
+});
+
+test("a refetch over an empty result still shows the bar next to the empty node", async () => {
+  const { host } = await mount(
+    <ListView {...base} rows={[]} empty={<p>Nothing here</p>} refreshing />,
+  );
+  expect(host.querySelector('[data-testid="list-view-refreshing"]')).not.toBeNull();
+  expect(host.textContent).toContain("Nothing here");
+});
+
+test("keepGridWhenEmpty keeps the same grid, and the input being typed in, through zero matches", async () => {
+  const rows = [{ id: "a" }, { id: "b" }];
+  const hint = <p>2 rows are hidden</p>;
+  const { host, rerender } = await mount(
+    <ListView {...base} rows={rows} empty={hint} keepGridWhenEmpty />,
+  );
+  const input = host.querySelector<HTMLInputElement>('[data-testid="header-filter"]')!;
+  input.focus();
+  expect(document.activeElement).toBe(input);
+
+  await rerender(<ListView {...base} rows={[]} empty={hint} keepGridWhenEmpty />);
+  expect(host.querySelector('[data-testid="header-filter"]')).toBe(input);
+  expect(document.activeElement).toBe(input);
+  expect(host.textContent).toContain("2 rows are hidden");
+
+  await rerender(<ListView {...base} rows={rows} empty={hint} keepGridWhenEmpty />);
+  expect(host.querySelector('[data-testid="header-filter"]')).toBe(input);
+  expect(host.textContent).not.toContain("hidden");
+});
+
+test("without keepGridWhenEmpty, zero rows still replaces the grid", async () => {
+  const { host } = await mount(<ListView {...base} rows={[]} empty={<p>Nothing here</p>} />);
+  expect(host.querySelector('[data-testid="grid"]')).toBeNull();
+});
+
+test("on a phone list keepGridWhenEmpty does not apply: the empty node replaces the cards", async () => {
+  isMobile = true;
+  const { host } = await mount(
+    <ListView
+      {...base}
+      rows={[]}
+      mobileRow={phoneRow}
+      empty={<p>Nothing here</p>}
+      keepGridWhenEmpty
+    />,
+  );
+  expect(host.querySelector('[data-testid="grid"]')).toBeNull();
   expect(host.textContent).toBe("Nothing here");
 });

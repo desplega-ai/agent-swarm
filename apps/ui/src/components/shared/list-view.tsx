@@ -59,6 +59,13 @@ export interface ListViewProps<TData>
   emptyMessage: string;
   /** Rendered instead of the grid (and the phone list) when there are no rows. */
   empty?: ReactNode;
+  /**
+   * Grid layout only: with no rows, keep the grid mounted (its header, and any
+   * filter input open in it) and render `empty` under it instead of in its
+   * place. Needed while a header filter narrows to nothing: unmounting the grid
+   * would drop the input the user is typing in.
+   */
+  keepGridWhenEmpty?: boolean;
   /** Stable id per row. Drives selection, the new-row flash and grid updates. */
   rowId: (row: TData) => string;
   onRowClick?: (row: TData, index: number) => void;
@@ -80,6 +87,7 @@ export function ListView<TData>({
   refreshing = false,
   emptyMessage,
   empty,
+  keepGridWhenEmpty = false,
   rowId,
   onRowClick,
   selectedId,
@@ -170,29 +178,42 @@ export function ListView<TData>({
     );
   }
 
-  if (rows.length === 0 && empty) return <>{empty}</>;
+  const phoneRow = isMobile ? mobileRow : undefined;
+  const keepGrid = keepGridWhenEmpty && phoneRow === undefined;
 
-  if (isMobile && mobileRow) {
+  if (rows.length === 0 && empty && !keepGrid) {
     return (
-      <MobileList label={label} emptyMessage={emptyMessage} className={className}>
-        {rows.map((row, index) => {
-          const id = rowId(row);
-          const mobile = mobileRow(row, index);
-          return (
-            <MobileListRow
-              key={id}
-              title={mobile.title}
-              status={mobile.status}
-              meta={mobile.meta}
-              leading={mobile.leading}
-              check={mobile.check}
-              controls={mobile.controls}
-              selected={selectedId !== undefined && selectedId !== null && id === selectedId}
-              onClick={onRowClick ? () => onRowClick(row, index) : undefined}
-            />
-          );
-        })}
-      </MobileList>
+      <div className="relative min-w-0">
+        {refreshing ? <RefreshBar /> : null}
+        {empty}
+      </div>
+    );
+  }
+
+  if (phoneRow) {
+    return (
+      <div className="relative min-w-0">
+        {refreshing ? <RefreshBar /> : null}
+        <MobileList label={label} emptyMessage={emptyMessage} className={className}>
+          {rows.map((row, index) => {
+            const id = rowId(row);
+            const mobile = phoneRow(row, index);
+            return (
+              <MobileListRow
+                key={id}
+                title={mobile.title}
+                status={mobile.status}
+                meta={mobile.meta}
+                leading={mobile.leading}
+                check={mobile.check}
+                controls={mobile.controls}
+                selected={selectedId !== undefined && selectedId !== null && id === selectedId}
+                onClick={onRowClick ? () => onRowClick(row, index) : undefined}
+              />
+            );
+          })}
+        </MobileList>
+      </div>
     );
   }
 
@@ -212,6 +233,7 @@ export function ListView<TData>({
         rowClassKey={selectedId ?? null}
         onRowClicked={onRowClick ? onRowClicked : undefined}
       />
+      {rows.length === 0 ? empty : null}
     </div>
   );
 }

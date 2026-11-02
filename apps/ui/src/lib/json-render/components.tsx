@@ -1722,11 +1722,32 @@ function TableComponent({ props }: { props: TableProps }) {
     />
   );
 
+  // With header filters the grid stays mounted at zero matches: the filter menu
+  // lives in its header, so replacing the grid would drop the input the user is
+  // typing in. The grid's own overlay says "no rows match"; this line sits under it.
+  const keepGridWhenNoMatch = narrowedToEmpty && hasColumnFilters;
+  const noMatchHint = (
+    <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-2 text-sm text-muted-foreground">
+      <span>
+        {allRows.length} {allRows.length === 1 ? "row is" : "rows are"} hidden by the current
+        filters.
+      </span>
+      {canClearFilters ? (
+        <Button size="sm" variant="outline" onClick={clearAllFilters}>
+          Clear filters
+        </Button>
+      ) : null}
+    </div>
+  );
+
   // First load: no rows yet and a fetch in flight (skeleton). Refetch: rows are
   // showing, so a slim bar runs and the rows stay exactly as they are.
   const loadingNow = props.loading === true;
   const firstLoad = loadingNow && allRows.length === 0 && !props.error;
-  const refreshing = loadingNow && !firstLoad;
+  // `loading` is first-load only for a query-bound table; `refreshing` (bound
+  // to `/queries/<name>/fetching`) carries the background fetches.
+  const fetchingNow = loadingNow || props.refreshing === true;
+  const refreshing = props.refreshing === true || (loadingNow && !firstLoad);
   // A failed query with nothing loaded has no table to show: the callout is the state.
   const errorOnly = Boolean(props.error) && allRows.length === 0;
 
@@ -2152,9 +2173,9 @@ function TableComponent({ props }: { props: TableProps }) {
           icon={AlertCircle}
           title="Query failed"
           action={
-            <Button size="sm" variant="outline" disabled={loadingNow} onClick={() => void retry()}>
-              <RotateCw className={cn("size-3.5", loadingNow && "animate-spin")} aria-hidden />
-              {loadingNow ? "Retrying…" : "Retry"}
+            <Button size="sm" variant="outline" disabled={fetchingNow} onClick={() => void retry()}>
+              <RotateCw className={cn("size-3.5", fetchingNow && "animate-spin")} aria-hidden />
+              {fetchingNow ? "Retrying…" : "Retry"}
             </Button>
           }
         >
@@ -2198,7 +2219,8 @@ function TableComponent({ props }: { props: TableProps }) {
           loading={firstLoad}
           refreshing={refreshing}
           emptyMessage={emptyMessage}
-          empty={empty}
+          empty={keepGridWhenNoMatch ? noMatchHint : empty}
+          keepGridWhenEmpty={keepGridWhenNoMatch}
           selectedId={selectedId}
           onRowClick={
             hasRowClick

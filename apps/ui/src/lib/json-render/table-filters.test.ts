@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   activeFilterCount,
   applyColumnFilters,
@@ -14,6 +14,10 @@ import {
   setFilterText,
   toggleFilterValue,
 } from "./table-filters";
+
+// `format-value` pulls `@/lib/utils`; resolve it the way format-value.test.ts does.
+mock.module("@/lib/utils", () => require("../utils"));
+const { formatValue } = await import("./format-value");
 
 const columns: FilterColumn[] = [
   { key: "title", label: "Title" },
@@ -57,6 +61,40 @@ describe("columnFilterMode", () => {
 
   test("filter:false opts one column out", () => {
     expect(columnFilterMode({ key: "a", kind: "badge", filter: false }, true)).toBeNull();
+  });
+});
+
+describe("boolean filtering matches what the cell shows", () => {
+  const column: FilterColumn = { key: "d", kind: "boolean" };
+  const samples: unknown[] = [true, false, null, undefined, "true", "false", "", "0", "1", 0, 1];
+
+  test("every spelling lands in the bucket its rendered text names", () => {
+    for (const sample of samples) {
+      const shown = formatValue("boolean", sample);
+      const expected = shown === "" ? "" : shown === "yes" ? "true" : "false";
+      expect({ sample, key: filterKey(column, sample) }).toEqual({ sample, key: expected });
+    }
+  });
+
+  test('a blank cell is not "No" and the string "false" is not "No"', () => {
+    const data = [
+      { id: "a", d: null },
+      { id: "b", d: "false" },
+      { id: "c", d: false },
+      { id: "d", d: true },
+    ];
+    const read = (row: Record<string, unknown>) => row.d;
+    expect(applyColumnFilters(data, { d: ["false"] }, new Map([["d", column]]), read)).toEqual([
+      data[2],
+    ]);
+    expect(applyColumnFilters(data, { d: [""] }, new Map([["d", column]]), read)).toEqual([
+      data[0],
+    ]);
+    expect(facetOptions(data, column, read).map((o) => [o.value, o.label, o.count])).toEqual([
+      ["", "(empty)", 1],
+      ["false", "No", 1],
+      ["true", "Yes", 2],
+    ]);
   });
 });
 
