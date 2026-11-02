@@ -301,7 +301,7 @@ describe("Codex device HTTP routes", () => {
     expect(state.steps.ai).toMatchObject({ status: "done", method: "codex_device" });
     // The sign-in itself checks the account: the account list says "Signed in".
     const statuses = await getKeyStatuses("CODEX_OAUTH", "global", null);
-    expect(statuses.map((s) => [s.keySuffix, s.keyIndex])).toEqual([["-full", 1]]);
+    expect(statuses.map((s) => [s.keySuffix, s.keyIndex])).toEqual([["-full-1", 1]]);
   });
 
   test("throttles upstream polling to the requested interval", async () => {

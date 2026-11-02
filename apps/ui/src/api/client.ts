@@ -69,6 +69,8 @@ import type {
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
+  Improvement,
+  ImprovementsResponse,
   InboxItemState,
   InboxItemStatus,
   InboxItemType,
@@ -160,6 +162,7 @@ import type {
   SteeringMessagesResponse,
   SteerMode,
   SteerResult,
+  SubmitImprovementInput,
   SubscriptionPlansResponse,
   SwarmConfig,
   SwarmConfigsResponse,
@@ -3931,6 +3934,40 @@ class ApiClient {
       throw new Error(err.error || `Failed to update the consent: ${res.status}`);
     }
     return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
+  async fetchImprovements(): Promise<ImprovementsResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/improvements`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load improvements: ${res.status}`);
+    return (await res.json()) as ImprovementsResponse;
+  }
+
+  private async improvementWrite(path: string, body: unknown): Promise<Improvement> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Improvement request failed: ${res.status}`);
+    }
+    return ((await res.json()) as { improvement: Improvement }).improvement;
+  }
+
+  /** Draft an improvement, or approve and send it in one call with `sendNow`. */
+  submitImprovement(input: SubmitImprovementInput): Promise<Improvement> {
+    return this.improvementWrite("/api/improvements", input);
+  }
+
+  approveImprovement(id: string, email: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/approve`, { email });
+  }
+
+  discardImprovement(id: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/discard`, {});
   }
 
   /** Whether this install can join, or is in, the public agent-swarm.dev ranking. */

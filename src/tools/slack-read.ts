@@ -18,6 +18,8 @@ import type { AgentTask } from "@/types";
  * deployment mounts the shared volume there.
  */
 const AUTO_DOWNLOAD_DIR = "/app/shared/downloads/slack";
+/** Parallel users.info calls per slack-read (Slack Tier 4, so a small cap is enough). */
+const USERS_INFO_CONCURRENCY = 4;
 
 const SlackFileSchema = z.looseObject({
   id: z.string().optional(),
@@ -204,42 +206,68 @@ export const registerSlackReadTool = (server: McpServer) => {
           blocks?: unknown[];
         };
 
-        let rawMessages: RawMessage[] = [];
+        // The bot user id (for identification) does not depend on the messages,
+        // so auth.test runs alongside the history read. allSettled, not all:
+        // an early auth.test failure must not return while withAutoJoin can
+        // still join the channel, and a history error keeps precedence over an
+        // auth error, as when the two ran in sequence.
+        const [fetchedSettled, authSettled] = await Promise.allSettled([
+          slackThreadTs
+            ? // Fetch thread replies — auto-join public channels on not_in_channel
+              withAutoJoin(client, slackChannelId, () =>
+                client.conversations.replies({ channel: slackChannelId, ts: slackThreadTs, limit }),
+              )
+            : // Fetch channel history — auto-join public channels on not_in_channel
+              withAutoJoin(client, slackChannelId, () =>
+                client.conversations.history({ channel: slackChannelId, limit }),
+              ),
+          client.auth.test(),
+        ]);
+        if (fetchedSettled.status === "rejected") throw fetchedSettled.reason;
+        if (authSettled.status === "rejected") throw authSettled.reason;
+        const rawMessages = (fetchedSettled.value.messages || []) as RawMessage[];
+        const botUserId = authSettled.value.user_id as string;
 
-        if (slackThreadTs) {
-          // Fetch thread replies — auto-join public channels on not_in_channel
-          const result = await withAutoJoin(client, slackChannelId, () =>
-            client.conversations.replies({ channel: slackChannelId, ts: slackThreadTs!, limit }),
-          );
-          rawMessages = (result.messages || []) as RawMessage[];
-        } else {
-          // Fetch channel history — auto-join public channels on not_in_channel
-          const result = await withAutoJoin(client, slackChannelId, () =>
-            client.conversations.history({ channel: slackChannelId, limit }),
-          );
-          rawMessages = (result.messages || []) as RawMessage[];
-        }
+        // One users.info per distinct user, shared by every message they wrote.
+        const userNameCache = new Map<string, Promise<string>>();
 
-        // Get bot user ID for identification
-        const authResult = await client.auth.test();
-        const botUserId = authResult.user_id as string;
-
-        // Cache for user display names
-        const userNameCache = new Map<string, string>();
-
-        async function getUserDisplayName(userId: string): Promise<string> {
-          if (userNameCache.has(userId)) {
-            return userNameCache.get(userId)!;
-          }
-          try {
-            const result = await client.users.info({ user: userId });
-            const name = result.user?.profile?.display_name || result.user?.real_name || userId;
+        function getUserDisplayName(userId: string): Promise<string> {
+          let name = userNameCache.get(userId);
+          if (!name) {
+            name = client.users
+              .info({ user: userId })
+              .then(
+                (result) => result.user?.profile?.display_name || result.user?.real_name || userId,
+              )
+              .catch(() => userId);
             userNameCache.set(userId, name);
-            return name;
-          } catch {
-            return userId;
           }
+          return name;
         }
+
+        // Resolve the human authors up front, a few at a time, instead of one
+        // round trip per author inside the formatting loop below.
+        const authorIds = [
+          ...new Set(
+            rawMessages.flatMap((m) =>
+              m.user &&
+              m.user !== botUserId &&
+              m.bot_id === undefined &&
+              m.subtype !== "bot_message" &&
+              // Same filter as the loop below: skipped messages need no name.
+              (extractSlackMessageText(m) || collectSlackMessageFiles(m).length > 0)
+                ? [m.user]
+                : [],
+            ),
+          ),
+        ];
+        await Promise.all(
+          Array.from({ length: Math.min(USERS_INFO_CONCURRENCY, authorIds.length) }, async () => {
+            for (let id = authorIds.shift(); id; id = authorIds.shift()) {
+              await getUserDisplayName(id);
+            }
+          }),
+        );
 
         // Get token for auto-download
         const token = process.env.SLACK_BOT_TOKEN;

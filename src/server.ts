@@ -174,6 +174,7 @@ import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerSteerTaskTool } from "./tools/steer-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
+import { registerSubmitImprovementTool } from "./tools/submit-improvement";
 // Swarm config tools
 import {
   registerDeleteConfigTool,
@@ -497,6 +498,7 @@ export async function createServer(
     registerStoreProgressTool(server);
     registerMyAgentInfoTool(server);
     registerCancelTaskTool(server);
+    registerSubmitImprovementTool(server);
 
     // User identity tools
     registerResolveUserTool(server);

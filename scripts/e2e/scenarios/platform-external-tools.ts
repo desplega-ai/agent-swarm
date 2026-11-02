@@ -730,7 +730,7 @@ export const platformCodexDeviceLogin: Scenario = {
           account.legacy === false &&
           account.plan === "plus" &&
           account.email === email &&
-          account.suffix === userId.slice(-5) &&
+          account.suffix === `${userId.slice(-5)}-${slot}` &&
           account.status === "ok",
         `the account is listed as signed in with the plan and email from the token: ${JSON.stringify(account)}`,
       );

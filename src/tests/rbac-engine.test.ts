@@ -104,6 +104,7 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "session.presence",
   "session.read.all",
   "approval.respond",
+  "improvement.approve",
   "runtime_controller.write",
   "runtime_pool.write",
   "agent.token.manage",
@@ -142,6 +143,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "favorite.write.own",
   "fs.join.own",
   "script.search",
+  "improvement.submit",
 ];
 
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [

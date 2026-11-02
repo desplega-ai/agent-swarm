@@ -15,6 +15,7 @@ import {
   LastAdminError,
   listRbacRoles,
   listUserRoles,
+  OperatorGrantedRoleError,
   PRIMARY_ROLE_NAMES,
   setUserRoles,
 } from "../be/rbac-roles";
@@ -58,14 +59,16 @@ const setUserRolesRoute = route({
   pattern: ["api", "users", null, "roles"],
   operationId: "users_setRbacRoles",
   summary: "Set a user's RBAC roles",
-  description: `Replaces the user's roles. The set holds exactly one of ${PRIMARY_ROLE_NAMES.join(", ")} plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.`,
+  description: `Replaces the user's roles. The set holds exactly one of ${PRIMARY_ROLE_NAMES.join(", ")} plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.`,
   tags: ["Users"],
   params: z.object({ id: z.string().min(1) }),
   body: z.object({ roles: z.array(z.string().min(1)).min(1) }).strict(),
   responses: {
     200: { description: "The user's roles after the change", schema: UserRbacRolesSchema },
     400: { description: "Invalid role set" },
-    403: { description: "Not allowed to change roles" },
+    403: {
+      description: "Not allowed to change roles, or adding an operator-only role with a user token",
+    },
     404: { description: "User not found" },
     409: { description: "Would leave no active admin" },
   },
@@ -147,6 +150,8 @@ export async function handleUserRoles(
       return true;
     }
     try {
+      // A user actor may keep or drop an operator-granted role but not add it;
+      // setUserRoles checks that inside its write transaction.
       const { before, after } = await setUserRoles(
         userId,
         parsed.body.roles,
@@ -166,6 +171,10 @@ export async function handleUserRoles(
       }
       if (err instanceof InvalidRoleSetError) {
         jsonError(res, err.message, 400);
+        return true;
+      }
+      if (err instanceof OperatorGrantedRoleError) {
+        jsonError(res, err.message, 403);
         return true;
       }
       throw err;

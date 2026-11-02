@@ -206,7 +206,7 @@ export const sendTaskInputSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items.",
+        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. When omitted, the child inherits the schema of its parent task (your current task by default). An empty object {} means no schema: the child stores none and inherits none.",
       ),
   })
   .superRefine((data, ctx) => {

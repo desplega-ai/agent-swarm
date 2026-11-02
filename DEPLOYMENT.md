@@ -263,7 +263,7 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.316`
-- `PI_CODING_AGENT_VERSION=1.4.0`
+- `PI_CODING_AGENT_VERSION=1.5.0`
 - `CODEX_VERSION=0.166.0`
 - `OPENCODE_VERSION=2.2.5` (installs `@opencode/cli` and `@opencode/sdk`)
 

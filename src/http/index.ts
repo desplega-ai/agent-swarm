@@ -94,6 +94,7 @@ import { handleFavorites } from "./favorites";
 import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
+import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
@@ -421,6 +422,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
+        () => handleImprovements(req, res, pathSegments, queryParams),
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),

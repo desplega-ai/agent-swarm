@@ -3475,6 +3475,42 @@ export interface FeedbackInput {
 export type SlackConnectMoment = "task_failed" | "first_workflow" | "default";
 
 /** Body of `POST /api/used-by`. */
+export type ImprovementStatus = "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+
+/** A product improvement for desplega. Agents draft; only a person approves and sends. */
+export interface Improvement {
+  id: string;
+  text: string;
+  email: string | null;
+  status: ImprovementStatus;
+  source: "mcp" | "api" | "ui";
+  requestedByAgentId: string | null;
+  /** A user id or `operator`, from the approver's credential. */
+  approvedBy: string | null;
+  approvedAt: string | null;
+  sentAt: string | null;
+  proxyStatus: number | null;
+  proxyId: string | null;
+  proxyError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Install-specific substrings to warn the approver about (pending and failed rows). */
+  leakHints?: string[];
+}
+
+export interface ImprovementsResponse {
+  enabled: boolean;
+  improvements: Improvement[];
+}
+
+export interface SubmitImprovementInput {
+  text: string;
+  /** Required with `sendNow` (the API answers 400 without it). */
+  email?: string;
+  sendNow?: boolean;
+  source?: "ui" | "api";
+}
+
 export interface UsedByConsentInput {
   granted: boolean;
   /** Required when `granted` is true (the API answers 400 without it). */

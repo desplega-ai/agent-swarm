@@ -218,7 +218,7 @@ async function completeFlow(
     // OpenAI just issued this token. Record the account as checked, so the
     // account list says "Signed in" now: a worker's Codex check is a presence
     // check and reports no per-account result.
-    const keySuffix = deriveCodexKeySuffix(credentials.access, credentials.accountId);
+    const keySuffix = deriveCodexKeySuffix(credentials.access, credentials.accountId, slot);
     const checked = [{ keyIndex: slot, keySuffix, ok: true }];
     await recordKeyValidation("CODEX_OAUTH", checked, "global", null, { retireAbsent: false });
     await updateOnboardingAiFromCodexDevice({ status: "complete" });

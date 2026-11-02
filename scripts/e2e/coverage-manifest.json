@@ -281,6 +281,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "improvements": {
+      "description": "An agent drafts an improvement over MCP and REST, an agent approve is refused, the operator approves and the proxy receives only install_id, text and email, the kill switch refuses writes",
+      "scenarios": ["core-improvements"]
+    },
     "integrations-surface": {
       "description": "mcp-user config, Slack manifest and icon, Chat SDK status, claude-managed test",
       "scenarios": ["platform-integrations"]

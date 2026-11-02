@@ -156,6 +156,9 @@ export const DEFERRED_TOOLS = new Set([
   "request-human-input",
   "cancel-approval-request",
 
+  // Improvements (1)
+  "submit-improvement",
+
   // Decisions (1)
   "system-one-decide",
 
