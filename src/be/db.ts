@@ -2962,9 +2962,9 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, profile, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -3003,6 +3003,7 @@ export async function createTaskExtended(
         options?.mentionChannelId ?? null,
         options?.dir ?? null,
         options?.parentTaskId ?? null,
+        options?.dispatchedByTaskId ?? null,
         options?.model ?? null,
         options?.modelTier ?? null,
         options?.effort ?? null,
@@ -13099,6 +13100,26 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
        CROSS JOIN agent_tasks t ON t.id = chain.id
        ORDER BY t.createdAt, t.rowid`,
     [rootTaskId],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
+ * Tasks that one of `taskIds` dispatched (send-task) and that are not in
+ * `taskIds`. A continuation keeps parentTaskId on an earlier task, so the
+ * task that sent it does not reach it by the parentTaskId walk.
+ */
+export async function getTasksDispatchedFrom(taskIds: string[]): Promise<AgentTask[]> {
+  if (taskIds.length === 0) return [];
+  const ids = JSON.stringify(taskIds);
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.*,
+       (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
+     FROM agent_tasks t
+     WHERE t.dispatchedByTaskId IN (SELECT value FROM json_each(?))
+       AND t.id NOT IN (SELECT value FROM json_each(?))
+     ORDER BY t.createdAt, t.rowid`,
+    [ids, ids],
   );
   return rows.map(rowToAgentTask);
 }

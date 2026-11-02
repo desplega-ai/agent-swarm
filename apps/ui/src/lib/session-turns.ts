@@ -6,7 +6,9 @@
 // A turn has one part, plus one more part per deferred wake-up: the lead
 // waits, then a `deferred` task runs and its output is the resumed answer.
 // Tasks belong to the part of their nearest opener above them (the person's
-// message or a wake-up). Each part shows:
+// message or a wake-up). "Above" follows the task that dispatched a task when
+// it is in the chain, else `parentTaskId`: a continuation's parent can be an
+// earlier worker task in another turn. Each part shows:
 //   - reply: the opener's answer.
 //   - workers: tasks of other agents, by agent, then by task type. A try that
 //     did not pass (failed, cancelled, superseded) and a later try of the same
@@ -23,6 +25,7 @@
 // Relative imports only: `bun:test` runs this from the repo root.
 
 import type { AgentTask, SessionApproval } from "../api/types";
+import { dispatchParentId } from "./dispatch-parent";
 import { TERMINAL_STATUSES } from "./task-activity";
 
 /** One unit of delegated work: the tries of one agent at one task type. */
@@ -188,7 +191,8 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
       }
       path.push(node);
       if (path.length > tasks.length) break;
-      node = node.parentTaskId ? byId.get(node.parentTaskId) : undefined;
+      const above = dispatchParentId(node, (id) => byId.has(id));
+      node = above ? byId.get(above) : undefined;
     }
     for (const task of path) partOf.set(task.id, found);
     return found;

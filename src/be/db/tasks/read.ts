@@ -87,6 +87,7 @@ export type AgentTaskRow = {
   mentionChannelId: string | null;
   dir: string | null;
   parentTaskId: string | null;
+  dispatchedByTaskId?: string | null;
   claudeSessionId: string | null;
   model: string | null;
   modelTier: string | null;
@@ -343,6 +344,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     mentionChannelId: row.mentionChannelId ?? undefined,
     dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
+    dispatchedByTaskId: row.dispatchedByTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
