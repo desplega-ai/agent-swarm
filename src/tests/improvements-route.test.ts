@@ -296,6 +296,58 @@ describe("discard", () => {
   });
 });
 
+describe("role grants", () => {
+  async function userWithVerbs(verbs: string[]) {
+    const roleId = `imp-role-${crypto.randomUUID()}`;
+    await getDbClient().run(
+      "INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, '', 0, 0)",
+      [roleId, roleId],
+    );
+    for (const verb of verbs) {
+      await getDbClient().run("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)", [
+        roleId,
+        verb,
+      ]);
+    }
+    const person = await createUser({ name: `Role ${roleId}` });
+    // New users start as admin (rbac-roles insert trigger); narrow this one.
+    await getDbClient().run("DELETE FROM principal_roles WHERE principalId = ?", [person.id]);
+    await getDbClient().run(
+      "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, ?)",
+      [person.id, roleId],
+    );
+    return (await mintToken(person.id, roleId, ACTOR)).plaintext;
+  }
+
+  test("a submit-only role cannot send through sendNow or discard a draft", async () => {
+    const token = await userWithVerbs(["improvement.submit"]);
+    const created = await call("POST", "/api/improvements", bearer(token), {
+      text: "Show queue depth on the dashboard",
+      email: "submitter@example.com",
+      sendNow: true,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.improvement.status).toBe("pending_approval");
+    const draft = await draftAsAgent();
+    const discard = await call("POST", `/api/improvements/${draft.id}/discard`, bearer(token));
+    expect(discard.status).toBe(403);
+    expect((await getImprovement(draft.id))?.status).toBe("pending_approval");
+    expect(proxyRequests).toHaveLength(0);
+  });
+
+  test("a role with improvement.approve can send through sendNow", async () => {
+    const token = await userWithVerbs(["improvement.submit", "improvement.approve"]);
+    const created = await call("POST", "/api/improvements", bearer(token), {
+      text: "Show queue depth on the dashboard",
+      email: "approver@example.com",
+      sendNow: true,
+    });
+    expect(created.status).toBe(200);
+    expect(created.body.improvement.status).toBe("sent");
+    expect(proxyRequests).toHaveLength(1);
+  });
+});
+
 describe("kill switch", () => {
   test("with IMPROVEMENTS_ENABLED=false every write route refuses and nothing is sent", async () => {
     const draft = await draftAsAgent();

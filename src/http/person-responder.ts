@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
-import { can, type PermissionVerb } from "../rbac";
+import { getUserGrant } from "../be/rbac-roles";
+import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { agentFirstPrincipal, authUser } from "./request-principal";
@@ -17,7 +18,9 @@ const AGENT_RESPONSE_REFUSED =
  * person). The shared key alone is the operator.
  *
  * `verb` and `refusedMessage` let other person-gated actions reuse the check
- * with their own permission and wording.
+ * with their own permission and wording. With RBAC on, a user must also hold
+ * `verb` through a role: route admission checks only the route's own verb, and
+ * a route admitted on another verb can still reach this check.
  */
 export async function approvalResponder(
   req: IncomingMessage,
@@ -44,9 +47,16 @@ export async function approvalResponder(
         ? { kind: "operator" }
         : null;
 
-  const decision = can({ principal, verb: options?.verb ?? "approval.respond", source: "http" });
-  if (!decision.allow || !responder) {
-    return { ok: false, message: options?.refusedMessage ?? AGENT_RESPONSE_REFUSED };
+  const verb = options?.verb ?? "approval.respond";
+  const refused = {
+    ok: false as const,
+    message: options?.refusedMessage ?? AGENT_RESPONSE_REFUSED,
+  };
+  const decision = can({ principal, verb, source: "http" });
+  if (!decision.allow || !responder) return refused;
+  if (responder.kind === "user" && isRbacEnabled()) {
+    const grant = await getUserGrant(responder.user.id);
+    if (!grant.grantsAll && !grant.verbs.has(verb)) return refused;
   }
   return { ok: true, responder };
 }
