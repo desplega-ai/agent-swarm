@@ -19,6 +19,19 @@ async function issuesFor(input: unknown) {
   return parsed.success ? [] : parsed.issues;
 }
 
+describe("Table refreshing binding", () => {
+  test("a query-bound refreshing property validates", async () => {
+    const issues = await issuesFor(
+      withProps("table", { refreshing: { $state: "/queries/allOrders/fetching" } }),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  test("a literal refreshing boolean validates", async () => {
+    expect(await issuesFor(withProps("table", { refreshing: true }))).toEqual([]);
+  });
+});
+
 describe("Table list layer and icons", () => {
   test("the example app with row click, new column kinds and icons passes validation", async () => {
     const parsed = await parseAppDefinition(definition);
