@@ -1,6 +1,7 @@
 import { overwriteTerminalTaskResultText } from "../be/db";
 import type { AgentTask } from "../types";
 import { isTerminalTaskStatus } from "../types";
+import { isEffectiveOutputSchema } from "../utils/output-schema";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 
@@ -23,7 +24,7 @@ export type TerminalResultGuardResult =
     };
 
 export function getTaskOutputValidationError(outputSchema: unknown, output: string | undefined) {
-  if (!outputSchema || typeof outputSchema !== "object") return undefined;
+  if (!isEffectiveOutputSchema(outputSchema)) return undefined;
 
   const schema = outputSchema as Record<string, unknown>;
   if (!output) {
