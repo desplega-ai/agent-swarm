@@ -100,3 +100,25 @@
 .ag-theme-quartz .ag-header-cell.json-render-select-header {
   padding-inline: 0;
 }
+
+/* ListView refetch bar: a short segment sweeping across the top edge. Rows stay untouched. */
+@keyframes list-view-refresh {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.list-view-refresh-bar {
+  animation: list-view-refresh 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .list-view-refresh-bar {
+    width: 100%;
+    animation: none;
+    opacity: 0.6;
+  }
+}

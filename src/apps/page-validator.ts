@@ -62,7 +62,7 @@ const UI_STATE_COMPONENTS = new Set([
  * whose items each carry a chain) are listed in `ITEM_ACTION_CHAINS`.
  */
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
-  Table: ["onRowClick"],
+  Table: ["onRowClick", "onRetry"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
@@ -1396,6 +1396,39 @@ export function validatePage(
               `is required with ${selectionProps.join(" / ")}: the selection is stored at /ui/<id>/selected`,
             ),
           );
+        }
+        // Column filters live at `/ui/<id>/filters`: same id requirement.
+        const filterProps: string[] = [];
+        if (tableProps.filterable === true) filterProps.push("filterable");
+        if (
+          Array.isArray(tableProps.columns) &&
+          tableProps.columns.some(
+            (column) =>
+              isPlainObject(column) && (column.filter === "values" || column.filter === "text"),
+          )
+        ) {
+          filterProps.push("columns[].filter");
+        }
+        if (filterProps.length > 0 && (typeof tableProps.id !== "string" || tableProps.id === "")) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${filterProps.join(" / ")}: the filters are stored at /ui/<id>/filters`,
+            ),
+          );
+        }
+        // `clearState` entries are state paths "Clear filters" resets: only UI
+        // control slots, and the control must exist on the page.
+        if (Array.isArray(tableProps.clearState)) {
+          for (const [index, entry] of tableProps.clearState.entries()) {
+            if (typeof entry !== "string") continue;
+            const entryPath = `${elementPath}.props.clearState.${index}`;
+            if (!/^\/ui\/[^/]+\/.+/.test(entry)) {
+              issues.push(issue(entryPath, `must be a /ui/<id>/... state path (got "${entry}")`));
+            } else {
+              stateRefs.push({ path: entryPath, value: entry });
+            }
+          }
         }
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {

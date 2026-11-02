@@ -50,6 +50,7 @@ import {
   Info,
   Minus,
   MoreHorizontal,
+  RotateCw,
   SearchX,
   TrendingDown,
   TrendingUp,
@@ -200,6 +201,27 @@ import type {
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import { parseNumberInputValue } from "./number-input-value";
+import {
+  activeFilterCount,
+  type ColumnFilterMode,
+  clearFilter,
+  columnFilterMode,
+  type FilterColumn,
+  filterPills,
+  filtersFromState,
+  isMutedValue,
+  narrowByColumnFilters,
+  setFilterText,
+  toFilterBoolean,
+  toggleFilterValue,
+} from "./table-filters";
+import {
+  type ColumnFilterTarget,
+  ColumnHeader,
+  createFilterStore,
+  FilterPills,
+  PhoneFilterButton,
+} from "./table-filters-ui";
 import {
   actionSlotFailed,
   applyRange,
@@ -1305,12 +1327,15 @@ function rowIdOf(row: Record<string, unknown>, field: string): string {
   return JSON.stringify(row);
 }
 
-/** Header label with a leading icon (AG Grid inner header component). */
-function IconHeader(params: { displayName: string; icon?: string }) {
+/**
+ * A column's `muted` value: a quiet dash where a pill would shout. The value
+ * stays reachable: a hover title and screen-reader text.
+ */
+function MutedValue({ text }: { text: string }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
-      <span className="ag-header-cell-text">{params.displayName}</span>
+    <span className="text-muted-foreground/60" title={text} data-testid="muted-value">
+      <span aria-hidden>—</span>
+      <span className="sr-only">{text}</span>
     </span>
   );
 }
@@ -1318,6 +1343,7 @@ function IconHeader(params: { displayName: string; icon?: string }) {
 /** The phone row's status slot, rendered like the grid cell. */
 function statusNode(column: TableColumn, value: unknown): ReactNode {
   if (value === null || value === undefined || value === "") return undefined;
+  if (isMutedValue(column, value)) return undefined;
   const raw = String(value);
   if (column.kind === "status") return <StatusCell value={raw} tones={column.tones} />;
   return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
@@ -1330,6 +1356,9 @@ function statusNode(column: TableColumn, value: unknown): ReactNode {
  */
 const AUTO_HEIGHT_MAX_ROWS = 12;
 
+/** What the error callout's Retry runs when the author gave no `onRetry`: re-run the page's queries. */
+const DEFAULT_RETRY_CHAIN: ActionChain = [{ action: "app.refresh" }];
+
 // ─── Client-side search / filtering ─────────────────────────────────────────
 //
 // Honest at spike scale: the runtime already polls the whole (capped) row set
@@ -1341,13 +1370,6 @@ const AUTO_HEIGHT_MAX_ROWS = 12;
 function isFilterActive(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(isFilterActive);
   return value !== null && value !== undefined && value !== "";
-}
-
-function toFilterBoolean(cell: unknown): boolean {
-  if (typeof cell === "boolean") return cell;
-  if (typeof cell === "number") return cell !== 0;
-  if (typeof cell === "string") return cell === "true" || cell === "1";
-  return false;
 }
 
 /** Case-insensitive substring match over the string/number cells of the listed columns. */
@@ -1506,16 +1528,67 @@ function TableComponent({ props }: { props: TableProps }) {
     (props.filters ?? {}) as NonNullable<TableFilters>,
     JSON.stringify(props.filters ?? {}),
   );
-  const narrowing = search !== "" || Object.values(filters).some(isFilterActive);
+  const externalNarrowing = search !== "" || Object.values(filters).some(isFilterActive);
 
-  const rows = useMemo(() => {
-    if (!narrowing) return allRows;
+  const searchedRows = useMemo(() => {
+    if (!externalNarrowing) return allRows;
     return allRows.filter(
       (row) =>
         (search === "" || rowMatchesSearch(row, columnKeys, search)) &&
         rowMatchesFilters(row, filters),
     );
-  }, [allRows, narrowing, search, columnKeys, filters]);
+  }, [allRows, externalNarrowing, search, columnKeys, filters]);
+
+  // ── Built-in column filters (`filterable` / `columns[].filter`) ────────────
+  //
+  // Client state at `/ui/<id>/filters`, so other elements can read it. They
+  // stack on `search` / `filters`: a row must pass all three.
+  const stableColumns = useStableBySignature(columns, JSON.stringify(columns));
+  const filterId = typeof props.id === "string" && props.id !== "" ? props.id : null;
+  const filtersPath = `/ui/${filterId}/filters`;
+  const filterModes = useMemo(() => {
+    const modes = new Map<string, ColumnFilterMode>();
+    if (filterId === null) return modes;
+    for (const column of stableColumns) {
+      const mode = columnFilterMode(column, props.filterable === true);
+      if (mode) modes.set(column.key, mode);
+    }
+    return modes;
+  }, [filterId, stableColumns, props.filterable]);
+  const hasColumnFilters = filterModes.size > 0;
+  const filterColumns = useMemo(
+    () => new Map<string, FilterColumn>(stableColumns.map((column) => [column.key, column])),
+    [stableColumns],
+  );
+  const readCell = useCallback(
+    (row: Record<string, unknown>, column: FilterColumn) =>
+      column.format ? applyTemplate(column.format, row) : row[column.key],
+    [],
+  );
+  const filtersValue = hasColumnFilters ? getByPath(state, filtersPath) : undefined;
+  const columnFilters = useMemo(
+    () => filtersFromState(filtersValue, filterModes),
+    [filtersValue, filterModes],
+  );
+  const columnNarrowing = activeFilterCount(columnFilters) > 0;
+  const narrowing = externalNarrowing || columnNarrowing;
+
+  const { rows, facets } = useMemo(
+    () => narrowByColumnFilters(searchedRows, columnFilters, filterColumns, filterModes, readCell),
+    [searchedRows, columnFilters, filterColumns, filterModes, readCell],
+  );
+
+  const [filterStore] = useState(createFilterStore);
+  useEffect(() => {
+    filterStore.update({ filters: columnFilters, facets });
+  }, [filterStore, columnFilters, facets]);
+
+  // Seed the slot so `{ "$state": "/ui/<id>/filters" }` reads `{}`, not nothing.
+  useEffect(() => {
+    if (hasColumnFilters && getRef.current(filtersPath) === undefined) {
+      setRef.current(filtersPath, {});
+    }
+  }, [hasColumnFilters, filtersPath]);
 
   // ── Row selection (`selectable` / `bulkActions`) ───────────────────────────
   //
@@ -1602,6 +1675,31 @@ function TableComponent({ props }: { props: TableProps }) {
     [runBulkAction],
   );
 
+  // ── Clearing filters ───────────────────────────────────────────────────────
+
+  /**
+   * Resets every filter the Table owns, plus the `clearState` paths (the
+   * `SearchInput` / `Select` feeding `search` / `filters`). A control that
+   * adopts external writes (SearchInput does) shows the cleared value.
+   */
+  const clearAllFilters = useCallback(() => {
+    if (propsRef.current.id) setRef.current(`/ui/${propsRef.current.id}/filters`, {});
+    for (const path of propsRef.current.clearState ?? []) {
+      if (path.startsWith("/ui/")) setRef.current(path, null);
+    }
+  }, []);
+  const clearableExternal = externalNarrowing && (props.clearState ?? []).length > 0;
+  const canClearFilters = columnNarrowing || clearableExternal;
+
+  const retry = useCallback(async () => {
+    const chain = (propsRef.current.onRetry as ActionChain | undefined) ?? DEFAULT_RETRY_CHAIN;
+    try {
+      await runChain(chain, {}, 0);
+    } catch {
+      // The runtime surfaces its own errors; the callout stays until data arrives.
+    }
+  }, [runChain]);
+
   // Distinguish "nothing here yet" from "your search hid everything".
   const narrowedToEmpty = narrowing && rows.length === 0 && allRows.length > 0;
   const emptyMessage = narrowedToEmpty
@@ -1612,7 +1710,18 @@ function TableComponent({ props }: { props: TableProps }) {
     <EmptyState
       icon={SearchX}
       title={emptyMessage}
-      description="Clear a filter to see more rows."
+      description={
+        canClearFilters
+          ? `${allRows.length} ${allRows.length === 1 ? "row is" : "rows are"} hidden by the current filters.`
+          : "Change the search or filters to see more rows."
+      }
+      action={
+        canClearFilters ? (
+          <Button size="sm" variant="outline" onClick={clearAllFilters}>
+            Clear filters
+          </Button>
+        ) : undefined
+      }
     />
   ) : (
     <EmptyState
@@ -1621,6 +1730,37 @@ function TableComponent({ props }: { props: TableProps }) {
       description={emptyState?.body}
     />
   );
+
+  // First load: no rows yet and a fetch in flight (skeleton). Refetch: rows are
+  // showing, so a slim bar runs and the rows stay exactly as they are.
+  const loadingNow = props.loading === true;
+  const firstLoad = loadingNow && allRows.length === 0 && !props.error;
+  const refreshing = loadingNow && !firstLoad;
+  // A failed query with nothing loaded has no table to show: the callout is the state.
+  const errorOnly = Boolean(props.error) && allRows.length === 0;
+
+  const filterTargetFor = (column: TableColumn): ColumnFilterTarget | undefined => {
+    const mode = filterModes.get(column.key);
+    if (!mode) return undefined;
+    const pill = column.kind === "badge" || column.kind === "status";
+    return {
+      key: column.key,
+      label: column.label ?? column.key,
+      mode,
+      kind: column.kind,
+      // The list shows the same pill the cell does, so a value reads the same everywhere.
+      renderValue: pill
+        ? (value, label) =>
+            value === "" || isMutedValue(column, value) ? (
+              label
+            ) : column.kind === "status" ? (
+              <StatusCell value={value} tones={column.tones} />
+            ) : (
+              <StatusPill text={value} tone={badgeToneFor(column.tones, value)} />
+            )
+        : undefined,
+    };
+  };
 
   const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => {
     const template = column.format;
@@ -1657,9 +1797,15 @@ function TableComponent({ props }: { props: TableProps }) {
       // `cellClass` replaces the `rightAligned` type's own class, so keep it.
       cellClass: endAligned ? ["ag-right-aligned-cell", "tabular-nums"] : undefined,
       tooltipField: column.tooltip,
-      headerComponentParams: catalogIcon(column.icon)
-        ? { innerHeaderComponent: IconHeader, icon: column.icon }
-        : undefined,
+      headerComponentParams:
+        catalogIcon(column.icon) || filterModes.has(column.key)
+          ? {
+              innerHeaderComponent: ColumnHeader,
+              icon: catalogIcon(column.icon) ? column.icon : undefined,
+              store: filterModes.has(column.key) ? filterStore : undefined,
+              filter: filterTargetFor(column),
+            }
+          : undefined,
       // AG Grid's cell-data-type inference turns a boolean column into a disabled
       // checkbox renderer, which contradicts the documented `formatCell` contract
       // (yes / no text) and reads as a broken toggle. Opt every app column out of
@@ -1671,6 +1817,9 @@ function TableComponent({ props }: { props: TableProps }) {
         const value = params.value;
         const row = (params.data ?? {}) as Record<string, unknown>;
         const raw = value === null || value === undefined ? "" : String(value);
+        if (kind !== "switch" && kind !== "checkbox" && isMutedValue(column, value)) {
+          return <MutedValue text={raw} />;
+        }
         switch (kind) {
           case "badge":
             return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
@@ -1850,7 +1999,7 @@ function TableComponent({ props }: { props: TableProps }) {
 
   const columnDefs = useStableBySignature(
     builtColumnDefs,
-    JSON.stringify([columns, rowActions, selectable]),
+    JSON.stringify([columns, rowActions, selectable, filterModes.size, [...filterModes]]),
   );
   const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
   // Endless-scroll guard: unless the author decided, big row sets paginate.
@@ -1885,12 +2034,43 @@ function TableComponent({ props }: { props: TableProps }) {
   // Same text as the desktop cell: a templated column renders its `format`.
   const mobileCellText = (key: string, row: Record<string, unknown>): string => {
     const column = columnByKey.get(key);
+    if (column && isMutedValue(column, row[key])) return "";
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
   };
   const rowLabel = (row: Record<string, unknown>): string => {
     const text = titleKey ? mobileCellText(titleKey, row) : "";
     return text ? `Select ${text}` : "Select row";
   };
+  filterStore.themeAttr = themeAttr as Record<string, string>;
+  filterStore.handlers = {
+    toggle: (key, value, checked) =>
+      setRef.current(
+        filtersPath,
+        toggleFilterValue(
+          filtersFromState(getRef.current(filtersPath), filterModes),
+          key,
+          value,
+          checked,
+        ),
+      ),
+    setText: (key, text) =>
+      setRef.current(
+        filtersPath,
+        setFilterText(filtersFromState(getRef.current(filtersPath), filterModes), key, text),
+      ),
+    clear: (key) =>
+      setRef.current(
+        filtersPath,
+        clearFilter(filtersFromState(getRef.current(filtersPath), filterModes), key),
+      ),
+    clearAll: clearAllFilters,
+  };
+  const pills = filterPills(columnFilters, stableColumns as FilterColumn[]);
+  const filterTargets = columns
+    .map(filterTargetFor)
+    .filter((target): target is ColumnFilterTarget => target !== undefined);
+  const showPhoneFilters = hasColumnFilters && isMobile && mobileMode === "list";
+
   selectionStore.rowId = rowId;
   selectionStore.rowLabel = rowLabel;
   selectionStore.handlers = {
@@ -1940,9 +2120,36 @@ function TableComponent({ props }: { props: TableProps }) {
     // parents so AG Grid owns the horizontal scroll instead of the card clipping it.
     <div className="flex min-w-0 flex-col gap-2" data-testid="json-render-table">
       {props.error ? (
-        <AlertCallout tone="error" icon={AlertCircle} title="Query failed">
+        <AlertCallout
+          tone="error"
+          icon={AlertCircle}
+          title="Query failed"
+          action={
+            <Button size="sm" variant="outline" disabled={loadingNow} onClick={() => void retry()}>
+              <RotateCw className={cn("size-3.5", loadingNow && "animate-spin")} aria-hidden />
+              {loadingNow ? "Retrying…" : "Retry"}
+            </Button>
+          }
+        >
           {props.error}
+          {allRows.length > 0 ? " Showing the last rows that loaded." : null}
         </AlertCallout>
+      ) : null}
+      {showPhoneFilters || pills.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {showPhoneFilters ? (
+            <PhoneFilterButton
+              targets={filterTargets}
+              store={filterStore}
+              activeCount={pills.length}
+            />
+          ) : null}
+          <FilterPills
+            pills={pills}
+            onRemove={(key) => filterStore.handlers.clear(key)}
+            onClearAll={clearAllFilters}
+          />
+        </div>
       ) : null}
       {showMobileSelectAll ? (
         <label className="flex min-h-11 items-center gap-3 px-4 text-sm text-muted-foreground">
@@ -1954,35 +2161,39 @@ function TableComponent({ props }: { props: TableProps }) {
           Select all
         </label>
       ) : null}
-      <ListView
-        rows={rows}
-        label={props.emptyState?.title ?? "Rows"}
-        rowId={rowId}
-        columnDefs={columnDefs}
-        loading={props.loading ?? false}
-        emptyMessage={emptyMessage}
-        empty={empty}
-        selectedId={selectedId}
-        onRowClick={
-          hasRowClick
-            ? (row, index) => void runChain(onRowClickChain, row as Record<string, unknown>, index)
-            : undefined
-        }
-        mobileRow={mobileRow}
-        // Hug the content while the table is short (a 1-row filtered result
-        // shouldn't sit on a slab of dead space), then cap into a scroll region.
-        domLayout={hugsContent ? "autoHeight" : "normal"}
-        className={cn(
-          "json-render-grid",
-          hugsContent && rows.length > 0 && "ag-grid-hug",
-          !hugsContent && "h-[520px] flex-none",
-        )}
-        columnSizing="flex"
-        pagination={paginated}
-        rowHeight={props.density === "compact" ? 34 : undefined}
-        cellFocus={rowActions.length > 0 || hasRowClick}
-        onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
-      />
+      {errorOnly ? null : (
+        <ListView
+          rows={rows}
+          label={props.emptyState?.title ?? "Rows"}
+          rowId={rowId}
+          columnDefs={columnDefs}
+          loading={firstLoad}
+          refreshing={refreshing}
+          emptyMessage={emptyMessage}
+          empty={empty}
+          selectedId={selectedId}
+          onRowClick={
+            hasRowClick
+              ? (row, index) =>
+                  void runChain(onRowClickChain, row as Record<string, unknown>, index)
+              : undefined
+          }
+          mobileRow={mobileRow}
+          // Hug the content while the table is short (a 1-row filtered result
+          // shouldn't sit on a slab of dead space), then cap into a scroll region.
+          domLayout={hugsContent ? "autoHeight" : "normal"}
+          className={cn(
+            "json-render-grid",
+            hugsContent && rows.length > 0 && "ag-grid-hug",
+            !hugsContent && "h-[520px] flex-none",
+          )}
+          columnSizing="flex"
+          pagination={paginated}
+          rowHeight={props.density === "compact" ? 34 : undefined}
+          cellFocus={rowActions.length > 0 || hasRowClick}
+          onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
+        />
+      )}
       {selectable && selected.length > 0 ? (
         <BulkActionBar
           count={selected.length}

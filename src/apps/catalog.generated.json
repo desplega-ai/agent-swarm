@@ -631,14 +631,7 @@
             "type": "string"
           },
           "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "loading": {
             "type": "boolean"
@@ -802,14 +795,7 @@
         "type": "object",
         "properties": {
           "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "tone": {
             "type": "string",
@@ -1064,14 +1050,7 @@
         "type": "object",
         "properties": {
           "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "type": ["string", "number"]
           },
           "label": {
             "type": "string"
@@ -1441,6 +1420,24 @@
                     "required": ["action"],
                     "additionalProperties": false
                   }
+                },
+                "filter": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["values", "text"]
+                    },
+                    {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  ]
+                },
+                "muted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": ["key"],
@@ -1682,18 +1679,40 @@
               "additionalProperties": false
             }
           },
+          "filterable": {
+            "type": "boolean"
+          },
+          "clearState": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "loading": {
             "type": "boolean"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
+            "type": ["string", "null"]
+          },
+          "onRetry": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
               },
-              {
-                "type": "null"
-              }
-            ]
+              "required": ["action"],
+              "additionalProperties": false
+            }
           },
           "emptyMessage": {
             "type": "string"
@@ -1722,17 +1741,7 @@
                     {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "boolean"
-                          }
-                        ]
+                        "type": ["string", "number", "boolean"]
                       }
                     }
                   ]
@@ -1774,21 +1783,7 @@
             }
           },
           "selectedId": {
-            "anyOf": [
-              {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "number", "null"]
           },
           "mobile": {
             "type": "string",
@@ -1960,7 +1955,7 @@
       }
     },
     "Drawer": {
-      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl width. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`.",
+      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2316,14 +2311,7 @@
             "type": "boolean"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "emptyMessage": {
             "type": "string"
@@ -2854,17 +2842,7 @@
               "type": "string"
             },
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
+              "type": ["string", "number", "boolean"]
             }
           }
         },

@@ -558,6 +558,21 @@ const tableColumnSchema = z.object({
    * the Table's `selectable` row selection: it is client state, not a write.
    */
   onChange: actionChainSchema.optional(),
+  /**
+   * The header filter menu this column gets (needs the Table's `id`): `values`
+   * is a checkbox list of the distinct values with row counts, `text` a
+   * contains-text field, `false` opts the column out. Omitted → the Table's
+   * `filterable` picks by `kind` (badge / status / enum / boolean / user /
+   * agent → `values`; text → `text`; numbers, dates and the rest → none). A
+   * `format` column only filters when this is set.
+   */
+  filter: z.union([z.enum(["values", "text"]), z.literal(false)]).optional(),
+  /**
+   * Cell values rendered as a muted dash instead of a pill or text (matched
+   * case-insensitively), e.g. `["none", "no"]` for an all-NONE column. The
+   * value stays in the data, the filter list and the hover title.
+   */
+  muted: z.array(z.string()).optional(),
 });
 
 /** Copy overrides for a row action's `AlertDialog` confirmation step. */
@@ -625,10 +640,30 @@ const tableProps = z.object({
    * finishes without an `app.action` step ending in error. Needs `id`.
    */
   bulkActions: z.array(tableBulkActionSchema).optional(),
+  /**
+   * Built-in column filters: a header menu on every column `kind` that has one
+   * (see `columns[].filter`), active filters as removable pills above the
+   * table. State is client state at `/ui/<id>/filters`, one entry per column:
+   * a string array for a `values` filter, a string for a `text` filter (bind
+   * `{ "$state": "/ui/<id>/filters/<column>" }`). Composes with `search` and
+   * `filters`: a row must pass all three. Needs `id`.
+   */
+  filterable: z.boolean().optional(),
+  /**
+   * State paths "Clear filters" and "Clear all" also reset, e.g. the
+   * `SearchInput` / `Select` that feed `search` / `filters`:
+   * `["/ui/prSearch/value"]`. Without it those controls keep their value.
+   */
+  clearState: z.array(z.string()).optional(),
   /** Usually `{ "$state": "/queries/<name>/loading" }`. */
   loading: z.boolean().optional(),
   /** Usually `{ "$state": "/queries/<name>/error" }`. */
   error: z.string().nullish(),
+  /**
+   * Chain run by the error callout's Retry button. Defaults to
+   * `[{ "action": "app.refresh" }]`, which re-runs every query on the page.
+   */
+  onRetry: actionChainSchema.optional(),
   emptyMessage: z.string().optional(),
   /**
    * Client-side free-text filter, applied to `data` before render.
