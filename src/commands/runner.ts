@@ -2707,7 +2707,6 @@ export interface RunnerConfig {
 
 export interface RunnerOptions {
   prompt?: string;
-  yolo?: boolean;
   systemPrompt?: string;
   systemPromptFile?: string;
   logsDir?: string;
@@ -4256,7 +4255,6 @@ export async function spawnProviderProcess(
     localBlocks?: Map<string, number>;
   },
   logDir: string,
-  isYolo: boolean,
 ): Promise<RunningTask> {
   // Real task ID from DB (may be undefined for pool_tasks_available triggers)
   const realTaskId = opts.taskId;
@@ -5071,15 +5069,9 @@ export async function spawnProviderProcess(
           const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
           await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
 
-          if (!isYolo) {
-            console.error(
-              `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}.`,
-            );
-          } else {
-            console.warn(
-              `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. YOLO mode - continuing...`,
-            );
-          }
+          console.error(
+            `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. Continuing to poll for work.`,
+          );
         }
 
         // Retain cost data for the concurrent final API writes.
@@ -5900,7 +5892,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   await mkdir(logDir, { recursive: true });
 
   const prompt = opts.prompt || defaultPrompt;
-  const isYolo = opts.yolo || process.env.YOLO === "true";
 
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
@@ -6116,7 +6107,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   console.log(`[${role}] Agent ID: ${agentId}`);
   console.log(`[${role}] Session ID: ${sessionId}`);
   console.log(`[${role}] Log directory: ${logDir}`);
-  console.log(`[${role}] YOLO mode: ${isYolo ? "enabled" : "disabled"}`);
   console.log(`[${role}] Prompt: ${prompt}`);
   console.log(`[${role}] API URL: ${apiUrl}`);
   console.log(`[${role}] Swarm URL: ${apiUrl}`);
@@ -6985,7 +6975,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           prompt: resumePrompt,
           trigger: "task_resumed",
           resumedTaskId: task.id,
-          yolo: isYolo,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
@@ -7093,7 +7082,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               localBlocks: state.modelWindowBlocks,
             },
             logDir,
-            isYolo,
           );
         } catch (spawnErr) {
           const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
@@ -7658,7 +7646,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           timestamp: new Date().toISOString(),
           prompt: triggerPrompt,
           trigger: trigger.type,
-          yolo: isYolo,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
@@ -7717,7 +7704,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               localBlocks: state.modelWindowBlocks,
             },
             logDir,
-            isYolo,
           );
         } catch (spawnErr) {
           const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);

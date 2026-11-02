@@ -77,7 +77,6 @@ services:
       - AGENT_ROLE=lead
       - TEMPLATE_ID=official/lead
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -126,7 +125,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/coder
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -175,7 +173,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-reviewer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -224,7 +221,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-strategist
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -273,7 +269,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-writer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -322,7 +317,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/discoverability-optimizer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -371,7 +365,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/forward-deployed-engineer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -420,7 +413,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/researcher
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -469,7 +461,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/reviewer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -518,7 +509,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/tester
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -567,7 +557,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/ux-principles
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=3
       - GITHUB_TOKEN=${GITHUB_TOKEN}

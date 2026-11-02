@@ -154,7 +154,6 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?Set CLAUDE_CODE_OAUTH_TOKEN in .env}
       MCP_BASE_URL: http://api:3013
       TEMPLATE_ID: official/coder
-      YOLO: "true"
     volumes:
       - swarm_logs:/logs
       - shared_agent_workspace:/workspace/personal

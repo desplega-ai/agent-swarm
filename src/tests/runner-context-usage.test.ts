@@ -100,7 +100,6 @@ describe("runner completion context", () => {
             cwd: directory,
           },
           directory,
-          true,
         );
         await running.promise;
         expect(configuredModel).toBe(model);

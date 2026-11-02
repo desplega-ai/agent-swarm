@@ -177,7 +177,6 @@ services:
       - AGENT_ROLE=lead
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Lead Agent}
@@ -225,7 +224,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Pi Worker}
@@ -277,7 +275,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Codex Worker}

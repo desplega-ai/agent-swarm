@@ -150,7 +150,6 @@ async function startOpencodeWorker(
     "-e", `AGENT_ID=${agentId}`,
     "-e", `MCP_BASE_URL=http://host.docker.internal:${PORT}`,
     "-e", "AGENT_ROLE=worker",
-    "-e", "YOLO=true",
     "-e", "STARTUP_SCRIPT_STRICT=false",
     "-e", "SLACK_DISABLE=true",
     "-e", "GITHUB_DISABLE=true",
