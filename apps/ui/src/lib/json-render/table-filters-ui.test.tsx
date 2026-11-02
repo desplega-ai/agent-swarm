@@ -11,7 +11,9 @@ mock.module("@/components/ui/button", () => require("../../components/ui/button"
 mock.module("@/components/ui/checkbox", () => require("../../components/ui/checkbox"));
 mock.module("@/components/ui/input", () => require("../../components/ui/input"));
 mock.module("@/components/ui/popover", () => require("../../components/ui/popover"));
+mock.module("@/components/ui/tooltip", () => require("../../components/ui/tooltip"));
 
+const { TooltipProvider } = await import("../../components/ui/tooltip");
 const { ColumnFilterPanel, ColumnHeader, FilterPills, PhoneFilterButton, createFilterStore } =
   await import("./table-filters-ui");
 
@@ -27,7 +29,7 @@ async function mount(node: React.ReactNode) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(node));
+  await act(async () => root.render(<TooltipProvider>{node}</TooltipProvider>));
   return { host, root };
 }
 
@@ -190,6 +192,20 @@ test("a column with no filter renders just its label, with the icon when given",
   const { host } = await mount(<ColumnHeader displayName="Findings" />);
   expect(host.querySelector("button")).toBeNull();
   expect(host.textContent).toBe("Findings");
+});
+
+test("a header with a hint keeps the filter menu beside its label", async () => {
+  const { store } = storeWith({});
+  const { host } = await mount(
+    <ColumnHeader
+      displayName="CI on head"
+      hint="Status of the last run"
+      store={store}
+      filter={ci}
+    />,
+  );
+  expect(host.textContent).toContain("CI on head");
+  expect(host.querySelector('button[aria-label^="Filter CI on head"]')).not.toBeNull();
 });
 
 test("pills show each filter, remove one, and clear all", async () => {
