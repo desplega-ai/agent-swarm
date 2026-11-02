@@ -281,7 +281,7 @@ const listTasks = route({
       .enum(["all"])
       .optional()
       .describe(
-        "all: every user's tasks, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
+        "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
       ),
   }),
   responses: {

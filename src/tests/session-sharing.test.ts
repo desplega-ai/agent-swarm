@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Readable } from "node:stream";
 import {
   closeDb,
@@ -8,7 +8,7 @@ import {
   getDbClient,
   initDb,
 } from "../be/db";
-import { getUserGrant, setUserRoles } from "../be/rbac-roles";
+import { ensureRbacSeedsSynced, getUserGrant, setUserRoles } from "../be/rbac-roles";
 import {
   getSessionRoot,
   listSessionShareHistory,
@@ -16,8 +16,10 @@ import {
   setSessionShares,
 } from "../be/session-shares";
 import { handleRealtimeTicket } from "../http/realtime";
+import { canReadAllSessions } from "../http/session-access";
 import { handleSessions } from "../http/sessions";
 import { handleTasks } from "../http/tasks";
+import { handleUserRoles } from "../http/user-roles";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { authorizeRoomNamespace } from "../realtime/auth";
@@ -51,7 +53,7 @@ function jsonReq(method: string, url: string, body?: unknown) {
 }
 
 async function call(
-  handler: "sessions" | "tasks" | "ticket" | "users",
+  handler: "sessions" | "tasks" | "ticket" | "users" | "roles",
   method: string,
   url: string,
   opts: Call = {},
@@ -81,7 +83,9 @@ async function call(
         ? await handleTasks(req as never, res as never, segments, query, opts.agentId)
         : handler === "users"
           ? await handleUsers(req as never, res as never, segments, query)
-          : await handleRealtimeTicket(req as never, res as never, segments, query);
+          : handler === "roles"
+            ? await handleUserRoles(req as never, res as never, segments, query)
+            : await handleRealtimeTicket(req as never, res as never, segments, query);
   expect(handled).toBe(true);
   return { status, body: chunks.length > 0 ? JSON.parse(chunks.join("")) : null };
 }
@@ -93,6 +97,8 @@ let ezeAuth: HttpRequestAuth;
 
 beforeAll(async () => {
   initDb(":memory:");
+  // Built-in roles, including the extra `auditor` role, as at server boot.
+  ensureRbacSeedsSynced({ quiet: true });
   owner = await createUser({ name: "Owner" });
   eze = await createUser({ name: "Eze" });
   mar = await createUser({ name: "Mar" });
@@ -578,11 +584,6 @@ describe("all-users read scope", () => {
     requester = await createUser({ name: "Req" });
     await setUserRoles(requester.id, ["requester"], null);
     requesterAuth = { kind: "user", userId: requester.id, user: requester as never };
-    const db = getDbClient();
-    await db.run("INSERT INTO roles (id, name) VALUES ('role-auditor', 'auditor')");
-    await db.run(
-      "INSERT INTO role_permissions (roleId, verb) VALUES ('role-auditor', 'session.read.all')",
-    );
   });
 
   const taskIds = async (query: string, opts: Call) => {
@@ -612,6 +613,194 @@ describe("all-users read scope", () => {
       expect((await call("sessions", "GET", `/api/sessions/${root.id}`, scoped)).status).toBe(403);
       expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
     }
+  });
+
+  test("the built-in auditor role is an extra, never a default, and holds only session.read.all", async () => {
+    const catalog = await call("roles", "GET", "/api/rbac/roles");
+    const auditor = catalog.body.roles.find((r: { name: string }) => r.name === "auditor");
+    expect(auditor).toMatchObject({
+      isBuiltin: true,
+      grantsAll: false,
+      primary: false,
+      verbs: ["session.read.all"],
+    });
+    const fresh = await createUser({ name: "Fresh default" });
+    const roles = await call("roles", "GET", `/api/users/${fresh.id}/roles`);
+    expect(roles.body.roles.map((r: { name: string }) => r.name)).toEqual(["admin"]);
+    // Not a primary role: it cannot stand alone.
+    const alone = await call("roles", "PUT", `/api/users/${fresh.id}/roles`, {
+      body: { roles: ["auditor"] },
+    });
+    expect(alone.status).toBe(400);
+  });
+
+  test("only the operator key adds auditor via PUT /api/users/{id}/roles; it then opts a default admin in", async () => {
+    const admin = await createUser({ name: "Admin to audit" });
+    const adminAuth: HttpRequestAuth = { kind: "user", userId: admin.id, user: admin as never };
+    const { root, child } = await session(owner.id);
+    const scoped = { auth: adminAuth, sessionScope: "all" };
+    const denied = async () => {
+      expect(await taskIds("&scope=all", { auth: adminAuth })).not.toContain(root.id);
+      expect(await sessionIds("&scope=all", { auth: adminAuth })).not.toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(403);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(false);
+    };
+    await denied();
+
+    // A requester (no grant-all role) is refused, and nothing changes.
+    const byRequester = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: requesterAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(byRequester.status).toBe(403);
+    // Nor can the requester grant it to itself.
+    const self = await call("roles", "PUT", `/api/users/${requester.id}/roles`, {
+      auth: requesterAuth,
+      body: { roles: ["requester", "auditor"] },
+    });
+    expect(self.status).toBe(403);
+    await denied();
+    expect(await taskIds("&scope=all", { auth: requesterAuth })).not.toContain(root.id);
+
+    // A default grant-all admin cannot add it either: not for itself, not for another user.
+    const selfGrant = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: adminAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(selfGrant.status).toBe(403);
+    expect(selfGrant.body.error).toContain("operator key");
+    const byAdmin = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      auth: ezeAuth,
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(byAdmin.status).toBe(403);
+    await denied();
+
+    // The operator key adds auditor next to the primary role.
+    const granted = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+      body: { roles: ["admin", "auditor"] },
+    });
+    expect(granted.status).toBe(200);
+    expect(granted.body.roles.map((r: { name: string }) => r.name)).toEqual(["admin", "auditor"]);
+    try {
+      expect(await taskIds("&scope=all", { auth: adminAuth })).toContain(root.id);
+      expect(await sessionIds("&scope=all", { auth: adminAuth })).toContain(root.id);
+      expect((await call("tasks", "GET", `/api/tasks/${child.id}`, scoped)).status).toBe(200);
+      expect((await call("users", "GET", "/api/whoami", scoped)).body.sessionReadAll).toBe(true);
+      // A grant-all user may keep it while changing other roles, and may revoke it.
+      const kept = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin", "auditor"] },
+      });
+      expect(kept.status).toBe(200);
+      const revoked = await call("roles", "PUT", `/api/users/${admin.id}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin"] },
+      });
+      expect(revoked.status).toBe(200);
+    } finally {
+      await setUserRoles(admin.id, ["admin"], null);
+    }
+    await denied();
+  });
+
+  describe("a keep request racing an operator revoke", () => {
+    /**
+     * Holds the next top-level DB transaction at `where`: before it starts
+     * (the old handler had already checked roles by then), or inside it after
+     * the callback ran and before COMMIT. Resolves `paused` once held.
+     */
+    function holdNextTransaction(where: "before" | "inside") {
+      const client = getDbClient();
+      const original = client.transaction.bind(client);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markPaused!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        markPaused = resolve;
+      });
+      const spy = spyOn(client, "transaction").mockImplementationOnce((async (
+        fn: (tx: never) => Promise<unknown>,
+        opts?: never,
+      ) => {
+        if (where === "before") {
+          markPaused();
+          await gate;
+          return original(fn, opts);
+        }
+        return original(async (tx: never) => {
+          const out = await fn(tx);
+          markPaused();
+          await gate;
+          return out;
+        }, opts);
+      }) as never);
+      return { paused, release, restore: () => spy.mockRestore() };
+    }
+
+    const keep = (userId: string) =>
+      call("roles", "PUT", `/api/users/${userId}/roles`, {
+        auth: ezeAuth,
+        body: { roles: ["admin", "auditor"] },
+      });
+    const revoke = (userId: string) =>
+      call("roles", "PUT", `/api/users/${userId}/roles`, { body: { roles: ["admin"] } });
+    const names = async (userId: string) =>
+      (await call("roles", "GET", `/api/users/${userId}/roles`)).body.roles.map(
+        (r: { name: string }) => r.name,
+      );
+
+    test("a revoke that lands before the replacement wins: the keep is refused, not a re-add", async () => {
+      const target = await createUser({ name: "Raced before" });
+      await setUserRoles(target.id, ["admin", "auditor"], null);
+      const hold = holdNextTransaction("before");
+      try {
+        const kept = keep(target.id);
+        await hold.paused;
+        hold.restore();
+        const revoked = await revoke(target.id);
+        expect(revoked.status).toBe(200);
+        expect(await names(target.id)).toEqual(["admin"]);
+        hold.release();
+        const result = await kept;
+        expect(result.status).toBe(403);
+        expect(result.body.error).toContain("operator key");
+        expect(await names(target.id)).toEqual(["admin"]);
+        expect(await canReadAllSessions(target.id)).toBe(false);
+      } finally {
+        hold.release();
+        hold.restore();
+      }
+    });
+
+    test("a revoke issued while the keep holds its transaction waits for it, then wins", async () => {
+      const target = await createUser({ name: "Raced inside" });
+      await setUserRoles(target.id, ["admin", "auditor"], null);
+      const hold = holdNextTransaction("inside");
+      try {
+        const kept = keep(target.id);
+        await hold.paused;
+        hold.restore();
+        let revokeDone = false;
+        const revoked = revoke(target.id).then((r) => {
+          revokeDone = true;
+          return r;
+        });
+        // The keep's check and write share one write lock: the revoke queues.
+        for (let i = 0; i < 20; i++) await Bun.sleep(1);
+        expect(revokeDone).toBe(false);
+        hold.release();
+        expect((await kept).status).toBe(200);
+        expect((await revoked).status).toBe(200);
+        expect(await names(target.id)).toEqual(["admin"]);
+        expect(await canReadAllSessions(target.id)).toBe(false);
+      } finally {
+        hold.release();
+        hold.restore();
+      }
+    });
   });
 
   describe("with an explicit session.read.all grant", () => {

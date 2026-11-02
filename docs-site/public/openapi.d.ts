@@ -13817,7 +13817,7 @@ export interface paths {
                     offset?: number | null;
                     fields?: "full" | "slim" | "timeline";
                     includeTotal?: "true" | "false";
-                    /** @description all: every user's tasks, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
+                    /** @description all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
                     scope?: "all";
                 };
                 header?: never;
@@ -20115,7 +20115,7 @@ export interface paths {
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
-                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user with an admin role or session.read.all; ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree. */
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree. */
                     scope?: "mine" | "shared" | "tree" | "all";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
@@ -24643,7 +24643,7 @@ export interface paths {
         get: operations["users_getRbacRoles"];
         /**
          * Set a user's RBAC roles
-         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
          */
         put: operations["users_setRbacRoles"];
         post?: never;
@@ -25017,6 +25017,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target user not found */
                 404: {
                     headers: {
@@ -25207,6 +25216,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
                     headers: {
@@ -25296,6 +25314,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25456,6 +25483,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25910,6 +25946,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target or source user not found */
                 404: {
                     headers: {
@@ -26058,6 +26103,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -33796,7 +33850,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Not allowed to change roles */
+            /** @description Not allowed to change roles, or adding an operator-only role with a user token */
             403: {
                 headers: {
                     [name: string]: unknown;

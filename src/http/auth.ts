@@ -4,7 +4,7 @@ import {
   findUserById,
   fingerprintApiKey,
   resolveSessionToken,
-  resolveUserByToken,
+  resolveUserToken,
 } from "../be/users";
 import type { User } from "../types";
 import { verifyPageSession } from "../utils/page-session";
@@ -54,9 +54,10 @@ export async function resolveHttpRequestAuth(
   }
 
   if (bearer.startsWith("aswt_")) {
-    const user = await resolveUserByToken(bearer);
-    if (isActiveUser(user)) {
-      return { kind: "user", userId: user.id, user };
+    const resolved = await resolveUserToken(bearer);
+    const user = resolved?.user ?? null;
+    if (resolved && isActiveUser(user)) {
+      return { kind: "user", userId: user.id, user, tokenId: resolved.tokenId };
     }
   }
 

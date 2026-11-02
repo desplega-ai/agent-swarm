@@ -51,15 +51,18 @@ import {
   upsertBudget,
 } from "../be/db";
 import {
+  assertMayActOnOperatorGrantedTarget,
   assertNotLastAdmin,
   getUserGrant,
   LastAdminError,
   listUserRoles,
+  OperatorGrantedTargetError,
   setUserRoles,
 } from "../be/rbac-roles";
 import {
   findUserByEmail,
   getUserIdentities,
+  type IdentityActor,
   type IdentityEvent,
   linkIdentity,
   listUserEvents,
@@ -304,6 +307,10 @@ const resolveUnmapped = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
@@ -370,6 +377,10 @@ const updateUserRoute = route({
     },
     400: { description: "Validation error or empty body" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -397,6 +408,10 @@ const mintUserMcpTokenRoute = route({
       }),
     },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -443,6 +458,10 @@ const createConnectorCodeRoute = route({
     },
     400: { description: "The public API origin or CONNECTOR_CONNECT_URL is not HTTPS" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
@@ -590,6 +609,10 @@ const mergeUsersRoute = route({
     },
     400: { description: "Validation error (e.g. target == source)" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "Target or source user not found" },
     409: { description: "Source is the last active admin (last_admin)" },
   },
@@ -633,6 +656,10 @@ const addIdentityRoute = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: {
+      description:
+        "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+    },
     404: { description: "User not found" },
     409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
@@ -658,6 +685,32 @@ const deleteIdentityRoute = route({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Run `write` in one write transaction after the operator-granted check: a
+ * user actor may not get a credential for, or bind an identity to, another
+ * user holding an operator-granted role (auditor). Every new user is a
+ * grant-all admin, so without this any admin could act as an auditor. The
+ * check and the write share the write lock, so an operator grant cannot land
+ * between them. Throws OperatorGrantedTargetError when refused.
+ */
+function writeGuarded<T>(
+  actor: IdentityActor,
+  targetUserId: string,
+  write: () => Promise<T>,
+): Promise<T> {
+  return getDbClient().transaction(async () => {
+    await assertMayActOnOperatorGrantedTarget(actor, targetUserId);
+    return await write();
+  });
+}
+
+/** Writes the 403 for an OperatorGrantedTargetError; returns true when it did. */
+function respondOperatorGrantedRefusal(res: ServerResponse, err: unknown): boolean {
+  if (!(err instanceof OperatorGrantedTargetError)) return false;
+  jsonError(res, err.message, 403);
+  return true;
+}
 
 /** True when `err` is a SQLite UNIQUE violation whose message names `target` (e.g. `users.email`). */
 function isUniqueViolation(err: unknown, target: string): boolean {
@@ -885,16 +938,22 @@ export async function handleUsers(
 
     try {
       const { identities, ...userFields } = parsed.body;
-      const user = await createUser(userFields);
-      await syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
-      for (const ident of identities ?? []) {
-        await linkIdentity(user.id, ident.kind, ident.externalId, actor);
-      }
-      if (userFields.dailyBudgetUsd !== undefined) {
-        await recordIdentityEvent(user.id, "budget_changed", actor, null, {
-          dailyBudgetUsd: userFields.dailyBudgetUsd,
-        });
-      }
+      // Create and link in one write transaction: an operator grant on the new
+      // user cannot land before its identities, so the grant-time review sees
+      // them all.
+      const user = await getDbClient().transaction(async () => {
+        const created = await createUser(userFields);
+        await syncUserBudgetMirror(created.id, userFields.dailyBudgetUsd);
+        for (const ident of identities ?? []) {
+          await linkIdentity(created.id, ident.kind, ident.externalId, actor);
+        }
+        if (userFields.dailyBudgetUsd !== undefined) {
+          await recordIdentityEvent(created.id, "budget_changed", actor, null, {
+            dailyBudgetUsd: userFields.dailyBudgetUsd,
+          });
+        }
+        return created;
+      });
       const composed = await composeUser(user.id);
       createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
@@ -947,15 +1006,23 @@ export async function handleUsers(
           return true;
         }
         targetUserId = existing.id;
+        await writeGuarded(actor, targetUserId, () =>
+          linkIdentity(targetUserId, kind, externalId, actor),
+        );
       } else {
-        const created = await createUser({
-          name: parsed.body.name,
-          email: parsed.body.email,
-          notes: parsed.body.notes,
+        // Create and link in one write transaction, so an operator grant on
+        // the new user cannot land before the identity.
+        const body = parsed.body;
+        targetUserId = await getDbClient().transaction(async () => {
+          const created = await createUser({
+            name: body.name,
+            email: body.email,
+            notes: body.notes,
+          });
+          await linkIdentity(created.id, kind, externalId, actor);
+          return created.id;
         });
-        targetUserId = created.id;
       }
-      await linkIdentity(targetUserId, kind, externalId, actor);
       // Clear both kv rows (best-effort — DELETE is idempotent).
       const ns = `integration:unmapped:${kind}`;
       await deleteKv(ns, `${externalId}:meta`);
@@ -963,6 +1030,7 @@ export async function handleUsers(
       const user = await composeUser(targetUserId);
       resolveUnmapped.respond(res, 200, { user });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to resolve unmapped", 500);
     }
     return true;
@@ -994,12 +1062,9 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-
     try {
-      const { tokenId, plaintext } = await mintToken(
-        parsed.params.id,
-        parsed.body.label ?? null,
-        actor,
+      const { tokenId, plaintext } = await writeGuarded(actor, parsed.params.id, () =>
+        mintToken(parsed.params.id, parsed.body.label ?? null, actor),
       );
       const token = (await listUserTokens(parsed.params.id)).find((t) => t.id === tokenId);
       mintUserMcpTokenRoute.respond(res, 200, {
@@ -1008,6 +1073,7 @@ export async function handleUsers(
         user: await composeUser(parsed.params.id),
       });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
     }
     return true;
@@ -1051,6 +1117,8 @@ export async function handleUsers(
       const connectUrl = connect.toString();
       createConnectorCodeRoute.respond(res, 201, { code, expiresAt, connectUrl });
     } catch (err) {
+      // createConnectorCode runs the operator-granted check with its insert.
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to create connector code", 500);
     }
     return true;
@@ -1269,11 +1337,14 @@ export async function handleUsers(
       return true;
     }
     try {
-      await linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
+      await writeGuarded(actor, parsed.params.id, () =>
+        linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor),
+      );
       addIdentityRoute.respond(res, 200, {
         identities: await getUserIdentities(parsed.params.id),
       });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       if (isUniqueViolation(err, "user_external_ids")) {
         jsonError(res, "identity_taken", 409);
         return true;
@@ -1332,9 +1403,10 @@ export async function handleUsers(
       jsonError(res, "Source user not found", 404);
       return true;
     }
-
     try {
       const mergedUser = await getDbClient().transaction(async () => {
+        // The source's identities and email aliases move to the target.
+        await assertMayActOnOperatorGrantedTarget(actor, targetId);
         // Move every identity from source → target.
         for (const ident of sourceBefore.identities) {
           await unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
@@ -1395,6 +1467,7 @@ export async function handleUsers(
       });
       mergeUsersRoute.respond(res, 200, { user: mergedUser });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       if (err instanceof LastAdminError) {
         jsonError(res, "last_admin", 409);
         return true;
@@ -1429,6 +1502,9 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
+    const { identities: newIdentities, email: newEmail, emailAliases: newAliases } = parsed.body;
+    const bindsIdentity =
+      newIdentities !== undefined || newEmail !== undefined || newAliases !== undefined;
 
     try {
       const { identities, metadata, comms, ...rest } = parsed.body;
@@ -1450,102 +1526,116 @@ export async function handleUsers(
       } else if (metadata !== undefined) {
         update.metadata = metadata as Record<string, unknown> | null;
       }
-      const updated = await updateUser(parsed.params.id, update);
-      if (!updated) {
+      // One write transaction: the operator-granted check for identity, email
+      // and alias changes, then every write, so a grant cannot land between.
+      const found = await getDbClient().transaction(async () => {
+        if (bindsIdentity) await assertMayActOnOperatorGrantedTarget(actor, parsed.params.id);
+        const updated = await updateUser(parsed.params.id, update);
+        if (!updated) return false;
+        await syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
+
+        // Budget event
+        if (
+          parsed.body.dailyBudgetUsd !== undefined &&
+          (before.dailyBudgetUsd ?? null) !== (parsed.body.dailyBudgetUsd ?? null)
+        ) {
+          await recordIdentityEvent(
+            parsed.params.id,
+            "budget_changed",
+            actor,
+            { dailyBudgetUsd: before.dailyBudgetUsd ?? null },
+            { dailyBudgetUsd: parsed.body.dailyBudgetUsd ?? null },
+          );
+        }
+
+        // Status event
+        if (parsed.body.status !== undefined && before.status !== parsed.body.status) {
+          await recordIdentityEvent(
+            parsed.params.id,
+            "status_changed",
+            actor,
+            { status: before.status },
+            { status: parsed.body.status },
+          );
+        }
+
+        // Email aliases diff — emit email_added / email_removed per Q19
+        if (parsed.body.emailAliases !== undefined) {
+          const beforeSet = new Set((before.emailAliases ?? []).map((a) => a.toLowerCase()));
+          const afterSet = new Set(parsed.body.emailAliases.map((a) => a.toLowerCase()));
+          for (const a of parsed.body.emailAliases) {
+            if (!beforeSet.has(a.toLowerCase())) {
+              await recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
+            }
+          }
+          for (const a of before.emailAliases ?? []) {
+            if (!afterSet.has(a.toLowerCase())) {
+              await recordIdentityEvent(
+                parsed.params.id,
+                "email_removed",
+                actor,
+                { email: a },
+                null,
+              );
+            }
+          }
+        }
+
+        // Profile-field diffs — emit one `profile_changed` event per field that
+        // changed value. Status / budget / aliases / identities already emit
+        // their own dedicated events above; skip them here to avoid double-emit.
+        const PROFILE_FIELDS = [
+          "name",
+          "email",
+          "role",
+          "timezone",
+          "preferredChannel",
+          "notes",
+          "metadata",
+        ] as const;
+        for (const field of PROFILE_FIELDS) {
+          if (parsed.body[field] === undefined) continue;
+          const beforeVal = (before as Record<string, unknown>)[field] ?? null;
+          const afterVal = parsed.body[field] ?? null;
+          // Cheap deep-equal via JSON — fields are scalar strings or object/null.
+          if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;
+          await recordIdentityEvent(
+            parsed.params.id,
+            "profile_changed",
+            actor,
+            { [field]: beforeVal },
+            { [field]: afterVal },
+          );
+        }
+
+        // Identities diff — complete-list semantics. linkIdentity / unlinkIdentity
+        // already emit the right event each.
+        if (identities !== undefined) {
+          const beforeIds = await getUserIdentities(parsed.params.id);
+          const beforeKeys = new Set(beforeIds.map((i) => `${i.kind}:${i.externalId}`));
+          const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
+          for (const i of identities) {
+            if (!beforeKeys.has(`${i.kind}:${i.externalId}`)) {
+              await linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            }
+          }
+          for (const i of beforeIds) {
+            if (!afterKeys.has(`${i.kind}:${i.externalId}`)) {
+              await unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            }
+          }
+        }
+        return true;
+      });
+      if (!found) {
         jsonError(res, "User not found", 404);
         return true;
-      }
-      await syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
-
-      // Budget event
-      if (
-        parsed.body.dailyBudgetUsd !== undefined &&
-        (before.dailyBudgetUsd ?? null) !== (parsed.body.dailyBudgetUsd ?? null)
-      ) {
-        await recordIdentityEvent(
-          parsed.params.id,
-          "budget_changed",
-          actor,
-          { dailyBudgetUsd: before.dailyBudgetUsd ?? null },
-          { dailyBudgetUsd: parsed.body.dailyBudgetUsd ?? null },
-        );
-      }
-
-      // Status event
-      if (parsed.body.status !== undefined && before.status !== parsed.body.status) {
-        await recordIdentityEvent(
-          parsed.params.id,
-          "status_changed",
-          actor,
-          { status: before.status },
-          { status: parsed.body.status },
-        );
-      }
-
-      // Email aliases diff — emit email_added / email_removed per Q19
-      if (parsed.body.emailAliases !== undefined) {
-        const beforeSet = new Set((before.emailAliases ?? []).map((a) => a.toLowerCase()));
-        const afterSet = new Set(parsed.body.emailAliases.map((a) => a.toLowerCase()));
-        for (const a of parsed.body.emailAliases) {
-          if (!beforeSet.has(a.toLowerCase())) {
-            await recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
-          }
-        }
-        for (const a of before.emailAliases ?? []) {
-          if (!afterSet.has(a.toLowerCase())) {
-            await recordIdentityEvent(parsed.params.id, "email_removed", actor, { email: a }, null);
-          }
-        }
-      }
-
-      // Profile-field diffs — emit one `profile_changed` event per field that
-      // changed value. Status / budget / aliases / identities already emit
-      // their own dedicated events above; skip them here to avoid double-emit.
-      const PROFILE_FIELDS = [
-        "name",
-        "email",
-        "role",
-        "timezone",
-        "preferredChannel",
-        "notes",
-        "metadata",
-      ] as const;
-      for (const field of PROFILE_FIELDS) {
-        if (parsed.body[field] === undefined) continue;
-        const beforeVal = (before as Record<string, unknown>)[field] ?? null;
-        const afterVal = parsed.body[field] ?? null;
-        // Cheap deep-equal via JSON — fields are scalar strings or object/null.
-        if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;
-        await recordIdentityEvent(
-          parsed.params.id,
-          "profile_changed",
-          actor,
-          { [field]: beforeVal },
-          { [field]: afterVal },
-        );
-      }
-
-      // Identities diff — complete-list semantics. linkIdentity / unlinkIdentity
-      // already emit the right event each.
-      if (identities !== undefined) {
-        const beforeIds = await getUserIdentities(parsed.params.id);
-        const beforeKeys = new Set(beforeIds.map((i) => `${i.kind}:${i.externalId}`));
-        const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
-        for (const i of identities) {
-          if (!beforeKeys.has(`${i.kind}:${i.externalId}`)) {
-            await linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
-          }
-        }
-        for (const i of beforeIds) {
-          if (!afterKeys.has(`${i.kind}:${i.externalId}`)) {
-            await unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
-          }
-        }
       }
 
       const composed = await composeUser(parsed.params.id);
       updateUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
+      if (respondOperatorGrantedRefusal(res, err)) return true;
       jsonError(res, err instanceof Error ? err.message : "Failed to update user", 500);
     }
     return true;
