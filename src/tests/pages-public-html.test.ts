@@ -23,10 +23,15 @@ import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
 import { PAGE_HEAD_V1 } from "../pages/page-head";
+import { buildPageShareMeta, renderPageShareMeta } from "../pages/page-og";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-public-html.sqlite";
 let BASE = "";
+
+/** The share tags a public page gets first in its head when no app URL is set. */
+const shareTags = (title: string) =>
+  renderPageShareMeta(buildPageShareMeta({ title, description: null }, null));
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -54,6 +59,8 @@ describe("GET /p/:id — HTML public path", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
+    delete process.env.APP_URL;
+    delete process.env.DASHBOARD_URL;
     initDb(TEST_DB_PATH);
     server = createTestServer();
     const port = await listenOnFreePort(server);
@@ -116,8 +123,8 @@ describe("GET /p/:id — HTML public path", () => {
     const text = await res.text();
     expect(text).toContain("<h1>Hello</h1>");
     expect(text).toContain("class SwarmSDK"); // BROWSER_SDK_JS sentinel
-    // The frozen design version 1 head, verbatim, right after <head>.
-    expect(text).toContain(`<head>${PAGE_HEAD_V1}<script>`);
+    // The share tags, then the frozen design version 1 head, verbatim.
+    expect(text).toContain(`<head>${shareTags("Public HTML")}${PAGE_HEAD_V1}<script>`);
     expect(text).toContain("color-scheme: light");
     expect(text).toContain("--swarm-bg: #fbfbfa");
     expect(text).toContain("--swarm-text: #111827");
@@ -132,7 +139,7 @@ describe("GET /p/:id — HTML public path", () => {
   });
 
   test("a version 1 body without a <head> still gets the injection prepended, byte for byte", async () => {
-    const injection = `${PAGE_HEAD_V1}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
+    const injection = `${shareTags("No head")}${PAGE_HEAD_V1}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
     // Version 2 adds a doctype and moves the head (pages-head-v2.test.ts).
     // Version 1 never does.
     const bodies = ["<h1>Fragment</h1>", "<!doctype html><html><body>x</body></html>"];

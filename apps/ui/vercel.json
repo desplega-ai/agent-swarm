@@ -1,7 +1,20 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ignoreCommand": "sh ../../scripts/vercel-ignore.sh apps/ui packages/model-catalog src/utils/task-citations.ts src/utils/dsh-usage.ts src/be/modelsdev-cache.json src/themes",
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/pages/:id([A-Za-z0-9_-]+)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(Slackbot|Slack-ImgProxy|Twitterbot|LinkedInBot|facebookexternalhit|Facebot|meta-externalagent|Discordbot|WhatsApp|TelegramBot|Applebot|redditbot|Mastodon|Bluesky|Embedly|SkypeUriPreview|Pinterestbot|Iframely|vkShare|Googlebot|bingbot|DuckDuckBot|Snapchat).*"
+        }
+      ],
+      "destination": "/api/page-share?id=:id"
+    },
+    { "source": "/((?!assets/|api/).*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/version.json",

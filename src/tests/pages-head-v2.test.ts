@@ -33,10 +33,15 @@ import {
   PAGE_MODE_PARAM,
   PAGE_THEME_PARAM,
 } from "../pages/page-head";
+import { buildPageShareMeta, renderPageShareMeta } from "../pages/page-og";
 import { resolvePageTheme } from "../themes/page-theme";
 import { getThemePreset } from "../themes/presets";
 import { HIVE_PAGE_TOKENS, PAGE_THEME_TOKENS } from "../themes/tokens";
 import { listenOnFreePort } from "./test-net";
+
+/** The share tags a public page gets first in its head when no app URL is set. */
+const shareTags = (title: string) =>
+  renderPageShareMeta(buildPageShareMeta({ title, description: null }, null));
 
 const TEST_DB_PATH = "./test-pages-head-v2.sqlite";
 
@@ -363,12 +368,19 @@ describe("GET /p/:id serves the head of the page's design version", () => {
     return declarations(styleText(page, "swarm-theme"), ":root");
   }
 
+  let origAppUrl: string | undefined;
+  let origDashboardUrl: string | undefined;
+
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
+    origAppUrl = process.env.APP_URL;
+    origDashboardUrl = process.env.DASHBOARD_URL;
+    delete process.env.APP_URL;
+    delete process.env.DASHBOARD_URL;
     initDb(TEST_DB_PATH);
     server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
       const pathSegments = getPathSegments(req.url || "");
@@ -385,6 +397,10 @@ describe("GET /p/:id serves the head of the page's design version", () => {
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
+    if (origAppUrl === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = origAppUrl;
+    if (origDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
+    else process.env.DASHBOARD_URL = origDashboardUrl;
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -408,31 +424,29 @@ describe("GET /p/:id serves the head of the page's design version", () => {
   });
 
   test("a v2 body without a doctype or a <head> is served in standards mode", async () => {
-    const cases: [body: string, start: string, end: string][] = [
+    // A public page's share tags come first, then the head.
+    const head = (index: number) => `${shareTags(`standards-${index}`)}<base target="_blank">`;
+    const cases: [body: string, start: (index: number) => string, end: string][] = [
       // A fragment: the doctype is prepended and the head follows it.
-      ["<h1>Hi</h1>", '<!doctype html><base target="_blank">', "</script><h1>Hi</h1>"],
+      ["<h1>Hi</h1>", (i) => `<!doctype html>${head(i)}`, "</script><h1>Hi</h1>"],
       // A doctype and no <html>: the head follows the doctype, not doubled.
-      [
-        "\n<!DOCTYPE html>\n<p>x</p>",
-        '\n<!DOCTYPE html><base target="_blank">',
-        "</script>\n<p>x</p>",
-      ],
+      ["\n<!DOCTYPE html>\n<p>x</p>", (i) => `\n<!DOCTYPE html>${head(i)}`, "</script>\n<p>x</p>"],
       // An <html> tag and no <head>: the head follows <html ...>.
       [
         '<!doctype html>\n<html lang="en"><body>x</body></html>',
-        '<!doctype html>\n<html lang="en"><base target="_blank">',
+        (i) => `<!doctype html>\n<html lang="en">${head(i)}`,
         "</script><body>x</body></html>",
       ],
       // A <head> and no doctype: the doctype is prepended, the head stays put.
       [
         "<html><head><title>T</title></head><body>x</body></html>",
-        '<!doctype html><html><head><base target="_blank">',
+        (i) => `<!doctype html><html><head>${head(i)}`,
         "</script><title>T</title></head><body>x</body></html>",
       ],
     ];
     for (const [index, [body, start, end]] of cases.entries()) {
       const page = await serve(await createPage(`standards-${index}`, { body }));
-      expect(page.startsWith(start)).toBe(true);
+      expect(page.startsWith(start(index))).toBe(true);
       expect(page.endsWith(end)).toBe(true);
     }
   });
@@ -457,7 +471,7 @@ describe("GET /p/:id serves the head of the page's design version", () => {
     ).text();
     const id = await createPage("v1-page", { designVersion: 1 });
     const page = await serve(id, `?${PAGE_THEME_PARAM}=github&${PAGE_MODE_PARAM}=dark`);
-    expect(page).toContain(`<head>${baseline}<script>`);
+    expect(page).toContain(`<head>${shareTags("v1-page")}${baseline}<script>`);
     expect(page).toContain("--swarm-bg: #fbfbfa");
     expect(page).not.toContain("@tailwindcss/browser");
     expect(page).not.toContain(DARK_SCRIPT);

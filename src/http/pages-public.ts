@@ -37,6 +37,7 @@ import {
   PAGE_MODE_PARAM,
   PAGE_THEME_PARAM,
 } from "../pages/page-head";
+import { buildPageShareMeta, declaresOpenGraph, renderPageShareMeta } from "../pages/page-og";
 import { resolvePageTheme } from "../themes/page-theme";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
@@ -101,6 +102,27 @@ const publicPageJsonRoute = route({
     401: { description: "Page requires an authenticated session" },
     403: { description: "Cookie does not match this page id" },
     404: { description: "Page not found" },
+  },
+  auth: { apiKey: false },
+});
+
+/** Wire shape of `/p/{id}/og`: what a link unfurl may show about a public page. */
+const PublicPageOgSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+});
+
+const publicPageOgRoute = route({
+  method: "get",
+  path: "/p/{id}/og",
+  pattern: ["p", null, "og"],
+  summary: "Share-preview metadata for a public page (title and description only)",
+  tags: ["Pages"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Share-preview metadata", schema: PublicPageOgSchema },
+    404: { description: "No public page with this id" },
   },
   auth: { apiKey: false },
 });
@@ -493,8 +515,11 @@ export async function handlePagesPublic(
   // suffix on the second segment. The route() registrations exist mainly so
   // isPublicRoute() lets these through the bearer gate — actual dispatch is
   // handled here.
-  if (pathSegments.length !== 2 || pathSegments[0] !== "p") return false;
-  if (req.method !== "GET") return false;
+  if (pathSegments[0] !== "p" || req.method !== "GET") return false;
+  if (pathSegments.length === 3 && pathSegments[2] === "og") {
+    return handlePublicPageOg(req, res, pathSegments, queryParams);
+  }
+  if (pathSegments.length !== 2) return false;
 
   const second = pathSegments[1]!;
   const jsonStripped = stripJsonSuffix(second);
@@ -668,7 +693,7 @@ export async function handlePagesPublic(
   const html =
     injectBrowserSdk(page.body, {
       head: pageHead(page, queryParams, wantsPrint),
-      headFirst: feedback ? feedbackKeyGuardScript() : "",
+      headFirst: (feedback ? feedbackKeyGuardScript() : "") + publicShareTags(page),
       standardsMode: page.designVersion !== 1,
     }) +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
@@ -684,6 +709,53 @@ export async function handlePagesPublic(
   res.writeHead(200, headers);
   res.end(html);
   await bumpViewCount(page.id);
+  return true;
+}
+
+/**
+ * The app URL that renders share cards, or null when none is configured (the
+ * localhost fallback cannot serve a crawler).
+ */
+function shareCardAppUrl(): string | null {
+  return getConfiguredAppUrls().length > 0 ? getAppBaseUrl() : null;
+}
+
+/**
+ * Open Graph and Twitter tags for a public HTML page, unless the body sets its
+ * own. Password and authed pages get none, so a crawler never sees their title
+ * or description.
+ */
+function publicShareTags(page: Page): string {
+  if (page.authMode !== "public" || declaresOpenGraph(page.body)) return "";
+  return renderPageShareMeta(buildPageShareMeta(page, shareCardAppUrl()));
+}
+
+/**
+ * `/p/:id/og`: the title and description a link unfurl may show. Only public
+ * pages answer; a missing page and a password or authed page both get the same
+ * 404, so the route confirms nothing about a private page. It reads no body and
+ * bumps no view count, so the dashboard's crawler path can call it per unfurl.
+ */
+async function handlePublicPageOg(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+): Promise<boolean> {
+  const parsed = await publicPageOgRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  const page = await getPage(parsed.params.id);
+  if (!page || page.authMode !== "public") {
+    res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "Page not found" }));
+    return true;
+  }
+  res.setHeader("Cache-Control", "public, max-age=300");
+  publicPageOgRoute.respond(res, 200, {
+    id: page.id,
+    title: page.title,
+    description: page.description?.trim() ? page.description : null,
+  });
   return true;
 }
 

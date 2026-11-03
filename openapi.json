@@ -38191,6 +38191,65 @@
         }
       }
     },
+    "/p/{id}/og": {
+      "get": {
+        "summary": "Share-preview metadata for a public page (title and description only)",
+        "tags": [
+          "Pages"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share-preview metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "description"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No public page with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/prompt-templates/resolved": {
       "get": {
         "summary": "Resolve a prompt template for a given event type and scope chain",

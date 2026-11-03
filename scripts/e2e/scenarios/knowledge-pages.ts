@@ -144,6 +144,11 @@ export const knowledgePages: Scenario = {
       );
       expect(response.text.includes(marker), "the page body is served verbatim");
       expect(
+        response.text.includes(`<meta property="og:title" content="Public page ${ctx.nonce}">`) &&
+          response.text.indexOf('property="og:title"') < response.text.indexOf(marker),
+        "a public html page carries its own share tags",
+      );
+      expect(
         response.text.includes("swarmSdk") &&
           response.text.indexOf("<script") < response.text.indexOf(marker),
         "the browser SDK is injected into <head>",
@@ -179,6 +184,16 @@ export const knowledgePages: Scenario = {
           publicJson.passwordHash === undefined &&
           publicJson.agentId === undefined,
         `public JSON shape must not leak private fields: ${JSON.stringify(publicJson).slice(0, 200)}`,
+      );
+      response = await ctx.api("GET", `/p/${pub.id}/og`, { apiKey: null });
+      expectStatus(response, [200], "public page share metadata");
+      const og = asRecord(response.json);
+      expect(
+        og.id === pub.id &&
+          og.title === `Public page ${ctx.nonce}` &&
+          og.description === "public html page" &&
+          og.body === undefined,
+        `share metadata is title and description only: ${JSON.stringify(og).slice(0, 200)}`,
       );
       response = await ctx.api("GET", `/p/${crypto.randomUUID()}`, { apiKey: null });
       expectStatus(response, [404], "serve an unknown page");
@@ -241,6 +256,8 @@ export const knowledgePages: Scenario = {
       expectStatus(response, [401], "an authed page without a session");
       response = await ctx.api("GET", `/p/${authed.id}.json`, { apiKey: null });
       expectStatus(response, [401], "an authed page as JSON without a session");
+      response = await ctx.api("GET", `/p/${authed.id}/og`, { apiKey: null });
+      expectStatus(response, [404], "an authed page has no share metadata");
       response = await ctx.api("POST", `/api/pages/${authed.id}/launch`);
       expectStatus(response, [204], "launch an authed page");
       const authedCookies = cookieHeader(response.headers);
