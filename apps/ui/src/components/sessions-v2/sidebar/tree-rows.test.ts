@@ -12,6 +12,7 @@ import {
   foldId,
   foldIds,
   fullListOf,
+  isMyGroupRow,
   isNavRow,
   type ListState,
   listSelectState,
@@ -412,5 +413,49 @@ describe("list selection", () => {
     expect(wholeListTotal(loaded, "inbox")).toBeNull();
     // No View all row: the list fits in 10.
     expect(wholeListTotal(rows, "inbox")).toBeNull();
+  });
+});
+
+describe("resource sections", () => {
+  const t = tree([
+    group("shared/a/", 1),
+    group("shared/slack/c0eng00001/", 1),
+    group("shared/workflow:w1/", 3),
+    group("shared/page:p1/", 2),
+  ]);
+
+  test("one read-only section per kind after the sources, named by kind", () => {
+    const { rows } = build(t, {
+      open: { inbox: false, later: false, "source:page": true },
+    });
+    expect(keys(rows).slice(1, -3)).toEqual([
+      "section:mine",
+      "group:shared/a/",
+      "add:group",
+      "source:slack",
+      "source:page",
+      "group:shared/page:p1/",
+      "source:workflow",
+    ]);
+    expect(rows.find((row) => row.key === "source:page")).toMatchObject({
+      type: "source",
+      source: "page",
+      label: "Pages",
+      counts: counts(2),
+    });
+    expect(rows.find((row) => row.key === "source:workflow")).toMatchObject({
+      label: "Workflows",
+      open: false,
+    });
+    expect(rows.find((row) => row.key === "source:slack")).toMatchObject({ label: "Slack" });
+    const pageGroup = rows.find((row) => row.key === "group:shared/page:p1/");
+    expect(pageGroup).toMatchObject({ level: 1, readOnly: true });
+    expect(isMyGroupRow(pageGroup)).toBe(false);
+  });
+
+  test("foldIds keeps the resource folds and groups", () => {
+    const ids = foldIds(buildSessionGroupTree(t.groups, ME));
+    expect(ids.has("source:workflow")).toBe(true);
+    expect(ids.has("shared/workflow:w1/")).toBe(true);
   });
 });

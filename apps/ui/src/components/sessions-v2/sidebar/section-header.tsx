@@ -1,5 +1,5 @@
 import { type MouseEvent, memo, type ReactNode } from "react";
-import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
+import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { plural } from "@/lib/sessions-v2";
 import { rowPropsEqual, TreeRow as TreeRowFrame } from "./tree-row";
 import type { TreeRow } from "./tree-rows";
@@ -25,7 +25,7 @@ export type SourceRow = Extract<TreeRow, { type: "source" }>;
 
 /** The name of a source section, with its session count, for screen readers. */
 export function sourceRowLabel(row: SourceRow): string {
-  return `${taskSourceLabel(row.source)}, ${plural(row.counts.total, "session")}`;
+  return `${row.label}, ${plural(row.counts.total, "session")}`;
 }
 
 /**
@@ -56,9 +56,7 @@ function SourceHeaderView({
       className="mt-3 h-7 pr-2 pl-3 font-mono text-meta text-muted-foreground"
     >
       <TaskSourceMark source={row.source} />
-      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">
-        {taskSourceLabel(row.source)}
-      </span>
+      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">{row.label}</span>
       <span className="shrink-0 tabular-nums">{row.counts.total}</span>
     </TreeRowFrame>
   );
