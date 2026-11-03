@@ -1138,6 +1138,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_TASK_WATCHER_INTERVAL_MS",
+        label: "Task watcher interval",
+        description:
+          "Milliseconds between Slack task watcher ticks. Under the v2 renderer each tick is the full reconcile; task events render their own thread in between. Inbound mentions do not wait on it.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "10000",
+        placeholder: "10000",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "SLACK_CONCLUSION_SETTLE_SEC",
         label: "Conclusion settle window",
         description:
