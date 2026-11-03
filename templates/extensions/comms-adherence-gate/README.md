@@ -93,7 +93,9 @@ Fixed text that your own templates tell an agent to post (a daily report's all-c
 }
 ```
 
-Fill placeholders with realistic sample values. `prefs` adds the preference dimensions it names; without it only `plain` is judged. At most 8 entries run; an invalid entry is skipped, never fatal to the rest of the config. `fixturesOk` is `null` when no fixtures are configured.
+Fill placeholders with realistic sample values. `prefs` adds the preference dimensions it names; without it only `plain` is judged. At most 8 entries run; an invalid entry is skipped, never fatal to the rest of the config.
+
+`fixturesOk` is `true` only when at least one entry ran and every entry passed. It is `null` when no valid entry ran: `fixtures` unset, an explicit `fixtures: []`, or every entry invalid. `null` means nothing was checked, so never read it as a pass. A skipped entry is missing from `fixtures` in `selftest:last`, so compare that list with your config.
 
 Unit tests mock Jev, so they cannot show that a line passes. Only the self-test, which calls the live judge, can.
 

@@ -522,6 +522,21 @@ describe("self-test", () => {
     expect(last.fixtures[1]).toMatchObject({ name: "fine", pass: true });
   });
 
+  test("an explicit empty list or only invalid entries records null, never a pass", async () => {
+    for (const fixtures of [[], [{ text: "no name" }, 42]]) {
+      jevCalls.length = 0;
+      mockWithFixtures(() => ({ plain: 0.9 }));
+      const { ctx, kv } = makeCtx({ fixtures });
+      await handler(selftestEvent, ctx);
+      expect(kv["selftest:last"]).toMatchObject({
+        controlsOk: true,
+        fixtures: [],
+        fixturesOk: null,
+      });
+      expect(jevCalls.filter((c) => c.body.state.judging_rules)).toHaveLength(0);
+    }
+  });
+
   test("invalid entries are skipped and never reset the rest of the config", () => {
     const cfg = mod.cfgOf({
       mode: "enforce",
