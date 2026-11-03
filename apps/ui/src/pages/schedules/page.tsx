@@ -15,7 +15,8 @@ import {
   ScheduleTargetFields,
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
@@ -393,6 +394,7 @@ export default function SchedulesPage() {
     [updateSchedule],
   );
 
+  const gridColumns = useDataGridColumns("schedules");
   const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
     () => [
       {
@@ -453,6 +455,7 @@ export default function SchedulesPage() {
         ),
       },
       {
+        colId: "setup",
         headerName: "Setup",
         context: HIDE_WHEN_COMPACT,
         width: 190,
@@ -473,6 +476,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "schedule",
         headerName: "Schedule",
         context: HIDE_WHEN_COMPACT,
         width: 250,
@@ -519,6 +523,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "model",
         headerName: "Model",
         context: HIDE_WHEN_COMPACT,
         width: 150,
@@ -661,8 +666,17 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
+        {isMobile ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
         {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setDialogOpen(true)}>
+        <Button
+          size="sm"
+          className={isMobile ? "ml-auto" : undefined}
+          onClick={() => setDialogOpen(true)}
+        >
           <Plus className="h-4 w-4" />
           New schedule
         </Button>
@@ -724,6 +738,7 @@ export default function SchedulesPage() {
         <DataGrid
           rowData={searchedRows}
           columnDefs={columnDefs}
+          columns={gridColumns}
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No scheduled tasks"

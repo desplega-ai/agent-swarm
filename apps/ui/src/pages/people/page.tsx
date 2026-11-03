@@ -5,7 +5,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useInvitesSupport } from "@/api/hooks/use-invites-support";
 import { useUnmapped, useUsers } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import {
+  DataGrid,
+  type DataGridColumnsState,
+  HIDE_WHEN_COMPACT,
+  useDataGridColumns,
+} from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,10 +53,12 @@ function PeopleTable({
   users,
   isLoading,
   onRowClick,
+  columns,
 }: {
   users: User[] | undefined;
   isLoading: boolean;
   onRowClick: (id: string) => void;
+  columns: DataGridColumnsState;
 }) {
   const columnDefs = useMemo<ColDef<User>[]>(
     () => [
@@ -158,6 +166,7 @@ function PeopleTable({
     <DataGrid
       rowData={users}
       columnDefs={columnDefs}
+      columns={columns}
       loading={isLoading}
       emptyMessage="No users yet — invite the first one with the New user button."
       paginationQueryKey="people"
@@ -169,6 +178,7 @@ function PeopleTable({
 }
 
 export default function PeoplePage() {
+  const gridColumns = useDataGridColumns("people");
   const navigate = useNavigate();
   const location = useLocation();
   const { searchParams, setParam } = useUrlSearchState();
@@ -265,6 +275,7 @@ export default function PeoplePage() {
               )}
             </TabsTrigger>
           </TabsList>
+          {tab === "people" ? <DataGridColumnsMenu state={gridColumns} /> : null}
           {/* Page actions ride the toolbar, right of the tabs — no lone
               header action row. */}
           <Tooltip>
@@ -311,6 +322,7 @@ export default function PeoplePage() {
           <PeopleTable
             users={filteredUsers}
             isLoading={isLoading}
+            columns={gridColumns}
             onRowClick={(id) => navigate(`/people/${id}`)}
           />
         </TabsContent>

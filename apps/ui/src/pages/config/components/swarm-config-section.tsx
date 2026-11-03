@@ -2,8 +2,9 @@ import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import type { SwarmConfig } from "@/api/types";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { Combobox } from "@/components/shared/combobox";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,6 +57,7 @@ export function SwarmConfigSection() {
     agentOptions,
   } = useSwarmConfigTable();
 
+  const gridColumns = useDataGridColumns("swarm-config");
   const columnDefs = useMemo<ColDef<SwarmConfig>[]>(
     () => [
       {
@@ -71,6 +73,7 @@ export function SwarmConfigSection() {
         ),
       },
       {
+        colId: "scopeId",
         headerName: "Agent / Scope ID",
         context: HIDE_WHEN_COMPACT,
         width: 160,
@@ -215,11 +218,10 @@ export function SwarmConfigSection() {
             triggerClassName="w-[220px]"
           />
         )}
-        <Button
-          onClick={handleAdd}
-          size="sm"
-          className="gap-1 bg-primary hover:bg-primary/90 ml-auto"
-        >
+        <div className="ml-auto">
+          <DataGridColumnsMenu state={gridColumns} />
+        </div>
+        <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
           <Plus className="h-3.5 w-3.5" /> Add Entry
         </Button>
       </div>
@@ -227,6 +229,7 @@ export function SwarmConfigSection() {
       <DataGrid
         rowData={filteredConfigs ?? []}
         columnDefs={columnDefs}
+        columns={gridColumns}
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No configuration entries"

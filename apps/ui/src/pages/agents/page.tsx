@@ -14,7 +14,8 @@ import {
 } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { HarnessCell, harnessLabel } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -89,8 +90,10 @@ export default function AgentsPage() {
     [configuredModelByAgentId, configuredEffortByAgentId, modelsCatalog?.providers],
   );
 
+  const gridColumns = useDataGridColumns("agents");
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
+      colId: "model",
       headerName: "Model",
       context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 4 },
       width: 320,
@@ -151,6 +154,7 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: AgentStatus }) => <StatusBadge status={params.value} />,
       },
       {
+        colId: "capacity",
         headerName: "Capacity",
         context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 2 },
         width: 110,
@@ -251,6 +255,11 @@ export default function AgentsPage() {
             <SelectItem value="waiting_for_credentials">Waiting for credentials</SelectItem>
           </SelectContent>
         </Select>
+        {isMobile ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
       </div>
 
       {isMobile ? (
@@ -284,6 +293,7 @@ export default function AgentsPage() {
         <DataGrid
           rowData={searchedAgents}
           columnDefs={columnDefs}
+          columns={gridColumns}
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No agents found"
