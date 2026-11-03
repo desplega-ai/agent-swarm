@@ -7,7 +7,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { SlackMock } from "@desplega.ai/slack-mock";
-import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
+import { App, LogLevel, type SlashCommand, SocketModeReceiver } from "@slack/bolt";
+// Bolt's own reading of the flag; not re-exported from the package root.
+import { isBodyWithTypeEnterpriseInstall } from "@slack/bolt/dist/helpers";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
 import { repoRoot } from "../../scripts/e2e/sut";
 import { closeDb, initDb } from "../be/db";
@@ -93,7 +95,8 @@ const ORG_INSTALL: SlackWorkspaceIdentity = {
 };
 
 // The documented slash command payload (docs.slack.dev/interactivity/implementing-slash-commands):
-// team_id and enterprise_id, no is_enterprise_install.
+// team_id and enterprise_id. The example has no is_enterprise_install, which
+// Bolt's SlashCommand type declares as an optional string.
 function documentedCommand(teamId: string, enterpriseId: string | null) {
   return {
     token: "verification",
@@ -388,6 +391,49 @@ describe("classifyInboundOwnership", () => {
     expect(classify(noBot, blockAction({ id: "T_OWN" }, "E_ORG", undefined, "B_WS"))).toEqual(
       FOREIGN,
     );
+  });
+
+  test("picks the installation Slack's own SDK picks (B5, B6, B7)", () => {
+    // Bolt models the flag on slash commands (`SlashCommand.is_enterprise_install?: string`)
+    // and parses "true"/"false" for them; an org install's commands carry it.
+    const commandFlag: keyof SlashCommand = "is_enterprise_install";
+    const command = (flag?: string) => ({
+      ...documentedCommand("T_OWN", "E_ORG"),
+      ...(flag === undefined ? {} : { [commandFlag]: flag }),
+    });
+    const view = (flag?: boolean) => ({
+      type: "view_submission",
+      team: { id: "T_OWN", enterprise_id: "E_ORG" },
+      view: { id: "V_1", callback_id: "follow_up_submit" },
+      ...(flag === undefined ? {} : { is_enterprise_install: flag }),
+    });
+    const event = (orgWide: boolean) => ({
+      ...eventBody("T_OWN"),
+      authorizations: [authorization("T_OWN", "E_ORG", orgWide)],
+    });
+    const payloads = [
+      command(),
+      command("true"),
+      command("false"),
+      blockAction({ id: "T_OWN" }, "E_ORG"),
+      blockAction({ id: "T_OWN" }, "E_ORG", true),
+      blockAction({ id: "T_OWN" }, "E_ORG", false),
+      view(),
+      view(true),
+      view(false),
+      event(true),
+      event(false),
+    ];
+    // A swarm on each installation that could hold the delivery's workspace.
+    const swarms = [GRID_WORKSPACE, ORG_INSTALL];
+    for (const body of payloads) {
+      // Bolt routes a delivery to the org install only when this returns true;
+      // otherwise @slack/oauth looks up the named workspace's installation.
+      const slackOwner = isBodyWithTypeEnterpriseInstall(body as never)
+        ? ORG_INSTALL
+        : GRID_WORKSPACE;
+      expect(swarms.filter((swarm) => classify(swarm, body).own)).toEqual([slackOwner]);
+    }
   });
 
   test("a view opened from a Slack Connect channel is attributed to the installing workspace", () => {

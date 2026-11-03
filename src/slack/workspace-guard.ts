@@ -29,9 +29,11 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
  *   `oauth.v2.access` response), set as `SLACK_ENTERPRISE_INSTALL`. `auth.test`
  *   supplies only the ids. An org install owns a delivery that names its
  *   enterprise and is marked as an org-wide install.
- * - `is_enterprise_install` is optional on interactive payloads and absent from
- *   the documented slash command payload. Without it, exactly one installation
- *   claims the delivery:
+ * - `is_enterprise_install` is optional on interactive payloads and on slash
+ *   commands (Bolt's `SlashCommand` declares it as a string, and Bolt parses
+ *   "true" for commands), though the docs' slash command example omits it.
+ *   Without it, exactly one installation claims the delivery, the one Slack's
+ *   own SDK would route it to:
  *   - A payload that names the bot it belongs to (`message.bot_id` on a button,
  *     `view.bot_id` on a view) belongs to the installation with that bot
  *     (`auth.test` `bot_id`). Each installation has its own bot.
