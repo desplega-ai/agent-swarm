@@ -136,8 +136,42 @@ describe("slack render-v2 watcher queries", () => {
   test("missing-tree scan reads only Slack tasks", async () => {
     const sql = await capturedSql(() => getSlackTasksMissingTree());
     const detail = plan(sql);
-    expect(detail).toContain("SCAN task USING INDEX idx_agent_tasks_slack_last_updated");
+    expect(detail).toContain("SEARCH task USING INDEX idx_agent_tasks_slack_created (createdAt>?)");
     expect(detail).not.toContain("idx_agent_tasks_last_updated");
+    expect(detail).not.toContain("idx_agent_tasks_slack_last_updated");
+  });
+
+  test("missing-tree scan is bounded to the last 24 hours", async () => {
+    const lead = await createAgent({ name: "Window Lead", isLead: true, status: "idle" });
+    const make = async (label: string, ageMs: number) => {
+      const task = await createTaskExtended(`ask ${label}`, {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: `C_${label}`,
+        slackThreadTs: `${label}.0`,
+      });
+      getDb().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        new Date(Date.now() - ageMs).toISOString(),
+        task.id,
+      ]);
+      return task;
+    };
+    const recent = await make("RECENT", 60 * 60 * 1000);
+    const old = await make("OLD", 25 * 60 * 60 * 1000);
+
+    const ids = (await getSlackTasksMissingTree()).map((task) => task.id);
+    expect(ids).toContain(recent.id);
+    expect(ids).not.toContain(old.id);
+
+    // The window is relative to `now`: two days later neither is in it.
+    const later = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    expect(await getSlackTasksMissingTree({ now: later })).toEqual([]);
+
+    // Thread scope narrows to one thread.
+    const scoped = await getSlackTasksMissingTree({
+      thread: { channelId: "C_RECENT", threadTs: "RECENT.0" },
+    });
+    expect(scoped.map((task) => task.id)).toEqual([recent.id]);
   });
 
   test("deferral resolution returns the latest terminal wake of each open chain", async () => {
