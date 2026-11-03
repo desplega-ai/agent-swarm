@@ -1,6 +1,6 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ForwardRefExoticComponent, MouseEvent, ReactNode, RefAttributes } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -47,6 +47,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAppSidebarPreferences } from "@/hooks/use-app-sidebar-preferences";
 import { navRequirementMet } from "@/lib/agent-fs/state";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
@@ -55,6 +56,7 @@ import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
 import { useIsAdmin } from "@/lib/use-can";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { CombSidebarPins } from "./comb-sidebar-pins";
+import { SidebarApps } from "./sidebar-apps";
 import { SwarmSwitcher } from "./swarm-switcher";
 
 /** The imperative surface every vendored animated icon exposes. */
@@ -593,6 +595,7 @@ function SidebarBrandRow({
 
 export function AppSidebar() {
   const location = useLocation();
+  const { preferences: appPreferences } = useAppSidebarPreferences();
   const { data: status } = useStatusContext();
   // Feature-gate lookups for nav items whose backing routes need a min API
   // version. Add a new entry here when introducing another gated surface.
@@ -608,7 +611,9 @@ export function AppSidebar() {
     (!!item.gate && gates[item.gate.minVersion]?.supported === false) ||
     (!!item.adminOnly && !isAdmin);
   const isHidden = (item: NavItem) =>
-    isGated(item) || !navRequirementMet(item.requires, status?.agent_fs?.comb);
+    isGated(item) ||
+    !navRequirementMet(item.requires, status?.agent_fs?.comb) ||
+    (item.path === "/apps" && appPreferences.mode !== "hidden");
 
   // Live counts surfaced as right-aligned badges on existing nav items.
   // Gated entirely on API ≥1.82: the backing queries don't even fire on
@@ -662,16 +667,52 @@ export function AppSidebar() {
           const items = group.items.filter((item) => !isHidden(item));
           if (items.length === 0) return null;
           return (
-            <SidebarGroup key={group.id}>
-              {/* Section title is hidden in icon-collapsed mode: the items
+            <Fragment key={group.id}>
+              <SidebarGroup>
+                {/* Section title is hidden in icon-collapsed mode: the items
                   themselves stay so you still get the navigation, just
                   without the truncated "WOR / SWA / RES…" labels. */}
-              <div className="group-data-[collapsible=icon]:hidden">
-                <CollapsibleSection
-                  title={group.label}
-                  defaultOpen
-                  persistKey={`agent-swarm:sidebar-group:${group.id}`}
-                >
+                <div className="group-data-[collapsible=icon]:hidden">
+                  <CollapsibleSection
+                    title={group.label}
+                    defaultOpen
+                    persistKey={`agent-swarm:sidebar-group:${group.id}`}
+                  >
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {items.map((item) => {
+                          const isActive =
+                            item.path === "/"
+                              ? location.pathname === "/"
+                              : location.pathname.startsWith(item.path);
+                          if (isHidden(item)) return null;
+                          const badge = badges[item.path];
+                          return (
+                            <SidebarMenuItem key={item.path}>
+                              <NavIconLink
+                                item={item}
+                                isActive={isActive}
+                                end={item.path === "/"}
+                                showBeta
+                                showNew={
+                                  !!item.newTag && gates[item.newTag.minVersion]?.supported === true
+                                }
+                              />
+                              {/* Live count: auto-hidden when icon-collapsed. */}
+                              {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
+                              {item.requires === "comb" && (
+                                <CombSidebarPins comb={status?.agent_fs?.comb} />
+                              )}
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleSection>
+                </div>
+                {/* Icon-only mirror: rendered only when sidebar is collapsed.
+                  Same items, no section header chrome. */}
+                <div className="hidden group-data-[collapsible=icon]:block">
                   <SidebarGroupContent>
                     <SidebarMenu>
                       {items.map((item) => {
@@ -680,56 +721,23 @@ export function AppSidebar() {
                             ? location.pathname === "/"
                             : location.pathname.startsWith(item.path);
                         if (isHidden(item)) return null;
-                        const badge = badges[item.path];
                         return (
                           <SidebarMenuItem key={item.path}>
                             <NavIconLink
                               item={item}
                               isActive={isActive}
                               end={item.path === "/"}
-                              showBeta
-                              showNew={
-                                !!item.newTag && gates[item.newTag.minVersion]?.supported === true
-                              }
+                              tooltip={item.title}
                             />
-                            {/* Live count: auto-hidden when icon-collapsed. */}
-                            {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
-                            {item.requires === "comb" && (
-                              <CombSidebarPins comb={status?.agent_fs?.comb} />
-                            )}
                           </SidebarMenuItem>
                         );
                       })}
                     </SidebarMenu>
                   </SidebarGroupContent>
-                </CollapsibleSection>
-              </div>
-              {/* Icon-only mirror: rendered only when sidebar is collapsed.
-                  Same items, no section header chrome. */}
-              <div className="hidden group-data-[collapsible=icon]:block">
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {items.map((item) => {
-                      const isActive =
-                        item.path === "/"
-                          ? location.pathname === "/"
-                          : location.pathname.startsWith(item.path);
-                      if (isHidden(item)) return null;
-                      return (
-                        <SidebarMenuItem key={item.path}>
-                          <NavIconLink
-                            item={item}
-                            isActive={isActive}
-                            end={item.path === "/"}
-                            tooltip={item.title}
-                          />
-                        </SidebarMenuItem>
-                      );
-                    })}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </div>
-            </SidebarGroup>
+                </div>
+              </SidebarGroup>
+              {group.id === "work" && <SidebarApps />}
+            </Fragment>
           );
         })}
       </SidebarContent>

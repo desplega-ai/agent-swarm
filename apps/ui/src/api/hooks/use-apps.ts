@@ -9,11 +9,12 @@ export function appQueryKey(appId: string, queryName: string) {
 }
 
 /** App catalog for `/apps`. 5s polling matches the dashboard default. */
-export function useApps() {
+export function useApps(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["apps"],
     queryFn: () => api.listApps(),
     refetchInterval: 5000,
+    enabled: options?.enabled ?? true,
   });
 }
 
