@@ -63,25 +63,185 @@ function columnWidth(col: ColDef): number {
   return Math.max(base ?? FALLBACK_COLUMN_WIDTH, col.minWidth ?? 0);
 }
 
-/** Hides marked columns by priority until the visible ones fit `containerWidth`. */
+/** A column's stable id for menus and persistence: `colId`, else `field`. */
+export function gridColumnId(col: ColDef): string | undefined {
+  return col.colId ?? (typeof col.field === "string" ? col.field : undefined);
+}
+
+/** User choices from the columns menu, keyed by `gridColumnId`. */
+export interface GridColumnOverrides {
+  /** Forced visible: never auto-hidden, the grid scrolls instead. */
+  show: ReadonlySet<string>;
+  /** Hidden by the user. */
+  hide: ReadonlySet<string>;
+}
+
+const NO_OVERRIDES: GridColumnOverrides = { show: new Set(), hide: new Set() };
+
+/**
+ * Hides marked columns by priority until the visible ones fit `containerWidth`.
+ * `overrides` only apply to marked columns: `hide` removes one, `show` keeps it
+ * visible without evicting another, so the grid scrolls horizontally instead.
+ */
 export function resolveCompactColumnDefs<TData>(
   columnDefs: ColDef<TData>[],
   containerWidth: number,
+  overrides: GridColumnOverrides = NO_OVERRIDES,
 ): ColDef<TData>[] {
-  if (containerWidth <= 0) return columnDefs;
-  let total = columnDefs.reduce((sum, col) => sum + (col.hide ? 0 : columnWidth(col)), 0);
-  const hidden = new Set<ColDef<TData>>();
-  const candidates = columnDefs
-    .filter((col) => !col.hide && col.context?.hideWhenCompact)
-    .reverse()
-    .sort((a, b) => (a.context?.compactHidePriority ?? 0) - (b.context?.compactHidePriority ?? 0));
-  for (const col of candidates) {
-    if (total <= containerWidth) break;
-    hidden.add(col);
-    total -= columnWidth(col);
+  const overrideOf = (col: ColDef<TData>) => {
+    const id = col.context?.hideWhenCompact ? gridColumnId(col) : undefined;
+    if (!id) return undefined;
+    if (overrides.hide.has(id)) return "hide";
+    if (overrides.show.has(id)) return "show";
+    return undefined;
+  };
+  const userHidden = new Set(columnDefs.filter((col) => !col.hide && overrideOf(col) === "hide"));
+  const isShown = (col: ColDef<TData>) => !col.hide && !userHidden.has(col);
+  const hidden = new Set(userHidden);
+  if (containerWidth > 0) {
+    // A forced column adds to the width instead of evicting another: the grid scrolls.
+    let total = columnDefs.reduce(
+      (sum, col) => sum + (isShown(col) && overrideOf(col) !== "show" ? columnWidth(col) : 0),
+      0,
+    );
+    const candidates = columnDefs
+      .filter((col) => isShown(col) && col.context?.hideWhenCompact && overrideOf(col) !== "show")
+      .reverse()
+      .sort(
+        (a, b) => (a.context?.compactHidePriority ?? 0) - (b.context?.compactHidePriority ?? 0),
+      );
+    for (const col of candidates) {
+      if (total <= containerWidth) break;
+      hidden.add(col);
+      total -= columnWidth(col);
+    }
   }
   if (hidden.size === 0) return columnDefs;
   return columnDefs.map((col) => (hidden.has(col) ? { ...col, hide: true } : col));
+}
+
+export interface DataGridColumnEntry {
+  id: string;
+  label: string;
+  visible: boolean;
+  /** Marked `HIDE_WHEN_COMPACT`: the user may show or hide it. */
+  toggleable: boolean;
+}
+
+/**
+ * Menu entries for the columns a grid can show: every column with an id and a
+ * label, minus the ones the caller hides outright (`hide: true`).
+ */
+export function summarizeGridColumns<TData>(
+  columnDefs: ColDef<TData>[],
+  effectiveColumnDefs: ColDef<TData>[],
+): { entries: DataGridColumnEntry[]; hiddenCount: number } {
+  const entries: DataGridColumnEntry[] = [];
+  columnDefs.forEach((col, i) => {
+    const id = gridColumnId(col);
+    const label = col.headerName ?? (typeof col.field === "string" ? col.field : "");
+    if (!id || !label || col.hide) return;
+    entries.push({
+      id,
+      label,
+      visible: !effectiveColumnDefs[i]?.hide,
+      toggleable: Boolean(col.context?.hideWhenCompact),
+    });
+  });
+  return { entries, hiddenCount: entries.filter((entry) => !entry.visible).length };
+}
+
+export interface DataGridColumnsState {
+  entries: DataGridColumnEntry[];
+  hiddenCount: number;
+  overrides: GridColumnOverrides;
+  setVisible: (id: string, visible: boolean) => void;
+  /** Called by `DataGrid` with its resolved columns; not for page code. */
+  report: (summary: { entries: DataGridColumnEntry[]; hiddenCount: number }) => void;
+}
+
+const COLUMNS_STORAGE_PREFIX = "data-grid:columns:";
+
+function toIds(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+}
+
+function loadOverrides(storageKey: string): GridColumnOverrides {
+  if (typeof window === "undefined") return NO_OVERRIDES;
+  try {
+    const raw = window.localStorage.getItem(COLUMNS_STORAGE_PREFIX + storageKey);
+    if (!raw) return NO_OVERRIDES;
+    const parsed = JSON.parse(raw) as { show?: unknown; hide?: unknown } | null;
+    return { show: new Set(toIds(parsed?.show)), hide: new Set(toIds(parsed?.hide)) };
+  } catch {
+    return NO_OVERRIDES;
+  }
+}
+
+function saveOverrides(storageKey: string, overrides: GridColumnOverrides) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      COLUMNS_STORAGE_PREFIX + storageKey,
+      JSON.stringify({ show: [...overrides.show], hide: [...overrides.hide] }),
+    );
+  } catch {
+    // Quota / private-mode failures: keep the choice in memory only.
+  }
+}
+
+function sameEntries(a: DataGridColumnEntry[], b: DataGridColumnEntry[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, i) =>
+        entry.id === b[i].id &&
+        entry.label === b[i].label &&
+        entry.visible === b[i].visible &&
+        entry.toggleable === b[i].toggleable,
+    )
+  );
+}
+
+/**
+ * Column visibility for one `DataGrid`, persisted per `storageKey`. Pass the
+ * result to the grid's `columns` prop and to `DataGridColumnsMenu`.
+ */
+export function useDataGridColumns(storageKey: string): DataGridColumnsState {
+  const [overrides, setOverrides] = useState(() => loadOverrides(storageKey));
+  const [summary, setSummary] = useState<{ entries: DataGridColumnEntry[]; hiddenCount: number }>({
+    entries: [],
+    hiddenCount: 0,
+  });
+
+  const setVisible = useCallback(
+    (id: string, visible: boolean) => {
+      setOverrides((prev) => {
+        const show = new Set(prev.show);
+        const hide = new Set(prev.hide);
+        if (visible) {
+          show.add(id);
+          hide.delete(id);
+        } else {
+          hide.add(id);
+          show.delete(id);
+        }
+        const next = { show, hide };
+        saveOverrides(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
+  const report = useCallback((next: { entries: DataGridColumnEntry[]; hiddenCount: number }) => {
+    setSummary((prev) => (sameEntries(prev.entries, next.entries) ? prev : next));
+  }, []);
+
+  return useMemo(
+    () => ({ ...summary, overrides, setVisible, report }),
+    [summary, overrides, setVisible, report],
+  );
 }
 
 export interface DataGridProps<TData> {
@@ -137,6 +297,11 @@ export interface DataGridProps<TData> {
   cellFocus?: boolean;
   /** Grid-level cell keydown hook — see `cellFocus`. */
   onCellKeyDown?: (event: CellKeyDownEvent<TData> | FullWidthCellKeyDownEvent<TData>) => void;
+  /**
+   * Column visibility from `useDataGridColumns`. Render `DataGridColumnsMenu`
+   * with the same state above the grid so users can reach auto-hidden columns.
+   */
+  columns?: DataGridColumnsState;
 }
 
 export function DataGrid<TData>({
@@ -161,6 +326,7 @@ export function DataGrid<TData>({
   columnSizing = "fit",
   cellFocus,
   onCellKeyDown,
+  columns,
 }: DataGridProps<TData>) {
   // AG Grid's edit-on-click only works when the cell can take focus. The
   // wrapper defaults to `suppressCellFocus` for the read-only data tables
@@ -205,17 +371,27 @@ export function DataGrid<TData>({
   // A marked column carries an explicit `hide: false` when it fits: AG Grid
   // keeps a column's last `hide` while the def leaves it undefined, so a
   // column hidden in a narrow pane would never come back when it widens.
+  const overrides = columns?.overrides;
   const effectiveColumnDefs = useMemo(
     () =>
-      resolveCompactColumnDefs(columnDefs, containerWidth).map((col) =>
+      resolveCompactColumnDefs(columnDefs, containerWidth, overrides).map((col) =>
         col.context?.hideWhenCompact && col.hide === undefined ? { ...col, hide: false } : col,
       ),
-    [columnDefs, containerWidth],
+    [columnDefs, containerWidth, overrides],
   );
-  const hiddenCount = useMemo(
-    () => effectiveColumnDefs.filter((col, i) => col.hide && !columnDefs[i].hide).length,
+  // Changes whenever the set of hidden columns does, to trigger a refit.
+  const hiddenKey = useMemo(
+    () =>
+      effectiveColumnDefs
+        .map((col, i) => (col.hide && !columnDefs[i].hide ? i : -1))
+        .filter((i) => i >= 0)
+        .join(","),
     [effectiveColumnDefs, columnDefs],
   );
+  const report = columns?.report;
+  useEffect(() => {
+    report?.(summarizeGridColumns(columnDefs, effectiveColumnDefs));
+  }, [report, columnDefs, effectiveColumnDefs]);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({
@@ -345,13 +521,13 @@ export function DataGrid<TData>({
   // Hiding or showing columns changes the total width, so re-fit them. A container resize
   // (e.g. the app sidebar collapsing) re-fits too, but AG Grid has not applied the new body
   // width or column set yet at that point, so refit once more on the next frame.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `hiddenCount` and `containerWidth` are the triggers
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `hiddenKey` and `containerWidth` are the triggers
   useEffect(() => {
     if (columnSizing !== "fit") return;
     gridRef.current?.api?.sizeColumnsToFit();
     const frame = requestAnimationFrame(() => gridRef.current?.api?.sizeColumnsToFit());
     return () => cancelAnimationFrame(frame);
-  }, [hiddenCount, containerWidth, columnSizing]);
+  }, [hiddenKey, containerWidth, columnSizing]);
 
   return (
     <div

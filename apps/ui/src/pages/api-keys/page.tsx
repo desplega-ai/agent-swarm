@@ -24,7 +24,8 @@ import {
   useSetApiKeyName,
 } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { KeyStatusPill, type KeyStatusTone } from "@/components/shared/key-status-pill";
 import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
@@ -331,6 +332,7 @@ export default function ApiKeysPage() {
     };
   }, [keys, costs]);
 
+  const gridColumns = useDataGridColumns("api-keys");
   const columnDefs = useMemo<ColDef<ApiKeyStatus>[]>(
     () => [
       {
@@ -609,8 +611,8 @@ export default function ApiKeysPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-48 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search by name, suffix, type…"
@@ -683,12 +685,16 @@ export default function ApiKeysPage() {
             </SelectContent>
           </Select>
         )}
+        <div className="ml-auto">
+          <DataGridColumnsMenu state={gridColumns} />
+        </div>
       </div>
 
       {/* Data grid */}
       <DataGrid
         rowData={filteredKeys}
         columnDefs={columnDefs}
+        columns={gridColumns}
         quickFilterText={search}
         loading={isLoading}
         emptyMessage="No provider keys tracked yet"

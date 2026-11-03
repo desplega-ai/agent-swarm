@@ -6,7 +6,8 @@ import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScripts } from "@/api/hooks/use-scripts";
 import type { ScriptListItem, ScriptScope } from "@/api/types";
 import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,7 @@ export default function ScriptsPage() {
     return counts;
   }, [runs]);
 
+  const gridColumns = useDataGridColumns("scripts");
   const scriptColumns = useMemo<ColDef<ScriptListItem>[]>(
     () => [
       {
@@ -191,6 +193,9 @@ export default function ScriptsPage() {
                   Include scratch
                 </Label>
               </div>
+              <div className="ml-auto">
+                <DataGridColumnsMenu state={gridColumns} />
+              </div>
             </div>
           )}
           {activeTab === "runs" && (
@@ -217,6 +222,7 @@ export default function ScriptsPage() {
             <DataGrid
               rowData={scripts ?? []}
               columnDefs={scriptColumns}
+              columns={gridColumns}
               quickFilterText={search}
               onRowClicked={onScriptRowClicked}
               loading={scriptsLoading}

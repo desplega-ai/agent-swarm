@@ -56,7 +56,13 @@ import type {
   ScriptCredentialBinding,
   SwarmConfigScope,
 } from "@/api/types";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import {
+  DataGrid,
+  type DataGridColumnsState,
+  HIDE_WHEN_COMPACT,
+  useDataGridColumns,
+} from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -2144,12 +2150,14 @@ function CredentialBindingsSection({
   oauthApps,
   search,
   loading,
+  columns,
 }: {
   bindings: ScriptCredentialBinding[];
   connections: ScriptConnection[];
   oauthApps: OAuthAppSummary[];
   search: string;
   loading: boolean;
+  columns: DataGridColumnsState;
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [editBinding, setEditBinding] = useState<ScriptCredentialBinding | undefined>();
@@ -2349,6 +2357,7 @@ function CredentialBindingsSection({
       <DataGrid
         rowData={bindings}
         columnDefs={columnDefs}
+        columns={columns}
         quickFilterText={search}
         loading={loading}
         emptyMessage="No credential bindings found"
@@ -3099,6 +3108,8 @@ export default function ConnectionsPage() {
     [agents],
   );
 
+  const gridColumns = useDataGridColumns("connections");
+  const bindingsColumns = useDataGridColumns("credential-bindings");
   const columnDefs = useMemo<ColDef<ScriptConnection>[]>(
     () => [
       {
@@ -3349,6 +3360,11 @@ export default function ConnectionsPage() {
                   </Select>
                 </div>
               ) : null}
+              {activeTab === "connections" || activeTab === "bindings" ? (
+                <DataGridColumnsMenu
+                  state={activeTab === "connections" ? gridColumns : bindingsColumns}
+                />
+              ) : null}
               {/* Per-tab add action rides the toolbar as a bare "+" — no
                   lone header action row. */}
               {addTarget && addLabel ? (
@@ -3373,6 +3389,7 @@ export default function ConnectionsPage() {
           <DataGrid
             rowData={connections ?? []}
             columnDefs={columnDefs}
+            columns={gridColumns}
             quickFilterText={search}
             onRowClicked={(event) => {
               const target = event.event?.target as HTMLElement | null;
@@ -3402,6 +3419,7 @@ export default function ConnectionsPage() {
             oauthApps={oauthApps}
             search={search}
             loading={bindingsLoading}
+            columns={bindingsColumns}
           />
         </TabsContent>
       </Tabs>
