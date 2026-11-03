@@ -132,6 +132,8 @@ An optional top-level `"theme"` sets the preset the dashboard applies to the app
 
 Viewers can override the preset per app from the app's settings drawer; the override rides the reserved `$theme` key of the user-config values (accepted on every app, even without a declared `userConfig` schema, and never visible at `/user/...`). A present override always beats the definition's `theme` — even an unrecognized one, which degrades to the dashboard theme — so treat `theme` as the app's default styling, not a guarantee.
 
+An optional top-level `"icon"` sets the app's icon on the dashboard Apps page, in the same shape as agent avatars: `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The server validates shape only; the dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name, so omitting `icon` is always safe.
+
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
 When a schema patch reports stale page/query bindings, repair them in that same patch. Page elements are atomic: replace the complete `pages.<page>.elements.<id>` declaration, removing any reference to a hidden or deleted column, instead of sending only the changed nested prop. This is also the repair move for older apps whose stored page already references an undeclared column; full-definition validation otherwise blocks every patch.
