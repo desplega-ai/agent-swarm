@@ -22,6 +22,7 @@ import {
   setSlackConnectionState,
 } from "../slack/connection-state";
 import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
+import { fenceSocketModeClient } from "../slack/socket-fence";
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -228,6 +229,30 @@ test("a failed restart logs a scrubbed message, never the raw token", async () =
   expect(h.lines).toEqual(["[Slack] watchdog: socket down for 60s, restarting (attempt 1)"]);
 });
 
+test("a retired client whose URL request fails resolves start() quietly and opens no socket", async () => {
+  const client = new SocketModeClient({ appToken: "xapp-test" });
+  let fail!: (error: Error) => void;
+  Reflect.set(
+    client,
+    "retrieveWSSURL",
+    () =>
+      new Promise<string>((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  const fence = fenceSocketModeClient(client);
+  const starting = client.start();
+  fence.retire();
+  // The library's reconnect calls start() with no catch: a rejection here would be unhandled.
+  fail(
+    Object.assign(new Error("A request error occurred: ECONNRESET"), {
+      code: ErrorCode.RequestError,
+    }),
+  );
+  expect(await starting).toBeUndefined();
+  expect(client.websocket).toBeUndefined();
+});
+
 describe("socket watchdog against a live Slack mock", () => {
   afterEach(async () => {
     await stopSlackApp();
@@ -249,7 +274,7 @@ describe("socket watchdog against a live Slack mock", () => {
         backoffMaxMs: 1000,
       });
 
-      expect(await startSlackApp()).toBe(true);
+      expect(await startSlackAppForTest()).toBe(true);
       await slack.mock.waitForConnection(10_000);
       expect(getSlackConnectionState()).toBe("connected");
       expect(isSlackSocketWatchdogRunning()).toBe(true);
@@ -324,7 +349,7 @@ describe("socket watchdog against a live Slack mock", () => {
       process.env.SLACK_DISABLE = "false";
       process.env.SLACK_MODE = "socket";
       _setSlackSocketWatchdogOptionsForTests({ tickMs: 20, downAfterMs: 50 });
-      expect(await startSlackApp()).toBe(true);
+      expect(await startSlackAppForTest()).toBe(true);
       await slack.mock.waitForConnection(10_000);
       const opened = slack.mock.apiCalls("apps.connections.open").length;
 
@@ -454,25 +479,41 @@ describe("socket watchdog against a live Slack mock", () => {
       downAfterMs: 50,
       backoffBaseMs: 100,
       backoffMaxMs: 200,
-      restartTimeoutMs: 300,
+      restartTimeoutMs: 500,
     };
     await withLiveSlack(options, async (slack) => {
       const errors: string[] = [];
       const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
         errors.push(args.map(String).join(" "));
       });
+      const first = _getSlackSocketClientForTests();
       // New clients never get a socket URL until the gate opens: every restart stalls.
       const gate = gateSocketUrls();
       try {
         setSlackConnectionState("disconnected");
+        // The watchdog restart holds the lock while its start waits at the gate.
         expect(
-          await pollUntil(() => errors.some((line) => line.includes("abandoned it")), 5_000, 10),
+          await pollUntil(
+            () =>
+              isSlackLifecycleBusy() &&
+              _getSlackSocketClientForTests() !== null &&
+              _getSlackSocketClientForTests() !== first,
+            5_000,
+            10,
+          ),
         ).toBe(true);
 
-        // A config reload waiting on the lock gets it within one restart bound.
+        // A config reload queued now waits for the restart, but only until its bound.
         const waitStarted = Date.now();
-        await runSlackLifecycleExclusive(async () => {});
-        expect(Date.now() - waitStarted).toBeLessThan(2_000);
+        let reloadRanAt: number | null = null;
+        const reload = runSlackLifecycleExclusive(async () => {
+          reloadRanAt = Date.now();
+        });
+        await Bun.sleep(100);
+        expect(reloadRanAt).toBeNull();
+        await reload;
+        expect(reloadRanAt! - waitStarted).toBeLessThan(2_000);
+        expect(errors.some((line) => line.includes("abandoned it"))).toBe(true);
 
         // The stalled clients now get their URLs. None of them opens a socket.
         const opened = slack.mock.apiCalls("apps.connections.open").length;
@@ -497,6 +538,15 @@ describe("socket watchdog against a live Slack mock", () => {
   }, 30_000);
 });
 
+/**
+ * The first start under the lifecycle lock. The watchdog skips its ticks
+ * while the lock is held, so a slow start on a loaded runner is never
+ * mistaken for a dead socket under the tests' short thresholds.
+ */
+function startSlackAppForTest(): Promise<boolean> {
+  return runSlackLifecycleExclusive(() => startSlackApp());
+}
+
 type LiveSlack = Awaited<ReturnType<typeof startSlackMock>>;
 
 /** Start the Slack app against a mock Slack with a connected socket, run `fn`, and clean up. */
@@ -512,7 +562,7 @@ async function withLiveSlack(
     process.env.SLACK_DISABLE = "false";
     process.env.SLACK_MODE = "socket";
     _setSlackSocketWatchdogOptionsForTests(options);
-    expect(await startSlackApp()).toBe(true);
+    expect(await startSlackAppForTest()).toBe(true);
     await slack.mock.waitForConnection(10_000);
     expect(getSlackConnectionState()).toBe("connected");
     await fn(slack);
