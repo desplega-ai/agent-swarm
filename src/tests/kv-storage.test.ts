@@ -212,9 +212,11 @@ describe("kv-storage helpers", () => {
   });
 
   test.each([
-    undefined,
-    500,
-  ])("prefix sweep caps each DELETE at 50 rows (requested: %s)", async (batchSize) => {
+    [undefined, 50],
+    [500, 50],
+    [-1, 1],
+    [0, 1],
+  ])("prefix sweep bounds each DELETE (requested: %s)", async (batchSize, expectedBatchSize) => {
     const now = Date.now();
     for (let i = 0; i < 101; i++) {
       await upsertKv({
@@ -225,7 +227,13 @@ describe("kv-storage helpers", () => {
         expiresAt: now,
       });
     }
-    const run = spyOn(getDbClient(), "run");
+    const client = getDbClient();
+    const originalRun = client.run.bind(client);
+    const run = spyOn(client, "run").mockImplementation(async (sql, params) => {
+      // Fail before SQLite runs an unlimited DELETE or the sweep loops forever.
+      expect(params?.[3]).toBe(expectedBatchSize);
+      return originalRun(sql, params);
+    });
     let calls: (typeof run.mock.calls)[number][];
     try {
       expect(await sweepExpiredKvPrefix("mcp:overflow:batch-cap", now, batchSize)).toBe(101);
@@ -233,7 +241,7 @@ describe("kv-storage helpers", () => {
     } finally {
       run.mockRestore();
     }
-    expect(calls.map(([, params]) => params?.[3])).toEqual([50, 50, 50]);
+    expect(calls).toHaveLength(Math.floor(101 / expectedBatchSize) + 1);
   });
 
   test("integer value type stores as number", async () => {

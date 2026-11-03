@@ -13913,7 +13913,7 @@ export async function sweepExpiredKvPrefix(
   /** Rows per DELETE, capped at 50 for multi-MB values. Yields between batches. */
   batchSize = 50,
 ): Promise<number> {
-  batchSize = Math.min(batchSize, 50);
+  batchSize = Math.max(1, Math.min(batchSize, 50));
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
   // Batched, with a macrotask yield between batches: one DELETE of every
   // expired multi-MB overflow row blocked the event loop for seconds and
