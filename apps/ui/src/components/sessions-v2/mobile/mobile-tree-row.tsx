@@ -25,7 +25,7 @@ import {
 import { type CSSProperties, type MouseEvent, memo, type ReactNode } from "react";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
-import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
+import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useLongPress } from "@/hooks/use-long-press";
 import { type SwipeSide, useSwipeRow } from "@/hooks/use-swipe-row";
@@ -396,9 +396,7 @@ function MobileSourceRowView({
       )}
     >
       <TaskSourceMark source={row.source} />
-      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">
-        {taskSourceLabel(row.source)}
-      </span>
+      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">{row.label}</span>
       <span className="shrink-0 tabular-nums">{row.counts.total}</span>
     </div>
   );

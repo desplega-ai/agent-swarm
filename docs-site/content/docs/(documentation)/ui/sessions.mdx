@@ -53,12 +53,15 @@ Sections and groups show their counts: running sessions, sessions that need you,
 
 ## Groups
 
-A group is a prefix of the session's [asset namespace key](/docs/guides/asset-namespaces). The sidebar reads the key of the session's first task. The group is that key without its last segment, when the last segment names one resource: `task:<id>`, `thread:<id>`, `schedule:<id>`, or `workflow:<id>`.
+A group is a prefix of the session's [asset namespace key](/docs/guides/asset-namespaces). The sidebar reads the key of the session's first task. The group is that key without its last segment, when the last segment names one resource: `task:<id>`, `thread:<id>`, `page:<id>`, `workflow:<id>`, `schedule:<id>`, `app:<id>`, `script:<id>`, or `fs:<id>`. A resource segment other than `task:` or `thread:` right after `shared/` or `personal/<your-user-id>/` is a group of its own, in that resource's [section](#resources).
 
 | Session key | Where the session shows |
 | --- | --- |
 | `shared/task:<id>/` | No group |
 | `personal/<your-user-id>/task:<id>/` | No group |
+| `shared/page:<id>/` | The page's title, in the Pages section |
+| `shared/workflow:<id>/` | The workflow's name, in the Workflows section |
+| `shared/research/workflow:<id>/` | **research**, in My groups |
 | `shared/research/` | **research**, in My groups |
 | `shared/research/pricing/task:<id>/` | **pricing** under **research**, in My groups |
 | `personal/<your-user-id>/drafts/` | **drafts**, in My groups |
@@ -109,6 +112,12 @@ Source groups are read-only:
 A session that you move out of a source group counts by its task source in the filter: Slack for a Slack session, Chat for a Telegram or Discord session, and MCP for an agent session.
 
 A source session shows to the dashboard user that the Slack, Telegram, or Discord person maps to. A session from a person with no dashboard user stays out of the sidebar.
+
+### Resources
+
+The resource sections come after the source sections: **Pages**, **Workflows**, **Schedules**, **Apps**, **Scripts**, and **Files**. They hold the sessions whose key is a resource's default key, such as the feedback sessions of a page or the runs of a workflow. Each resource is one group, named by the page title or the resource name. An app action is a group under its app. A resource that no longer exists shows its kind and a short id: `Workflow · 0f3a9c12`. Your `personal/<your-user-id>/` resource groups join the same sections.
+
+Resource groups are read-only, like source groups: no menu, no **+**, no drops, and no rename or delete. You can move a session out, and **Undo** puts it back. Their sessions stay in the Inbox, like source sessions. A resource whose key is a group of yours, such as `shared/research/`, files its sessions in that group.
 
 ### Create, rename, and delete groups
 

@@ -9,7 +9,7 @@ import {
   test,
 } from "bun:test";
 import { createServer, type Server } from "node:http";
-import { keyPrefixRange, sessionGroupKey } from "../assets/key";
+import { keyPrefixRange, sessionGroupKey, sessionResourceGroupOf } from "../assets/key";
 import {
   isSourceThreadKey,
   NESTED_THREAD_MIN_ROOTS,
@@ -19,10 +19,13 @@ import {
   closeDb,
   countSessions,
   createAgent,
+  createPage,
+  createScheduledTask,
   createSessionCost,
   createSteeringMessage,
   createTaskExtended,
   createUser,
+  createWorkflow,
   getDbClient,
   initDb,
   listRecentSessions,
@@ -147,7 +150,7 @@ async function ids(extra: SessionFilters) {
 describe("session groups and prefix bounds", () => {
   test("leaf helpers preserve group names and namespace roots", () => {
     expect(keyPrefixRange("shared/a/")).toEqual({ lo: "shared/a/", hi: "shared/a0" });
-    for (const kind of ["task", "thread", "schedule", "workflow"]) {
+    for (const kind of ["task", "thread", "schedule", "workflow", "page", "app", "script", "fs"]) {
       expect(sessionGroupKey(`shared/a/${kind}:abc/`)).toBe("shared/a/");
     }
     for (const key of [
@@ -211,6 +214,134 @@ describe("session groups and prefix bounds", () => {
     await task(`personal/${other.id}/`);
     await task("shared/release:v2/");
     expect(await ids({ noGroup: true })).toEqual([a.id, b.id].sort());
+  });
+});
+
+describe("resource groups", () => {
+  test("a resource leaf at a namespace root is its own group; task stays No group", () => {
+    const me = `personal/${owner.id}/`;
+    const cases: Array<[string, string]> = [
+      ["shared/task:t1/", "shared/"],
+      [`${me}task:t1/`, me],
+      ["shared/thread:t1/", "shared/"],
+      ["shared/page:p1/", "shared/page:p1/"],
+      ["shared/workflow:w1/", "shared/workflow:w1/"],
+      [`${me}schedule:s1/`, `${me}schedule:s1/`],
+      ["shared/script:x1/", "shared/script:x1/"],
+      ["shared/fs:agent-fs:f1/", "shared/fs:agent-fs:f1/"],
+      ["shared/app:a1/action:send/", "shared/app:a1/action:send/"],
+      ["shared/workflow:w1/task:t1/", "shared/workflow:w1/"],
+      ["shared/northwind/page:p1/", "shared/northwind/"],
+    ];
+    for (const [key, group] of cases) expect([key, sessionGroupKey(key)]).toEqual([key, group]);
+    expect(sessionResourceGroupOf("shared/app:a1/action:send/")).toEqual({
+      kind: "app",
+      id: "a1",
+      base: "shared/",
+      resourceKey: "shared/app:a1/",
+      action: "send",
+    });
+    expect(sessionResourceGroupOf("shared/page:p1/action:x/")).toBeNull();
+    expect(sessionResourceGroupOf("shared/northwind/page:p1/")).toBeNull();
+    expect(sessionResourceGroupOf("shared/")).toBeNull();
+  });
+
+  test("tree, lists and the Inbox agree; No group keeps only task leaves", async () => {
+    const loose = await task("shared/task:loose/");
+    const page = await task("shared/page:p1/");
+    const workflow = await task("shared/workflow:w1/");
+    const workflowChild = await task("shared/workflow:w1/task:c1/");
+    const schedule = await task(`personal/${owner.id}/schedule:s1/`);
+    const action = await task("shared/app:a1/action:send/");
+    const filed = await task("shared/northwind/workflow:w2/");
+    expect(await ids({ noGroup: true })).toEqual([loose.id]);
+    expect(await ids({ groupKey: "shared/page:p1/" })).toEqual([page.id]);
+    expect(await ids({ groupKey: "shared/workflow:w1/" })).toEqual(
+      [workflow.id, workflowChild.id].sort(),
+    );
+    expect(await ids({ groupKey: `personal/${owner.id}/schedule:s1/` })).toEqual([schedule.id]);
+    expect(await ids({ groupKey: "shared/app:a1/" })).toEqual([]);
+    expect(await ids({ groupKey: "shared/app:a1/action:send/" })).toEqual([action.id]);
+    expect(await ids({ groupKey: "shared/northwind/" })).toEqual([filed.id]);
+    // Resource sections file on their own, like sources: their sessions stay in the Inbox.
+    const inbox = [loose, page, workflow, workflowChild, schedule, action].map((r) => r.id).sort();
+    expect(await ids({ triage: "inbox" })).toEqual(inbox);
+
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.noGroup.total).toBe(1);
+    expect(tree.inbox.total).toBe(6);
+    const totals = Object.fromEntries(tree.groups.map((g) => [g.key, g.total]));
+    expect(totals).toEqual({
+      "shared/app:a1/action:send/": 1,
+      "shared/northwind/": 1,
+      "shared/page:p1/": 1,
+      "shared/workflow:w1/": 2,
+      [`personal/${owner.id}/schedule:s1/`]: 1,
+    });
+    expect(tree.resourceGroups).toEqual(
+      [
+        "shared/app:a1/",
+        "shared/app:a1/action:send/",
+        "shared/page:p1/",
+        "shared/workflow:w1/",
+        `personal/${owner.id}/schedule:s1/`,
+      ].sort(),
+    );
+  });
+
+  test("the route labels resource groups by name, and a deleted resource gets none", async () => {
+    const agent = await createAgent({ name: "page-agent", isLead: false, status: "idle" });
+    const page = await createPage({
+      agentId: agent.id,
+      slug: `pricing-${crypto.randomUUID()}`,
+      title: "Pricing review",
+      contentType: "text/html",
+      body: "<h1>Pricing</h1>",
+    });
+    const workflow = await createWorkflow({
+      name: "Nightly digest",
+      definition: { nodes: [] },
+    });
+    const schedule = await createScheduledTask({
+      name: "Morning sweep",
+      cronExpression: "0 9 * * *",
+      taskTemplate: "Sweep",
+    });
+    // Each resource's own default key is its session group.
+    for (const resource of [page, workflow, schedule]) await task(resource.key);
+    await task("shared/workflow:deleted1/");
+    await task("shared/app:gone/action:send/");
+    const res = await fetch(`${baseUrl}/api/session-tree?show=all`, {
+      headers: { "x-swarm-user-id": owner.id },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Record<string, string>; resourceGroups?: unknown };
+    expect(body.resourceGroups).toBeUndefined();
+    expect(body.labels).toEqual({
+      [`shared/page:${page.id}/`]: "Pricing review",
+      [`shared/workflow:${workflow.id}/`]: "Nightly digest",
+      [`shared/schedule:${schedule.id}/`]: "Morning sweep",
+      "shared/app:gone/action:send/": "send",
+    });
+  });
+
+  test("resource groups are read-only: no prefix rename or delete", async () => {
+    await task("shared/workflow:w1/");
+    const move = (body: { from: string; to: string | null }) =>
+      fetch(`${baseUrl}/api/session-moves/prefix`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-swarm-user-id": owner.id },
+        body: JSON.stringify(body),
+      });
+    for (const body of [
+      { from: "shared/workflow:w1/", to: "shared/renamed/" },
+      { from: "shared/workflow:w1/", to: null },
+      { from: "shared/a/", to: "shared/page:p1/" },
+    ]) {
+      const res = await move(body);
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain("Resource groups are read-only.");
+    }
   });
 });
 

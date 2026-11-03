@@ -64,6 +64,15 @@ export interface GroupNode {
   thread?: boolean;
 }
 
+/** One resource section (Pages, Workflows, ...): its groups, read-only. */
+export interface ResourceSection {
+  kind: SessionResourceKind;
+  /** One group per resource (an app's actions nest below it), newest first. */
+  nodes: GroupNode[];
+  /** Every session in the section. */
+  counts: SessionSectionCounts;
+}
+
 /** One source section (Slack, Telegram, Discord): its groups, read-only. */
 export interface SourceSection {
   source: SessionSource;
@@ -91,6 +100,8 @@ export interface SessionGroupTree {
   sharedWithMeTotal: number;
   /** In `SESSION_SOURCES` order, only the sources with groups. */
   sources: SourceSection[];
+  /** In `SESSION_RESOURCE_KINDS` order, only the kinds with groups: mine and shared. */
+  resources: ResourceSection[];
 }
 
 const ZERO: SessionSectionCounts = { total: 0, unread: 0, running: 0, needsYou: 0 };
@@ -113,9 +124,105 @@ export function isNoGroupKey(key: string, me: string | null): boolean {
   return key === "shared/" || (me !== null && key === `personal/${me}/`);
 }
 
-/** A root key's group: the key without a trailing `<kind>:<id>/` leaf (plan D4, the server's rule). */
+/**
+ * Resource kinds whose default key names a session group of its own, each
+ * with a sidebar section. Mirrors `SESSION_RESOURCE_KINDS` in
+ * `src/assets/key.ts`; the parity tests in `session-groups.test.ts` pin the two.
+ */
+export const SESSION_RESOURCE_KINDS = [
+  "page",
+  "workflow",
+  "schedule",
+  "app",
+  "script",
+  "fs",
+] as const;
+export type SessionResourceKind = (typeof SESSION_RESOURCE_KINDS)[number];
+
+const SESSION_LEAF_KINDS = ["task", "thread", ...SESSION_RESOURCE_KINDS] as const;
+const leafPattern = new RegExp(`/(${SESSION_LEAF_KINDS.join("|")}):[^/]+/$`);
+const resourceGroupPattern = new RegExp(
+  `^(shared/|personal/[^/]+/)((${SESSION_RESOURCE_KINDS.join("|")}):([^/]+))/(?:(action:[^/]+)/)?$`,
+);
+
+/**
+ * A root key's group: the key without a trailing `<kind>:<id>/` leaf (plan
+ * D4, the server's `sessionGroupKey`). A resource leaf right at `shared/` or
+ * `personal/<user>/` stays: it is the resource's group (`shared/page:<id>/`).
+ */
 export function groupKeyOf(key: string): string {
-  return key.replace(/\/(?:task|thread|schedule|workflow):[^/]+\/$/, "/");
+  const leaf = leafPattern.exec(key);
+  if (!leaf) return key;
+  const group = key.slice(0, leaf.index + 1);
+  const resource = (SESSION_RESOURCE_KINDS as readonly string[]).includes(leaf[1]);
+  const root = group === "shared/" || /^personal\/[^/]+\/$/.test(group);
+  return resource && root ? key : group;
+}
+
+/** The resource of a group key (the server's `sessionResourceGroupOf`). */
+export interface ResourceGroup {
+  kind: SessionResourceKind;
+  id: string;
+  /** `shared/` or `personal/<user>/`. */
+  base: string;
+  /** The group of the resource itself: `<base><kind>:<id>/`. */
+  resourceKey: string;
+  /** An app action below the app (`shared/app:<id>/action:<name>/`). */
+  action?: string;
+}
+
+/** The resource of a group key, or null: `<base><kind>:<id>/`, or an app's `.../action:<name>/`. */
+export function resourceOfGroupKey(key: string): ResourceGroup | null {
+  const match = resourceGroupPattern.exec(key);
+  if (!match) return null;
+  const kind = match[3] as SessionResourceKind;
+  if (match[5] && kind !== "app") return null;
+  return {
+    kind,
+    id: match[4],
+    base: match[1],
+    resourceKey: `${match[1]}${match[2]}/`,
+    ...(match[5] ? { action: match[5].slice("action:".length) } : {}),
+  };
+}
+
+const RESOURCE_NAMES: Record<SessionResourceKind, [one: string, section: string]> = {
+  page: ["Page", "Pages"],
+  workflow: ["Workflow", "Workflows"],
+  schedule: ["Schedule", "Schedules"],
+  app: ["App", "Apps"],
+  script: ["Script", "Scripts"],
+  fs: ["File", "Files"],
+};
+
+/** The section a resource kind shows under: `Pages`, `Workflows`, ... */
+export function resourceSectionLabel(kind: SessionResourceKind): string {
+  return RESOURCE_NAMES[kind][1];
+}
+
+/**
+ * The name of a resource group: its label from the tree (the page title, the
+ * workflow name, the action name), else `<Kind> · <short id>` for a deleted
+ * resource. Never the raw `<kind>:<id>`.
+ */
+export function resourceGroupLabel(
+  key: string,
+  labels: Readonly<Record<string, string>> = {},
+): string {
+  const resource = resourceOfGroupKey(key);
+  if (!resource) return "";
+  if (labels[key]) return labels[key];
+  if (resource.action) return resource.action;
+  const id = resource.id.slice(resource.id.lastIndexOf(":") + 1);
+  return `${RESOURCE_NAMES[resource.kind][0]} · ${id.slice(0, 8)}`;
+}
+
+/** The path of a resource group below its section: `[app, action]` or `[page title]`. */
+function resourcePath(key: string, labels: Readonly<Record<string, string>>): string[] {
+  const resource = resourceOfGroupKey(key);
+  if (!resource) return [];
+  const own = resourceGroupLabel(key, labels);
+  return resource.action ? [resourceGroupLabel(resource.resourceKey, labels), own] : [own];
 }
 
 /**
@@ -190,6 +297,10 @@ function myBase(key: string, me: string | null): string | null {
 }
 
 /** A source as its section names it: `Slack`, `Telegram`, `Discord`. */
+export function sourceSectionLabel(source: SessionSource): string {
+  return sourceName(source);
+}
+
 function sourceName(source: SessionSource): string {
   return source.charAt(0).toUpperCase() + source.slice(1);
 }
@@ -206,6 +317,7 @@ export function groupLabel(
   if (!groupKey || isNoGroupKey(groupKey, me)) return "";
   const source = sourceOfGroupKey(groupKey);
   if (source) return sourceGroupLabel(groupKey, labels) || sourceName(source);
+  if (resourceOfGroupKey(groupKey)) return resourceGroupLabel(groupKey, labels);
   const owner = personalOwner(groupKey);
   const parts = segments(groupKey).slice(owner ? 2 : 1);
   return parts[parts.length - 1] ?? "";
@@ -229,7 +341,10 @@ export function groupCrumb(
     return label ? `${sourceName(source)} › ${label}` : sourceName(source);
   }
   const owner = personalOwner(groupKey);
-  const parts = segments(groupKey).slice(owner ? 2 : 1);
+  const resource = resourceOfGroupKey(groupKey);
+  const parts = resource
+    ? [resourceSectionLabel(resource.kind), ...resourcePath(groupKey, labels)]
+    : segments(groupKey).slice(owner ? 2 : 1);
   if (owner && owner !== me) return [nameOf(owner), ...parts].join(" › ");
   return parts.join(" › ");
 }
@@ -388,6 +503,7 @@ export function buildSessionGroupTree(
   const mine = nester();
   const { nodes, roots } = mine;
   const bySource = new Map<SessionSource, ReturnType<typeof nester>>();
+  const byResource = new Map<SessionResourceKind, ReturnType<typeof nester>>();
 
   const owners = new Map<string, OwnerNode>();
   for (const group of groups) {
@@ -398,8 +514,17 @@ export function buildSessionGroupTree(
       running: group.running,
       needsYou: group.needsYou,
     };
+    const resource = resourceOfGroupKey(group.key);
+    if (resource && myBase(resource.base, me)) {
+      const tree = byResource.get(resource.kind) ?? nester();
+      byResource.set(resource.kind, tree);
+      const node = tree.nodeFor(group.key, resource.base);
+      node.own = counts;
+      node.lastActivityAt = group.lastActivityAt;
+      continue;
+    }
     const source = sourceOfGroupKey(group.key);
-    const base = source ? `shared/${source}/` : myBase(group.key, me);
+    const base = source ? `shared/${source}/` : resource ? null : myBase(group.key, me);
     if (base) {
       let tree = mine;
       if (source) {
@@ -420,7 +545,9 @@ export function buildSessionGroupTree(
     }
     owner.groups.push({
       key: group.key,
-      name: segments(group.key).slice(2).join(" › "),
+      name: resource
+        ? [resourceSectionLabel(resource.kind), ...resourcePath(group.key, labels)].join(" › ")
+        : segments(group.key).slice(2).join(" › "),
       own: counts,
       subtree: counts,
       lastActivityAt: group.lastActivityAt,
@@ -463,11 +590,22 @@ export function buildSessionGroupTree(
     return [{ source, nodes: tree.roots, counts }];
   });
 
+  const resources = SESSION_RESOURCE_KINDS.flatMap((kind): ResourceSection[] => {
+    const tree = byResource.get(kind);
+    if (!tree) return [];
+    for (const node of tree.nodes.values()) node.name = resourceGroupLabel(node.key, labels);
+    for (const root of tree.roots) rollUp(root);
+    tree.roots.sort(byActivity);
+    const counts = tree.roots.reduce((sum, node) => addCounts(sum, node.subtree), ZERO);
+    return [{ kind, nodes: tree.roots, counts }];
+  });
+
   return {
     myGroups: roots,
     sharedWithMe,
     myGroupsTotal: roots.reduce((sum, node) => sum + node.subtree.total, 0),
     sharedWithMeTotal: sharedWithMe.reduce((sum, owner) => sum + owner.subtree.total, 0),
     sources,
+    resources,
   };
 }
