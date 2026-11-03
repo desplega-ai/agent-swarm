@@ -101,7 +101,7 @@ export function slackWatchdogBackoffMs(
 
 /**
  * The watchdog state machine, with no timers of its own: the caller drives
- * `tick()`. The two log lines feed a Datadog log-based metric, so keep their
+ * `tick()`. Operators search the two log lines, so keep their
  * text stable.
  */
 export function createSlackSocketWatchdog(

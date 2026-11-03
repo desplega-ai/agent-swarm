@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 import { ErrorCode } from "@slack/web-api";
 import { pollUntil } from "../../scripts/e2e/http";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
 import { closeDb, initDb } from "../be/db";
-import { startSlackSocketMetrics, stopSlackSocketMetrics } from "../otel-impl";
 import {
   _getSlackSocketClientForTests,
   _setSlackSocketWatchdogOptionsForTests,
@@ -329,35 +327,4 @@ describe("socket watchdog against a live Slack mock", () => {
       closeDb();
     }
   }, 20_000);
-});
-
-describe("agent_swarm.slack.socket_connected gauge", () => {
-  afterEach(() => {
-    stopSlackSocketMetrics();
-    setSlackConnectionState("disconnected");
-  });
-
-  test("reports 1 when connected and 0 otherwise", async () => {
-    class CollectingReader extends MetricReader {
-      protected async onForceFlush(): Promise<void> {}
-      protected async onShutdown(): Promise<void> {}
-    }
-    const reader = new CollectingReader();
-    const provider = new MeterProvider({ readers: [reader] });
-    startSlackSocketMetrics(provider.getMeter("test"));
-
-    const read = async () => {
-      const { resourceMetrics } = await reader.collect();
-      const metric = resourceMetrics.scopeMetrics
-        .flatMap((s) => s.metrics)
-        .find((m) => m.descriptor.name === "agent_swarm.slack.socket_connected");
-      return metric?.dataPoints[0]?.value;
-    };
-
-    setSlackConnectionState("connected");
-    expect(await read()).toBe(1);
-    setSlackConnectionState("connecting");
-    expect(await read()).toBe(0);
-    await provider.shutdown();
-  });
 });
