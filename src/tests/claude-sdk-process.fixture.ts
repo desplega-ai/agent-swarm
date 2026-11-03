@@ -85,6 +85,10 @@ function resultMessage(
     queued_turn_count: queuedTurnCount,
     uuid: crypto.randomUUID(),
     session_id: sessionId,
+    user_message_uuid: userUuids[turn - 1],
+    ...(mode === "redirect-error" || mode === "redirect-retry"
+      ? { user_message_uuids: userUuids }
+      : {}),
   };
 }
 
@@ -154,7 +158,9 @@ function answerInitialize(requestId: string): void {
 const decoder = new TextDecoder();
 let buffer = "";
 let initialized = false;
+let interrupts = 0;
 const userMessages: string[] = [];
+const userUuids: string[] = [];
 const argv = process.argv.slice(2);
 
 if (mode === "cancel") {
@@ -171,6 +177,7 @@ async function handleLine(line: string): Promise<boolean> {
   const message = JSON.parse(line) as {
     type?: string;
     request_id?: string;
+    uuid?: string;
     request?: { subtype?: string };
     message?: { content?: unknown };
   };
@@ -180,6 +187,30 @@ async function handleLine(line: string): Promise<boolean> {
       initialized = true;
       emitInit();
     }
+    return false;
+  }
+  if (
+    message.type === "control_request" &&
+    message.request?.subtype === "interrupt" &&
+    mode?.startsWith("redirect")
+  ) {
+    interrupts++;
+    writeMessage({
+      type: "control_response",
+      response: {
+        subtype: mode === "redirect-error" ? "error" : "success",
+        request_id: message.request_id,
+        ...(mode === "redirect-error"
+          ? { error: "fixture interrupt rejected" }
+          : { response: { still_queued: [] } }),
+      },
+    });
+    if (mode === "redirect-error") return false;
+    // Exercise the receipt/result gap. The redirect must not be sent into
+    // the interrupted turn, whose final result reports no queued work.
+    await writeStateFile(`${stateFile}.interrupt`, { interrupts });
+    await Bun.sleep(mode === "redirect-cancel" ? 500 : 30);
+    writeMessage(resultMessage("interrupted", 1, 0));
     return false;
   }
   if (message.type !== "user") return false;
@@ -200,6 +231,18 @@ async function handleLine(line: string): Promise<boolean> {
             .join("")
         : "";
   userMessages.push(text);
+  userUuids.push(message.uuid ?? "");
+
+  if (mode?.startsWith("redirect")) {
+    await writeStateFile(stateFile, { argv, userMessages, interrupts });
+    if (userMessages.length === 1) {
+      writeMessage(assistantMessage("working", 1));
+    } else if (mode !== "redirect-retry" || text === "finish") {
+      writeMessage(assistantMessage(`accepted:${text}`, userMessages.length));
+      writeMessage(resultMessage(`accepted:${text}`, userMessages.length, 0));
+    }
+    return false;
+  }
 
   if (mode === "stderr-error") {
     writeMessage(errorResultMessage());

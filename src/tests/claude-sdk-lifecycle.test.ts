@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createSteeringDispatchState, pollAndDispatchSteering } from "../commands/runner";
 import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
 import { userClaudeMdExclude } from "../providers/claude-flag-settings";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import type { SteeringMessage } from "../types";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const fixturePath = join(import.meta.dir, "claude-sdk-process.fixture.ts");
@@ -18,7 +20,14 @@ async function temporaryDirectory(): Promise<string> {
 
 function config(
   directory: string,
-  mode: "queue" | "cancel" | "stderr-error",
+  mode:
+    | "queue"
+    | "cancel"
+    | "stderr-error"
+    | "redirect"
+    | "redirect-error"
+    | "redirect-cancel"
+    | "redirect-retry",
   stateFile: string,
 ): ProviderSessionConfig {
   return {
@@ -155,6 +164,172 @@ describe("Claude SDK production adapter lifecycle", () => {
       expect(JSON.parse(fixtureState.argv[settingsAt + 1] ?? "")).toMatchObject({
         claudeMdExcludes: ["/workspace/CLAUDE.md", userClaudeMdExclude()],
       });
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "redirect waits for the interrupted result and serializes queue and completion-time input",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "redirect-state.json");
+      let summaries = 0;
+      const session = await new ClaudeAdapter(async () => {
+        summaries++;
+      }).createSession(config(directory, "redirect", stateFile));
+      const events: ProviderEvent[] = [];
+      let late: Promise<unknown> | undefined;
+      session.onEvent((event) => {
+        events.push(event);
+        if (event.type === "message" && event.content === "accepted:queued") {
+          late = session.deliverSteering!({ mode: "queue", text: "completion-message" });
+        }
+      });
+      await waitForFile(stateFile);
+      expect(
+        await Promise.all([
+          session.deliverSteering!({ mode: "steer", text: "redirected" }),
+          session.deliverSteering!({ mode: "queue", text: "queued" }),
+        ]),
+      ).toEqual([
+        { delivered: true, mode: "steer" },
+        { delivered: true, mode: "queue" },
+      ]);
+      const result = await session.waitForCompletion();
+      expect(await late).toEqual({ delivered: true, mode: "queue" });
+      expect(result).toMatchObject({
+        exitCode: 0,
+        isError: false,
+        output: "accepted:completion-message",
+      });
+      expect(result.cost).toMatchObject({ totalCostUsd: 0.004, numTurns: 4 });
+      expect(JSON.parse(await Bun.file(stateFile).text())).toMatchObject({
+        interrupts: 1,
+        userMessages: ["initial-message", "redirected", "queued", "completion-message"],
+      });
+      expect(events.filter((e) => e.type === "session_init")).toHaveLength(1);
+      expect(events.some((e) => e.type === "context_usage")).toBeTrue();
+      expect(summaries).toBe(1);
+      expect(await session.deliverSteering!({ mode: "steer", text: "too-late" })).toMatchObject({
+        delivered: false,
+      });
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "a rejected interrupt does not deliver its text and later queue delivery still completes",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "redirect-error.json");
+      const session = await new ClaudeAdapter(async () => {}).createSession(
+        config(directory, "redirect-error", stateFile),
+      );
+      try {
+        await waitForFile(stateFile);
+        expect(await session.deliverSteering!({ mode: "steer", text: "rejected" })).toMatchObject({
+          delivered: false,
+        });
+        expect(await session.deliverSteering!({ mode: "queue", text: "recovery" })).toEqual({
+          delivered: true,
+          mode: "queue",
+        });
+        expect((await session.waitForCompletion()).exitCode).toBe(0);
+        expect(JSON.parse(await Bun.file(stateFile).text()).userMessages).toEqual([
+          "initial-message",
+          "recovery",
+        ]);
+      } finally {
+        await session.abort("test cleanup");
+      }
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "cancellation during redirect rejects pending input and wins over interrupted completion",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "redirect-cancel.json");
+      const session = await new ClaudeAdapter(async () => {}).createSession(
+        config(directory, "redirect-cancel", stateFile),
+      );
+      await waitForFile(stateFile);
+      const redirect = session.deliverSteering!({ mode: "steer", text: "must-not-arrive" });
+      const queued = session.deliverSteering!({ mode: "queue", text: "also-cancelled" });
+      await waitForFile(`${stateFile}.interrupt`);
+      await session.abort("cancel during redirect");
+      expect(await redirect).toMatchObject({ delivered: false });
+      expect(await queued).toMatchObject({ delivered: false });
+      expect(await session.waitForCompletion()).toMatchObject({
+        exitCode: 130,
+        errorCategory: "cancelled",
+      });
+      expect(JSON.parse(await Bun.file(stateFile).text()).userMessages).toEqual([
+        "initial-message",
+      ]);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "SDK delivery-report retries retain steering IDs without interrupting or injecting twice",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "redirect-retry.json");
+      const sessionConfig = config(directory, "redirect-retry", stateFile);
+      const session = await new ClaudeAdapter(async () => {}).createSession(sessionConfig);
+      try {
+        await waitForFile(stateFile);
+        const messages: SteeringMessage[] = (["queue", "steer"] as const).map((mode) => ({
+          id: crypto.randomUUID(),
+          taskId: sessionConfig.taskId,
+          mode,
+          body: `${mode} body`,
+          status: "pending",
+          source: "api",
+          createdByKind: "user",
+          createdAt: new Date().toISOString(),
+        }));
+        let failReport = true;
+        const reports: string[] = [];
+        const fetchImpl = (async (input: string | URL | Request) => {
+          const url = new URL(String(input));
+          if (url.pathname === "/api/steering-messages") return Response.json({ messages });
+          reports.push(url.pathname);
+          return new Response("{}", { status: failReport ? 503 : 200 });
+        }) as typeof fetch;
+        const api = {
+          apiUrl: "http://steering.test",
+          apiKey: "fixture",
+          agentId: sessionConfig.agentId,
+        };
+        const state = createSteeringDispatchState();
+        await expect(
+          pollAndDispatchSteering(api, sessionConfig.taskId, session, state, fetchImpl),
+        ).rejects.toThrow("report failed");
+        // Promise.all rejects at the first failed report; let every active
+        // delivery settle before retrying the still-pending server rows.
+        while (state.inFlightMessageIds.size > 0) await Bun.sleep(10);
+        failReport = false;
+        await pollAndDispatchSteering(api, sessionConfig.taskId, session, state, fetchImpl);
+        await session.deliverSteering!({ mode: "queue", text: "finish" });
+        expect((await session.waitForCompletion()).exitCode).toBe(0);
+        const captured = JSON.parse(await Bun.file(stateFile).text());
+        expect(captured.interrupts).toBe(1);
+        expect(captured.userMessages).toHaveLength(4);
+        for (const message of messages) {
+          expect(
+            captured.userMessages.filter((text: string) => text.includes(message.id)),
+          ).toHaveLength(1);
+          expect(captured.userMessages.find((text: string) => text.includes(message.id))).toContain(
+            message.body,
+          );
+          expect(reports.filter((path) => path.includes(message.id))).toHaveLength(2);
+        }
+      } finally {
+        await session.abort("retry test cleanup");
+      }
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

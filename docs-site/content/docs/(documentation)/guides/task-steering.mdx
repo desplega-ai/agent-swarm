@@ -22,12 +22,21 @@ Not every harness can interrupt. Task responses include `supportedSteerModes`, a
 | Claude Managed | `steer`, `queue` | `steered` |
 | opencode | `queue` | `queued` |
 | Devin | `queue` | `queued` |
-| Claude Code | `queue` | `queued` |
+| Claude Code (CLI) | `queue` | `queued` |
+| Claude Code (SDK) | `steer`, `queue` | `steered` in the same task and session |
 | Codex | `steer`, `queue` | `steered` (native `turn/steer` on the per-task app-server) |
 | Cursor | `steer`, `queue` | `steered` (`run.steer()` on the in-flight run) |
 | Amp | `queue` | `queued` (appended to the next tool result) |
 
 Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate). Codex steers the active turn through its per-task app-server and starts queued messages after that turn ends; legacy `codex exec` sessions still use hook delivery. See [Harness Providers: Live task steering](/docs/guides/harness-providers#live-task-steering). Amp has no interrupt primitive: a queued message is appended to the next tool result, so the model reads it mid-turn.
+
+Claude SDK redirect stops the active turn before delivering the new instruction.
+It preserves messages already queued, which can run before the redirect.
+Queue leaves the active turn running; cancellation ends the session and starts
+no replacement turn. The dashboard enables Interrupt after the task records
+SDK transport at session initialization. Its modes follow that running session,
+not subsequent changes to the agent's transport setting.
+See [Claude SDK redirect](/docs/guides/harness-providers#claude-sdk-redirect).
 
 ## Enable steering
 

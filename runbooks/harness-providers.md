@@ -562,7 +562,8 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 | `claude-managed` | Yes | Yes | Sends ordered `user.message` events to the managed session. |
 | `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
-| `claude` | No | Conditional | Both transports queue input at a turn boundary. CLI uses the version gate below. SDK enables queueing unless explicitly disabled. |
+| `claude` CLI | No | Conditional | Queue only; version gate below. |
+| `claude` SDK | `query.interrupt()`, then redirect | Yes | Keeps the same task/session and queued input; both modes honor the explicit disable switch. |
 | `codex` | Native `turn/steer` | Adapter queue | The per-task app-server receives steering over JSON-RPC. `steer` interrupts the active turn. `queue` starts after that turn ends. See below. |
 | `fx` | Native `_meta.fx.steer` prompt | No | A second `session/prompt` with `_meta.fx.steer: true`, absorbed at the next tool boundary without cancelling. Only `_meta.fx.steering: "absorbed"` counts as delivered; anything else is undeliverable and is promoted to a follow-up. Advertises `["steer"]`. |
 | `acp` | No | No | ACP has one in-flight `session/prompt` and no queue primitive; `session/cancel` is a full abort, not an interrupt. Advertises `[]`. |
@@ -570,6 +571,37 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
 
 Steering is enabled by default; `STEERING_ENABLED=false|0` is the global opt-out (set it on the API server and worker containers). While off, new steering requests are rejected, steering MCP/UI surfaces are removed, and worker delivery polling is skipped. Existing read-only message history, in-flight worker delivery callbacks, and terminal-status promotion remain available so pre-existing rows can be inspected and drain to a terminal state.
+
+### Claude SDK interrupt-and-redirect
+
+The static Claude trait remains queue-only, the CLI default. Task reads and
+steering admission add `steer` when the task's recorded `providerMeta.transport`
+is `sdk`; they do not resolve a newly edited agent configuration for a live task.
+Until initialization records transport, Claude requests retain queue-only admission.
+
+`ClaudeSdkSession` serializes delivery operations and reserves pending work
+before awaiting control responses. Redirect waits for both `query.interrupt()`
+and the interrupted result, then writes the unchanged steering envelope.
+Queued messages survive the interrupt and are never resent. Input UUIDs and
+result UUID lists keep the session open for unanswered/coalesced input. Older
+executables without UUID echoes keep the `queued_turn_count` fallback.
+Cancellation closes input immediately and wins over pending deliveries.
+
+An interrupt failure or a 10-second redirect deadline returns undeliverable;
+the existing runner promotes the message. Report retries reuse its cached
+outcome. Only `accept-steer` marks the Swarm message handled. Costs, context,
+transcript, background heartbeat and final summary remain session-owned.
+See the [operator guide](/docs/guides/harness-providers#claude-sdk-redirect).
+
+Opt-in live verification (real model calls; isolated API and worker):
+`RUN_CLAUDE_SDK_REDIRECT=1 bun scripts/probe-claude-sdk-redirect.ts`.
+Supply worker credentials in the environment; API-key, OAuth, and configured
+Anthropic-compatible gateway routes are accepted. `CLAUDE_SDK_LIFECYCLE_BINARY`
+selects the executable, and `CLAUDE_SDK_REDIRECT_RESULT` optionally saves scrubbed
+JSON evidence. The probe bounds the worker to three minutes, runs an active
+Bash tool with a child, submits queue and redirect together, checks process
+exit and distinct output files, matches real `accept-steer` calls to handled
+message IDs, and verifies same-session completion with persisted token usage.
 
 ### Claude queue-steering gate
 

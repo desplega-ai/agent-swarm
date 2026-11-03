@@ -101,12 +101,13 @@ export class ClaudeInputQueue implements AsyncIterable<SDKUserMessage> {
     return this.entries.length + this.inFlight;
   }
 
-  enqueue(text: string): Promise<void> {
+  enqueue(text: string, uuid = crypto.randomUUID()): Promise<void> {
     if (this.closed) return Promise.reject(new Error("Claude SDK input is closed"));
     return new Promise((accepted, rejected) => {
       this.entries.push({
         message: {
           type: "user",
+          uuid,
           message: { role: "user", content: text },
           parent_tool_use_id: null,
         },
@@ -323,6 +324,13 @@ class ClaudeSdkSession implements ProviderSession {
   private aborted = false;
   private abortReason = "cancelled";
   private acceptingInput = true;
+  private deliveryTail: Promise<unknown> = Promise.resolve();
+  private pendingDeliveries = 0;
+  private turnActive = true;
+  private resultWaiters = new Set<() => void>();
+  private completionCandidate = false;
+  private unansweredInputs = new Set<string>();
+  private inputResultIdsSupported = false;
   private errorTracker = new SessionErrorTracker();
   private shutdownPromise: Promise<void> | undefined;
   /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
@@ -334,7 +342,7 @@ class ClaudeSdkSession implements ProviderSession {
     this.contextWindowSize = getContextWindowSize(options.model);
     this.transcript = [`User: ${scrubSecrets(options.config.prompt)}`];
     if (options.queueSteeringSupported) {
-      this.deliverSteering = (delivery) => this.deliverQueuedSteering(delivery);
+      this.deliverSteering = (delivery) => this.deliverLiveSteering(delivery);
     }
     this.completionPromise = this.run();
   }
@@ -360,6 +368,9 @@ class ClaudeSdkSession implements ProviderSession {
     this.aborted = true;
     this.acceptingInput = false;
     this.abortReason = scrubSecrets(reason ?? "cancelled");
+    this.input.close(this.abortReason);
+    for (const resolve of this.resultWaiters) resolve();
+    this.resultWaiters.clear();
     const interrupt = this.query?.interrupt();
     if (interrupt) {
       await Promise.race([interrupt.catch(() => undefined), Bun.sleep(SDK_INTERRUPT_TIMEOUT_MS)]);
@@ -369,22 +380,80 @@ class ClaudeSdkSession implements ProviderSession {
     await this.shutdownAfterSdkGrace();
   }
 
-  private async deliverQueuedSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
+  private deliverLiveSteering(delivery: SteerDelivery): Promise<SteerDeliveryResult> {
+    // Reserve before yielding: a result can arrive while an interrupt or an
+    // earlier delivery is awaiting its control response.
     if (!this.acceptingInput || this.aborted) {
-      return { delivered: false, reason: "Claude SDK session has completed" };
+      return Promise.resolve({ delivered: false, reason: "Claude SDK session has completed" });
     }
-    if (mode === "steer") {
-      return {
-        delivered: false,
-        reason: "Claude SDK transport currently supports queued input only",
-      };
+    this.pendingDeliveries++;
+    const operation = this.deliveryTail.then(async (): Promise<SteerDeliveryResult> => {
+      try {
+        if (!this.acceptingInput || this.aborted) {
+          throw new Error("Claude SDK session has completed");
+        }
+        if (delivery.mode === "steer" && this.turnActive && this.query) {
+          // The control receipt precedes the interrupted result. Wait for both
+          // before writing the redirect, so that result cannot close its input.
+          // interrupt() preserves messages already queued inside Claude.
+          let release!: () => void;
+          const result = new Promise<void>((resolve) => {
+            release = resolve;
+            this.resultWaiters.add(resolve);
+          });
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              Promise.all([this.query.interrupt(), result]),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error("Claude SDK redirect timed out")),
+                  10_000,
+                );
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+            this.resultWaiters.delete(release);
+          }
+        }
+        if (!this.acceptingInput || this.aborted) {
+          throw new Error("Claude SDK session has completed");
+        }
+        this.completionCandidate = false;
+        this.turnActive = true;
+        const uuid = crypto.randomUUID();
+        this.unansweredInputs.add(uuid);
+        try {
+          await this.input.enqueue(delivery.text, uuid);
+        } catch (error) {
+          this.unansweredInputs.delete(uuid);
+          throw error;
+        }
+        this.transcript.push(`User: ${scrubSecrets(delivery.text)}`);
+        return { delivered: true, mode: delivery.mode };
+      } catch (error) {
+        return { delivered: false, reason: scrubSecrets(String(error)) };
+      } finally {
+        this.pendingDeliveries--;
+        this.maybeCloseInput();
+      }
+    });
+    this.deliveryTail = operation;
+    return operation;
+  }
+
+  private maybeCloseInput(): void {
+    if (
+      !this.completionCandidate ||
+      this.pendingDeliveries > 0 ||
+      this.input.pendingCount > 0 ||
+      this.unansweredInputs.size > 0
+    ) {
+      return;
     }
-    try {
-      this.transcript.push(`User: ${scrubSecrets(text)}`);
-      await this.input.enqueue(text);
-      return { delivered: true, mode: "queue" };
-    } catch (error) {
-      return { delivered: false, reason: scrubSecrets(String(error)) };
+    if (!this.backgroundKeepalive.holdInputForBackgroundWork(() => this.closeInput())) {
+      this.closeInput();
     }
   }
 
@@ -422,6 +491,24 @@ class ClaudeSdkSession implements ProviderSession {
 
   private handleMessage(message: SDKMessage): boolean {
     const json = message as ClaudeProtocolMessage;
+    if (json.type === "result") {
+      const result = message as SDKResultMessage;
+      const answered =
+        result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : []);
+      if (answered.length > 0) {
+        this.inputResultIdsSupported = true;
+        for (const uuid of answered) this.unansweredInputs.delete(uuid);
+      } else if (!this.inputResultIdsSupported) {
+        // Older executables do not echo input UUIDs. Preserve their existing
+        // queued_turn_count completion contract.
+        this.unansweredInputs.clear();
+      }
+      this.turnActive = (result.queued_turn_count ?? 0) > 0 || this.unansweredInputs.size > 0;
+      for (const resolve of this.resultWaiters) resolve();
+      this.resultWaiters.clear();
+    } else if (json.type === "assistant" && !json.parent_tool_use_id) {
+      this.turnActive = true;
+    }
     this.backgroundKeepalive.observe(json);
     const normalized = normalizeClaudeMessage(json, {
       taskId: this.options.config.taskId,
@@ -462,7 +549,9 @@ class ClaudeSdkSession implements ProviderSession {
     let terminalError: unknown;
     let stderrOutput = "";
 
-    void this.input.enqueue(config.prompt).catch(() => {});
+    const initialUuid = crypto.randomUUID();
+    this.unansweredInputs.add(initialUuid);
+    void this.input.enqueue(config.prompt, initialUuid).catch(() => {});
     try {
       const executable = resolveClaudeSdkExecutable(
         this.options.claudeBinaryArgv[0] ?? "claude",
@@ -529,13 +618,8 @@ class ClaudeSdkSession implements ProviderSession {
         const isResult = this.handleMessage(message);
         if (!isResult) continue;
         terminalResult = message as SDKResultMessage;
-        if ((terminalResult.queued_turn_count ?? 0) === 0 && this.input.pendingCount === 0) {
-          // Live background work gets its notification turn; the result after
-          // it settles closes input.
-          if (!this.backgroundKeepalive.holdInputForBackgroundWork(() => this.closeInput())) {
-            this.closeInput();
-          }
-        }
+        this.completionCandidate = (terminalResult.queued_turn_count ?? 0) === 0;
+        this.maybeCloseInput();
       }
     } catch (error) {
       terminalError = error;
@@ -544,6 +628,8 @@ class ClaudeSdkSession implements ProviderSession {
         this.emit({ type: "error", message, category: "sdk_transport" });
       }
     } finally {
+      for (const resolve of this.resultWaiters) resolve();
+      this.resultWaiters.clear();
       this.backgroundKeepalive.stop();
       this.acceptingInput = false;
       this.input.close();
