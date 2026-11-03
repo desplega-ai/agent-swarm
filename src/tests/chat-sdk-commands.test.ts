@@ -420,6 +420,83 @@ describe("Chat SDK commands that belong to one conversation stay unscoped", () =
   });
 });
 
+describe("Chat SDK commands in a Slack DM channel", () => {
+  // A slash command reports the DM as `slack:<D id>`. The adapter keys the DM
+  // conversation `slack:<D id>:` (empty thread ts) or, per message, `slack:<D id>:<ts>`.
+  let agentId: string;
+  let userId: string;
+  const seed = async (key: string, requestedByUserId?: string) => {
+    const task = await createTaskExtended("dm ask", {
+      agentId,
+      source: "chat",
+      contextKey: chatSdkContextKey(key),
+      requestedByUserId,
+    });
+    await Bun.sleep(5);
+    return task.id;
+  };
+
+  beforeAll(async () => {
+    agentId = (
+      await createAgent({
+        id: crypto.randomUUID(),
+        name: "SlackDmCmdWorker",
+        isLead: false,
+        status: "idle",
+      })
+    ).id;
+    userId = (await createUser({ name: "DmOwner" })).id;
+  });
+
+  test("finds the empty-ts DM conversation for a mapped, an unmapped and an unknown sender", async () => {
+    const taskId = await seed("slack:DEMPTY:", userId);
+    for (const sender of [userId, "someone-else", undefined]) {
+      expect(await runChatCommand("/status", "slack:DEMPTY", "dm-user", sender)).toContain(
+        taskId.slice(0, 8),
+      );
+    }
+    expect(await runChatCommand("/cancel", "slack:DEMPTY", "dm-user")).toBe(
+      `Cancelled task ${taskId.slice(0, 8)}.`,
+    );
+  });
+
+  test("a task without a requester is reachable from its DM", async () => {
+    const taskId = await seed("slack:DNOREQ:");
+    expect(await runChatCommand("/status", "slack:DNOREQ", "dm-user", userId)).toContain(
+      taskId.slice(0, 8),
+    );
+  });
+
+  test("acts on the latest per-message DM thread and resets that thread", async () => {
+    await seed("slack:DTHREADS:1700000000.000100", userId);
+    const latest = await seed("slack:DTHREADS:1700000000.000200", userId);
+    expect(await runChatCommand("/status", "slack:DTHREADS", "dm-user", userId)).toContain(
+      latest.slice(0, 8),
+    );
+    expect(await runChatCommand("/reset", "slack:DTHREADS", "dm-user", userId)).toContain(
+      "Context reset",
+    );
+    expect(await getChatThreadResetAt("slack:DTHREADS:1700000000.000200")).not.toBeNull();
+    expect(await runChatCommand("/cancel", "slack:DTHREADS", "dm-user", userId)).toContain(
+      `Cancelled task ${latest.slice(0, 8)}`,
+    );
+  });
+
+  test("/reset before the first message marks the conversation the first message lands in", async () => {
+    expect(await runChatCommand("/reset", "slack:DFRESH", "dm-user")).toContain("Context reset");
+    expect(await getChatThreadResetAt("slack:DFRESH:")).not.toBeNull();
+    expect(await runChatCommand("/status", "slack:DFRESH", "dm-user")).toContain("No task yet");
+  });
+
+  test("a DM does not reach the tasks of another DM or of a channel", async () => {
+    await seed("slack:DOTHER:", userId);
+    await seed("slack:COTHER:1700000000.000300", userId);
+    expect(await runChatCommand("/status", "slack:DFRESH2", "dm-user", userId)).toContain(
+      "No task yet",
+    );
+  });
+});
+
 describe("chatMessageText", () => {
   const message = (markdown: string) => {
     const formatted = parseMarkdown(markdown);

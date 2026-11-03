@@ -340,6 +340,68 @@ describe("Chat SDK Slack adapter, channel-level commands and inbound text", () =
   });
 });
 
+describe("Chat SDK Slack adapter, DM slash commands", () => {
+  let dmChannel: string;
+  let dmThread: string;
+  let taskId: string;
+
+  beforeAll(async () => {
+    await startSlackAdapter("socket");
+    await slack.waitForConnection();
+  });
+
+  afterAll(async () => {
+    await stopChatSdk();
+  });
+
+  /** Run a slash command in the DM through the adapter and return the bot's reply. */
+  async function dmCommand(command: string, user = "alice"): Promise<string> {
+    const seen = new Set(slack.messages(dmChannel).map((m) => m.ts));
+    await slack.slashCommand({ command, channel: dmChannel, user });
+    const reply = await slack.waitForMessage(
+      (m) => m.channel === dmChannel && !seen.has(m.ts) && m.user !== slack.user(user).id,
+      { timeoutMs: 5_000 },
+    );
+    return reply.text;
+  }
+
+  test("a DM message creates a chat task", async () => {
+    dmChannel = slack.openDm(slack.user("alice").id).id;
+    expect(dmChannel.startsWith("D")).toBe(true);
+    await slack.postMessage({ channel: dmChannel, user: "alice", text: "what is in the queue?" });
+    // The adapter keys a DM by the channel and an empty thread ts.
+    dmThread = `slack:${dmChannel}:`;
+    await waitForBuffered(dmThread);
+    await flushChatBuffers();
+    const [task] = await chatTasks(chatSdkContextKey(dmThread));
+    expect(task).toBeDefined();
+    taskId = task!.id;
+  });
+
+  test("/agent-swarm-status in the DM finds the DM task", async () => {
+    const reply = await dmCommand("/agent-swarm-status");
+    expect(reply).toContain(taskId.slice(0, 8));
+    expect(reply).not.toContain("No task yet");
+  });
+
+  // The shipped manifest declares only /agent-swarm-status and /agent-swarm-help,
+  // so the mock cannot send the other two: they run through the command runner
+  // with the channel id the adapter reports for a DM.
+  test("/reset in the DM channel marks the DM conversation, for any sender", async () => {
+    expect(await runChatCommand("/reset", `slack:${dmChannel}`, "alice")).toContain(
+      "Context reset",
+    );
+    expect(await getChatThreadResetAt(dmThread)).not.toBeNull();
+  });
+
+  test("/cancel in the DM channel cancels the DM task, for any sender", async () => {
+    expect(await runChatCommand("/cancel", `slack:${dmChannel}`, "alice")).toContain(
+      `Cancelled task ${taskId.slice(0, 8)}`,
+    );
+    expect((await getTaskById(taskId))?.status).toBe("cancelled");
+  });
+});
+
 describe("Chat SDK Slack adapter, webhook mode", () => {
   beforeAll(async () => {
     await startSlackAdapter("webhook");

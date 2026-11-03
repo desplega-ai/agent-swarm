@@ -105,27 +105,35 @@ interface CommandTarget {
 }
 
 /**
- * True for a chat id that names a place several people share without naming a
- * conversation in it: a Slack or Discord channel, as a slash command reports
- * it. Telegram's id is the conversation itself, a Discord thread or a Slack
- * thread names one, and a DM has a single human. An adapter this does not know
- * counts as shared, so the sender filter applies.
+ * What a chat id names, as a command reports it:
+ * - `conversation`: one conversation (Telegram's chat id, a Discord thread or
+ *   DM, a Slack thread). The command acts on it directly.
+ * - `dm`: the channel of a Slack 1:1 DM, which a slash command reports without
+ *   the conversation in it. Its human is the only requester, so the command
+ *   acts on the latest conversation there whoever the sender resolves to.
+ * - `shared`: a Slack or Discord channel, where several people ask. The command
+ *   sees and changes only the sender's own tasks. An adapter this does not know
+ *   counts as shared.
  */
-function isSharedChannel(threadId: string): boolean {
+type CommandScope = "conversation" | "dm" | "shared";
+
+function commandScope(threadId: string): CommandScope {
   const separator = threadId.indexOf(":");
   const adapter = threadId.slice(0, separator);
   const parts = threadId.slice(separator + 1).split(":");
   switch (adapter) {
     case "telegram":
-      return false;
+      return "conversation";
     case "discord":
       // `<guild>:<channel>[:<thread>]`; a DM has the guild `@me`.
-      return parts.length <= 2 && parts[0] !== "@me";
+      if (parts[0] === "@me") return "conversation";
+      return parts.length <= 2 ? "shared" : "conversation";
     case "slack":
       // `<channel>[:<thread ts>]`; a 1:1 DM channel id starts with `D`.
-      return !parts[1] && !parts[0]?.startsWith("D");
+      if (parts[1]) return "conversation";
+      return parts[0]?.startsWith("D") ? "dm" : "shared";
     default:
-      return true;
+      return "shared";
   }
 }
 
@@ -178,33 +186,40 @@ async function cancelActiveTasks(
  * found at once. Slack and Discord hand it the channel, while their tasks are
  * keyed `<channel>:<thread>` (a Slack thread root, a Discord thread made for a
  * mention) or, when Discord cannot open a thread, by the channel itself; a
- * slash command carries no thread. The command then acts on the sender's most
- * recent task in the channel (the most recent running one for `/cancel`), and
- * only on the sender's own tasks: a channel member must not read, cancel or
- * reset another user's conversation, which on Discord may be private. An
- * unknown sender gets no target.
+ * slash command carries no thread. The command then acts on the most recent
+ * task in the channel (the most recent running one for `/cancel`). In a shared
+ * channel that is the sender's own tasks only: a channel member must not read,
+ * cancel or reset another user's conversation, which on Discord may be private,
+ * and an unknown sender gets no target. A Slack DM channel has one human, so the
+ * sender is not checked there (see `CommandScope`).
  */
 async function resolveCommandTarget(
   threadId: string,
   activeOnly: boolean,
   senderUserId: string | undefined,
 ): Promise<CommandTarget | null> {
-  if (!isSharedChannel(threadId)) return { threadId };
-  if (!senderUserId) return null;
+  const scope = commandScope(threadId);
+  if (scope === "conversation") return { threadId };
+  if (scope === "shared" && !senderUserId) return null;
+  // A shared channel filters by the sender; a DM has one human and no filter.
+  const owner = scope === "shared" ? senderUserId : undefined;
   const contextKey = chatSdkContextKey(threadId);
   const exact = activeOnly
-    ? await getLatestActiveTaskByContextKey(contextKey, "chat", senderUserId)
-    : await getLatestTaskByContextKey(contextKey, { requestedByUserId: senderUserId });
+    ? await getLatestActiveTaskByContextKey(contextKey, "chat", owner)
+    : await getLatestTaskByContextKey(contextKey, { requestedByUserId: owner });
   const threaded = await getLatestTaskByContextKeyPrefix(
     `${contextKey}${encodeURIComponent(":")}`,
     activeOnly
-      ? { activeOnly, source: "chat", requestedByUserId: senderUserId }
-      : { requestedByUserId: senderUserId },
+      ? { activeOnly, source: "chat", requestedByUserId: owner }
+      : { requestedByUserId: owner },
   );
   const latest =
     exact && threaded && threaded.createdAt > exact.createdAt ? threaded : (exact ?? threaded);
   const found = chatThreadOfContextKey(latest?.contextKey)?.threadId;
-  return found ? { threadId: found, owner: senderUserId } : null;
+  if (found) return owner ? { threadId: found, owner } : { threadId: found };
+  // No task yet in a DM: its conversation is the channel with an empty thread
+  // ts, which is where the first message lands, so a reset still applies to it.
+  return scope === "dm" ? { threadId: `${threadId}:` } : null;
 }
 
 async function resetText(target: CommandTarget | null): Promise<string> {
