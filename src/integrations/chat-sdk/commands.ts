@@ -7,6 +7,7 @@ import {
   getLatestTaskByContextKeyPrefix,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
+import { resolveIdentity } from "@/be/identity";
 import { chatSdkContextKey, chatThreadOfContextKey } from "@/tasks/context-key";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -131,27 +132,40 @@ async function cancelActiveTasks(
  * the chat's own task is found at once. Slack and Discord hand it the channel,
  * while their tasks are keyed `<channel>:<thread>` (a Slack thread root, a
  * Discord thread made for a mention) and a slash command carries no thread. When
- * the channel itself has no task, the command acts on the thread of the most
- * recent task in the channel (the most recent running one for `/cancel`).
+ * the channel itself has no task, the command acts on the thread of the sender's
+ * most recent task in the channel (the most recent running one for `/cancel`).
+ * Only the sender's own tasks count: a channel member must not cancel, reset or
+ * read another user's thread, which on Discord may be private. An unknown
+ * sender gets no cross-thread target.
  */
-async function resolveCommandThread(threadId: string, activeOnly: boolean): Promise<string> {
+async function resolveCommandThread(
+  threadId: string,
+  activeOnly: boolean,
+  senderUserId: string | undefined,
+): Promise<string> {
   const contextKey = chatSdkContextKey(threadId);
   const own = activeOnly
     ? await getLatestActiveTaskByContextKey(contextKey, "chat")
     : await getLatestTaskByContextKey(contextKey);
-  if (own) return threadId;
+  if (own || !senderUserId) return threadId;
   const latest = await getLatestTaskByContextKeyPrefix(
     `${contextKey}${encodeURIComponent(":")}`,
-    activeOnly ? { activeOnly, source: "chat" } : {},
+    activeOnly
+      ? { activeOnly, source: "chat", requestedByUserId: senderUserId }
+      : { requestedByUserId: senderUserId },
   );
   return chatThreadOfContextKey(latest?.contextKey)?.threadId ?? threadId;
 }
 
-/** The reply for one command. Exported for tests; the handler posts it. */
+/**
+ * The reply for one command. Exported for tests; the handler posts it.
+ * `senderUserId` is the sender's canonical user, undefined when unknown.
+ */
 export async function runChatCommand(
   command: string,
   threadId: string,
   requestedBy: string,
+  senderUserId?: string,
 ): Promise<string> {
   let name = command.replace(/^\//, "").toLowerCase();
   if (name.startsWith(COMMAND_ALIAS_PREFIX)) name = name.slice(COMMAND_ALIAS_PREFIX.length);
@@ -167,13 +181,15 @@ export async function runChatCommand(
   }
   switch (name) {
     case "status":
-      return statusText(chatSdkContextKey(await resolveCommandThread(threadId, false)));
+      return statusText(
+        chatSdkContextKey(await resolveCommandThread(threadId, false, senderUserId)),
+      );
     case "cancel": {
-      const target = await resolveCommandThread(threadId, true);
+      const target = await resolveCommandThread(threadId, true, senderUserId);
       return cancelActiveTasks(chatSdkContextKey(target), target, requestedBy);
     }
     case "reset": {
-      const target = await resolveCommandThread(threadId, false);
+      const target = await resolveCommandThread(threadId, false, senderUserId);
       await markChatThreadReset(target);
       const lines = ["Context reset. Your next message starts a new conversation."];
       // A running task is state, not context: it keeps going, and the next task
@@ -188,6 +204,18 @@ export async function runChatCommand(
   }
 }
 
+/** The sender's canonical user through the identity registry, undefined when unknown. */
+async function resolveCommandSender(adapter: string, userId: string): Promise<string | undefined> {
+  if (!userId || userId.startsWith("chat:")) return undefined;
+  try {
+    const resolution = await resolveIdentity(adapter, userId);
+    return resolution.status === "resolved" ? resolution.userId : undefined;
+  } catch (error) {
+    console.warn(`[chat-sdk] Could not resolve the command sender: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
 async function onSlashCommand(event: SlashCommandEvent): Promise<void> {
   const adapter = event.adapter.name;
   // Telegram passes the thread id as the channel id. Slack and Discord pass
@@ -197,7 +225,8 @@ async function onSlashCommand(event: SlashCommandEvent): Promise<void> {
   console.log(`[chat-sdk] ${adapter} ${threadId}: command ${event.command} from ${requestedBy}`);
   let reply: string;
   try {
-    reply = await runChatCommand(event.command, threadId, requestedBy);
+    const senderUserId = await resolveCommandSender(adapter, event.user.userId);
+    reply = await runChatCommand(event.command, threadId, requestedBy, senderUserId);
   } catch (error) {
     console.warn(
       scrubSecrets(

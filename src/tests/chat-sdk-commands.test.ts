@@ -5,11 +5,16 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
   getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
-import { CHAT_COMMANDS, runChatCommand } from "../integrations/chat-sdk/commands";
+import {
+  CHAT_COMMANDS,
+  getChatThreadResetAt,
+  runChatCommand,
+} from "../integrations/chat-sdk/commands";
 import { chatMessageText } from "../integrations/chat-sdk/message-text";
 import { startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
 import { readPersistedThreadHistory } from "../integrations/chat-sdk/state";
@@ -219,8 +224,17 @@ describe("Chat SDK commands on a channel-keyed platform (Discord)", () => {
   const newerThread = "discord:G1:C1:T-new";
   let olderId: string;
   let newerId: string;
+  /** Owns both threads. */
+  let ownerId: string;
+  /** Another member of the channel. */
+  let otherId: string;
+  const asOwner = (command: string, thread = channel) =>
+    runChatCommand(command, thread, "owner", ownerId);
+  const asOther = (command: string) => runChatCommand(command, channel, "other", otherId);
 
   beforeAll(async () => {
+    ownerId = (await createUser({ name: "Owner" })).id;
+    otherId = (await createUser({ name: "Other" })).id;
     const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "DiscordCmdWorker",
@@ -233,6 +247,7 @@ describe("Chat SDK commands on a channel-keyed platform (Discord)", () => {
           agentId: agent.id,
           source: "chat",
           contextKey: chatSdkContextKey(thread),
+          requestedByUserId: ownerId,
         })
       ).id;
     olderId = await seed(olderThread, "older thread ask");
@@ -242,26 +257,35 @@ describe("Chat SDK commands on a channel-keyed platform (Discord)", () => {
     await seed("discord:G1:C10:T-x", "another channel");
   });
 
-  test("/status in the channel reports the most recent thread's task", async () => {
-    const reply = await runChatCommand("/status", channel, "tester");
+  test("/status in the channel reports the sender's most recent thread task", async () => {
+    const reply = await asOwner("/status");
     expect(reply).toContain(newerId.slice(0, 8));
     expect(reply).not.toContain("No task yet");
   });
 
   test("/status inside a thread reports that thread", async () => {
-    expect(await runChatCommand("/status", olderThread, "tester")).toContain(olderId.slice(0, 8));
+    expect(await asOwner("/status", olderThread)).toContain(olderId.slice(0, 8));
+  });
+
+  test("another user's channel-level commands never reach the owner's threads", async () => {
+    // The threads may be private: neither the task ids nor their state leak.
+    expect(await asOther("/status")).toContain("No task yet");
+    await asOther("/reset");
+    expect(await getChatThreadResetAt(newerThread)).toBeNull();
+    expect(await getChatThreadResetAt(olderThread)).toBeNull();
+    expect(await asOther("/cancel")).toContain("No running task");
+    // An unknown sender gets no cross-thread target either.
+    expect(await runChatCommand("/cancel", channel, "stranger")).toContain("No running task");
+    expect((await getTaskById(newerId))?.status).toBe("pending");
+    expect((await getTaskById(olderId))?.status).toBe("pending");
   });
 
   test("/cancel in the channel cancels the most recent running thread, one at a time", async () => {
-    expect(await runChatCommand("/cancel", channel, "tester")).toContain(
-      `Cancelled task ${newerId.slice(0, 8)}`,
-    );
+    expect(await asOwner("/cancel")).toContain(`Cancelled task ${newerId.slice(0, 8)}`);
     expect((await getTaskById(olderId))?.status).toBe("pending");
-    expect(await runChatCommand("/cancel", channel, "tester")).toContain(
-      `Cancelled task ${olderId.slice(0, 8)}`,
-    );
+    expect(await asOwner("/cancel")).toContain(`Cancelled task ${olderId.slice(0, 8)}`);
     // Neither the task of C10 nor any other channel counts.
-    expect(await runChatCommand("/cancel", channel, "tester")).toContain("No running task");
+    expect(await asOwner("/cancel")).toContain("No running task");
   });
 });
 
