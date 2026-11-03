@@ -39,6 +39,7 @@ mock.module("../slack/app", () => ({
   initSlackApp: async () => null,
   startSlackApp: async () => {},
   stopSlackApp: async () => {},
+  stopSlackAppUnderLifecycleLock: async () => {},
 }));
 
 type RegisteredTool = {
