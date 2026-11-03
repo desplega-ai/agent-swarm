@@ -113,7 +113,9 @@ jobs:
 
   report:
     needs: test
-    if: always()
+    # `test` runs only on the upstream repo. On a fork it is skipped, so no
+    # blob report exists and the merge step would fail falsely.
+    if: always() && needs.test.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
