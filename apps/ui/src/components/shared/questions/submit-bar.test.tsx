@@ -133,4 +133,9 @@ describe("SubmitBar label", () => {
     expect(html).toContain("Send me the invite");
     expect(html).not.toContain("Submit<");
   });
+
+  test("a long label wraps under the progress text; the default row does not wrap", () => {
+    expect(render("cancelled", "Send me the invite")).toContain("flex-wrap");
+    expect(render("cancelled")).not.toContain("flex-wrap");
+  });
 });

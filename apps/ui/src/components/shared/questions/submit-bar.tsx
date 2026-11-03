@@ -163,8 +163,18 @@ export function SubmitBar({
             transition={{ duration: 0.3, ease: SNAPPY }}
           />
         </div>
-        <div className="flex items-center gap-3 px-3 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-4">
-          <div className="flex min-w-0 flex-1 flex-col" aria-live="polite">
+        {/* A custom label can be long: in a narrow container the button wraps
+            under the progress text instead of covering it. */}
+        <div
+          className={cn(
+            "flex items-center gap-3 px-3 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-4",
+            customLabel && "flex-wrap",
+          )}
+        >
+          <div
+            className={cn("flex flex-1 flex-col", customLabel ? "min-w-32" : "min-w-0")}
+            aria-live="polite"
+          >
             <span className="flex items-baseline gap-1 text-sm font-medium">
               <Ticker value={progress.answered} />
               <span className="text-muted-foreground">of {progress.total} answered</span>
@@ -197,6 +207,7 @@ export function SubmitBar({
                 variant={progress.rejects ? "destructive" : "default"}
                 className={cn(
                   "h-11 shrink-0 gap-2 px-5 sm:h-9",
+                  customLabel && "ml-auto",
                   "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:scale-100",
                 )}
               >
