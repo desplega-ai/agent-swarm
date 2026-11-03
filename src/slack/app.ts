@@ -173,8 +173,12 @@ let watchdogOptions: SlackSocketWatchdogOptions = SLACK_SOCKET_WATCHDOG_DEFAULTS
  * hangs is the web client retrying apps.connections.open, which is progress,
  * and abandoning it would leave a second live socket behind.
  */
-async function restartSlackAppForWatchdog(): Promise<void> {
+async function restartSlackAppForWatchdog(owner: ReturnType<typeof setInterval>): Promise<void> {
   await runSlackLifecycleExclusive(async () => {
+    // stopSlackApp() won the lock first and disarmed this watchdog (shutdown,
+    // or a reload that armed a new one). Restarting now would bring back an
+    // app that the caller already stopped.
+    if (watchdogTimer !== owner) return;
     // A config reload that won the lock may have just brought the socket back.
     if (getSlackConnectionState() === "connected" && isLiveSocketActive()) return;
     await teardownSlackApp();
@@ -184,6 +188,7 @@ async function restartSlackAppForWatchdog(): Promise<void> {
 
 function startSocketWatchdog(): void {
   if (watchdogTimer) return;
+  let timer: ReturnType<typeof setInterval> | null = null;
   const watchdog = createSlackSocketWatchdog(
     {
       now: Date.now,
@@ -191,12 +196,12 @@ function startSocketWatchdog(): void {
       getLastActivityAt: () => lastSocketActivityAt,
       isSocketActive: isLiveSocketActive,
       isLifecycleBusy: isSlackLifecycleBusy,
-      restart: restartSlackAppForWatchdog,
+      restart: () => (timer ? restartSlackAppForWatchdog(timer) : Promise.resolve()),
       log: (line) => console.log(line),
     },
     watchdogOptions,
   );
-  watchdogTimer = setInterval(() => {
+  timer = setInterval(() => {
     if (getSlackConfiguration().mode !== "socket") {
       stopSocketWatchdog();
       return;
@@ -204,7 +209,8 @@ function startSocketWatchdog(): void {
     void watchdog.tick();
   }, watchdogOptions.tickMs);
   // Never keep the process (or a test run) alive for the watchdog alone.
-  watchdogTimer.unref?.();
+  timer.unref?.();
+  watchdogTimer = timer;
 }
 
 function stopSocketWatchdog(): void {
@@ -367,7 +373,20 @@ export async function startSlackApp(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Stop the app and disarm the watchdog. Takes the Slack lifecycle lock, so a
+ * watchdog restart in flight finishes first and cannot bring the app back
+ * after this returns.
+ */
 export async function stopSlackApp(): Promise<void> {
+  await runSlackLifecycleExclusive(stopSlackAppUnderLifecycleLock);
+}
+
+/**
+ * stopSlackApp() for a caller that already holds the lifecycle lock (the
+ * config reload). The lock is not reentrant: taking it again would deadlock.
+ */
+export async function stopSlackAppUnderLifecycleLock(): Promise<void> {
   stopSocketWatchdog();
   await teardownSlackApp();
 }

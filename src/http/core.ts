@@ -41,7 +41,7 @@ import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime"
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
-import { startSlackApp, stopSlackApp } from "../slack";
+import { startSlackApp, stopSlackAppUnderLifecycleLock } from "../slack";
 import { getSlackConnectionState, getSlackLastConnectedAt } from "../slack/connection-state";
 import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import type { AgentStatus } from "../types";
@@ -207,7 +207,8 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
 
   // Retire the old transport before any other integration can fail during
   // reload. HTTP/invalid selection must never leave the previous socket live.
-  await stopSlackApp();
+  // The reload already holds the Slack lifecycle lock (see the caller).
+  await stopSlackAppUnderLifecycleLock();
 
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late

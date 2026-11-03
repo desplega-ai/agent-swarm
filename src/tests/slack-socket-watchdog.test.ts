@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { SocketModeClient } from "@slack/socket-mode";
 import { ErrorCode } from "@slack/web-api";
 import { pollUntil } from "../../scripts/e2e/http";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
@@ -7,6 +8,7 @@ import {
   _getSlackSocketClientForTests,
   _setSlackSocketWatchdogOptionsForTests,
   createSlackSocketWatchdog,
+  getSlackApp,
   isSlackSocketWatchdogRunning,
   SLACK_SOCKET_WATCHDOG_DEFAULTS,
   type SlackSocketWatchdogDeps,
@@ -20,7 +22,7 @@ import {
   type SlackConnectionState,
   setSlackConnectionState,
 } from "../slack/connection-state";
-import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
+import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -354,4 +356,98 @@ describe("socket watchdog against a live Slack mock", () => {
       closeDb();
     }
   }, 20_000);
+
+  test("stopSlackApp waits for a watchdog restart in flight, and the app stays stopped", async () => {
+    await withLiveSlack({ tickMs: 20, downAfterMs: 50 }, async (slack) => {
+      const first = _getSlackSocketClientForTests();
+      // Every socket-mode client built from now on waits at the gate before
+      // it asks apps.connections.open for a socket URL.
+      const gate = gateSocketUrls();
+      try {
+        setSlackConnectionState("disconnected");
+        // The watchdog tears down the app and blocks in the restart's start.
+        expect(
+          await pollUntil(
+            () =>
+              isSlackLifecycleBusy() &&
+              _getSlackSocketClientForTests() !== null &&
+              _getSlackSocketClientForTests() !== first,
+            5_000,
+            10,
+          ),
+        ).toBe(true);
+
+        let stopped = false;
+        const stopping = stopSlackApp().then(() => {
+          stopped = true;
+        });
+        await Bun.sleep(200);
+        // Shutdown waits for the restart; it does not race it.
+        expect(stopped).toBe(false);
+
+        gate.release();
+        await stopping;
+        expect(getSlackApp()).toBeNull();
+        expect(isSlackSocketWatchdogRunning()).toBe(false);
+        // Nothing brings the app back after stopSlackApp() returned.
+        await Bun.sleep(200);
+        expect(getSlackApp()).toBeNull();
+        expect(await pollUntil(() => slack.mock.connectionCount === 0, 5_000, 20)).toBe(true);
+      } finally {
+        gate.restore();
+      }
+    });
+  }, 20_000);
 });
+
+type LiveSlack = Awaited<ReturnType<typeof startSlackMock>>;
+
+/** Start the Slack app against a mock Slack with a connected socket, run `fn`, and clean up. */
+async function withLiveSlack(
+  options: Partial<typeof SLACK_SOCKET_WATCHDOG_DEFAULTS>,
+  fn: (slack: LiveSlack) => Promise<void>,
+): Promise<void> {
+  const slack = await startSlackMock(false);
+  initDb(":memory:");
+  const saved = { ...process.env };
+  try {
+    Object.assign(process.env, slack.mock.env);
+    process.env.SLACK_DISABLE = "false";
+    process.env.SLACK_MODE = "socket";
+    _setSlackSocketWatchdogOptionsForTests(options);
+    expect(await startSlackApp()).toBe(true);
+    await slack.mock.waitForConnection(10_000);
+    expect(getSlackConnectionState()).toBe("connected");
+    await fn(slack);
+  } finally {
+    await stopSlackApp();
+    process.env = saved;
+    await stopSlackMock(slack, false);
+    closeDb();
+  }
+}
+
+/**
+ * Hold every socket-mode client's socket URL request at a gate. The client
+ * opens no socket until the gate is released.
+ */
+function gateSocketUrls(): { release: () => void; restore: () => void } {
+  const proto = SocketModeClient.prototype as unknown as {
+    retrieveWSSURL: (this: SocketModeClient) => Promise<string>;
+  };
+  const real = proto.retrieveWSSURL;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  proto.retrieveWSSURL = async function (this: SocketModeClient) {
+    await gate;
+    return real.call(this);
+  };
+  return {
+    release,
+    restore: () => {
+      proto.retrieveWSSURL = real;
+    },
+  };
+}
