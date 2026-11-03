@@ -54,6 +54,12 @@ export const config = z.object({
   openrouterModel: z.string().default("typesafe/jev-1.13"),
   /** Explicit TypeSafe key; otherwise TYPESAFE_API_KEY from the API process env. */
   apiKey: z.string().optional(),
+  /**
+   * Fixed text the operator's own templates mandate, judged by the self-test and
+   * expected to pass. Kept loose here and parsed per entry by `fixturesOf`, so one
+   * bad entry cannot fail the whole config and drop `mode` back to its default.
+   */
+  fixtures: z.unknown().optional(),
 });
 
 type Cfg = z.infer<typeof config>;
@@ -254,6 +260,27 @@ export const resolveTransport = (cfg: Cfg): JevTransport => {
   );
 };
 
+/**
+ * The judge input for one message. The live gate and the self-test fixtures build it
+ * here, so a fixture is judged exactly like real traffic.
+ */
+export const gateState = (s: {
+  requester: string;
+  prefs: Prefs;
+  ask: string;
+  threadOpening: string;
+  text: string;
+}): Record<string, unknown> => ({
+  role: "You audit an AI agent's message to the human who requested the work.",
+  requester: s.requester,
+  requester_preferences: s.prefs,
+  latest_request: s.ask,
+  thread_opening: s.threadOpening,
+  judging_rules: JUDGING_RULES,
+  plain_language_rules: PLAIN_RULES,
+  agent_message: s.text,
+});
+
 /** One Jev call; returns the `noul` score per question. Throws on any failure. */
 export const askJev = async (
   state: Record<string, unknown>,
@@ -310,6 +337,72 @@ const SELFTEST_PLAIN_GOOD =
 const below = (bad: unknown, good: unknown, threshold: number): boolean =>
   typeof bad === "number" && typeof good === "number" && bad < threshold && good >= threshold;
 
+/** Fixtures judged per self-test run: one Jev call each, inside the 5 s handler budget. */
+export const MAX_FIXTURES = 8;
+const fixture = z.object({
+  name: z.string().min(1).max(80),
+  /** The fixed text as it will be posted, placeholders filled with sample values. */
+  text: z.string().min(1).max(4000),
+  /** Audience preferences; omit to judge `plain` only. */
+  prefs: z
+    .object({
+      verbosity: z.string().optional(),
+      tone: z.string().optional(),
+      language: z.string().optional(),
+    })
+    .optional(),
+  /** The request the text answers, as `latest_request`. */
+  request: z.string().max(900).optional(),
+});
+export type Fixture = z.infer<typeof fixture>;
+
+/** Valid fixture entries, in order, capped at MAX_FIXTURES; invalid entries are skipped. */
+export const fixturesOf = (raw: unknown): Fixture[] =>
+  (Array.isArray(raw) ? raw : [])
+    .map((f) => fixture.safeParse(f))
+    .filter((r) => r.success)
+    .map((r) => r.data)
+    .slice(0, MAX_FIXTURES);
+
+/**
+ * Judge each fixture with the live gate's questions and state. A fixture is fixed
+ * text the operator expects to pass, so any dimension below its threshold fails it.
+ */
+const judgeFixtures = async (
+  fixtures: Fixture[],
+  transport: JevTransport,
+  cfg: Cfg,
+  signal?: AbortSignal,
+) =>
+  Promise.all(
+    fixtures.map(async (f) => {
+      const prefs: Prefs = f.prefs ?? {};
+      const questions = { ...buildQuestions(prefs), plain: PLAIN_QUESTION };
+      try {
+        const { scores } = await askJev(
+          gateState({
+            requester: "the requester",
+            prefs,
+            ask: f.request ?? "",
+            threadOpening: "",
+            text: f.text,
+          }),
+          questions,
+          transport,
+          cfg,
+          signal,
+        );
+        const failed = Object.keys(questions).filter((dim) => {
+          const s = scores[dim];
+          return typeof s !== "number" || s < (dim === "plain" ? cfg.plainThreshold : cfg.threshold);
+        });
+        return { name: f.name, scores, failed, pass: failed.length === 0 };
+      } catch (err) {
+        return { name: f.name, error: String(err).slice(0, 200), pass: false };
+      }
+    }),
+  );
+
 /**
  * Run the judge on known-bad (positive control, must score below threshold) and
  * known-good (negative control, must score at or above it) messages and record
@@ -330,11 +423,13 @@ const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<v
         cfg,
         signal,
       ).then((r) => r.scores[dim] ?? null);
-    const [bad, good, plainBad, plainGood] = await Promise.all([
+    const fixtures = fixturesOf(cfg.fixtures);
+    const [bad, good, plainBad, plainGood, fixtureResults] = await Promise.all([
       judge(SELFTEST_BAD, "verbosity"),
       judge(SELFTEST_GOOD, "verbosity"),
       judge(SELFTEST_PLAIN_BAD, "plain"),
       judge(SELFTEST_PLAIN_GOOD, "plain"),
+      judgeFixtures(fixtures, transport, cfg, signal),
     ]);
     await swarm.kv_set({
       namespace: NS,
@@ -350,6 +445,9 @@ const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<v
         plainPositiveControlBadScore: plainBad,
         plainNegativeControlGoodScore: plainGood,
         plainControlsOk: below(plainBad, plainGood, cfg.plainThreshold),
+        fixtures: fixtureResults,
+        // null when none are configured: zero fixtures is not a pass.
+        fixturesOk: fixtureResults.length === 0 ? null : fixtureResults.every((f) => f.pass),
         latencyMs: Date.now() - started,
       },
     });
@@ -561,16 +659,7 @@ const extension: SwarmExtension = (api) => {
 
       const transport = resolveTransport(cfg);
       const { scores, latencyMs } = await askJev(
-        {
-          role: "You audit an AI agent's message to the human who requested the work.",
-          requester: audienceName,
-          requester_preferences: prefs,
-          latest_request: ask,
-          thread_opening: threadOpening,
-          judging_rules: JUDGING_RULES,
-          plain_language_rules: PLAIN_RULES,
-          agent_message: text,
-        },
+        gateState({ requester: audienceName, prefs, ask, threadOpening, text }),
         questions,
         transport,
         cfg,

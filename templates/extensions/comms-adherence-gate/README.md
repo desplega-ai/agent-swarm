@@ -75,6 +75,28 @@ Every error lets the completion through: a missing key, an HTTP error, a network
 
 Call `store-progress` with a non-completed status and `progress` starting with `comms-gate-selftest`. The gate judges a known-bad and a known-good message against a terse preference, and a dense and a plain message on `plain`, then writes `selftest:last`: every score, both thresholds, the provider, `controlsOk` (verbosity: bad below `threshold`, good at or above it) and `plainControlsOk` (the same against `plainThreshold`). Real traffic is untouched.
 
+### Fixtures
+
+Fixed text that your own templates tell an agent to post (a daily report's all-clear line, a standard reply) should pass the gate. List it under `fixtures` and the self-test judges each entry with the same state and questions as real traffic, then records `fixtures` (per entry: `name`, `scores`, `failed`, `pass`) and `fixturesOk` in `selftest:last`. A failing fixture means the template line or the gate needs a fix before a quiet day forces an ad-hoc rewrite.
+
+```json
+{
+  "fixtures": [
+    { "name": "daily-report-all-clear", "text": "📊 11-03: all clear, nothing for you. 56 of 73 workflows are turned on." },
+    {
+      "name": "short-reply",
+      "text": "Went with option B: it keeps the migration reversible. PR #123.",
+      "prefs": { "verbosity": "very terse, ~400 chars max" },
+      "request": "which option did you pick?"
+    }
+  ]
+}
+```
+
+Fill placeholders with realistic sample values. `prefs` adds the preference dimensions it names; without it only `plain` is judged. At most 8 entries run; an invalid entry is skipped, never fatal to the rest of the config. `fixturesOk` is `null` when no fixtures are configured.
+
+Unit tests mock Jev, so they cannot show that a line passes. Only the self-test, which calls the live judge, can.
+
 ## Config
 
 | Key | Default | Notes |
@@ -89,6 +111,7 @@ Call `store-progress` with a non-completed status and `progress` starting with `
 | `model` | `jev-latest` | Jev model on TypeSafe |
 | `openrouterModel` | `typesafe/jev-1.13` | Jev model on OpenRouter |
 | `apiKey` | unset | Explicit TypeSafe key. Prefer the `TYPESAFE_API_KEY` secret below |
+| `fixtures` | unset | Fixed template text the self-test expects to pass. See [Fixtures](#fixtures) |
 
 ## Required secrets
 
