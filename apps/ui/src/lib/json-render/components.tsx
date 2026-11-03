@@ -202,7 +202,13 @@ import type {
 } from "./catalog";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
-import { cellHasControls, isLinkColumn, linkCell, tipText } from "./link-cell-model";
+import {
+  cellHasControls,
+  isLinkColumn,
+  isPhoneControlColumn,
+  linkCell,
+  tipText,
+} from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { SmartLink } from "./smart-link";
 import {
@@ -2243,13 +2249,7 @@ function TableComponent({ props }: { props: TableProps }) {
   // An editable checkbox / switch column cannot be a line of card text: the
   // phone list gives it a real control beside the row (see `controls` below).
   const editableKeys = new Set(
-    columns
-      .filter(
-        (column) =>
-          (column.kind === "checkbox" || column.kind === "switch") &&
-          (column.onChange as ActionChain | undefined)?.length,
-      )
-      .map((column) => column.key),
+    columns.filter((column) => isPhoneControlColumn(column)).map((column) => column.key),
   );
   const metaKeys: string[] = mobileFields
     ? [
