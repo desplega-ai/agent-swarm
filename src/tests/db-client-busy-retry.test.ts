@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createBunSqliteClient, type DbClient } from "../be/db-client";
 
@@ -319,29 +319,38 @@ describe("db-client SQLITE_BUSY retry", () => {
       finalAttemptSpinMs: 50,
     });
     const writers = 60;
+    // The gate logs "(N spinning probes)" when the episode ends. Counting
+    // probes measures the thing that blocks the loop (each probe is one
+    // synchronous attemptSpinMs wait) without sampling wall-clock timer lag,
+    // which stalls for 700-1100ms on loaded CI runners although the gate held.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
     const released = holdWriteLock(1_500);
 
-    let maxLagMs = 0;
-    let last = performance.now();
-    const ticker = setInterval(() => {
-      const now = performance.now();
-      maxLagMs = Math.max(maxLagMs, now - last - 10);
-      last = now;
-    }, 10);
-
     const startedAt = performance.now();
-    const results = await Promise.allSettled(
-      Array.from({ length: writers }, (_, i) =>
-        crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
-      ),
-    );
+    let results: PromiseSettledResult<unknown>[];
+    try {
+      results = await Promise.allSettled(
+        Array.from({ length: writers }, (_, i) =>
+          crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
+        ),
+      );
+    } finally {
+      await released;
+    }
     const wallMs = performance.now() - startedAt;
-    clearInterval(ticker);
-    await released;
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    warn.mockRestore();
 
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
-    // Ungated: 60 writers x 50ms = 3s of blocked loop per round of attempts.
-    expect(maxLagMs).toBeLessThan(500);
+    const episode = messages.map((m) => /released after \d+ms \((\d+) spinning probes\)/.exec(m));
+    const probes = Number(episode.find((m) => m)?.[1]);
+    // The episode must have been observed and closed, or the count proves nothing.
+    expect(Number.isFinite(probes)).toBe(true);
+    // Ungated every one of the 60 writers spins on every round of attempts
+    // (60 x 50ms = 3s of blocked loop per round). Gated, only one probe runs
+    // per gate interval (50, 100, 200, 400, 800ms), so a 1.5s hold needs ~6.
+    expect(probes).toBeGreaterThan(0);
+    expect(probes).toBeLessThanOrEqual(15);
     // Ungated the crowd needed several seconds of spin rounds after release.
     expect(wallMs).toBeLessThan(3_000);
     const rows = await crowdClient.query<{ n: number }>(
