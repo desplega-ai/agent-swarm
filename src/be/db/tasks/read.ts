@@ -1608,7 +1608,7 @@ export async function getInProgressSlackTasks(): Promise<AgentTask[]> {
 }
 
 /** How far back the missing-tree sweep looks for Slack tasks without a tree. */
-export const SLACK_MISSING_TREE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SLACK_MISSING_TREE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Slack tasks created in the last 24 h (and since render-v2 activation) whose

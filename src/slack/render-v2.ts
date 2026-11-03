@@ -27,6 +27,7 @@ import {
   type SlackMessageRecord,
   updateSlackMessageRecord,
 } from "../be/db";
+import { closeSlackTreeIfSettled } from "../be/db/slack-trees";
 import { getTaskCitations } from "../be/task-citations";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
@@ -1885,6 +1886,13 @@ export async function processSlackRenderV2(): Promise<void> {
       console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
     }
     await statusTick.reconcile(tree.channelId, tree.threadTs);
+    try {
+      // Drop the tree from later sweeps once its thread has no work left.
+      // Any later task or outcome write in the thread reopens it.
+      await closeSlackTreeIfSettled(tree.id);
+    } catch (error) {
+      console.error(`[Slack] Failed to close settled v2 tree ${tree.id}:`, error);
+    }
   }
 
   await refreshResolvedDeferralCards();

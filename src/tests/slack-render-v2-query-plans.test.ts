@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { join } from "node:path";
 import {
   closeDb,
   createAgent,
@@ -10,7 +11,9 @@ import {
   getSlackTreeMessages,
   initDb,
   recordSlackMessage,
+  updateSlackMessageRecord,
 } from "../be/db";
+import { closeSlackTreeIfSettled } from "../be/db/slack-trees";
 import { getSlackTasksMissingTree } from "../be/db/tasks/read";
 import { completeTask, startTask } from "../be/db/tasks/write";
 
@@ -207,5 +210,155 @@ describe("slack render-v2 watcher queries", () => {
         [chained.card.id, chained.ask.id, lastWake.id],
       ].sort(),
     );
+  });
+});
+
+async function settledThread(label: string, leadId: string) {
+  const channelId = `C_${label}`;
+  const threadTs = `${label}.0`;
+  const ask = await createTaskExtended(`ask ${label}`, {
+    agentId: leadId,
+    source: "slack",
+    slackChannelId: channelId,
+    slackThreadTs: threadTs,
+  });
+  await startTask(ask.id);
+  await completeTask(ask.id, "done");
+  const card = await recordSlackMessage({
+    contextKey: `slack:${channelId}:${threadTs}`,
+    channelId,
+    threadTs,
+    ts: `${label}.2`,
+    kind: "outcome",
+    taskId: ask.id,
+    finalized: true,
+  });
+  await Bun.sleep(2);
+  const tree = await recordSlackMessage({
+    contextKey: `slack:${channelId}:${threadTs}`,
+    channelId,
+    threadTs,
+    ts: `${label}.1`,
+    kind: "tree",
+  });
+  return { ask, card, tree, channelId, threadTs };
+}
+
+function closedAt(id: string): string | null {
+  return (
+    getDb()
+      .query<{ closed_at: string | null }, [string]>(
+        "SELECT closed_at FROM slack_messages WHERE id = ?",
+      )
+      .get(id)?.closed_at ?? null
+  );
+}
+
+describe("slack render-v2 tree closed_at", () => {
+  let leadId: string;
+
+  beforeEach(async () => {
+    initDb(":memory:");
+    getDb().run(
+      "INSERT OR IGNORE INTO slack_render_v2_state (id, activated_at) VALUES (1, '2000-01-01T00:00:00.000Z')",
+    );
+    leadId = (await createAgent({ name: "Close Lead", isLead: true, status: "idle" })).id;
+  });
+
+  afterEach(() => {
+    closeDb();
+  });
+
+  test("the sweep reads only open trees through the partial index", async () => {
+    const sql = await capturedSql(() => getSlackTreeMessages());
+    expect(plan(sql)).toContain("SCAN tree USING INDEX idx_slack_messages_open_trees");
+  });
+
+  test("a settled thread closes and drops out of the sweep", async () => {
+    const { tree } = await settledThread("SETTLED", leadId);
+    expect(await getSlackTreeMessages()).toEqual([]);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+    expect(closedAt(tree.id)).not.toBeNull();
+    // Closing twice is a no-op.
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(false);
+  });
+
+  test("a thread with a running task does not close", async () => {
+    const { tree, channelId, threadTs } = await settledThread("RUNNING", leadId);
+    const follow = await createTaskExtended("follow-up", {
+      agentId: leadId,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await startTask(follow.id);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(false);
+    expect(closedAt(tree.id)).toBeNull();
+    expect((await getSlackTreeMessages()).map((row) => row.id)).toEqual([tree.id]);
+  });
+
+  test("a new task in a closed thread reopens it", async () => {
+    const { tree, channelId, threadTs } = await settledThread("REOPEN", leadId);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+
+    await createTaskExtended("new ask in the same thread", {
+      agentId: leadId,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    expect(closedAt(tree.id)).toBeNull();
+    expect((await getSlackTreeMessages()).map((row) => row.id)).toEqual([tree.id]);
+    expect(
+      (await getSlackTreeMessages({ thread: { channelId, threadTs } })).map((row) => row.id),
+    ).toEqual([tree.id]);
+  });
+
+  test("a status change in a closed thread reopens it", async () => {
+    const { ask, tree } = await settledThread("STATUS", leadId);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+    getDb().run("UPDATE agent_tasks SET status = 'failed' WHERE id = ?", [ask.id]);
+    expect(closedAt(tree.id)).toBeNull();
+  });
+
+  test("an outcome card write in a closed thread reopens it", async () => {
+    const { card, tree } = await settledThread("CARD", leadId);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+    await Bun.sleep(2);
+    await updateSlackMessageRecord(card.id, { touchUpdatedAt: true });
+    expect(closedAt(tree.id)).toBeNull();
+    // The touched card is newer than the tree, so the sweep picks it up again.
+    expect((await getSlackTreeMessages()).map((row) => row.id)).toEqual([tree.id]);
+  });
+
+  test("a task write in another thread leaves a closed tree closed", async () => {
+    const { tree } = await settledThread("QUIET", leadId);
+    expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+    await settledThread("OTHER", leadId);
+    expect(closedAt(tree.id)).not.toBeNull();
+  });
+
+  test("migration 278 backfill closes settled trees and keeps open ones open", async () => {
+    const settled = await settledThread("BF_SETTLED", leadId);
+    const open = await settledThread("BF_OPEN", leadId);
+    const running = await createTaskExtended("running", {
+      agentId: leadId,
+      source: "slack",
+      slackChannelId: open.channelId,
+      slackThreadTs: open.threadTs,
+    });
+    await startTask(running.id);
+
+    const migration = await Bun.file(
+      join(import.meta.dir, "../be/migrations/278_slack_render_v2_reconcile.sql"),
+    ).text();
+    const backfill = migration.slice(
+      migration.indexOf("UPDATE slack_messages AS tree"),
+      migration.indexOf(";", migration.indexOf("UPDATE slack_messages AS tree")),
+    );
+    getDb().run(backfill);
+
+    expect(closedAt(settled.tree.id)).not.toBeNull();
+    expect(closedAt(open.tree.id)).toBeNull();
   });
 });
