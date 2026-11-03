@@ -316,6 +316,106 @@ function summarizeSessionLogLine(line: SessionLogForPreamble): string | null {
   return snippet ? `[${ts}] ${snippet}` : null;
 }
 
+/** Tools with no side effect: an unanswered call to one of them is safe to repeat. */
+const READ_ONLY_TOOLS = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "LS",
+  "WebFetch",
+  "WebSearch",
+  "ToolSearch",
+]);
+
+type ToolLogEvent =
+  | { kind: "use"; id: string | null; name: string; input: Record<string, unknown> | undefined }
+  | { kind: "result"; id: string };
+
+function firstString(...values: unknown[]): string | null {
+  for (const v of values) if (typeof v === "string" && v) return v;
+  return null;
+}
+
+/**
+ * Extract tool_use / tool_result events from one session_log line, in order.
+ * Claude message shape pairs `tool_use.id` with `tool_result.tool_use_id`.
+ * The flat event shape pairs only when the line carries a call id; a
+ * tool_use without one gets `id: null` and is never flagged.
+ */
+function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line.content);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const obj = parsed as Record<string, unknown>;
+  const events: ToolLogEvent[] = [];
+
+  const content = (obj.message as Record<string, unknown> | undefined)?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === "tool_use" && typeof b.name === "string") {
+        events.push({
+          kind: "use",
+          id: firstString(b.id),
+          name: b.name,
+          input: b.input as Record<string, unknown> | undefined,
+        });
+      } else if (b.type === "tool_result") {
+        const id = firstString(b.tool_use_id);
+        if (id) events.push({ kind: "result", id });
+      }
+    }
+    return events;
+  }
+
+  if (obj.type === "tool_use" && typeof obj.name === "string") {
+    events.push({
+      kind: "use",
+      id: firstString(obj.id, obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId),
+      name: obj.name,
+      input: obj.input as Record<string, unknown> | undefined,
+    });
+  } else if (obj.type === "tool_result") {
+    const id = firstString(obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId, obj.id);
+    if (id) events.push({ kind: "result", id });
+  }
+  return events;
+}
+
+/**
+ * Find the tool call the interrupted session was waiting on. Walks back from
+ * the most recent tool_use through the trailing run of unanswered calls (a
+ * parallel batch) and returns the latest one that is not read-only, as
+ * `<tool> <arg summary>`. Returns null when the most recent call got its
+ * result or carries no id to pair on. The caller scrubs the result.
+ */
+function findInterruptedToolCall(logs: SessionLogForPreamble[]): string | null {
+  const uses: Extract<ToolLogEvent, { kind: "use" }>[] = [];
+  const answered = new Set<string>();
+  for (const line of logs) {
+    for (const event of extractToolLogEvents(line)) {
+      if (event.kind === "use") uses.push(event);
+      else answered.add(event.id);
+    }
+  }
+  for (let i = uses.length - 1; i >= 0; i--) {
+    const use = uses[i];
+    if (!use?.id || answered.has(use.id)) return null;
+    if (READ_ONLY_TOOLS.has(use.name)) continue;
+    const input = use.input;
+    const primary = firstString(input?.file_path, input?.path, input?.command);
+    const raw = primary ?? (input && Object.keys(input).length > 0 ? JSON.stringify(input) : "");
+    const args = raw.replace(/\s+/g, " ").trim().slice(0, 200);
+    return args ? `${use.name} ${args}` : use.name;
+  }
+  return null;
+}
+
 /**
  * Build a resume-task preamble.
  *
@@ -402,6 +502,15 @@ export async function buildResumeContextPreamble(
   let artBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.1);
   const steeringBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.1);
 
+  // An unanswered side-effecting call may have landed before the cut-off
+  // (git push, PR comment, message send). Flag it so the agent checks first.
+  const interrupted = findInterruptedToolCall(recentLogs);
+  const interruptedLine = interrupted
+    ? scrubSecrets(
+        `Interrupted: ${interrupted} may have landed. Check its effect before calling it again.`,
+      )
+    : "";
+
   const header = [
     "\n---",
     "## Resuming Interrupted Task",
@@ -418,6 +527,7 @@ export async function buildResumeContextPreamble(
           chain.length === 2 ? "2nd" : chain.length === 3 ? "3rd" : `${chain.length}th`
         } resume attempt).`
       : "",
+    interruptedLine,
     "",
     "---",
     "",

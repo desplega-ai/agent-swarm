@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import {
   buildContextPreamble,
+  buildResumeContextPreamble,
   CONTEXT_PREAMBLE_MAX_CHARS,
   CONTEXT_PREAMBLE_MAX_TOKENS,
   fetchTaskContextForPreamble,
@@ -15,12 +16,20 @@ const API_KEY = "example-test-key";
 
 // In-memory task store for the mock server
 const mockTasks: Record<string, TaskContextForPreamble> = {};
+// Session-log rows served by /api/tasks/:id/session-logs
+const mockSessionLogs: Record<string, { createdAt: string; content: string }[]> = {};
 
 let server: Server;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     const url = req.url ?? "";
+    const logsMatch = url.match(/^\/api\/tasks\/([^/?]+)\/session-logs/);
+    if (logsMatch) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ logs: mockSessionLogs[logsMatch[1]] ?? [] }));
+      return;
+    }
     const match = url.match(/^\/api\/tasks\/([^/?]+)/);
     if (match) {
       const id = match[1];
@@ -229,5 +238,79 @@ describe("buildContextPreamble", () => {
   test("CONTEXT_PREAMBLE_MAX_TOKENS is 2000 by default", () => {
     expect(CONTEXT_PREAMBLE_MAX_TOKENS).toBe(2000);
     expect(CONTEXT_PREAMBLE_MAX_CHARS).toBe(8000);
+  });
+});
+
+describe("buildResumeContextPreamble interrupted tool call", () => {
+  const TASK_ID = "resume-parent";
+  let seq = 0;
+
+  function logLine(content: unknown) {
+    seq += 1;
+    return {
+      createdAt: `2026-11-03T10:00:${String(seq).padStart(2, "0")}.000Z`,
+      content: JSON.stringify(content),
+    };
+  }
+  const toolUse = (id: string, name: string, input: Record<string, unknown>) =>
+    logLine({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name, input }] },
+    });
+  const toolResult = (id: string) =>
+    logLine({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+    });
+
+  async function preambleFor(logs: { createdAt: string; content: string }[]) {
+    seedTask({ id: TASK_ID, task: "Ship the fix", status: "failed" });
+    mockSessionLogs[TASK_ID] = logs;
+    const preamble = await buildResumeContextPreamble(API_URL, API_KEY, TASK_ID);
+    expect(preamble).toBeTruthy();
+    return preamble ?? "";
+  }
+
+  test("flags an unpaired last call before the task description", async () => {
+    const preamble = await preambleFor([
+      toolUse("toolu_1", "Bash", { command: "bun run check:local" }),
+      toolResult("toolu_1"),
+      toolUse("toolu_2", "Bash", { command: "git push origin fix/x" }),
+    ]);
+    const line =
+      "Interrupted: Bash git push origin fix/x may have landed. Check its effect before calling it again.";
+    expect(preamble).toContain(line);
+    expect(preamble.indexOf(line)).toBeGreaterThan(
+      preamble.indexOf("## Resuming Interrupted Task"),
+    );
+    expect(preamble.indexOf(line)).toBeLessThan(preamble.indexOf("### Original Task Description"));
+  });
+
+  test("does not flag a call that got its result", async () => {
+    const preamble = await preambleFor([
+      toolUse("toolu_1", "Bash", { command: "git push origin fix/x" }),
+      toolResult("toolu_1"),
+    ]);
+    expect(preamble).not.toContain("Interrupted:");
+  });
+
+  test("does not flag an unpaired read-only call", async () => {
+    const preamble = await preambleFor([
+      toolUse("toolu_1", "Bash", { command: "git push origin fix/x" }),
+      toolResult("toolu_1"),
+      toolUse("toolu_2", "Read", { file_path: "/workspace/src/a.ts" }),
+    ]);
+    expect(preamble).not.toContain("Interrupted:");
+  });
+
+  test("redacts a token in the interrupted call's args", async () => {
+    const fakeToken = `ghp_${"a".repeat(36)}`;
+    const preamble = await preambleFor([
+      toolUse("toolu_1", "Bash", {
+        command: `curl -H 'Authorization: token ${fakeToken}' https://api.github.com/x`,
+      }),
+    ]);
+    expect(preamble).toContain("Interrupted: Bash curl");
+    expect(preamble).not.toContain(fakeToken);
   });
 });
