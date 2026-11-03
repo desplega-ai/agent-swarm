@@ -5,9 +5,11 @@ import { join } from "node:path";
 import {
   AgentFsProvider,
   agentFsUploadTimeoutMs,
+  fileObjectFromHeaders,
   FilesError,
   LocalFsProvider,
   normalizeFilesError,
+  normalizeStoredKey,
   resetFileStorageProviderForTests,
   selectProvider,
 } from "../fs";
@@ -529,6 +531,46 @@ describe("normalizeFilesError", () => {
 
   test("keeps other errors on the Provider code", () => {
     expect(normalizeFilesError(new Error("socket closed"))).toMatchObject({ code: "Provider" });
+  });
+});
+
+describe("normalizeStoredKey", () => {
+  test("accepts a concrete relative path and strips leading slashes", () => {
+    expect(normalizeStoredKey("/tasks/report.md")).toBe("tasks/report.md");
+  });
+
+  test("rejects '.' and empty path segments", () => {
+    expect(() => normalizeStoredKey(".")).toThrow(FilesError);
+    expect(() => normalizeStoredKey("tasks//report.md")).toThrow(FilesError);
+    expect(() => normalizeStoredKey("tasks/./report.md")).toThrow(FilesError);
+  });
+
+  test("still rejects parent path segments", () => {
+    expect(() => normalizeStoredKey("../secret")).toThrow(FilesError);
+    expect(() => normalizeStoredKey("tasks/%2e%2e/x")).toThrow(FilesError);
+  });
+});
+
+describe("fileObjectFromHeaders", () => {
+  const scope = { taskId: "task-1", name: "notes.md" };
+
+  test("keeps a valid Content-Length as sizeBytes", () => {
+    const file = fileObjectFromHeaders(
+      "agent-fs",
+      scope,
+      new Headers({ "content-length": "42", "content-type": "text/plain" }),
+    );
+    expect(file.sizeBytes).toBe(42);
+    expect(file.contentType).toBe("text/plain");
+  });
+
+  test("omits sizeBytes for missing, malformed, negative, or non-finite Content-Length", () => {
+    for (const value of [null, "unknown", "-1", "NaN", "Infinity"]) {
+      const headers = new Headers();
+      if (value !== null) headers.set("content-length", value);
+      const file = fileObjectFromHeaders("agent-fs", scope, headers);
+      expect(file.sizeBytes).toBeUndefined();
+    }
   });
 });
 

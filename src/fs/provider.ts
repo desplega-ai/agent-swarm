@@ -117,8 +117,13 @@ export function normalizeStoredKey(key: string): string {
   if (!trimmed || trimmed.includes("\0")) {
     throw new FilesError("Provider", "Stored file key must be a non-empty path");
   }
-  if (trimmed.split("/").some(isParentSegment)) {
-    throw new FilesError("Provider", "Stored file key must not contain parent path segments");
+  // Match normalizeName: reject empty and "." segments so a stored key stays a
+  // concrete relative file path (not a directory-like or ambiguous path).
+  if (trimmed.split("/").some((part) => !part || part === "." || isParentSegment(part))) {
+    throw new FilesError(
+      "Provider",
+      "Stored file key must not contain empty or parent path segments",
+    );
   }
   return trimmed;
 }
@@ -156,13 +161,22 @@ export function fileObjectFromHeaders(
   overrides: Partial<FileObject> = {},
 ): FileObject {
   const sizeHeader = headers.get("content-length");
+  let sizeBytes: number | undefined;
+  if (sizeHeader) {
+    const parsed = Number(sizeHeader);
+    // Malformed / negative / non-finite Content-Length must not leak NaN into
+    // metadata consumers — omit the field instead (#2671).
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      sizeBytes = parsed;
+    }
+  }
   return {
     providerId,
     key: providerPath(scope),
     taskId: scope.taskId,
     name: scope.name,
     contentType: headers.get("content-type") ?? undefined,
-    sizeBytes: sizeHeader ? Number(sizeHeader) : undefined,
+    sizeBytes,
     etag: headers.get("etag") ?? undefined,
     sha256: headers.get("x-agent-fs-content-hash") ?? undefined,
     version: headers.get("x-agent-fs-version") ?? undefined,
