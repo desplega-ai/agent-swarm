@@ -769,6 +769,24 @@ function publicCardBase(req: IncomingMessage): string {
   return `${proto}://${host}`;
 }
 
+// An http(s) origin with no path, as nginx.conf's /__page_share/ location sends it.
+const DASHBOARD_ORIGIN_RE =
+  /^https?:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?$/i;
+
+/**
+ * The dashboard origin for a crawler view's og:url and canonical link: `APP_URL`
+ * (or `DASHBOARD_URL`) when set, else the origin the bot reached, which the
+ * dashboard's nginx proxy sends as `X-Swarm-Dashboard-Origin`, else the local
+ * dashboard. The header only changes links in this no-store response.
+ */
+function shareDashboardBase(req: IncomingMessage): string {
+  if (getConfiguredAppUrls().length > 0) return getAppBaseUrl();
+  const raw = req.headers["x-swarm-dashboard-origin"];
+  // A proxy chain's X-Forwarded-Host is a list; the first entry is the client's.
+  const origin = (Array.isArray(raw) ? raw[0] : raw)?.split(",")[0]?.trim();
+  return origin && DASHBOARD_ORIGIN_RE.test(origin) ? origin : getAppBaseUrl();
+}
+
 /**
  * Open Graph and Twitter tags for a public HTML page, unless the body sets its
  * own. Password and authed pages get none, so a crawler never sees their title
@@ -881,7 +899,8 @@ async function handlePublicPageOgImage(
  * `/p/:id/share`: what a link-preview bot gets for the dashboard link
  * `/pages/:id`. The dashboard's nginx image proxies crawler requests here (its
  * Vercel deployment has `api/page-share.ts`). Public pages only, no view bump,
- * `no-store`. The tags point at this API's card and at the dashboard link.
+ * `no-store`. The tags point at this API's card and at the dashboard link
+ * (see `shareDashboardBase`).
  */
 async function handlePublicPageShare(
   req: IncomingMessage,
@@ -898,7 +917,7 @@ async function handlePublicPageShare(
     description: clipText(page.description?.trim() || PAGE_FALLBACK_DESCRIPTION, 200),
     imageUrl: pageOgImageUrl(publicCardBase(req), page.id),
     imageAlt: page.title,
-    url: `${getAppBaseUrl()}/pages/${encodeURIComponent(page.id)}`,
+    url: `${shareDashboardBase(req)}/pages/${encodeURIComponent(page.id)}`,
   });
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",

@@ -9,11 +9,13 @@ name="ui-smoke-$$"
 shared="ui-smoke-share-$$"
 stub="ui-smoke-api-$$"
 net="ui-smoke-net-$$"
+baddns="ui-smoke-baddns-$$"
+badport="ui-smoke-badport-$$"
 key="SMOKE-DUMMY-KEY-$$"
 fail=0
 
 cleanup() {
-  docker rm -f "$name" "$shared" "$stub" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$shared" "$stub" "$baddns" "$badport" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -102,6 +104,15 @@ check "API: crawler on a private /pages/:id status" "$(status -A "$crawler" "$sh
 check "API: browser on /pages/:id gets the SPA" "$(og og:image "$shared_base/pages/abc123" | sed 's/.*\///')" "og-image.png"
 docker stop -t 1 "$stub" >/dev/null
 check "API down: crawler still gets the generic card" "$(og og:image -A "$crawler" "$shared_base/pages/abc123" | sed 's/.*\///')" "og-image.png"
+
+# Whatever SWARM_API_URL holds, the dashboard starts: nginx resolves the API per request.
+baddns_base=$(run_ui "$baddns" -e SWARM_API_URL="http://no-such-api.invalid:3013")
+check "unresolvable API host: dashboard starts" "$(status "$baddns_base/healthz")" "200"
+check "unresolvable API host: crawler gets the generic card" "$(og og:image -A "$crawler" "$baddns_base/pages/abc123" | sed 's/.*\///')" "og-image.png"
+badport_base=$(run_ui "$badport" -e SWARM_API_URL="http://api.example.test:99999")
+check "out-of-range API port: dashboard starts" "$(status "$badport_base/healthz")" "200"
+check "out-of-range API port logged" "$(docker logs "$badport" 2>&1 | grep -c "port '99999' is out of range" || true)" "1"
+check "out-of-range API port: crawler gets the generic card" "$(og og:image -A "$crawler" "$badport_base/pages/abc123" | sed 's/.*\///')" "og-image.png"
 
 check "nosniff" "$(header x-content-type-options "$base/")" "nosniff"
 check "referrer policy" "$(header referrer-policy "$base/")" "no-referrer"
