@@ -10,6 +10,7 @@ import {
   markSlackRelayDelivered,
   setSlackMessageTracking,
 } from "../be/db";
+import { bindLoopPath } from "../be/event-loop-lag";
 import type { AgentTask } from "../types";
 import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
@@ -676,7 +677,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     );
   }
 
-  watcherInterval = setInterval(async () => {
+  const watcherTick = async () => {
     // Prevent overlapping processing cycles
     if (isProcessing || !getSlackApp()) return;
     isProcessing = true;
@@ -848,7 +849,9 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     } finally {
       isProcessing = false;
     }
-  }, intervalMs);
+  };
+  // Name the entry point for the event-loop stall line.
+  watcherInterval = setInterval(bindLoopPath("slack.watcher.tick", watcherTick), intervalMs);
 
   console.log(`[Slack] Task watcher started (interval: ${intervalMs}ms)`);
 }

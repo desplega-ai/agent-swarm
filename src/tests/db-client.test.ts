@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBunSqliteClient, type DbClient, type DbExecutor } from "../be/db-client";
+import { withLoopPath } from "../be/event-loop-lag";
+import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
 let raw: Database;
 let client: DbClient;
@@ -452,12 +454,35 @@ describe("db-client slow statement warning", () => {
       expect(elapsedMs).toBeGreaterThan(100);
       const lines = slowWarnings(warn);
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toMatch(/blocked the event loop for \d+ms: \/\* padding/);
+      expect(lines[0]).toMatch(/blocked the event loop for \d+ms path=unknown: \/\* padding/);
       expect(lines[0]).not.toContain(PARAM_SECRET);
       expect(lines[0]).not.toContain("WITH RECURSIVE");
       expect(lines[0]?.endsWith("…")).toBe(true);
     } finally {
       warn.mockRestore();
+    }
+  });
+
+  test("scrubs a secret that straddles the SQL cutoff and a secret in the path", async () => {
+    const secret = "slowsqlSECRET0123456789abcdef"; // gitleaks:allow (synthetic test fixture)
+    registerVolatileSecret(secret, "SLOW_SQL_TEST_SECRET");
+    // "/* " plus 186 chars puts the secret at char 189, across the 200-char cut.
+    const sql = `/* ${"p".repeat(185)} ${secret} */ WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c WHERE ? IS NOT NULL`;
+    expect(sql.indexOf(secret)).toBeLessThan(200);
+    expect(sql.indexOf(secret) + secret.length).toBeGreaterThan(200);
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const startedAt = performance.now();
+      await withLoopPath(`route ${secret}`, () => client.get(sql, [SLOW_ROWS, PARAM_SECRET]));
+      expect(performance.now() - startedAt).toBeGreaterThan(100);
+      const lines = slowWarnings(warn);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toContain(secret.slice(0, 10));
+      expect(lines[0]).toContain("path=route [REDACTED:SLOW_SQL_TEST_SECRET]");
+      expect(lines[0]).toContain("[REDACTED:SLOW_SQL_TEST_SECRET]");
+    } finally {
+      warn.mockRestore();
+      clearVolatileSecretsForTesting();
     }
   });
 

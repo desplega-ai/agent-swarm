@@ -1,5 +1,6 @@
 import { MCP_OVERFLOW_NAMESPACE } from "../kv-overflow";
 import { sweepExpiredKvPrefix } from "./db";
+import { withLoopPath } from "./event-loop-lag";
 
 export const MCP_OVERFLOW_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -26,7 +27,7 @@ export async function runMcpOverflowSweep(now = Date.now()): Promise<number> {
 export function startMcpOverflowSweep(intervalMs = MCP_OVERFLOW_SWEEP_INTERVAL_MS): void {
   if (sweepTimer) return;
   sweepTimer = setInterval(() => {
-    void runMcpOverflowSweep();
+    void withLoopPath("mcp-overflow.sweep", () => runMcpOverflowSweep());
   }, intervalMs);
   if (typeof sweepTimer?.unref === "function") sweepTimer.unref();
 }

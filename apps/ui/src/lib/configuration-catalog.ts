@@ -1769,6 +1769,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "EVENT_LOOP_STALL_WARN_MS",
+        label: "Event-loop stall warning",
+        description:
+          "Log one [event-loop] stall line when a single macrotask blocks the API event loop for at least this long. The line names the entry point (HTTP route, MCP tool, timer) and its slowest database statements. Applies without a restart.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "1000",
+        placeholder: "1000",
+      },
+      {
         key: "ANONYMIZED_TELEMETRY",
         label: "Anonymized telemetry",
         description:

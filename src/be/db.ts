@@ -13907,16 +13907,34 @@ export async function sweepExpiredKv(namespace: string, now = Date.now()): Promi
 /** Delete expired entries across a namespace family (`prefix` and
  * `prefix:*`). Used by per-agent internal stores whose inactive owners may
  * never return to trigger a namespace-local sweep. */
-export async function sweepExpiredKvPrefix(prefix: string, now = Date.now()): Promise<number> {
+export async function sweepExpiredKvPrefix(
+  prefix: string,
+  now = Date.now(),
+  /** Rows per DELETE. The sweep yields the event loop between batches. */
+  batchSize = 500,
+): Promise<number> {
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [prefix, `${escaped}:%`, now],
-  );
-  return result.changes;
+  // Batched, with a macrotask yield between batches: one DELETE of every
+  // expired multi-MB overflow row blocked the event loop for seconds and
+  // starved the Slack socket ping. `now` is fixed for the whole sweep, so the
+  // batches delete the same row set as one statement. kv_entries is WITHOUT
+  // ROWID, so a batch selects the (namespace, key) primary key.
+  let removed = 0;
+  for (;;) {
+    const result = await getDbClient().run(
+      `DELETE FROM kv_entries
+          WHERE (namespace, key) IN (
+            SELECT namespace, key FROM kv_entries
+              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+                AND expires_at IS NOT NULL
+                AND expires_at <= ?
+              LIMIT ?)`,
+      [prefix, `${escaped}:%`, now, batchSize],
+    );
+    removed += result.changes;
+    if (result.changes < batchSize) return removed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 /**
