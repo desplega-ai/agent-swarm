@@ -25,6 +25,8 @@ import {
 } from "@/lib/company-profile";
 import type { NotificationDefinition } from "@/lib/notifications/definitions";
 
+/** The first step's button: the click emails the invite, so it says so. */
+const REQUEST_SUBMIT_LABEL = "Send me the Slack Connect invite";
 const KICKOFF_URL = "https://calendar.app.google/R1ngNwcjs4vrJDk96";
 const FREEMAIL_HINT = "Use the email of your company Slack, so the invite reaches your workspace.";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -39,12 +41,12 @@ const MOMENT_COPY: Record<
   task_failed: {
     icon: <AlertTriangle className="size-4" />,
     title: "A task failed. Want a hand?",
-    body: "Open a shared Slack channel, and we look at the failure with you. We reply within a business day.",
+    body: "We email a Slack Connect invite to the address below, then look at the failure with you there.",
   },
   first_workflow: {
     icon: <Workflow className="size-4" />,
     title: "Your first workflow ran",
-    body: "Show the team what you built, and ask what to automate next, in a shared Slack channel.",
+    body: "We email a Slack Connect invite to the address below. Show us what you built there.",
   },
 };
 
@@ -72,7 +74,7 @@ interface SentRequest {
 
 /**
  * The Slack Connect invite in the bell. Its copy follows the moment (a recent
- * failed task, a first workflow run, else the plain invite). The first Submit
+ * failed task, a first workflow run, else the plain invite). The first button
  * sends the request; an optional second set updates the same submission.
  */
 export function SlackConnectInviteCard({
@@ -137,7 +139,7 @@ export function SlackConnectInviteCard({
       required: true,
       label: "Work email",
       placeholder: "you@company.com",
-      description: `${emailLead ? `${emailLead} ` : ""}Submit sends it, your swarm name and any role you pick to Desplega.`,
+      description: `${emailLead ? `${emailLead} ` : ""}We email the invite here, and send your swarm name and any role you pick to Desplega Labs.`,
     },
     {
       id: "user_function",
@@ -206,6 +208,7 @@ export function SlackConnectInviteCard({
         initialValues={initialRequest}
         onChange={(values) => setEmail(String(values.email ?? "").trim())}
         onSubmit={submitRequest}
+        submitLabel={REQUEST_SUBMIT_LABEL}
         footer={
           <Button
             type="button"
