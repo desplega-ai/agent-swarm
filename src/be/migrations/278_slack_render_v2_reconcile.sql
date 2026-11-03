@@ -8,12 +8,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_tasks_deferred
   ON agent_tasks(id)
   WHERE deferredAt IS NOT NULL;
 
--- The missing-tree sweep is bounded to recent Slack tasks; this makes the
--- createdAt bound a range seek instead of a filter over every Slack task.
-CREATE INDEX IF NOT EXISTS idx_agent_tasks_slack_created
-  ON agent_tasks(createdAt)
-  WHERE source = 'slack' AND slackChannelId IS NOT NULL AND slackThreadTs IS NOT NULL;
-
 -- A tree is closed once the tree sweep has nothing left to do for it. The
 -- sweep reads only open trees. Any write that could give the thread work
 -- again (a task in the thread, an outcome card in the thread) reopens it

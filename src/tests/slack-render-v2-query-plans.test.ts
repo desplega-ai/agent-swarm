@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import {
+  claimTask,
   closeDb,
   createAgent,
   createTaskExtended,
@@ -10,6 +11,7 @@ import {
   getResolvableDeferralOutcomes,
   getSlackTreeMessages,
   initDb,
+  moveTaskFromBacklog,
   recordSlackMessage,
   updateSlackMessageRecord,
 } from "../be/db";
@@ -136,15 +138,29 @@ describe("slack render-v2 watcher queries", () => {
     expect(detail).not.toContain("idx_agent_tasks_status_last_updated");
   });
 
-  test("missing-tree scan reads only Slack tasks", async () => {
+  test("missing-tree scan reads only recently updated Slack tasks", async () => {
     const sql = await capturedSql(() => getSlackTasksMissingTree());
     const detail = plan(sql);
-    expect(detail).toContain("SEARCH task USING INDEX idx_agent_tasks_slack_created (createdAt>?)");
-    expect(detail).not.toContain("idx_agent_tasks_last_updated");
+    expect(detail).toContain(
+      "SEARCH task USING INDEX idx_agent_tasks_slack_last_updated (lastUpdatedAt>?)",
+    );
+    // The index order serves the ORDER BY too.
+    expect(detail).not.toContain("USE TEMP B-TREE");
+    expect(detail).not.toContain("idx_agent_tasks_last_updated ");
+  });
+
+  test("thread-scoped missing-tree query seeks the thread", async () => {
+    const sql = await capturedSql(() =>
+      getSlackTasksMissingTree({ thread: { channelId: "C_X", threadTs: "X.0" } }),
+    );
+    const detail = plan(sql, ["C_X", "X.0"]);
+    expect(detail).toContain(
+      "SEARCH task USING INDEX idx_agent_tasks_slack_thread_cover (slackChannelId=? AND slackThreadTs=?",
+    );
     expect(detail).not.toContain("idx_agent_tasks_slack_last_updated");
   });
 
-  test("missing-tree scan is bounded to the last 24 hours", async () => {
+  test("missing-tree scan is bounded to the last 24 hours of updates", async () => {
     const lead = await createAgent({ name: "Window Lead", isLead: true, status: "idle" });
     const make = async (label: string, ageMs: number) => {
       const task = await createTaskExtended(`ask ${label}`, {
@@ -153,8 +169,10 @@ describe("slack render-v2 watcher queries", () => {
         slackChannelId: `C_${label}`,
         slackThreadTs: `${label}.0`,
       });
-      getDb().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
-        new Date(Date.now() - ageMs).toISOString(),
+      const at = new Date(Date.now() - ageMs).toISOString();
+      getDb().run("UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?", [
+        at,
+        at,
         task.id,
       ]);
       return task;
@@ -170,11 +188,41 @@ describe("slack render-v2 watcher queries", () => {
     const later = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
     expect(await getSlackTasksMissingTree({ now: later })).toEqual([]);
 
-    // Thread scope narrows to one thread.
+    // Thread scope narrows to one thread and has no window.
     const scoped = await getSlackTasksMissingTree({
       thread: { channelId: "C_RECENT", threadTs: "RECENT.0" },
     });
     expect(scoped.map((task) => task.id)).toEqual([recent.id]);
+    const oldScoped = await getSlackTasksMissingTree({
+      thread: { channelId: "C_OLD", threadTs: "OLD.0" },
+    });
+    expect(oldScoped.map((task) => task.id)).toEqual([old.id]);
+  });
+
+  test("a Slack task assigned after 24 h in backlog still gets a tree", async () => {
+    const lead = await createAgent({ name: "Backlog Lead", isLead: true, status: "idle" });
+    const task = await createTaskExtended("ask BACKLOG", {
+      source: "slack",
+      slackChannelId: "C_BACKLOG",
+      slackThreadTs: "BACKLOG.0",
+    });
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    getDb().run(
+      "UPDATE agent_tasks SET status = 'backlog', agentId = NULL, createdAt = ?, lastUpdatedAt = ? WHERE id = ?",
+      [threeDaysAgo, threeDaysAgo, task.id],
+    );
+    // In backlog: no tree yet, by design.
+    expect((await getSlackTasksMissingTree()).map((t) => t.id)).not.toContain(task.id);
+
+    // Released and claimed: the status change bumps lastUpdatedAt.
+    expect(await moveTaskFromBacklog(task.id)).not.toBeNull();
+    expect(await claimTask(task.id, lead.id)).not.toBeNull();
+
+    expect((await getSlackTasksMissingTree()).map((t) => t.id)).toContain(task.id);
+    const scoped = await getSlackTasksMissingTree({
+      thread: { channelId: "C_BACKLOG", threadTs: "BACKLOG.0" },
+    });
+    expect(scoped.map((t) => t.id)).toEqual([task.id]);
   });
 
   test("deferral resolution returns the latest terminal wake of each open chain", async () => {

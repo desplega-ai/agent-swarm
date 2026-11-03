@@ -1611,32 +1611,47 @@ export async function getInProgressSlackTasks(): Promise<AgentTask[]> {
 const SLACK_MISSING_TREE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Slack tasks created in the last 24 h (and since render-v2 activation) whose
- * thread has no tree row yet. The window keeps the per-tick scan to recent
- * tasks: idx_agent_tasks_slack_created turns it into a range seek. INDEXED BY:
- * without ANALYZE statistics the planner otherwise walks the lastUpdatedAt
- * index for the ORDER BY over every Slack task. A Slack task
- * that waits in backlog/unassigned for longer than the window gets no tree
- * from this sweep.
+ * Slack tasks (created since render-v2 activation) whose thread has no tree
+ * row yet.
  *
- * `thread` scopes the sweep to one thread (event-driven render).
+ * The full sweep reads only tasks updated in the last 24 h. The bound is on
+ * lastUpdatedAt, not createdAt: a task that waits in backlog/unassigned for
+ * days gets a fresh lastUpdatedAt when it leaves that status, so it re-enters
+ * the window exactly when it starts to need a tree. idx_agent_tasks_slack_last_updated
+ * makes the bound a range seek and also serves the ORDER BY. INDEXED BY:
+ * without ANALYZE statistics the planner otherwise picks a wider index.
+ *
+ * `thread` scopes the query to one thread (event-driven render). It seeks the
+ * thread through idx_agent_tasks_slack_thread_cover and has no time window,
+ * so an old task in that thread is never skipped.
  */
 export async function getSlackTasksMissingTree(
   options: { now?: Date; thread?: { channelId: string; threadTs: string } } = {},
 ): Promise<AgentTask[]> {
+  const thread = options.thread;
   const since = new Date(
     (options.now ?? new Date()).getTime() - SLACK_MISSING_TREE_WINDOW_MS,
   ).toISOString();
-  const thread = options.thread;
+  const scope = thread
+    ? {
+        index: "idx_agent_tasks_slack_thread_cover",
+        sql: "AND task.slackChannelId = ? AND task.slackThreadTs = ?",
+        params: [thread.channelId, thread.threadTs],
+      }
+    : {
+        index: "idx_agent_tasks_slack_last_updated",
+        sql: "AND task.lastUpdatedAt >= ?",
+        params: [since],
+      };
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT task.* FROM slack_render_v2_state state
-       CROSS JOIN agent_tasks task INDEXED BY idx_agent_tasks_slack_created
+       CROSS JOIN agent_tasks task INDEXED BY ${scope.index}
        WHERE state.id = 1
        AND task.source = 'slack'
        AND task.slackChannelId IS NOT NULL
        AND task.slackThreadTs IS NOT NULL
-       AND task.createdAt >= max(state.activated_at, ?)
-       ${thread ? "AND task.slackChannelId = ? AND task.slackThreadTs = ?" : ""}
+       ${scope.sql}
+       AND task.createdAt >= state.activated_at
        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
        AND NOT EXISTS (
          SELECT 1 FROM agent_tasks earlier
@@ -1653,7 +1668,7 @@ export async function getSlackTasksMissingTree(
        )
        ORDER BY task.lastUpdatedAt DESC
        LIMIT 200`,
-    thread ? [since, thread.channelId, thread.threadTs] : [since],
+    scope.params,
   );
   return rows.map(rowToAgentTask);
 }
