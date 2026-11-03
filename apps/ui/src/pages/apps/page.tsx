@@ -51,7 +51,7 @@ function storeView(view: AppsView) {
 
 /**
  * Catalog icon wins; a missing or unrecognized name falls back to the generic
- * app icon. The name comes from stored app data, so it is looked up as an own
+ * app icon (a valid color still applies). The name comes from stored app data, so it is looked up as an own
  * key only, and the color must be a `#RRGGBB` hex before it reaches `style`.
  */
 function resolveAppIcon(icon: AppIcon | null | undefined): {
@@ -63,7 +63,7 @@ function resolveAppIcon(icon: AppIcon | null | undefined): {
       ? AVATAR_ICON_CATALOG[icon.icon]
       : undefined;
   const color = icon?.color && /^#[0-9a-fA-F]{6}$/.test(icon.color) ? icon.color : undefined;
-  return { Icon: Icon ?? LayoutGrid, color: Icon ? color : undefined };
+  return { Icon: Icon ?? LayoutGrid, color };
 }
 
 function AppGlyph({ icon, className }: { icon: AppIcon | null | undefined; className?: string }) {
