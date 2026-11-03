@@ -414,6 +414,9 @@ export async function startSlackApp(): Promise<boolean> {
     console.log("[Slack] Bot connected via Socket Mode");
     void inboundDrain?.wake();
     await emitBuiltInIntegrationConnectedOnce("slack");
+    // Abandoned or stopped while telemetry was pending: a watcher started now
+    // would outlive the stop and leak its timer.
+    if (generation !== lifecycleGeneration) return false;
 
     // Start watching for task completions
     await startTaskWatcher();

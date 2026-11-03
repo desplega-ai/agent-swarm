@@ -634,6 +634,56 @@ describe("socket watchdog against a live Slack mock", () => {
       }
     });
   }, 30_000);
+  test("a start abandoned while connect telemetry is pending starts no watcher after shutdown", async () => {
+    const options = {
+      tickMs: 20,
+      downAfterMs: 50,
+      backoffBaseMs: 100,
+      backoffMaxMs: 200,
+      restartTimeoutMs: 500,
+    };
+    await withLiveSlack(options, async () => {
+      expect(_isTaskWatcherRunning()).toBe(true);
+      const errors: string[] = [];
+      const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      });
+      // Every later start waits at the gate in its connect telemetry, before
+      // startTaskWatcher() runs.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let emits = 0;
+      const realEmit = db.emitBuiltInIntegrationConnectedOnce;
+      const emitSpy = spyOn(db, "emitBuiltInIntegrationConnectedOnce").mockImplementation(
+        async (...args: Parameters<typeof realEmit>) => {
+          emits += 1;
+          await gate;
+          return realEmit(...args);
+        },
+      );
+      try {
+        setSlackConnectionState("disconnected");
+        // A watchdog restart reaches the telemetry, then runs out of time.
+        expect(await pollUntil(() => emits > 0, 5_000, 10)).toBe(true);
+        expect(
+          await pollUntil(() => errors.some((line) => line.includes("abandoned it")), 5_000, 10),
+        ).toBe(true);
+        await stopSlackApp();
+        expect(_isTaskWatcherRunning()).toBe(false);
+
+        // The telemetry settles after shutdown. No watcher starts.
+        release();
+        await Bun.sleep(100);
+        expect(_isTaskWatcherRunning()).toBe(false);
+      } finally {
+        release();
+        emitSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
+    });
+  }, 30_000);
 });
 
 /**
