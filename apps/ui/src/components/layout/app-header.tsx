@@ -4,6 +4,7 @@ import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
 import { MoonIcon } from "@/components/icons/moon";
 import { SunIcon } from "@/components/icons/sun";
+import { ImprovementHeaderButton } from "@/components/improvements/improvement-header-button";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SetupPill } from "@/components/onboarding/setup-pill";
 import { useOpenCommandMenu } from "@/components/shared/command-menu";
@@ -106,6 +107,7 @@ export function AppHeader() {
             {modKeyLabel()}K
           </Kbd>
         </Button>
+        <ImprovementHeaderButton />
         <NotificationBell />
         <ContextPanelToggle />
 

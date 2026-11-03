@@ -335,9 +335,9 @@ To rename a session, click the pencil next to the title, double-click the title,
 The conversation reads in turns. A turn starts at each message from a person.
 
 - Your messages show on the right, with no name. Other people's messages show on the left, with their name. Hover a message to show **Copy**.
-- The swarm's reply follows, with its time and a **Copy** button.
-- The work of the workers folds into one line, for example "Writer worked for 17m" or "2 workers worked for 26m". The line also counts retries and failures. While work runs, it shows who works and for how long.
-- Click the worker line to see each step, with its tries and its output. The timeline remembers which lines you opened.
+- The swarm's reply follows, with its time, a **Copy** button, and an **Open task** button. A **Worked for** line above the reply opens the lead's work.
+- Each worker step shows as one row: the agent, its status, one line of its outcome, and its time. Two or more steps sit under a group line, for example "2 workers · 5 steps", with a status count and the total time. A running step shows its live status.
+- Click a row to see the step's tries, its work, and its full outcome. In the work, click a tool line to see the command or input, the output, and the time.
 - When the session waits for an approval, a **Waiting for approval** line links to the approval request.
 - When the lead defers work and picks it up later, the turn splits into parts. Each part has its own reply and worker line.
 - **Handoffs**, in the meta line, shows the internal rows: follow-ups, deferred wake-ups, resumes, reroutes, and superseded tasks. The toggle shows only when the session has such rows.

@@ -1,6 +1,6 @@
 /**
  * Sessions surface — a task's final outcome: inline prose for a completed
- * turn, a tinted frame for failed / cancelled ones. Lives in its own module
+ * turn, a tinted frame for failed / cancelled / skipped ones. Lives in its own module
  * so `task-card.tsx`, `review-ack.tsx` and `session-timeline.tsx` can share
  * it without importing each other.
  */
@@ -13,10 +13,13 @@ import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
+import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
+import { ShowMore } from "@/components/shared/show-more";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { parseJsonOutput } from "@/lib/json-output";
+import { type TaskReason, taskReason } from "@/lib/task-reason";
 import { cn, normalizeNewlines } from "@/lib/utils";
 
 /**
@@ -33,35 +36,28 @@ export function TaskOutcome({
   task,
   fallbackLines,
   hideCopy = false,
+  clamp = false,
 }: {
   task: AgentTask;
   fallbackLines?: string[];
   /** Leave out the hover Copy of a completed output: the caller puts Copy elsewhere. */
   hideCopy?: boolean;
+  /** Clamp a long output behind "Show more" (a worker's outcome inside a turn). */
+  clamp?: boolean;
 }) {
   fallbackLines = fallbackLines ?? [];
-  if (
-    (task.status === "failed" || task.status === "cancelled") &&
-    task.failureReason &&
-    task.failureReason.trim().length > 0
-  ) {
-    return (
-      <OutcomeFrame
-        label={task.status === "cancelled" ? "Cancelled" : "Failure"}
-        text={task.failureReason}
-        tone="error"
-      />
-    );
-  }
+  const reason = taskReason(task);
+  if (reason) return <OutcomeFrame label={reason.label} text={reason.text} tone={reason.tone} />;
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     const json = parseJsonOutput(task.output);
     if (json) return <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />;
-    return (
+    const prose = (
       <OutcomeProse
         text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
         hideCopy={hideCopy}
       />
     );
+    return clamp ? <ShowMore>{prose}</ShowMore> : prose;
   }
   // The chain-of-thought above already covers active states — only fall
   // through to the cached summaryLines as a final fallback when nothing
@@ -79,7 +75,8 @@ export function TaskOutcome({
 }
 
 // Env-var names in inline code get a copy button; other inline code is unchanged.
-const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode };
+// Links to this swarm render as chips (`useSwarmLinkPlugins`).
+const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode, "swarm-link": SwarmLinkChip };
 
 /**
  * Successful output — renders inline as plain prose, no border. Hover surfaces
@@ -87,10 +84,13 @@ const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode };
  */
 function OutcomeProse({ text, hideCopy }: { text: string; hideCopy: boolean }) {
   const trimmed = text.trim();
+  const rehypePlugins = useSwarmLinkPlugins();
   return (
     <OutcomeCopyShell copyText={trimmed} hideCopy={hideCopy}>
       <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
-        <Streamdown components={STREAMDOWN_COMPONENTS}>{normalizeNewlines(trimmed)}</Streamdown>
+        <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
+          {normalizeNewlines(trimmed)}
+        </Streamdown>
       </div>
     </OutcomeCopyShell>
   );
@@ -147,18 +147,40 @@ function OutcomeCopyShell({
  * Tinted block — only used for failed/cancelled. Worth the chrome because the
  * negative state genuinely needs attention.
  */
-function OutcomeFrame({ label, text, tone }: { label: string; text: string; tone: "error" }) {
+// A skip is a decision, not an error: a muted frame and label, plain body text.
+const FRAME_TONE: Record<TaskReason["tone"], { frame: string; label: string; body: string }> = {
+  error: {
+    frame: "border-status-error/30 bg-status-error/5",
+    label: "text-status-error-strong",
+    body: "text-status-error-strong",
+  },
+  neutral: {
+    frame: "border-border bg-muted/30",
+    label: "text-muted-foreground",
+    body: "text-foreground/90",
+  },
+};
+
+function OutcomeFrame({
+  label,
+  text,
+  tone,
+}: {
+  label: string;
+  text: string;
+  tone: TaskReason["tone"];
+}) {
   const trimmed = text.trim();
   const { copied, copy } = useCopyToClipboard();
   return (
     <div
       className={cn(
         "rounded-md border px-3 py-2 mt-0.5 min-w-0 relative group/outcome",
-        tone === "error" ? "border-status-error/30 bg-status-error/5" : "",
+        FRAME_TONE[tone].frame,
       )}
     >
       <div className="flex items-center justify-between gap-2 mb-1">
-        <p className="text-[10px] uppercase tracking-wider font-mono text-status-error-strong">
+        <p className={cn("text-[10px] uppercase tracking-wider font-mono", FRAME_TONE[tone].label)}>
           {label}
         </p>
         <Tooltip>
@@ -176,7 +198,12 @@ function OutcomeFrame({ label, text, tone }: { label: string; text: string; tone
           <TooltipContent>{copied ? "Copied" : "Copy"}</TooltipContent>
         </Tooltip>
       </div>
-      <div className="text-xs min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full text-status-error-strong">
+      <div
+        className={cn(
+          "text-xs min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full",
+          FRAME_TONE[tone].body,
+        )}
+      >
         <Streamdown components={STREAMDOWN_COMPONENTS}>{normalizeNewlines(trimmed)}</Streamdown>
       </div>
     </div>

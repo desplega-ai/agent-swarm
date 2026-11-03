@@ -45,6 +45,7 @@ import { getSlackConnectionState } from "../slack/connection-state";
 import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { resolveAppUrl } from "./config-values";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -116,6 +117,12 @@ export const StatusIdentitySchema = z.object({
    * cloud installs can be sliced server-side.
    */
   org_id: z.string().nullable(),
+  /**
+   * The swarm's public dashboard URL (`APP_URL`, then `DASHBOARD_URL`, with
+   * swarm_config precedence). Null when neither is set. The dashboard reads
+   * links to it in agent output as its own. Absent on older APIs.
+   */
+  dashboard_url: z.string().nullable().optional(),
 });
 export type StatusIdentity = z.infer<typeof StatusIdentitySchema>;
 
@@ -334,7 +341,7 @@ export async function rollupCredStatusForProvider(provider: string): Promise<Cre
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 
-function buildIdentity(): StatusIdentity {
+function buildIdentity(dashboardUrl: string | null): StatusIdentity {
   const cloudRaw = process.env.SWARM_CLOUD;
   const hideRaw = process.env.SWARM_HIDE_CLOUD_PROMO;
   return {
@@ -345,6 +352,7 @@ function buildIdentity(): StatusIdentity {
     marketing_url: process.env.SWARM_MARKETING_URL?.trim() || null,
     hide_cloud_promo: hideRaw === "true" || hideRaw === "1",
     org_id: process.env.SWARM_ORG_ID?.trim() || null,
+    dashboard_url: dashboardUrl,
   };
 }
 
@@ -759,7 +767,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
   const instance = await getInstanceFeedbackSignals();
   return {
     runtime_pools: { enabled: isRuntimePoolsEnabled(), supervisor: runtimeSupervisorStatus() },
-    identity: buildIdentity(),
+    identity: buildIdentity(await resolveAppUrl()),
     setup,
     activity: { ...activity, leads_ready: readyLeads },
     agent_fs: {

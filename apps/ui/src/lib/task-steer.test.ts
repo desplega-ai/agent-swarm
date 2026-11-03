@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTaskStatus } from "@/api/types";
-import { canSteerSessionTask, canSteerTask } from "./task-steer";
+import { canSteerSessionTask, canSteerTask, sessionComposerTarget } from "./task-steer";
 
 const STATUSES: AgentTaskStatus[] = [
   "draft",
@@ -39,5 +39,41 @@ describe("canSteerSessionTask (Sessions)", () => {
     }
     expect(canSteerSessionTask(null)).toBe(false);
     expect(canSteerSessionTask(undefined)).toBe(false);
+  });
+});
+
+describe("sessionComposerTarget", () => {
+  const lead = (id: string, status: AgentTaskStatus, createdAt: string) => ({
+    id,
+    status,
+    isLeadTask: true,
+    createdAt,
+  });
+  const worker = (id: string, status: AgentTaskStatus, createdAt: string) => ({
+    id,
+    status,
+    isLeadTask: false,
+    createdAt,
+  });
+
+  test("a running lead turn wins over a newer delegated worker task", () => {
+    const chain = [
+      lead("root", "completed", "2026-10-30 09:00:00"),
+      lead("turn-2", "in_progress", "2026-10-30 09:05:00"),
+      worker("child", "in_progress", "2026-10-30 09:06:00"),
+    ];
+    expect(sessionComposerTarget(chain)?.id).toBe("turn-2");
+  });
+
+  test("with nothing live, the newest task is the follow-up parent", () => {
+    const chain = [
+      lead("root", "completed", "2026-10-30 09:00:00"),
+      worker("child", "completed", "2026-10-30 09:06:00"),
+    ];
+    expect(sessionComposerTarget(chain)?.id).toBe("child");
+  });
+
+  test("an empty chain has no target", () => {
+    expect(sessionComposerTarget([])).toBeNull();
   });
 });

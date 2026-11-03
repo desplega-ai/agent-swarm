@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v2.7.5",
+  "title": "API Reference v2.7.9",
   "description": "REST API reference for agent-swarm.dev",
   "root": true,
   "pages": [
@@ -23,6 +23,7 @@
     "fs",
     "favorites",
     "heartbeat",
+    "improvements",
     "inbox-state",
     "integrations",
     "kv",

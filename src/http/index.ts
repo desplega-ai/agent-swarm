@@ -33,6 +33,7 @@ import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-poo
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import { initBitbucket } from "../bitbucket";
@@ -93,6 +94,7 @@ import { handleFavorites } from "./favorites";
 import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
+import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
@@ -420,6 +422,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
+        () => handleImprovements(req, res, pathSegments, queryParams),
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
@@ -465,6 +468,7 @@ const detachRealtime = attachRealtimeTransport(httpServer);
 const { attachControllerTransport } = await import("./controllers-connect");
 const detachControllers = attachControllerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
+const taskAutoTitles = startTaskAutoTitleListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
   void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
     console.error("[rooms] Deletion failed:", scrubSecrets(String(error))),
@@ -474,6 +478,7 @@ globalState.__closeRealtime = () => {
   detachRealtime();
   detachControllers();
   stopWorkerNudges();
+  taskAutoTitles.stop();
   stopRoomDeletion();
 };
 globalState.__httpServer = httpServer;
@@ -905,6 +910,14 @@ httpServer
       })
       .catch((err) => {
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
+      });
+
+    // Normalize stored schema JSON so defaulted fields become optional.
+    // This repair never executes script source. It is idempotent and non-fatal.
+    import("../be/scripts/boot-args-schema")
+      .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
+      .catch((err) => {
+        console.error("[boot-args-schema] startup backfill failed (non-fatal):", err);
       });
 
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored

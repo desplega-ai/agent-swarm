@@ -1,4 +1,5 @@
 import { keepPreviousData } from "@tanstack/react-query";
+import { withinAllUsersScope } from "../../lib/all-users-scope";
 import type { CompositionManifest } from "../../lib/request-composition";
 
 /** A known session has no manifest yet: its worker manifest is due. */
@@ -43,7 +44,7 @@ export function requestCompositionQuery(
     queryFn: () => fetchManifests(taskId),
     enabled: !!taskId && opts.enabled,
     staleTime: Number.POSITIVE_INFINITY,
-    placeholderData: keepPreviousData,
+    placeholderData: withinAllUsersScope(keepPreviousData),
     refetchInterval: (query: { state: { data: CompositionManifest[] | undefined } }) =>
       compositionPollMs(query.state.data, opts.sessionIds, opts.live),
   };

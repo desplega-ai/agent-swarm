@@ -36,6 +36,8 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, `devin`, or `claude-managed` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
 | `TEMPLATE_REGISTRY_URL` | `https://templates.agent-swarm.dev` | |
+| `DESPLEGA_TELEMETRY_ENDPOINT` | `https://proxy.desplega.sh/v1/events` | Telemetry sink. A test knob, read once at boot and honoured only for https origins or http on loopback; reserved from `swarm_config` writes. The black-box suite points it at a mock so `telemetry.enabled` never leaves the machine. |
+| `CODEX_OAUTH_DEVICE_BASE_URL` | `https://auth.openai.com` | Codex device-login host. A test knob honoured only for a loopback http origin; reserved from `swarm_config` writes. The black-box suite fixes a free port at boot and binds its stand-in there. |
 
 `HARNESS_PROVIDER=codex` requires `OPENAI_API_KEY` **or** `~/.codex/auth.json` **or** ChatGPT OAuth via `codex-login`. ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 

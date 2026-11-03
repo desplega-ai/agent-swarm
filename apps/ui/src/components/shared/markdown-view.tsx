@@ -1,11 +1,12 @@
 import Editor from "@monaco-editor/react";
-import { createContext, type ReactNode, useContext } from "react";
-import { Streamdown } from "streamdown";
+import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
+import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import { CopyButton } from "./copy-button";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
+import { SwarmLinkChip, useSwarmLinkPlugins } from "./markdown-link-chip";
 
 // Returns prettified JSON text if `text` parses to an object/array, else null.
 function tryPrettyJson(text: string): string | null {
@@ -70,8 +71,16 @@ export function MonacoCodeBlock({
   const lineCount = value.split("\n").length;
   // Size to fit all content; the parent container (tooltip / card / collapsible)
   // already provides a scroll boundary via its own max-h + overflow-auto.
-  // Floor at 80 so a single-line snippet doesn't render a near-empty editor.
-  const height = Math.max(80, lineCount * MONACO_LINE_HEIGHT + MONACO_PADDING);
+  // The source line count is only the first guess: `wordWrap` turns a long
+  // line into several, so Monaco's measured content height replaces it.
+  // The guess floors at 80 so the first paint is not a sliver; once Monaco
+  // measures, the box fits the code (a 2-line diff gets no empty band), with
+  // a 36 px floor so a one-line block still holds the 24 px copy button.
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const height =
+    contentHeight !== null
+      ? Math.max(36, contentHeight)
+      : Math.max(80, lineCount * MONACO_LINE_HEIGHT + MONACO_PADDING);
   return (
     <div
       className={cn(
@@ -90,6 +99,9 @@ export function MonacoCodeBlock({
           readOnly: true,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
+          // No overview ruler on snippets: it drew a stray mark at the top right
+          // of short blocks. A `fill` editor scrolls, so it keeps its ruler.
+          ...(fill ? {} : { overviewRulerLanes: 0, overviewRulerBorder: false }),
           // Monaco's own scrollbars are disabled so the outer container is the
           // single source of scroll truth, except in `fill` mode, where the
           // editor owns its viewport and must scroll itself.
@@ -106,6 +118,11 @@ export function MonacoCodeBlock({
         }}
         height="100%"
         width="100%"
+        onMount={(editor) => {
+          if (fill) return;
+          setContentHeight(editor.getContentHeight());
+          editor.onDidContentSizeChange((event) => setContentHeight(event.contentHeight));
+        }}
       />
     </div>
   );
@@ -134,6 +151,8 @@ const STREAMDOWN_COMPONENTS = {
     return <>{children}</>;
   },
   a: MarkdownLink,
+  // Links to this swarm render as chips (`useSwarmLinkPlugins`).
+  "swarm-link": SwarmLinkChip,
 };
 
 /** The links one `MarkdownView` opens in the same tab (`sameTabHrefs`). */
@@ -167,6 +186,7 @@ export function MarkdownView({
   text,
   normalizeSoftBreaks = true,
   sameTabHrefs,
+  html = true,
 }: {
   text: string;
   /**
@@ -183,6 +203,12 @@ export function MarkdownView({
    * task page's task id links. Every other link opens in a new tab.
    */
   sameTabHrefs?: ReadonlySet<string>;
+  /**
+   * Render HTML tags in the text (Streamdown's `raw` rehype plugin). Pass
+   * `false` for text a person typed, where `Promise<void>` or `<TaskCard>` is
+   * prose: the tags then show as written instead of vanishing.
+   */
+  html?: boolean;
 }) {
   const pretty = tryPrettyJson(text);
   const body =
@@ -191,7 +217,17 @@ export function MarkdownView({
       : normalizeSoftBreaks
         ? normalizeNewlines(text)
         : text;
-  const markdown = <Streamdown components={STREAMDOWN_COMPONENTS}>{body}</Streamdown>;
+  const linkPlugins = useSwarmLinkPlugins();
+  const rehypePlugins = useMemo(
+    () =>
+      html ? linkPlugins : linkPlugins.filter((plugin) => plugin !== defaultRehypePlugins.raw),
+    [html, linkPlugins],
+  );
+  const markdown = (
+    <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
+      {body}
+    </Streamdown>
+  );
   if (!sameTabHrefs) return markdown;
   return <SameTabHrefs.Provider value={sameTabHrefs}>{markdown}</SameTabHrefs.Provider>;
 }

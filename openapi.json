@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.5",
+    "version": "2.7.9",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -153,7 +153,8 @@
               "completed",
               "failed",
               "cancelled",
-              "superseded"
+              "superseded",
+              "skipped"
             ]
           },
           "source": {
@@ -341,6 +342,9 @@
             "minLength": 1
           },
           "parentTaskId": {
+            "type": "string"
+          },
+          "dispatchedByTaskId": {
             "type": "string"
           },
           "claudeSessionId": {
@@ -3171,6 +3175,7 @@
               "task_released",
               "task_deferred_wait_woke",
               "task_follow_up_suppressed",
+              "task_follow_up_gate_shadow",
               "task_citation_check_refused",
               "channel_message",
               "service_registered",
@@ -3226,6 +3231,30 @@
           }
         }
       },
+      "PageThemeTokens": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "light": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "dark": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "light",
+          "dark"
+        ]
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -3278,6 +3307,19 @@
               "type": "string"
             }
           },
+          "theme": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "themeTokens": {
+            "$ref": "#/components/schemas/PageThemeTokens"
+          },
+          "designVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
           "viewCount": {
             "type": "integer",
             "minimum": 0,
@@ -3302,6 +3344,9 @@
           "contentType",
           "authMode",
           "body",
+          "theme",
+          "themeTokens",
+          "designVersion",
           "createdAt",
           "updatedAt"
         ]
@@ -3373,6 +3418,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "theme": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "themeTokens": {
+            "$ref": "#/components/schemas/PageThemeTokens"
+          },
+          "designVersion": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -3665,6 +3723,7 @@
           "url",
           "name",
           "clonePath",
+          "hooks",
           "createdAt",
           "lastUpdatedAt"
         ]
@@ -3677,9 +3736,7 @@
             "default": false
           }
         },
-        "default": {
-          "enabled": false
-        }
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -3809,6 +3866,9 @@
             "type": "string"
           },
           "requestedByUserId": {
+            "type": "string"
+          },
+          "sourceTaskId": {
             "type": "string"
           }
         },
@@ -10128,7 +10188,8 @@
                             "completed",
                             "failed",
                             "cancelled",
-                            "superseded"
+                            "superseded",
+                            "skipped"
                           ]
                         }
                       },
@@ -12066,7 +12127,7 @@
             }
           },
           "404": {
-            "description": "Agent not found",
+            "description": "Agent not found, or changedByAgentId names no agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -13674,7 +13735,8 @@
                           "type": "string"
                         },
                         "required": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "default": true
                         },
                         "description": {
                           "type": "string"
@@ -28757,7 +28819,7 @@
     "/api/models-catalog": {
       "get": {
         "summary": "Get the live model catalog for the picker-reachable providers",
-        "description": "Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
+        "description": "Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
         "tags": [
           "Pricing"
         ],
@@ -29892,6 +29954,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -30369,6 +30441,7 @@
     "/api/mcp-oauth/{mcpServerId}": {
       "delete": {
         "summary": "Revoke and delete the OAuth token for an MCP server",
+        "description": "Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.",
         "tags": [
           "MCP OAuth"
         ],
@@ -30817,6 +30890,12 @@
                           "type": "boolean"
                         },
                         "org_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "dashboard_url": {
                           "type": [
                             "string",
                             "null"
@@ -33918,7 +33997,7 @@
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
-        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
         "tags": [
           "Tasks"
         ],
@@ -34100,6 +34179,19 @@
             "required": false,
             "name": "includeTotal",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ],
+              "description": "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way."
+            },
+            "required": false,
+            "description": "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
+            "name": "scope",
+            "in": "query"
           }
         ],
         "responses": {
@@ -34163,7 +34255,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "source": {
@@ -34363,7 +34456,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "createdAt": {
@@ -35734,7 +35828,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "source": {
@@ -36020,7 +36115,8 @@
     },
     "/api/tasks/{id}/finish": {
       "post": {
-        "summary": "Mark task as completed or failed (runner endpoint)",
+        "summary": "Mark task as completed, failed, or skipped (runner endpoint)",
+        "description": "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
         "tags": [
           "Tasks"
         ],
@@ -36049,7 +36145,8 @@
                     "type": "string",
                     "enum": [
                       "completed",
-                      "failed"
+                      "failed",
+                      "skipped"
                     ]
                   },
                   "output": {
@@ -36132,7 +36229,7 @@
             }
           },
           "400": {
-            "description": "Invalid status",
+            "description": "Invalid status, or a skip without a reason",
             "content": {
               "application/json": {
                 "schema": {
@@ -36542,7 +36639,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -36819,6 +36917,51 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it."
+                  },
+                  "themeTokens": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "tokens",
+                          "css"
+                        ]
+                      },
+                      "light": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "dark": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "css": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: \"css\", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them."
+                  },
+                  "designVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2,
+                    "description": "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value."
                   }
                 },
                 "required": [
@@ -36858,6 +37001,18 @@
                     },
                     "app_url": {
                       "type": "string"
+                    },
+                    "ignoredTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored."
+                    },
+                    "designVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The design version of the new page: 2 unless the body set designVersion: 1."
                     }
                   },
                   "required": [
@@ -36865,14 +37020,15 @@
                     "key",
                     "version",
                     "api_url",
-                    "app_url"
+                    "app_url",
+                    "designVersion"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid body",
+            "description": "Invalid body, unknown theme, or invalid themeTokens",
             "content": {
               "application/json": {
                 "schema": {
@@ -37044,6 +37200,19 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "theme": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "themeTokens": {
+                            "$ref": "#/components/schemas/PageThemeTokens"
+                          },
+                          "designVersion": {
+                            "type": "integer",
+                            "minimum": 1
                           },
                           "viewCount": {
                             "type": "integer",
@@ -37244,6 +37413,51 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it."
+                  },
+                  "themeTokens": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "tokens",
+                          "css"
+                        ]
+                      },
+                      "light": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "dark": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "css": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: \"css\", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them."
+                  },
+                  "designVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2,
+                    "description": "Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value."
                   }
                 }
               }
@@ -37270,13 +37484,36 @@
                     "version": {
                       "type": "integer",
                       "minimum": 1
+                    },
+                    "ignoredTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored."
+                    },
+                    "designVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The design version the page has after the update. An omitted designVersion keeps the stored one, so an older page stays on 1."
                     }
                   },
                   "required": [
                     "id",
                     "key",
-                    "version"
+                    "version",
+                    "designVersion"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown theme or invalid themeTokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -48875,6 +49112,7 @@
       "post": {
         "operationId": "script_runs_internal_step_create",
         "summary": "Write a script run journal step",
+        "description": "Write-once per stepKey; a replay keeps the first journal entry and still answers 201.",
         "tags": [
           "Script Runs"
         ],
@@ -49279,6 +49517,9 @@
                   "outputSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "allowRedelegation": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -49338,7 +49579,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -49350,8 +49592,38 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent task failed, was cancelled, or was superseded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Blocked by the follow-up re-delegation guard",
             "content": {
               "application/json": {
                 "schema": {
@@ -51147,12 +51419,13 @@
               "enum": [
                 "mine",
                 "shared",
-                "tree"
+                "tree",
+                "all"
               ],
-              "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope."
+              "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree."
             },
             "required": false,
-            "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
+            "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
             "name": "scope",
             "in": "query"
           },
@@ -51252,7 +51525,8 @@
                                       "completed",
                                       "failed",
                                       "cancelled",
-                                      "superseded"
+                                      "superseded",
+                                      "skipped"
                                     ]
                                   },
                                   "source": {
@@ -51414,7 +51688,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "readState": {
@@ -52150,7 +52425,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
+            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56720,6 +56995,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A server with this name already exists in the same scope and owner (mcp_server_name_taken)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -59692,6 +59977,855 @@
         }
       }
     },
+    "/api/improvements": {
+      "get": {
+        "summary": "List product improvements",
+        "description": "Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvements and the switch state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "improvements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending_approval",
+                              "sending",
+                              "sent",
+                              "failed",
+                              "discarded"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "mcp",
+                              "api",
+                              "ui"
+                            ]
+                          },
+                          "requestedByAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "approvedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "approvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sentAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "proxyStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "proxyId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "proxyError": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "leakHints": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "text",
+                          "email",
+                          "status",
+                          "source",
+                          "requestedByAgentId",
+                          "approvedBy",
+                          "approvedAt",
+                          "sentAt",
+                          "proxyStatus",
+                          "proxyId",
+                          "proxyError",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "improvements"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Draft a product improvement, or send one as a person",
+        "description": "Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email"
+                  },
+                  "sendNow": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "ui",
+                      "api"
+                    ]
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A person's `sendNow` was approved and sent (see `status`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Draft stored as `pending_approval`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text or email, or `sendNow` without an email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not draft improvements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/improvements/{id}/approve": {
+      "post": {
+        "summary": "Approve and send a drafted improvement",
+        "description": "Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email",
+                    "description": "The approver's email, sent with the text."
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved. `status` is `sent`, or `failed` with the proxy status and error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is an agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already sent, sending or discarded, or improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/improvements/{id}/discard": {
+      "post": {
+        "summary": "Discard a drafted improvement",
+        "description": "A person may discard any pending or failed improvement. An agent may discard only a draft it requested.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is an agent that did not request this draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already sent or discarded, or improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fleet-benchmark": {
       "get": {
         "summary": "Compare this swarm with similar swarms",
@@ -59982,7 +61116,7 @@
       "put": {
         "operationId": "users_setRbacRoles",
         "summary": "Set a user's RBAC roles",
-        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.",
+        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.",
         "tags": [
           "Users"
         ],
@@ -60047,7 +61181,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to change roles",
+            "description": "Not allowed to change roles, or adding an operator-only role with a user token",
             "content": {
               "application/json": {
                 "schema": {
@@ -60139,6 +61273,9 @@
                         "verbs",
                         "roles"
                       ]
+                    },
+                    "sessionReadAll": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -60584,6 +61721,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A user with this email already exists (user_exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -60904,6 +62051,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -61387,6 +62544,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User not found",
             "content": {
@@ -61626,6 +62793,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -61912,6 +63089,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62604,6 +63791,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Target or source user not found",
             "content": {
@@ -62816,7 +64013,7 @@
             }
           },
           "400": {
-            "description": "Validation error or PK collision",
+            "description": "Validation error",
             "content": {
               "application/json": {
                 "schema": {
@@ -62835,8 +64032,28 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The (kind, externalId) identity is already linked (identity_taken)",
             "content": {
               "application/json": {
                 "schema": {
@@ -65436,6 +66653,16 @@
           },
           "400": {
             "description": "Cannot retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
             "content": {
               "application/json": {
                 "schema": {

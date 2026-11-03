@@ -44,12 +44,12 @@ import {
   ArrowRight,
   Bot,
   CheckCircle,
-  ExternalLink,
   Image as ImageIcon,
   Inbox,
   Info,
   Minus,
   MoreHorizontal,
+  RotateCw,
   SearchX,
   TrendingDown,
   TrendingUp,
@@ -94,6 +94,7 @@ import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { JsonViewer } from "@/components/shared/json-viewer";
 import { ListView, type ListViewMobileRow } from "@/components/shared/list-view";
+import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
 import { SearchBox } from "@/components/shared/search-box";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ChipButton } from "@/components/shared/suggestion-chips";
@@ -131,11 +132,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/searchable-select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -163,6 +166,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
@@ -189,6 +193,7 @@ import type {
   SelectOption,
   SpacingToken,
   swarmCatalog,
+  TableBulkAction,
   TableColumn,
   TableFilters,
   TableRowAction,
@@ -197,9 +202,57 @@ import type {
 } from "./catalog";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
+import {
+  cellHasControls,
+  isLinkColumn,
+  isPhoneControlColumn,
+  linkCell,
+  tipText,
+} from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { SchemaFormComponent } from "./schema-form";
+import { SmartLink } from "./smart-link";
+import {
+  activeFilterCount,
+  type ColumnFilterMode,
+  clearFilter,
+  columnFilterMode,
+  type FilterColumn,
+  filterPills,
+  filtersFromState,
+  isMutedValue,
+  narrowByColumnFilters,
+  setFilterText,
+  toFilterBoolean,
+  toggleFilterValue,
+} from "./table-filters";
+import {
+  type ColumnFilterTarget,
+  ColumnHeader,
+  createFilterStore,
+  FilterPills,
+  PhoneFilterButton,
+} from "./table-filters-ui";
+import {
+  applyRange,
+  headerCheckState,
+  hiddenSelectedCount,
+  pruneSelection,
+  selectionFromState,
+  setRowSelected,
+  toggleAllVisible,
+} from "./table-selection";
+import {
+  BulkActionBar,
+  createSelectionStore,
+  SELECT_COLUMN_ID,
+  SelectAllHeader,
+  SelectCell,
+  TableCheckbox,
+  useBulkRunner,
+} from "./table-selection-ui";
 import { useJsonRenderThemeAttr } from "./theme-scope";
+import { OverflowTip, Tip } from "./tip";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
 
@@ -337,12 +390,25 @@ function SentencePill({
 function WithHint({ hint, children }: { hint?: string; children: ReactNode }) {
   if (!hint) return children;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">{children}</span>
-      </TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
+    <Tip content={hint} className="inline-flex">
+      {children}
+    </Tip>
+  );
+}
+
+/**
+ * Middle-truncated text with the dashboard's tooltip carrying the full value
+ * while (and only while) it is cut. `MiddleTruncation` still sets a native
+ * `title`, so it is cleared here.
+ */
+function MiddleText({ text, className }: { text: string; className?: string }) {
+  const [cut, setCut] = useState(false);
+  return (
+    <Tip content={cut ? text : null} className="flex min-w-0 flex-1">
+      <MiddleTruncation className={className} title={undefined} onTruncatedChange={setCut}>
+        {text}
+      </MiddleTruncation>
+    </Tip>
   );
 }
 
@@ -361,11 +427,11 @@ function CopyCell({ value, middle }: { value: string; middle?: boolean }) {
       onKeyDown={stop}
     >
       {middle ? (
-        <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">{value}</MiddleTruncation>
+        <MiddleText text={value} className="min-w-0 flex-1 font-mono text-xs" />
       ) : (
-        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
+        <OverflowTip content={value} className="min-w-0 flex-1 truncate font-mono text-xs">
           {value}
-        </span>
+        </OverflowTip>
       )}
       <CopyValueButton value={value} label={`Copy ${value}`} size="icon-xs" />
     </span>
@@ -1231,6 +1297,7 @@ function minWidthForKind(kind: TableColumn["kind"]): number {
   switch (kind) {
     case "boolean":
     case "switch":
+    case "checkbox":
       return 85;
     case "number":
     case "duration":
@@ -1285,19 +1352,198 @@ function rowIdOf(row: Record<string, unknown>, field: string): string {
   return JSON.stringify(row);
 }
 
-/** Header label with a leading icon (AG Grid inner header component). */
-function IconHeader(params: { displayName: string; icon?: string }) {
+/**
+ * A column's `muted` value: a quiet dash where a pill would shout. The value
+ * stays reachable: a hover title and screen-reader text.
+ */
+function MutedValue({ text }: { text: string }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
-      <span className="ag-header-cell-text">{params.displayName}</span>
+    <span className="text-muted-foreground/60" title={text} data-testid="muted-value">
+      <span aria-hidden>—</span>
+      <span className="sr-only">{text}</span>
     </span>
   );
+}
+
+type CellPopoverConfig = NonNullable<TableColumn["popover"]>;
+
+// Tall enough for the 12 fields a popover can list; it scrolls when the viewport is shorter.
+const POPOVER_SIZE_CLASS = "w-80 overflow-auto";
+const POPOVER_POPOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-popover-content-available-height))]`;
+const POPOVER_HOVER_CLASS = `${POPOVER_SIZE_CLASS} max-h-[min(36rem,var(--radix-hover-card-content-available-height))]`;
+
+/** The popover's body: an optional heading, then the row fields rendered like a `DetailList`. */
+function CellPopoverBody({
+  popover,
+  row,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+}) {
+  const title = popover.title ? applyTemplate(popover.title, row).trim() : "";
+  return (
+    <div className="flex flex-col gap-3">
+      {title ? <p className="m-0 text-sm font-medium break-words">{title}</p> : null}
+      <DetailFieldsView fields={popover.fields as DetailListField[]} data={row} />
+    </div>
+  );
+}
+
+/**
+ * A click popover opened from its own button. It sits beside a cell's content
+ * (a link, a copy button) or under a phone row, so no control ever wraps
+ * another and a tap or Enter on the button always reaches it.
+ */
+function DetailsButton({
+  popover,
+  row,
+  label,
+  text,
+  className,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  /** Accessible name; says which column's details open. */
+  label: string;
+  /** Visible text next to the icon; omit for an icon-only button. */
+  text?: string;
+  className?: string;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-slot="cell-details"
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-sm text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+            text ? "min-h-8 px-2" : "size-6",
+            className,
+          )}
+        >
+          <Info aria-hidden className="size-3.5" />
+          {text}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className={POPOVER_POPOVER_CLASS} {...themeAttr}>
+        <CellPopoverBody popover={popover} row={row} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * A popover on a Table cell that lists fields of the cell's row, rendered like
+ * a `DetailList`. Hover (default) opens it on pointer rest or keyboard focus and
+ * lets the pointer move into it; `click` toggles it from a button. A cell that
+ * has its own controls (`interactive`) gets a separate details button beside
+ * the content instead of one that wraps it.
+ */
+function CellPopover({
+  popover,
+  row,
+  endAligned,
+  interactive,
+  label,
+  children,
+}: {
+  popover: CellPopoverConfig;
+  row: Record<string, unknown>;
+  endAligned: boolean;
+  interactive: boolean;
+  /** Column name, for the details button's accessible name. */
+  label: string;
+  children: ReactNode;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const triggerClass = cn(
+    "flex w-full min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+    endAligned && "justify-end",
+  );
+  const content = <CellPopoverBody popover={popover} row={row} />;
+  if (popover.trigger === "click") {
+    if (interactive) {
+      return (
+        <span className="flex w-full min-w-0 max-w-full items-center gap-1">
+          <span className={cn("flex min-w-0 flex-1", endAligned && "justify-end")}>{children}</span>
+          <DetailsButton popover={popover} row={row} label={`Details: ${label}`} />
+        </span>
+      );
+    }
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button type="button" className={cn(triggerClass, "cursor-pointer text-left")}>
+            {children}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className={POPOVER_POPOVER_CLASS} {...themeAttr}>
+          {content}
+        </PopoverContent>
+      </Popover>
+    );
+  }
+  return (
+    <HoverCard openDelay={300} closeDelay={120}>
+      <HoverCardTrigger asChild>
+        {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the hover card also opens on keyboard focus */}
+        <span tabIndex={0} className={triggerClass}>
+          {children}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className={POPOVER_HOVER_CLASS} {...themeAttr}>
+        {content}
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+/** Cell decorations from the column config: a popover with row fields, then a styled tooltip with one row field. */
+function CellExtras({
+  column,
+  row,
+  endAligned,
+  children,
+}: {
+  column: TableColumn;
+  row: Record<string, unknown>;
+  endAligned: boolean;
+  children: ReactNode;
+}) {
+  let node = children;
+  if (column.popover) {
+    node = (
+      <CellPopover
+        popover={column.popover}
+        row={row}
+        endAligned={endAligned}
+        interactive={cellHasControls(column)}
+        label={column.label ?? column.key}
+      >
+        {node}
+      </CellPopover>
+    );
+  }
+  const tip = column.tooltip ? tipText(row[column.tooltip]) : "";
+  if (tip) {
+    node = (
+      <Tip
+        content={tip}
+        className={cn("flex w-full min-w-0 max-w-full", endAligned && "justify-end")}
+      >
+        {node}
+      </Tip>
+    );
+  }
+  return node;
 }
 
 /** The phone row's status slot, rendered like the grid cell. */
 function statusNode(column: TableColumn, value: unknown): ReactNode {
   if (value === null || value === undefined || value === "") return undefined;
+  if (isMutedValue(column, value)) return undefined;
   const raw = String(value);
   if (column.kind === "status") return <StatusCell value={raw} tones={column.tones} />;
   return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
@@ -1310,6 +1556,9 @@ function statusNode(column: TableColumn, value: unknown): ReactNode {
  */
 const AUTO_HEIGHT_MAX_ROWS = 12;
 
+/** What the error callout's Retry runs when the author gave no `onRetry`: re-run the page's queries. */
+const DEFAULT_RETRY_CHAIN: ActionChain = [{ action: "app.refresh" }];
+
 // ─── Client-side search / filtering ─────────────────────────────────────────
 //
 // Honest at spike scale: the runtime already polls the whole (capped) row set
@@ -1321,13 +1570,6 @@ const AUTO_HEIGHT_MAX_ROWS = 12;
 function isFilterActive(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(isFilterActive);
   return value !== null && value !== undefined && value !== "";
-}
-
-function toFilterBoolean(cell: unknown): boolean {
-  if (typeof cell === "boolean") return cell;
-  if (typeof cell === "number") return cell !== 0;
-  if (typeof cell === "string") return cell === "true" || cell === "1";
-  return false;
 }
 
 /** Case-insensitive substring match over the string/number cells of the listed columns. */
@@ -1369,9 +1611,11 @@ function rowMatchesFilters(
 
 function TableComponent({ props }: { props: TableProps }) {
   const { execute } = useActions();
-  const { getSnapshot } = useStateStore();
+  const { state, get, set, getSnapshot } = useStateStore();
   const themeAttr = useJsonRenderThemeAttr();
   const [pendingRowAction, setPendingRowAction] = useState<PendingRowAction | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<number | null>(null);
+  const isMobile = useIsMobile();
 
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -1379,6 +1623,10 @@ function TableComponent({ props }: { props: TableProps }) {
   executeRef.current = execute;
   const snapshotRef = useRef(getSnapshot);
   snapshotRef.current = getSnapshot;
+  const getRef = useRef(get);
+  getRef.current = get;
+  const setRef = useRef(set);
+  setRef.current = set;
 
   const runChain = useCallback(
     async (chain: ActionChain | undefined, row: Record<string, unknown>, index: number) => {
@@ -1444,6 +1692,8 @@ function TableComponent({ props }: { props: TableProps }) {
         target.querySelector<HTMLButtonElement>("button")?.focus();
         return;
       }
+      // The selection checkbox is its own control: Enter must not open the row.
+      if (event.column.getColId() === SELECT_COLUMN_ID) return;
       // Enter on any other cell opens the row, like a click.
       const chain = propsRef.current.onRowClick as ActionChain | undefined;
       if (chain && event.data) void runChain(chain, event.data, event.rowIndex ?? 0);
@@ -1477,16 +1727,169 @@ function TableComponent({ props }: { props: TableProps }) {
     (props.filters ?? {}) as NonNullable<TableFilters>,
     JSON.stringify(props.filters ?? {}),
   );
-  const narrowing = search !== "" || Object.values(filters).some(isFilterActive);
+  const externalNarrowing = search !== "" || Object.values(filters).some(isFilterActive);
 
-  const rows = useMemo(() => {
-    if (!narrowing) return allRows;
+  const searchedRows = useMemo(() => {
+    if (!externalNarrowing) return allRows;
     return allRows.filter(
       (row) =>
         (search === "" || rowMatchesSearch(row, columnKeys, search)) &&
         rowMatchesFilters(row, filters),
     );
-  }, [allRows, narrowing, search, columnKeys, filters]);
+  }, [allRows, externalNarrowing, search, columnKeys, filters]);
+
+  // ── Built-in column filters (`filterable` / `columns[].filter`) ────────────
+  //
+  // Client state at `/ui/<id>/filters`, so other elements can read it. They
+  // stack on `search` / `filters`: a row must pass all three.
+  const stableColumns = useStableBySignature(columns, JSON.stringify(columns));
+  const filterId = typeof props.id === "string" && props.id !== "" ? props.id : null;
+  const filtersPath = `/ui/${filterId}/filters`;
+  const filterModes = useMemo(() => {
+    const modes = new Map<string, ColumnFilterMode>();
+    if (filterId === null) return modes;
+    for (const column of stableColumns) {
+      const mode = columnFilterMode(column, props.filterable === true);
+      if (mode) modes.set(column.key, mode);
+    }
+    return modes;
+  }, [filterId, stableColumns, props.filterable]);
+  const hasColumnFilters = filterModes.size > 0;
+  const filterColumns = useMemo(
+    () => new Map<string, FilterColumn>(stableColumns.map((column) => [column.key, column])),
+    [stableColumns],
+  );
+  const readCell = useCallback(
+    (row: Record<string, unknown>, column: FilterColumn) =>
+      column.format ? applyTemplate(column.format, row) : row[column.key],
+    [],
+  );
+  const filtersValue = hasColumnFilters ? getByPath(state, filtersPath) : undefined;
+  const columnFilters = useMemo(
+    () => filtersFromState(filtersValue, filterModes),
+    [filtersValue, filterModes],
+  );
+  const columnNarrowing = activeFilterCount(columnFilters) > 0;
+  const narrowing = externalNarrowing || columnNarrowing;
+
+  const { rows, facets } = useMemo(
+    () => narrowByColumnFilters(searchedRows, columnFilters, filterColumns, filterModes, readCell),
+    [searchedRows, columnFilters, filterColumns, filterModes, readCell],
+  );
+
+  const [filterStore] = useState(createFilterStore);
+  useEffect(() => {
+    filterStore.update({ filters: columnFilters, facets });
+  }, [filterStore, columnFilters, facets]);
+
+  // Seed the slot so `{ "$state": "/ui/<id>/filters" }` reads `{}`, not nothing.
+  useEffect(() => {
+    if (hasColumnFilters && getRef.current(filtersPath) === undefined) {
+      setRef.current(filtersPath, {});
+    }
+  }, [hasColumnFilters, filtersPath]);
+
+  // ── Row selection (`selectable` / `bulkActions`) ───────────────────────────
+  //
+  // Client state only: the row ids live at `/ui/<id>/selected`, so a click is
+  // never a server write and never shared with another viewer.
+  const selectionId = typeof props.id === "string" && props.id !== "" ? props.id : null;
+  const bulkActions = (props.bulkActions ?? []) as TableBulkAction[];
+  const selectable = selectionId !== null && (props.selectable === true || bulkActions.length > 0);
+  const selectionPath = `/ui/${selectionId}/selected`;
+  const selectionValue = selectable ? getByPath(state, selectionPath) : undefined;
+  const selected = useMemo(() => selectionFromState(selectionValue), [selectionValue]);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const visibleIds = useMemo(() => rows.map(rowId), [rows, rowId]);
+  const [selectionStore] = useState(createSelectionStore);
+  // Last row toggled: the fixed end of a shift-click range.
+  const anchorRef = useRef<string | null>(null);
+
+  // Runs one bulk action's chain against a frozen selection and clears the
+  // acted-on rows only when every step truly succeeded (see `useBulkRunner`).
+  const {
+    busy: bulkBusy,
+    busyRef: bulkBusyRef,
+    run: runBulkAction,
+  } = useBulkRunner({
+    actions: bulkActions,
+    selectionPath,
+    outcomePath: `/ui/${selectionId ?? ""}/bulkOutcome`,
+    execute: (binding) => executeRef.current(binding),
+    getSnapshot: () => snapshotRef.current(),
+    get: (path) => getRef.current(path),
+    set: (path, value) => setRef.current(path, value),
+    onSettled: () => {
+      anchorRef.current = null;
+    },
+  });
+
+  // Seed the slot so `{ "$state": "/ui/<id>/selected" }` reads `[]`, not nothing.
+  useEffect(() => {
+    if (selectable && getRef.current(selectionPath) === undefined) {
+      setRef.current(selectionPath, []);
+    }
+  }, [selectable, selectionPath]);
+
+  // Rows that left the data (a sync, a delete) cannot stay selected: a bulk
+  // chain would act on ids nobody can see. Waits out loading and errors, when
+  // `data` is not trustworthy.
+  // Not while a bulk chain runs: its steps read the selection, and a refetch
+  // between two steps must not shrink the ids the later ones act on.
+  const dataReady = Array.isArray(props.data) && !props.loading && !props.error;
+  useEffect(() => {
+    if (!selectable || !dataReady || bulkBusy || selected.length === 0) return;
+    const next = pruneSelection(selected, new Set(allRows.map(rowId)));
+    if (next !== selected) setRef.current(selectionPath, next);
+  }, [selectable, dataReady, bulkBusy, selected, allRows, rowId, selectionPath]);
+
+  useEffect(() => {
+    selectionStore.update({ selected, visibleIds, locked: bulkBusy });
+  }, [selectionStore, selected, visibleIds, bulkBusy]);
+
+  const clearSelection = useCallback(() => {
+    if (bulkBusyRef.current) return;
+    anchorRef.current = null;
+    setRef.current(`/ui/${propsRef.current.id}/selected`, []);
+  }, [bulkBusyRef]);
+
+  const requestBulkAction = useCallback(
+    (index: number) => {
+      const action = propsRef.current.bulkActions?.[index] as TableBulkAction | undefined;
+      if (!action) return;
+      if (!confirmConfigFor(action)) {
+        void runBulkAction(index);
+        return;
+      }
+      setPendingBulkAction(index);
+    },
+    [runBulkAction],
+  );
+
+  // ── Clearing filters ───────────────────────────────────────────────────────
+
+  /**
+   * Resets every filter the Table owns, plus the `clearState` paths (the
+   * `SearchInput` / `Select` feeding `search` / `filters`). A control that
+   * adopts external writes (SearchInput does) shows the cleared value.
+   */
+  const clearAllFilters = useCallback(() => {
+    if (propsRef.current.id) setRef.current(`/ui/${propsRef.current.id}/filters`, {});
+    for (const path of propsRef.current.clearState ?? []) {
+      if (path.startsWith("/ui/")) setRef.current(path, null);
+    }
+  }, []);
+  const clearableExternal = externalNarrowing && (props.clearState ?? []).length > 0;
+  const canClearFilters = columnNarrowing || clearableExternal;
+
+  const retry = useCallback(async () => {
+    const chain = (propsRef.current.onRetry as ActionChain | undefined) ?? DEFAULT_RETRY_CHAIN;
+    try {
+      await runChain(chain, {}, 0);
+    } catch {
+      // The runtime surfaces its own errors; the callout stays until data arrives.
+    }
+  }, [runChain]);
 
   // Distinguish "nothing here yet" from "your search hid everything".
   const narrowedToEmpty = narrowing && rows.length === 0 && allRows.length > 0;
@@ -1498,7 +1901,18 @@ function TableComponent({ props }: { props: TableProps }) {
     <EmptyState
       icon={SearchX}
       title={emptyMessage}
-      description="Clear a filter to see more rows."
+      description={
+        canClearFilters
+          ? `${allRows.length} ${allRows.length === 1 ? "row is" : "rows are"} hidden by the current filters.`
+          : "Change the search or filters to see more rows."
+      }
+      action={
+        canClearFilters ? (
+          <Button size="sm" variant="outline" onClick={clearAllFilters}>
+            Clear filters
+          </Button>
+        ) : undefined
+      }
     />
   ) : (
     <EmptyState
@@ -1507,6 +1921,58 @@ function TableComponent({ props }: { props: TableProps }) {
       description={emptyState?.body}
     />
   );
+
+  // With header filters the grid stays mounted at zero matches: the filter menu
+  // lives in its header, so replacing the grid would drop the input the user is
+  // typing in. The grid's own overlay says "no rows match"; this line sits under it.
+  const keepGridWhenNoMatch = narrowedToEmpty && hasColumnFilters;
+  const noMatchHint = (
+    <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-2 text-sm text-muted-foreground">
+      <span>
+        {allRows.length} {allRows.length === 1 ? "row is" : "rows are"} hidden by the current
+        filters.
+      </span>
+      {canClearFilters ? (
+        <Button size="sm" variant="outline" onClick={clearAllFilters}>
+          Clear filters
+        </Button>
+      ) : null}
+    </div>
+  );
+
+  // First load: no rows yet and a fetch in flight (skeleton). Refetch: rows are
+  // showing, so a slim bar runs and the rows stay exactly as they are.
+  const loadingNow = props.loading === true;
+  const firstLoad = loadingNow && allRows.length === 0 && !props.error;
+  // `loading` is first-load only for a query-bound table; `refreshing` (bound
+  // to `/queries/<name>/fetching`) carries the background fetches.
+  const fetchingNow = loadingNow || props.refreshing === true;
+  const refreshing = props.refreshing === true || (loadingNow && !firstLoad);
+  // A failed query with nothing loaded has no table to show: the callout is the state.
+  const errorOnly = Boolean(props.error) && allRows.length === 0;
+
+  const filterTargetFor = (column: TableColumn): ColumnFilterTarget | undefined => {
+    const mode = filterModes.get(column.key);
+    if (!mode) return undefined;
+    const pill = column.kind === "badge" || column.kind === "status";
+    return {
+      key: column.key,
+      label: column.label ?? column.key,
+      mode,
+      kind: column.kind,
+      // The list shows the same pill the cell does, so a value reads the same everywhere.
+      renderValue: pill
+        ? (value, label) =>
+            value === "" || isMutedValue(column, value) ? (
+              label
+            ) : column.kind === "status" ? (
+              <StatusCell value={value} tones={column.tones} />
+            ) : (
+              <StatusPill text={value} tone={badgeToneFor(column.tones, value)} />
+            )
+        : undefined,
+    };
+  };
 
   const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => {
     const template = column.format;
@@ -1542,10 +2008,13 @@ function TableComponent({ props }: { props: TableProps }) {
       type: endAligned ? "rightAligned" : undefined,
       // `cellClass` replaces the `rightAligned` type's own class, so keep it.
       cellClass: endAligned ? ["ag-right-aligned-cell", "tabular-nums"] : undefined,
-      tooltipField: column.tooltip,
-      headerComponentParams: catalogIcon(column.icon)
-        ? { innerHeaderComponent: IconHeader, icon: column.icon }
-        : undefined,
+      headerComponentParams: {
+        innerHeaderComponent: ColumnHeader,
+        icon: catalogIcon(column.icon) ? column.icon : undefined,
+        hint: column.hint,
+        store: filterModes.has(column.key) ? filterStore : undefined,
+        filter: filterTargetFor(column),
+      },
       // AG Grid's cell-data-type inference turns a boolean column into a disabled
       // checkbox renderer, which contradicts the documented `formatCell` contract
       // (yes / no text) and reads as a broken toggle. Opt every app column out of
@@ -1557,67 +2026,102 @@ function TableComponent({ props }: { props: TableProps }) {
         const value = params.value;
         const row = (params.data ?? {}) as Record<string, unknown>;
         const raw = value === null || value === undefined ? "" : String(value);
-        switch (kind) {
-          case "badge":
-            return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
-          case "status":
-            return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
-          case "user":
-          case "agent":
-            return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
-          case "date":
-          case "relative":
-            return raw ? <RelativeTimeCell value={value} /> : null;
-          case "progress":
-            return <ProgressCell value={value} max={column.max} />;
-          case "copy":
-            return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
-          case "switch": {
-            const chain = column.onChange as ActionChain | undefined;
+        const body = ((): ReactNode => {
+          if (kind !== "switch" && kind !== "checkbox" && isMutedValue(column, value)) {
+            return <MutedValue text={raw} />;
+          }
+          // `href` names a row field with the URL, so the cell shows its own text over it.
+          // A templated column reads the key's raw value: its cell value is the composed text.
+          if (isLinkColumn(column)) {
             return (
-              <Switch
-                checked={toFilterBoolean(value)}
-                disabled={!chain?.length}
-                aria-label={column.label ?? column.key}
-                onCheckedChange={(checked) =>
-                  void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0)
-                }
+              <SmartLink
+                // The popover already describes the row; a tooltip on the chip would stack on it.
+                noTip={Boolean(column.popover)}
+                cell={linkCell({
+                  value: template ? row[column.key] : value,
+                  row,
+                  href: column.href,
+                  linkLabel: column.linkLabel,
+                  text: column.href || template ? (params.valueFormatted ?? raw) : undefined,
+                })}
               />
             );
           }
-          case "link": {
-            const href = safeHttpUrl(value);
-            if (!href) return raw ? <span className="block min-w-0 truncate">{raw}</span> : null;
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-primary hover:underline"
-              >
-                <span className="min-w-0 truncate">{raw}</span>
-                <ExternalLink aria-hidden className="size-3 shrink-0" />
-              </a>
-            );
-          }
-          default: {
-            // AG Grid drops a plain value straight into the cell, which is a flex
-            // row — the text becomes an anonymous flex item, and `text-overflow`
-            // never applies to one, so long titles hard-clip mid-word. Wrapping
-            // the value in a real element gives the ellipsis something to bite on
-            // (and a native tooltip carrying the full text).
-            const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
-            if (!text) return null;
-            if (column.truncate === "middle") {
-              return <MiddleTruncation className="block w-full">{text}</MiddleTruncation>;
+          switch (kind) {
+            case "badge":
+              return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
+            case "status":
+              return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
+            case "user":
+            case "agent":
+              return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
+            case "date":
+            case "relative":
+              return raw ? <RelativeTimeCell value={value} /> : null;
+            case "progress":
+              return <ProgressCell value={value} max={column.max} />;
+            case "copy":
+              return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
+            case "switch":
+            case "checkbox": {
+              const chain = column.onChange as ActionChain | undefined;
+              const on = toFilterBoolean(value);
+              const toggle = (checked: boolean) =>
+                void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0);
+              if (kind === "checkbox") {
+                return (
+                  <TableCheckbox
+                    checked={on}
+                    disabled={!chain?.length}
+                    label={column.label ?? column.key}
+                    onToggle={() => toggle(!on)}
+                  />
+                );
+              }
+              return (
+                <Switch
+                  checked={on}
+                  disabled={!chain?.length}
+                  aria-label={column.label ?? column.key}
+                  onCheckedChange={toggle}
+                />
+              );
             }
-            return (
-              <span className="block w-full truncate" title={column.tooltip ? undefined : text}>
-                {text}
-              </span>
-            );
+            default: {
+              // AG Grid drops a plain value straight into the cell, which is a flex
+              // row — the text becomes an anonymous flex item, and `text-overflow`
+              // never applies to one, so long titles hard-clip mid-word. Wrapping
+              // the value in a real element gives the ellipsis something to bite on
+              // (and a tooltip carrying the full text while it is cut).
+              const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
+              if (!text) return null;
+              // A column tooltip or popover already speaks for the cell.
+              const hasOwnTip = Boolean(column.tooltip || column.popover);
+              if (column.truncate === "middle") {
+                return hasOwnTip ? (
+                  <MiddleTruncation className="block w-full" title={undefined}>
+                    {text}
+                  </MiddleTruncation>
+                ) : (
+                  <MiddleText text={text} className="block w-full" />
+                );
+              }
+              return hasOwnTip ? (
+                <span className="block w-full truncate">{text}</span>
+              ) : (
+                <OverflowTip content={text} className="block w-full truncate">
+                  {text}
+                </OverflowTip>
+              );
+            }
           }
-        }
+        })();
+        if (body === null) return null;
+        return (
+          <CellExtras column={column} row={row} endAligned={endAligned}>
+            {body}
+          </CellExtras>
+        );
       },
     };
   });
@@ -1695,7 +2199,37 @@ function TableComponent({ props }: { props: TableProps }) {
     });
   }
 
-  const columnDefs = useStableBySignature(builtColumnDefs, JSON.stringify([columns, rowActions]));
+  if (selectable) {
+    // First, pinned left: a leading checkbox column. The cell and the header
+    // read the selection from the store, so these defs stay stable across polls.
+    builtColumnDefs.unshift({
+      colId: SELECT_COLUMN_ID,
+      headerName: "",
+      width: 44,
+      minWidth: 44,
+      maxWidth: 44,
+      pinned: "left",
+      lockPinned: true,
+      lockPosition: true,
+      resizable: false,
+      sortable: false,
+      filter: false,
+      suppressMovable: true,
+      suppressSizeToFit: true,
+      suppressHeaderMenuButton: true,
+      headerComponent: SelectAllHeader,
+      headerComponentParams: { store: selectionStore },
+      cellRenderer: SelectCell,
+      cellRendererParams: { store: selectionStore },
+      cellClass: "json-render-select-cell",
+      headerClass: "json-render-select-header",
+    });
+  }
+
+  const columnDefs = useStableBySignature(
+    builtColumnDefs,
+    JSON.stringify([columns, rowActions, selectable, filterModes.size, [...filterModes]]),
+  );
   const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
   // Endless-scroll guard: unless the author decided, big row sets paginate.
   const paginated = props.pagination ?? rows.length > 200;
@@ -1713,6 +2247,11 @@ function TableComponent({ props }: { props: TableProps }) {
   const statusKey =
     mobileFields?.status ??
     columns.find((column) => column.kind === "status" || column.kind === "badge")?.key;
+  // An editable checkbox / switch column cannot be a line of card text: the
+  // phone list gives it a real control beside the row (see `controls` below).
+  const editableKeys = new Set(
+    columns.filter((column) => isPhoneControlColumn(column)).map((column) => column.key),
+  );
   const metaKeys: string[] = mobileFields
     ? [
         ...(mobileFields.subtitle ? [mobileFields.subtitle] : []),
@@ -1721,71 +2260,267 @@ function TableComponent({ props }: { props: TableProps }) {
           : mobileFields.meta
             ? [mobileFields.meta]
             : []),
-      ]
+      ].filter((key) => !editableKeys.has(key))
     : columns
         .map((column) => column.key)
-        .filter((key) => key !== titleKey && key !== statusKey)
+        .filter((key) => key !== titleKey && key !== statusKey && !editableKeys.has(key))
         .slice(0, 2);
   // Same text as the desktop cell: a templated column renders its `format`.
   const mobileCellText = (key: string, row: Record<string, unknown>): string => {
     const column = columnByKey.get(key);
+    if (column && isMutedValue(column, row[key])) return "";
     return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
+  };
+  const rowLabel = (row: Record<string, unknown>): string => {
+    const text = titleKey ? mobileCellText(titleKey, row) : "";
+    return text ? `Select ${text}` : "Select row";
+  };
+  filterStore.themeAttr = themeAttr as Record<string, string>;
+  filterStore.handlers = {
+    toggle: (key, value, checked) =>
+      setRef.current(
+        filtersPath,
+        toggleFilterValue(
+          filtersFromState(getRef.current(filtersPath), filterModes),
+          key,
+          value,
+          checked,
+        ),
+      ),
+    setText: (key, text) =>
+      setRef.current(
+        filtersPath,
+        setFilterText(filtersFromState(getRef.current(filtersPath), filterModes), key, text),
+      ),
+    clear: (key) =>
+      setRef.current(
+        filtersPath,
+        clearFilter(filtersFromState(getRef.current(filtersPath), filterModes), key),
+      ),
+    clearAll: clearAllFilters,
+  };
+  const pills = filterPills(columnFilters, stableColumns as FilterColumn[]);
+  const filterTargets = columns
+    .map(filterTargetFor)
+    .filter((target): target is ColumnFilterTarget => target !== undefined);
+  const showPhoneFilters = hasColumnFilters && isMobile && mobileMode === "list";
+
+  selectionStore.rowId = rowId;
+  selectionStore.rowLabel = rowLabel;
+  selectionStore.handlers = {
+    toggleRow: (id, checked, displayOrder) => {
+      if (bulkBusyRef.current) return;
+      const current = selectionFromState(getRef.current(selectionPath));
+      const next = displayOrder
+        ? applyRange(current, displayOrder, anchorRef.current, id, checked)
+        : setRowSelected(current, id, checked);
+      anchorRef.current = id;
+      setRef.current(selectionPath, next);
+    },
+    toggleAll: () => {
+      if (bulkBusyRef.current) return;
+      const current = selectionFromState(getRef.current(selectionPath));
+      setRef.current(selectionPath, toggleAllVisible(current, visibleIds));
+    },
+  };
+  // A link column leaves the meta text (it renders as a chip below) and a
+  // popover column gets a details button. Those actions cover every column of
+  // the table, not only the ones that show text: a PR column behind Owner and
+  // Date would otherwise be unreachable on a phone.
+  const metaTextKeys = metaKeys.filter((key) => {
+    const column = columnByKey.get(key);
+    return !column || !isLinkColumn(column);
+  });
+  // The row itself is one button when `onRowClick` is set, so links and popover
+  // buttons sit under it, never inside it. Hover cards do not open on touch, so
+  // every phone popover opens from a button, whatever its `trigger`.
+  const mobileExtras = (row: Record<string, unknown>): ReactNode => {
+    const items: ReactNode[] = [];
+    for (const column of columns) {
+      const key = column.key;
+      if (isLinkColumn(column)) {
+        const cell = linkCell({
+          value: row[column.key],
+          row,
+          href: column.href,
+          linkLabel: column.linkLabel,
+          text: column.href || column.format ? mobileCellText(key, row) : undefined,
+        });
+        if (cell.target || cell.label) {
+          items.push(
+            <span key={`link:${key}`} className="inline-flex min-w-0 max-w-full">
+              <SmartLink cell={cell} noTip={Boolean(column.popover)} />
+            </span>,
+          );
+        }
+      }
+      if (column.popover) {
+        items.push(
+          <DetailsButton
+            key={`details:${key}`}
+            popover={column.popover}
+            row={row}
+            label={`Details: ${column.label ?? column.key}`}
+            text="Details"
+          />,
+        );
+      }
+    }
+    return items.length > 0 ? items : undefined;
   };
   const mobileRow =
     mobileMode === "list"
-      ? (row: Record<string, unknown>): ListViewMobileRow => ({
+      ? (row: Record<string, unknown>, rowIndex: number): ListViewMobileRow => ({
+          check: selectable
+            ? {
+                checked: selectedSet.has(rowId(row)),
+                label: rowLabel(row),
+                disabled: bulkBusy,
+                onChange: () =>
+                  selectionStore.handlers.toggleRow(rowId(row), !selectedSet.has(rowId(row)), null),
+              }
+            : undefined,
           title: (titleKey ? mobileCellText(titleKey, row) : "") || "Untitled",
+          // No hover tooltip on a phone: show the whole title, never an ellipsis.
+          titleLines: "full",
           status: statusKey
             ? statusNode(
                 columnByKey.get(statusKey) ?? { key: statusKey, kind: "badge" },
                 row[statusKey],
               )
             : undefined,
-          meta: metaKeys.map((key) => mobileCellText(key, row)),
+          meta: metaTextKeys.map((key) => mobileCellText(key, row)),
+          controls: columns
+            .filter((column) => editableKeys.has(column.key))
+            .map((column) => {
+              const on = toFilterBoolean(row[column.key]);
+              const name = `${column.label ?? column.key}: ${mobileCellText(titleKey ?? "", row) || "row"}`;
+              const toggle = (checked: boolean) =>
+                void runChain(
+                  column.onChange as ActionChain,
+                  { ...row, [column.key]: checked },
+                  rowIndex,
+                );
+              return column.kind === "switch" ? (
+                <Switch key={column.key} checked={on} aria-label={name} onCheckedChange={toggle} />
+              ) : (
+                <TableCheckbox
+                  key={column.key}
+                  checked={on}
+                  label={name}
+                  onToggle={() => toggle(!on)}
+                />
+              );
+            }),
+          extras: mobileExtras(row),
         })
       : undefined;
 
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
     : undefined;
+  const confirmingBulk = pendingBulkAction === null ? undefined : bulkActions[pendingBulkAction];
+  const showMobileSelectAll = selectable && isMobile && mobileMode === "list" && rows.length > 0;
 
   return (
     // `min-w-0` lets the grid shrink below its column total inside flex/grid
     // parents so AG Grid owns the horizontal scroll instead of the card clipping it.
     <div className="flex min-w-0 flex-col gap-2" data-testid="json-render-table">
       {props.error ? (
-        <AlertCallout tone="error" icon={AlertCircle} title="Query failed">
+        <AlertCallout
+          tone="error"
+          icon={AlertCircle}
+          title="Query failed"
+          action={
+            <Button size="sm" variant="outline" disabled={fetchingNow} onClick={() => void retry()}>
+              <RotateCw className={cn("size-3.5", fetchingNow && "animate-spin")} aria-hidden />
+              {fetchingNow ? "Retrying…" : "Retry"}
+            </Button>
+          }
+        >
           {props.error}
+          {allRows.length > 0 ? " Showing the last rows that loaded." : null}
         </AlertCallout>
       ) : null}
-      <ListView
-        rows={rows}
-        label={props.emptyState?.title ?? "Rows"}
-        rowId={rowId}
-        columnDefs={columnDefs}
-        loading={props.loading ?? false}
-        emptyMessage={emptyMessage}
-        empty={empty}
-        selectedId={selectedId}
-        onRowClick={
-          hasRowClick
-            ? (row, index) => void runChain(onRowClickChain, row as Record<string, unknown>, index)
-            : undefined
-        }
-        mobileRow={mobileRow}
-        // Hug the content while the table is short (a 1-row filtered result
-        // shouldn't sit on a slab of dead space), then cap into a scroll region.
-        domLayout={hugsContent ? "autoHeight" : "normal"}
-        className={cn(
-          "json-render-grid",
-          hugsContent && rows.length > 0 && "ag-grid-hug",
-          !hugsContent && "h-[520px] flex-none",
-        )}
-        columnSizing="flex"
-        pagination={paginated}
-        rowHeight={props.density === "compact" ? 34 : undefined}
-        cellFocus={rowActions.length > 0 || hasRowClick}
-        onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
+      {showPhoneFilters || pills.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {showPhoneFilters ? (
+            <PhoneFilterButton
+              targets={filterTargets}
+              store={filterStore}
+              activeCount={pills.length}
+            />
+          ) : null}
+          <FilterPills
+            pills={pills}
+            onRemove={(key) => filterStore.handlers.clear(key)}
+            onClearAll={clearAllFilters}
+          />
+        </div>
+      ) : null}
+      {showMobileSelectAll ? (
+        <label className="flex min-h-11 items-center gap-3 px-4 text-sm text-muted-foreground">
+          <TableCheckbox
+            checked={headerCheckState(visibleIds, selectedSet)}
+            label="Select all rows"
+            disabled={bulkBusy}
+            onToggle={() => selectionStore.handlers.toggleAll()}
+          />
+          Select all
+        </label>
+      ) : null}
+      {errorOnly ? null : (
+        <ListView
+          rows={rows}
+          label={props.emptyState?.title ?? "Rows"}
+          rowId={rowId}
+          columnDefs={columnDefs}
+          loading={firstLoad}
+          refreshing={refreshing}
+          emptyMessage={emptyMessage}
+          empty={keepGridWhenNoMatch ? noMatchHint : empty}
+          keepGridWhenEmpty={keepGridWhenNoMatch}
+          selectedId={selectedId}
+          onRowClick={
+            hasRowClick
+              ? (row, index) =>
+                  void runChain(onRowClickChain, row as Record<string, unknown>, index)
+              : undefined
+          }
+          mobileRow={mobileRow}
+          // Hug the content while the table is short (a 1-row filtered result
+          // shouldn't sit on a slab of dead space), then cap into a scroll region.
+          domLayout={hugsContent ? "autoHeight" : "normal"}
+          className={cn(
+            "json-render-grid",
+            hugsContent && rows.length > 0 && "ag-grid-hug",
+            !hugsContent && "h-[520px] flex-none",
+          )}
+          columnSizing="flex"
+          pagination={paginated}
+          rowHeight={props.density === "compact" ? 34 : undefined}
+          cellFocus={rowActions.length > 0 || hasRowClick}
+          onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
+        />
+      )}
+      {selectable && selected.length > 0 ? (
+        <BulkActionBar
+          count={selected.length}
+          hidden={hiddenSelectedCount(selected, visibleIds)}
+          actions={bulkActions}
+          busy={bulkBusy}
+          onRun={requestBulkAction}
+          onClear={clearSelection}
+        />
+      ) : null}
+      <ChainConfirmDialog
+        action={confirmingBulk ? withSelectionCount(confirmingBulk, selected.length) : undefined}
+        onCancel={() => setPendingBulkAction(null)}
+        onConfirm={() => {
+          const index = pendingBulkAction;
+          setPendingBulkAction(null);
+          if (index !== null) void runBulkAction(index);
+        }}
       />
       <ChainConfirmDialog
         action={confirmingAction}
@@ -1800,6 +2535,19 @@ function TableComponent({ props }: { props: TableProps }) {
       />
     </div>
   );
+}
+
+/**
+ * A bulk action with the selection size added to its confirm copy, so the
+ * dialog always says how many rows it is about to touch.
+ */
+function withSelectionCount(action: TableBulkAction, count: number): TableBulkAction {
+  const copy = confirmConfigFor(action) ?? {};
+  const scope = `Applies to ${count} selected ${count === 1 ? "row" : "rows"}.`;
+  return {
+    ...action,
+    confirm: { ...copy, description: copy.description ? `${copy.description} ${scope}` : scope },
+  };
 }
 
 /**
@@ -2283,6 +3031,26 @@ function DrawerActionsFooter({ actions }: { actions: DrawerAction[] }) {
   );
 }
 
+// ─── Markdown ───────────────────────────────────────────────────────────────
+
+const MARKDOWN_COMPONENTS = { "swarm-link": SwarmLinkChip };
+
+/**
+ * The `Markdown` block. Links to a GitHub PR / issue / commit / repo, a
+ * dashboard page or an agent-fs file render as the dashboard's link chips, the
+ * same as agent output in a session; `[text](url)` keeps its text.
+ */
+function MarkdownBlock({ content }: { content: string }) {
+  const rehypePlugins = useSwarmLinkPlugins();
+  return (
+    <div className="prose-doc min-w-0 text-foreground">
+      <Streamdown rehypePlugins={rehypePlugins} components={MARKDOWN_COMPONENTS}>
+        {content}
+      </Streamdown>
+    </div>
+  );
+}
+
 // ─── DetailList ─────────────────────────────────────────────────────────────
 
 /** A JSON-ish field value as a tree: objects as-is, a JSON string parsed. */
@@ -2300,10 +3068,29 @@ function jsonFieldData(value: unknown): unknown {
  * (status chip, person, relative time, copy). `code` gets a monospace block;
  * `json` the collapsible `JsonViewer` tree.
  */
-function DetailFieldValue({ field, value }: { field: DetailListField; value: unknown }) {
+function DetailFieldValue({
+  field,
+  value,
+  data,
+}: {
+  field: DetailListField;
+  value: unknown;
+  /** The record the field reads, for `href`. */
+  data?: Record<string, unknown>;
+}) {
   const raw = value === null || value === undefined ? "" : String(value);
   const dash = <span className="text-muted-foreground">—</span>;
   switch (field.kind) {
+    case "link": {
+      const cell = linkCell({
+        value,
+        row: data ?? {},
+        href: field.href,
+        linkLabel: field.linkLabel,
+        text: field.href ? raw : undefined,
+      });
+      return cell.target || cell.label ? <SmartLink cell={cell} /> : dash;
+    }
     case "badge":
       return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : dash;
     case "status":
@@ -2374,13 +3161,32 @@ function DetailListComponent({ props }: { props: DetailListComponentProps }) {
   }
 
   return (
-    <DefinitionList
+    <DetailFieldsView
+      fields={fields}
+      data={data}
       className={cn(props.columns === 2 && "grid grid-cols-1 gap-3 space-y-0 sm:grid-cols-2")}
-      data-testid="json-render-detail-list"
-    >
-      {fields.map((field) => (
-        <InfoRow key={field.key} label={field.label ?? field.key}>
-          <DetailFieldValue field={field} value={data[field.key]} />
+      testId="json-render-detail-list"
+    />
+  );
+}
+
+/** Label/value rows for the fields of one record: the body of `DetailList` and of a Table cell popover. */
+function DetailFieldsView({
+  fields,
+  data,
+  className,
+  testId,
+}: {
+  fields: DetailListField[];
+  data: Record<string, unknown>;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <DefinitionList className={className} data-testid={testId}>
+      {fields.map((field, index) => (
+        <InfoRow key={`${index}:${field.key}`} label={field.label ?? field.key}>
+          <DetailFieldValue field={field} value={data[field.key]} data={data} />
         </InfoRow>
       ))}
     </DefinitionList>
@@ -2576,7 +3382,11 @@ function KanbanComponent({ props }: { props: KanbanComponentProps }) {
                         key={field.key}
                       >
                         <span className="text-muted-foreground">{field.label ?? field.key}</span>
-                        <DetailFieldValue field={field} value={item.row[field.key]} />
+                        <DetailFieldValue
+                          field={field}
+                          value={item.row[field.key]}
+                          data={item.row}
+                        />
                       </div>
                     ))}
                   </div>
@@ -2748,7 +3558,21 @@ const CARD_GRID_SKELETON_COUNT = 3;
 const CARD_GRID_DEFAULT_COLUMNS: GridColumns = { base: 1, sm: 2, md: 3 };
 
 /** One `CardGrid.fields[]` entry rendered into the `·`-joined meta line, or `null` to skip it (empty value). */
-function cardGridMetaItem(field: CardGridField, value: unknown): ReactNode | null {
+function cardGridMetaItem(
+  field: CardGridField,
+  value: unknown,
+  row: Record<string, unknown>,
+): ReactNode | null {
+  if (field.kind === "link") {
+    const cell = linkCell({
+      value,
+      row,
+      href: field.href,
+      linkLabel: field.linkLabel,
+      text: field.href ? cardGridCapText(formatValue(undefined, value)) : undefined,
+    });
+    return cell.target || cell.label ? <SmartLink cell={cell} /> : null;
+  }
   if (field.kind === "badge") {
     const raw = value === null || value === undefined ? "" : cardGridCapText(String(value));
     return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : null;
@@ -2861,7 +3685,7 @@ function CardGridComponent({ props }: { props: CardGridComponentProps }) {
           const metaItems = fields
             .map((field, itemIndex) => ({
               key: `${itemIndex}:${field.key}`,
-              node: cardGridMetaItem(field, row[field.key]),
+              node: cardGridMetaItem(field, row[field.key], row),
             }))
             .filter((item): item is { key: string; node: ReactNode } => item.node !== null);
           const activate = clickable ? () => void runChain(onClick, row, index) : undefined;
@@ -2892,12 +3716,11 @@ function CardGridComponent({ props }: { props: CardGridComponentProps }) {
             >
               {props.imageKey ? <CardGridImage value={row[props.imageKey]} /> : null}
               <CardContent className="flex flex-col gap-1.5 p-4">
-                <p
-                  className="m-0 line-clamp-2 text-sm font-medium text-foreground"
-                  title={titleText}
-                >
-                  {titleText}
-                </p>
+                <OverflowTip content={titleText} className="block">
+                  <p className="m-0 line-clamp-2 text-sm font-medium text-foreground">
+                    {titleText}
+                  </p>
+                </OverflowTip>
                 {metaItems.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     {metaItems.map((item, itemIndex) => (
@@ -3210,11 +4033,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,
-  Markdown: ({ props }) => (
-    <div className="prose-doc min-w-0 text-foreground">
-      <Streamdown>{props.content}</Streamdown>
-    </div>
-  ),
+  Markdown: ({ props }) => <MarkdownBlock content={props.content} />,
   Container: ({ props, children }) => {
     const direction = props.direction ?? "column";
     const gap = props.gap ?? "md";

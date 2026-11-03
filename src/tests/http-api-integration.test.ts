@@ -1981,11 +1981,11 @@ describe("Workflows", () => {
     expect(nodeB.config.template).toBe("Changed");
   });
 
-  test("PATCH /api/workflows/:id/nodes/:nodeId — 400 on non-existent node", async () => {
+  test("PATCH /api/workflows/:id/nodes/:nodeId — 404 on non-existent node", async () => {
     const { status, body } = await patch(`/api/workflows/${workflowId}/nodes/nope`, {
       body: { label: "x" },
     });
-    expect(status).toBe(400);
+    expect(status).toBe(404);
     expect(body.error).toContain("non-existent");
   });
 

@@ -18,7 +18,8 @@ export const registerTrackerUnlinkTool = (server: McpServer) => {
     },
     async (args, _requestInfo, _meta) => {
       try {
-        await deleteTrackerSync(args.syncId);
+        const removed = await deleteTrackerSync(args.syncId);
+        if (!removed) return toolErr(`No tracker mapping ${args.syncId}`);
         return toolOk(`Removed tracker sync mapping ${args.syncId}.`);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";

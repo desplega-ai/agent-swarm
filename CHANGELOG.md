@@ -6,6 +6,88 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.9] - 2026-11-03
+
+### Added
+- Improvements: agents draft product improvements for Desplega with the `submit-improvement` MCP tool or `POST /api/improvements`; only a person can approve and send one. `IMPROVEMENTS_ENABLED=false` turns it off (#2632).
+- RBAC: a built-in auditor role that grants the All users session scope (#2631).
+- Apps: Table row selection and bulk actions (#2655); column filters, loading and error states, and muted values (#2656); smart links, tooltips and cell popovers for tables, detail lists and cards (#2653).
+- UI: a one-time GitHub star nudge after the fifth dashboard prompt (#2652).
+
+### Changed
+- agent-fs pins bumped 0.18.14 -> 0.18.15 (server image, worker CLI, skill tag, `@desplega.ai/agent-fs-just-bash`).
+- Performance: independent awaits on the worker, hook and Slack hot paths now run in parallel (#2642).
+- Docker: bumped pi, ACP SDK, amp and kiro (#2636, #2649); agent-browser 0.41.1 (#2637).
+- Docs: corrected the documented Codex default model (#2626), removed the obsolete harness verification TTL setting (#2643), added the 2026-11-02 release notes (#2634) and synced the TLA+ specs (#2639).
+
+### Fixed
+- Sessions: delegated tasks are grouped under the turn that dispatched them, through a new `dispatchedByTaskId` column (#2654).
+- Onboarding: swarm setup links are redacted and credentials are saved privately (#2650).
+- Codex: OAuth key suffixes are slot-unique (#2646), sparse OAuth slot availability is preserved (#2645), and `CONTEXT_MODE_DISABLED` is honored from the session env (#2638).
+
+### Removed
+- Runner: the obsolete YOLO mode (`--yolo` flag and `YOLO` env var); failed tasks are logged and the runner keeps polling (#2648).
+
+## [2.7.8] - 2026-11-02
+
+### Added
+- Tasks: a terminal `skipped` status. `store-progress status: "skipped"` with a one-line reason ends a task that is not the agent's to handle without posting to Slack or creating a lead follow-up; the trigger message gets `SLACK_REACTION_SKIPPED` (default `mute`) (#2571).
+- Sessions: an opt-in All users read scope (`scope=all` or the `X-Swarm-Session-Scope: all` header) for users holding the `session.read.all` grant (#2630).
+- E2E: a strict black-box coverage contract for every route, MCP tool and workflow node type, run by the merge gate (#2605).
+
+### Changed
+- Docs: model tier selection for tasks (#2629) and the heartbeat spec (#2622).
+- Evals: benchmark 1.0 published from the weekly run (#2621).
+- Docker: bumped amp and qwen (#2620).
+
+### Fixed
+- Tasks: an empty `outputSchema` (`{}`) means no schema, so workers no longer complete with the literal output `{}` (#2633).
+- Usage: pi and Codex usage and context windows are recorded correctly (#2618).
+- CLI: `claude-managed-setup` help documents `AGENT_SWARM_API_KEY` (#2627).
+
+## [2.7.7] - 2026-11-01
+
+### Added
+- Tasks: every new task gets a short display title from the cheapest configured model; `TASK_AUTO_TITLE_ENABLED` and `TASK_AUTO_TITLE_MODEL` control it (#2604).
+- Pages: a token-based design system (`designVersion` 2) with `theme` presets and `themeTokens` overrides on `create-page`, plus the `paper` app theme (#2607).
+- UI: simpler task creation with session drafts (#2609).
+- Follow-ups: `FOLLOW_UP_GATE_MODE=shadow` records a verifier verdict beside each follow-up of the schedules in `FOLLOW_UP_GATE_SCHEDULE_IDS`, without skipping or delaying it (#2599).
+
+### Changed
+- Seed: the default schedules drop `daily-workflow-health-audit` (its queries moved into `daily-status-report`), and `daily-swarm-update-check` now runs the new `swarm-update-check` script instead of an LLM task (#2612).
+- Merge gate: E2E is skipped on PRs it cannot see, and history checkouts are blobless (#2611).
+- agent-fs pins bumped to 0.18.14 (#2616).
+- Docker: bumped claude-code, opencode, amp and kiro (#2602, #2617).
+
+### Fixed
+- Database: queued writers no longer spin the event loop behind an external write lock such as a Litestream snapshot (#2614).
+- Pages: the page-session cookie is Secure, and localhost frame-ancestors fail closed, when `NODE_ENV` is unset (#2608, #2610).
+- Profile sync: an untouched profile file no longer overwrites a newer DB edit at session end or on self-edit (#2600).
+- Codex: the app-server launches on the gateway provider, so gateway turns no longer fail on a provider mismatch (#2606).
+- Tasks: small unfiltered task pages use the `lastUpdatedAt` index (#2615).
+- UI: session timelines show steering receipts (#2613).
+
+## [2.7.6] - 2026-10-31
+
+### Added
+- Slack: people can type `!leave` in a thread to make the swarm stop following it, with no agent turn needed (#2585).
+- Runtime pools: Docker pools can share one optional persistent cache across their runtimes, configured through the pool API (#2577).
+- Script runs: `ctx.step.agentTask` now applies the same follow-up re-delegation guard as `send-task`; migration 266 records the launching session's task (#2596).
+- UI: the Sessions page and task details share one transcript, with tool calls summarized per run and a live working timer (#2587).
+- UI: worker step rows, inline tool details and a single task details card; dev-only in-page review notes behind `DEV_NOTES=1` (#2595).
+
+### Changed
+- Performance: synchronous SQLite work (session visibility, task counts, memory GC and FTS reconcile) yields the API event loop instead of starving it (#2588).
+- Entrypoint: API readiness polling moved from shell into Bun, with a per-request timeout (#2581).
+- Worker image: claude-code 2.1.314, codex 0.166.0, opencode 2.2.3, amp, kiro 2.36.0, fx 0.0.16 and ACP SDK 2.2.0 (#2583, #2591).
+
+### Fixed
+- send-task: follow-up sessions can dispatch distinct next steps; the guard only blocks re-sending the same work (#2589).
+- Script runs: a step's `parentTaskId` now requires `task.parent.attach`, so a script cannot parent a step on a foreign task (#2597).
+- Runtime pools: built-in boxd environment settings are honored (#2594).
+- Task failure audit: model output limits are classified separately from credential errors (#2592).
+- UI: a follow-up composer reads the promoted task's status before reporting that it started (#2590).
+
 ## [2.7.5] - 2026-10-30
 
 ### Added

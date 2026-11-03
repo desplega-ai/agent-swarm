@@ -432,6 +432,121 @@ describe("self-test", () => {
     ]);
     expect(queries).toHaveLength(0);
     expect(counters.total).toBeUndefined();
+    // No fixtures configured: null, never a vacuous pass.
+    expect(kv["selftest:last"]).toMatchObject({ fixtures: [], fixturesOk: null });
+  });
+
+  const selftestEvent = {
+    tool: "store-progress",
+    args: { taskId: TASK_ID, status: "in_progress", progress: "comms-gate-selftest now" },
+    requestInfo: { callOrigin: "mcp" },
+  };
+  /** Controls answer as in the test above; fixture calls (judging_rules in state) get `fixtureScores`. */
+  const mockWithFixtures = (fixtureScores: (msg: string) => Record<string, number>) =>
+    mockJev((body) => {
+      const msg = String(body.state.agent_message);
+      if (body.state.judging_rules) {
+        const s = fixtureScores(msg);
+        const answers: Record<string, unknown> = {};
+        for (const id of Object.keys(body.questions)) answers[id] = { noul: s[id] ?? 1 };
+        return Response.json({ answers });
+      }
+      const bad = msg.startsWith("Great") || msg.startsWith("Prompt cache monitor");
+      const [dim] = Object.keys(body.questions);
+      return Response.json({ answers: { [dim!]: { noul: bad ? 0.1 : 0.9 } } });
+    });
+
+  test("judges each fixture like real traffic and records the failing one", async () => {
+    mockWithFixtures((msg) =>
+      msg.includes("Workflows 56/73") ? { plain: 0.14 } : { plain: 0.9, verbosity: 0.8 },
+    );
+    const { ctx, kv } = makeCtx({
+      threshold: 0.75,
+      fixtures: [
+        { name: "dense", text: "📊 11-03 — all clear. Workflows 56/73 · agents 12/19." },
+        {
+          name: "reply",
+          text: "Went with option B. PR #123.",
+          prefs: { verbosity: "~400 chars max" },
+          request: "which option?",
+        },
+      ],
+    });
+    await handler(selftestEvent, ctx);
+    const last = kv["selftest:last"] as any;
+    expect(last.controlsOk).toBe(true);
+    expect(last.fixturesOk).toBe(false);
+    expect(last.fixtures).toEqual([
+      { name: "dense", scores: { plain: 0.14 }, failed: ["plain"], pass: false },
+      { name: "reply", scores: { verbosity: 0.8, plain: 0.9 }, failed: [], pass: true },
+    ]);
+    const fixtureCalls = jevCalls.filter((c) => c.body.state.judging_rules);
+    expect(fixtureCalls).toHaveLength(2);
+    // Same state shape and questions as the live gate.
+    expect(Object.keys(fixtureCalls[1]!.body.questions).sort()).toEqual(["plain", "verbosity"]);
+    expect(fixtureCalls[1]!.body.state).toMatchObject({
+      latest_request: "which option?",
+      requester_preferences: { verbosity: "~400 chars max" },
+      plain_language_rules: mod.PLAIN_RULES,
+    });
+  });
+
+  test("all fixtures passing sets fixturesOk", async () => {
+    mockWithFixtures(() => ({ plain: 0.9 }));
+    const { ctx, kv } = makeCtx({
+      fixtures: [{ name: "ok", text: "All clear, nothing for you." }],
+    });
+    await handler(selftestEvent, ctx);
+    expect(kv["selftest:last"]).toMatchObject({ fixturesOk: true });
+  });
+
+  test("a judge error fails only that fixture", async () => {
+    mockJev((body) => {
+      if (String(body.state.agent_message) === "boom") return new Response("x", { status: 503 });
+      const [dim] = Object.keys(body.questions);
+      const answers: Record<string, unknown> = {};
+      for (const id of Object.keys(body.questions)) answers[id] = { noul: 0.9 };
+      return Response.json({ answers: dim ? answers : {} });
+    });
+    const { ctx, kv } = makeCtx({
+      fixtures: [
+        { name: "boom", text: "boom" },
+        { name: "fine", text: "fine" },
+      ],
+    });
+    await handler(selftestEvent, ctx);
+    const last = kv["selftest:last"] as any;
+    expect(last.fixturesOk).toBe(false);
+    expect(last.fixtures[0]).toMatchObject({ name: "boom", pass: false });
+    expect(last.fixtures[0].error).toContain("503");
+    expect(last.fixtures[1]).toMatchObject({ name: "fine", pass: true });
+  });
+
+  test("an explicit empty list or only invalid entries records null, never a pass", async () => {
+    for (const fixtures of [[], [{ text: "no name" }, 42]]) {
+      jevCalls.length = 0;
+      mockWithFixtures(() => ({ plain: 0.9 }));
+      const { ctx, kv } = makeCtx({ fixtures });
+      await handler(selftestEvent, ctx);
+      expect(kv["selftest:last"]).toMatchObject({
+        controlsOk: true,
+        fixtures: [],
+        fixturesOk: null,
+      });
+      expect(jevCalls.filter((c) => c.body.state.judging_rules)).toHaveLength(0);
+    }
+  });
+
+  test("invalid entries are skipped and never reset the rest of the config", () => {
+    const cfg = mod.cfgOf({
+      mode: "enforce",
+      fixtures: [{ text: "no name" }, 42, { name: "ok", text: "t" }],
+    });
+    expect(cfg.mode).toBe("enforce");
+    expect(mod.fixturesOf(cfg.fixtures)).toEqual([{ name: "ok", text: "t" }]);
+    expect(mod.fixturesOf("not an array")).toEqual([]);
+    const many = Array.from({ length: 12 }, (_, i) => ({ name: `f${i}`, text: "t" }));
+    expect(mod.fixturesOf(many)).toHaveLength(mod.MAX_FIXTURES);
   });
 });
 

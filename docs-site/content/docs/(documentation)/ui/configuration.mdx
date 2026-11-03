@@ -76,15 +76,23 @@ The sweep reads the value on every call, so a saved change needs no restart.
 | Harness & tools | `CLAUDE_TRUST_PRESEED`, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `CONTEXT_BOUND_NOTE_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES` |
-| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
+| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_REACTION_SKIPPED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults), `PAGES_FRAME_ANCESTORS` (extra origins that may iframe public pages) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
-| Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY`, `IMPROVEMENTS_ENABLED` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
 `SWARM_ORG_WEBSITE` takes a website and stores its bare hostname (`https://www.example.com/about` saves as `example.com`). When `SWARM_ORG_LOGO_URL` is empty, saving a website fills it with that site's logo, served by the telemetry proxy (`https://proxy.desplega.sh/v1/logo?domain=<host>`) so no logo key ever reaches your install. A logo you set yourself is never replaced. The "Show our logo on agent-swarm.dev" switch sends your organization name, website, domain, and contact email to Desplega. It also sends your optional job function and quote. This explicit consent works with telemetry on or off. A person approves each logo before it appears. Turning `ANONYMIZED_TELEMETRY` back on applies without a restart.
 
 The **Public ranking** row opts the install into [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking), which ranks installs by tokens used. It needs telemetry on and both `SWARM_ORG_NAME` (not the placeholder `Swarm`) and `SWARM_ORG_WEBSITE`; until then it lists what is missing. **Get ranked** sends the listing (name, website, category, subcategory, optional description and source code URL) and that is the whole opt-in: the install shows at the next hourly refresh. Renaming the organization updates the listing. Clearing the name or website, or changing the website, leaves the ranking. The listing is stored as the `telemetry_ranking` config key, which only this row can write. What it sends is in the [telemetry reference](/docs/reference/telemetry#public-ranking).
+
+### Improvements
+
+The **Improvements** switch, under Telemetry & observability, turns on short product improvements for the Agent Swarm team at Desplega. A person writes one from the lightbulb button in the header. An agent drafts one with the `submit-improvement` MCP tool or `POST /api/improvements`. This section keeps the switch and the send history.
+
+An agent can only draft. Its draft waits in the lightbulb popover in the header until a person approves it. Approval needs a user token or the shared API key with no agent identity. The approver is taken from the credential and stored as `approvedBy`. Each pending draft shows its exact text, with parts that look specific to your install highlighted: agent and repo names, your hosts, your organization, and emails. To change the text, discard it and draft again. Text is scrubbed of known secrets before it is stored. If scrubbing changes a person's text, it is kept for review instead of being sent at once.
+
+Three fields leave your install, every time: the text, the approver's email, and the install id. The email is required to send or approve and defaults to the signed-in user's email. The install id is sent whether or not `ANONYMIZED_TELEMETRY` is on; an install without one gets one on its first send, and telemetry reuses it later. A failed send is never retried automatically; **Retry** is another approval. Set `IMPROVEMENTS_ENABLED` to `false` to turn drafting and sending off. The header button then disappears.
 
 Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead. `OPENROUTER_BASE_URL` is a deployment-wide routing endpoint rather than a model choice, which is why it does belong here.
 
@@ -199,6 +207,35 @@ Optional global config values tune the script:
 
 Run `script-run` on `heartbeat-jev-gate` with `{ "dryRun": true }` to see the verdict, the
 compact state, and the setup prompt, without creating a prompt or writing KV.
+
+## Follow-up gate
+
+When a worker finishes a task, the Lead gets a follow-up task to review the result. For scheduled
+runs whose output a script can check, the follow-up gate measures how often that review could be
+skipped. It only records; it never skips or delays a follow-up.
+
+- `FOLLOW_UP_GATE_MODE`: `off` (default) runs nothing. `shadow` records a decision for each gated
+  run. Config writes reject any other value, including `enforce`.
+- `FOLLOW_UP_GATE_SCHEDULE_IDS`: comma-separated schedule ids to evaluate. Empty (the default)
+  evaluates nothing. Config writes reject a value that is not a UUID. Leave off any schedule
+  whose follow-up does required work.
+- `FOLLOW_UP_GATE_VERIFIER_SCRIPT`: a global script that runs as the Lead with `{ taskId }` and
+  returns `{ ok: true | false | null, controls: { ok: boolean }, check?, detail?, unverified? }`.
+
+After the follow-up is created and committed, the server runs the verifier with a 60-second
+deadline, at most two at a time, and writes one `task_follow_up_gate_shadow` row to `agent_log`
+for the worker task. Its metadata holds `followUpTaskId`, `decision`, `reason`, the verdict,
+`unverified`, the verifier's name, version and content hash, and `latencyMs`.
+
+| Decision | When |
+| --- | --- |
+| `would_skip` | `ok` is `true` and `controls.ok` is `true` |
+| `would_keep` | any other result: `ok` is `false` or `null`, or the controls did not pass |
+| `ineligible` | a failed run, or a task whose `followUpConfig` carries `onCompleted` or `onFailed` instructions. The verifier does not run. |
+| `error` | the verifier threw, timed out, returned no object, is not configured or not found (`no_verifier`), or two runs were already in flight (`concurrency_cap`) |
+
+Runs of schedules that are not on the list, and tasks with no schedule, write nothing. All three
+keys apply to the next follow-up without a restart. Rows follow `AGENT_LOG_RETENTION_DAYS`.
 
 ## Default SystemOne provider
 
@@ -368,9 +405,10 @@ schedule that needs no integration and no required param/placeholder — and who
 doesn't recommend staying off — arrives already enabled at boot, instead of disabled-but-inventoried.
 An item that needs a credential or a param this install doesn't have is unaffected either way.
 
-This includes `daily-swarm-update-check`, a zero-config schedule that calls the public GitHub
-releases API on a daily cron and posts to the configured admin channel when a newer
-`desplega-ai/agent-swarm` release is available — the only outbound network call and notification
+This includes `daily-swarm-update-check`, a zero-config schedule that runs the global
+`swarm-update-check` script on a daily cron. The script calls the public GitHub releases API and,
+only when a newer `desplega-ai/agent-swarm` release is available, asks the lead to post to the
+configured admin channel. That is the only outbound network call and notification
 this switch turns on by default. Turn the switch off, or disable that schedule individually from
 its details page, to stop it.
 
@@ -387,6 +425,24 @@ already created on this install.
 `CHAT_SDK_OWNER_WINDOW_MIN` (number, default `15`, 0 to 1440) applies to Telegram groups only. It is how long after a chat task ends the group keeps the same owner, and the requester's plain messages count only inside this window; everyone else has to mention the bot or reply to it. `0` keeps the owner only while the task is open. DMs and other adapters' threads keep their owner with no time limit. A new value applies to the next message.
 
 Voice-note transcription is configured on the **Transcription** card under **Settings → Integrations**, not on this page. See [Voice notes](/docs/integrations/chat-sdk#voice-notes).
+
+## Task titles
+
+`TASK_AUTO_TITLE_ENABLED` (boolean, default `true`, applies on save) gives every new task a short display title. Right after a task is created, the API sends the prompt to a small model and stores the answer as the task title. The sessions sidebar and task lists show that title instead of the first line of the prompt. A title a person sets (session rename) is never replaced, and a prompt shorter than 48 characters keeps the prompt as its title.
+
+The API picks the provider in a fixed order and, inside a provider, the cheapest model first. A provider is used only when its credential is set on the API server.
+
+| Order | Credential | Models, in order |
+|---|---|---|
+| 1 | `OPENROUTER_API_KEY` | `deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-5.5`, `openai/gpt-6-luna` |
+| 2 | `ANTHROPIC_API_KEY` | `claude-haiku-5-5` |
+| 3 | `OPENAI_API_KEY` | `gpt-6-luna`, `gpt-5-nano` |
+| 4 | Codex OAuth (Settings → Integrations) | `gpt-6-luna` |
+| 5 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude -p --model haiku` |
+
+A model error moves on to the next model, then to the next provider. One title reads at most 2000 characters of the prompt and writes about ten words, so a swarm with thousands of tasks a week spends cents.
+
+`TASK_AUTO_TITLE_MODEL` (string, applies on save) pins one model. Use `provider/model-id` (`openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-5-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`) or a `claude -p` alias such as `haiku`. The pinned model is tried first; the table above remains the fallback. A value for a provider with no credential is skipped.
 
 ## Comb
 

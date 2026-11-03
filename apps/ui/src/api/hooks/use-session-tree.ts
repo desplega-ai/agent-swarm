@@ -1,5 +1,6 @@
 import { hashKey, type QueryKey, useQuery } from "@tanstack/react-query";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import {
   sessionsFilterParams,
   useSessionsShow,
@@ -38,6 +39,8 @@ export function useSessionTree(options?: { enabled?: boolean }) {
   const [show] = useSessionsShow();
   const [shown] = useSessionsShownSources();
   const queryKey = sessionTreeKey(userId ?? null, show, shown);
+  // Never across a scope change: the kept tree could count all-users sessions.
+  const placeholderData = useWithinAllUsersScope(keepAcrossViews(queryKey));
   return useQuery({
     queryKey,
     queryFn: () => api.getSessionTree(sessionsFilterParams(show, shown)),
@@ -45,7 +48,7 @@ export function useSessionTree(options?: { enabled?: boolean }) {
     // Fresh for one poll: a reader that mounts later (the pane header's
     // labels on every session open) reuses the cache instead of refetching.
     staleTime: SESSION_TREE_STALE_MS,
-    placeholderData: keepAcrossViews(queryKey),
+    placeholderData,
   });
 }
 

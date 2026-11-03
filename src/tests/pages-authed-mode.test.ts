@@ -5,7 +5,7 @@
  *   2. `GET /p/:id` without cookie → 401.
  *   3. `POST /api/pages/:id/launch` (bearer) → 204 + Set-Cookie.
  *   4. `GET /p/:id` with cookie → 200 + SDK injected.
- *   5. A session signed for a DIFFERENT page id is ignored → 401.
+ *   5. A session signed for a DIFFERENT page id is refused → 403 (no/expired session stays 401).
  *   6. Two launched pages both load from one cookie jar.
  *   7. `GET /p/:id.json` with cookie → 200 + JSON metadata.
  *
@@ -133,7 +133,7 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     expect(text).toContain("class SwarmSDK");
   });
 
-  test("a session signed for another page is ignored → 401", async () => {
+  test("a session signed for another page is refused → 403", async () => {
     const idA = await createAuthedPage("page-a");
     const idB = await createAuthedPage("page-b");
 
@@ -144,6 +144,17 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     // … and try to use it for page B, under the legacy name and under B's own name.
     for (const cookie of [`page_session=${tokenForA}`, `page_session_${idB}=${tokenForA}`]) {
       const res = await fetch(`${BASE}/p/${idB}`, { headers: { Cookie: cookie } });
+      expect(res.status).toBe(403);
+      const json = await fetch(`${BASE}/p/${idB}.json`, { headers: { Cookie: cookie } });
+      expect(json.status).toBe(403);
+    }
+
+    // An expired or tampered session for another page is not a session: still 401.
+    const expired = await signPageSession({ pageId: idA, exp: Math.floor(Date.now() / 1000) - 10 });
+    for (const token of [expired, `${tokenForA}x`]) {
+      const res = await fetch(`${BASE}/p/${idB}`, {
+        headers: { Cookie: `page_session_${idA}=${token}` },
+      });
       expect(res.status).toBe(401);
     }
   });

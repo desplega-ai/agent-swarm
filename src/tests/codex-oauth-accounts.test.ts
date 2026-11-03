@@ -7,6 +7,7 @@ import {
   createUser,
   getAvailableKeyIndices,
   getDbClient,
+  getKv,
   getSwarmConfigs,
   initDb,
   markKeyRateLimited,
@@ -124,7 +125,7 @@ describe("Codex account HTTP routes", () => {
       value: JSON.stringify(credentials("agent-only")),
       isSecret: true,
     });
-    await recordKeyUsage("CODEX_OAUTH", "first", 2, null);
+    await recordKeyUsage("CODEX_OAUTH", "first-2", 2, null);
     const response = await request();
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -137,7 +138,7 @@ describe("Codex account HTTP routes", () => {
           slot: 2,
           configKey: "codex_oauth_2",
           legacy: false,
-          suffix: "first",
+          suffix: "first-2",
           plan: "team",
           email: "first@example.test",
           status: "ok",
@@ -146,7 +147,7 @@ describe("Codex account HTTP routes", () => {
           slot: 10,
           configKey: "codex_oauth_10",
           legacy: false,
-          suffix: "tenth",
+          suffix: "tenth-10",
           plan: "team",
           email: null,
           status: "unchecked",
@@ -229,16 +230,16 @@ describe("Codex account HTTP routes", () => {
     await store("codex_oauth_2", credentials("grant-ratel"));
     await upsertKv({
       namespace: "codex-auth-watch",
-      key: "bench:bench",
+      key: "bench:bench-0",
       valueType: "string",
       value: "1",
     });
-    await recordKeyAuthFailure("CODEX_OAUTH", "authf", 1);
-    await recordKeyAuthFailure("CODEX_OAUTH", "authf", 1);
-    await getDbClient().run("DELETE FROM kv_entries WHERE key = 'bench:authf'");
+    await recordKeyAuthFailure("CODEX_OAUTH", "authf-1", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "authf-1", 1);
+    await getDbClient().run("DELETE FROM kv_entries WHERE key = 'bench:authf-1'");
     await markKeyRateLimited(
       "CODEX_OAUTH",
-      "ratel",
+      "ratel-2",
       2,
       new Date(Date.now() + 3_600_000).toISOString(),
     );
@@ -253,12 +254,12 @@ describe("Codex account HTTP routes", () => {
     await store("codex_oauth_0", credentials("grant-clear"));
     await upsertKv({
       namespace: "codex-auth-watch",
-      key: "bench:clear",
+      key: "bench:clear-0",
       valueType: "string",
       value: "1",
       expiresAt: Date.now() - 1,
     });
-    await recordKeyAuthFailure("CODEX_OAUTH", "clear", 0, "agent", workerId);
+    await recordKeyAuthFailure("CODEX_OAUTH", "clear-0", 0, "agent", workerId);
     expect((await list()).accounts[0]?.status).toBe("unchecked");
   });
 
@@ -285,16 +286,51 @@ describe("Codex account HTTP routes", () => {
   test("a sign-in in a freed slot does not inherit the removed account's auth bench", async () => {
     await store("codex_oauth_0", credentials("grant-keep0"));
     await store("codex_oauth_1", credentials("grant-gone1"));
-    await recordKeyAuthFailure("CODEX_OAUTH", "gone1", 1);
-    await recordKeyAuthFailure("CODEX_OAUTH", "gone1", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "gone1-1", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "gone1-1", 1);
     expect((await getAvailableKeyIndices("CODEX_OAUTH", 2)).availableIndices).toEqual([0]);
     expect((await request("/1", "DELETE")).status).toBe(200);
+    expect(await getKv("codex-auth-watch", "bench:gone1-1")).toBeNull();
     await store("codex_oauth_1", credentials("grant-fresh"));
     expect((await getAvailableKeyIndices("CODEX_OAUTH", 2)).availableIndices).toEqual([0, 1]);
     expect((await list()).accounts.map((account) => account.status)).toEqual([
       "unchecked",
       "unchecked",
     ]);
+  });
+
+  test("a bench stored under the pre-slot suffix format follows its slot until removal", async () => {
+    await store("codex_oauth_0", credentials("grant-keep0"));
+    await store("codex_oauth_1", credentials("grant-old01"));
+    // Rows written before suffixes carried the slot: `<last 5 of user id>`.
+    await recordKeyAuthFailure("CODEX_OAUTH", "old01", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "old01", 1);
+    expect((await list()).accounts.map((account) => account.status)).toEqual([
+      "unchecked",
+      "needs_login",
+    ]);
+    expect((await request("/1", "DELETE")).status).toBe(200);
+    expect(await getKv("codex-auth-watch", "bench:old01")).toBeNull();
+    await store("codex_oauth_1", credentials("grant-fresh"));
+    expect((await getAvailableKeyIndices("CODEX_OAUTH", 2)).availableIndices).toEqual([0, 1]);
+  });
+
+  test("two slots signed in by the same ChatGPT user keep separate health", async () => {
+    await store("codex_oauth_0", credentials("user-same-person"));
+    await store("codex_oauth_1", credentials("user-same-person"));
+    const before = await list();
+    expect(before.accounts.map((account) => account.suffix)).toEqual(["erson-0", "erson-1"]);
+    await recordKeyAuthFailure("CODEX_OAUTH", "erson-1", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "erson-1", 1);
+    expect((await getAvailableKeyIndices("CODEX_OAUTH", 2)).availableIndices).toEqual([0]);
+    expect(await getKv("codex-auth-watch", "bench:erson-1")).not.toBeNull();
+    expect(await getKv("codex-auth-watch", "bench:erson-0")).toBeNull();
+    expect((await list()).accounts.map((account) => account.status)).toEqual([
+      "unchecked",
+      "needs_login",
+    ]);
+    expect((await request("/1", "DELETE")).status).toBe(200);
+    expect((await getAvailableKeyIndices("CODEX_OAUTH", 1)).availableIndices).toEqual([0]);
   });
 
   test("deletes the legacy slot zero and keeps it when the numbered row exists", async () => {

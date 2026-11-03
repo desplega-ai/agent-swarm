@@ -59,7 +59,7 @@ services:
 
   agent-fs:
     container_name: swarm-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.18.13
+    image: ghcr.io/desplega-ai/agent-fs:0.18.15
     platform: linux/amd64
     depends_on:
       minio-init:
@@ -117,6 +117,10 @@ services:
       # Local dev stack: keep it out of production telemetry.
       - ANONYMIZED_TELEMETRY=false
       - API_KEY=${API_KEY}
+      # Dashboard origin (`apps/ui` Vite dev server). NODE_ENV is unset here,
+      # so `/p/:id` frame-ancestors lists only this origin, not localhost
+      # fallbacks.
+      - APP_URL=${APP_URL:-http://localhost:5274}
       - AGENT_FS_API_URL=http://agent-fs:7433
       # Browser-facing agent-fs URL for Comb (the host port published above).
       - AGENT_FS_PUBLIC_URL=${AGENT_FS_PUBLIC_URL:-http://localhost:7433}
@@ -173,7 +177,6 @@ services:
       - AGENT_ROLE=lead
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Lead Agent}
@@ -221,7 +224,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Pi Worker}
@@ -273,7 +275,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
       - GITHUB_NAME=${GITHUB_NAME:-Codex Worker}

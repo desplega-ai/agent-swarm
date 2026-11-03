@@ -36,6 +36,7 @@ const REAL = [
   "components/ui/dialog",
   "components/ui/kbd",
   "hooks/use-debounced-value",
+  "lib/all-users-scope",
   "lib/agent-fs/state",
   "lib/approval-shortcuts",
   "lib/comb/paths",

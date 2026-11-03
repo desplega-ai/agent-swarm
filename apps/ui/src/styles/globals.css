@@ -771,6 +771,23 @@ button[data-slot="sidebar-rail"] {
   margin: 0.1em 0;
 }
 
+/* Every Streamdown list, in any prose scope. Streamdown draws lists with
+ * `list-inside`; in a "loose" list (a blank line between items) each item's
+ * text is a <p> block, so the marker sat alone on a line above its text and
+ * the item margins spread the list apart. Outside markers keep the bullet
+ * beside the first line, and the per-item <p> margins collapse. Unlayered,
+ * so it beats the utility class; scopes that set their own padding win. */
+:is([data-streamdown="unordered-list"], [data-streamdown="ordered-list"]) {
+  list-style-position: outside;
+  padding-left: 1.25em;
+}
+[data-streamdown="list-item"] > p {
+  margin: 0;
+}
+[data-streamdown="list-item"] > p + p {
+  margin-top: 0.25em;
+}
+
 .prose-chat blockquote {
   margin: 0.5em 0;
   padding-left: 0.75em;

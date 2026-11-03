@@ -256,16 +256,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.311)
+# Override the pinned Claude Code version (default: 2.1.317)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.311`
-- `PI_CODING_AGENT_VERSION=1.4.0`
-- `CODEX_VERSION=0.164.0`
-- `OPENCODE_VERSION=2.2.1` (installs `@opencode/cli` and `@opencode/sdk`)
+- `CLAUDE_CODE_VERSION=2.1.317`
+- `PI_CODING_AGENT_VERSION=1.5.0`
+- `CODEX_VERSION=0.166.0`
+- `OPENCODE_VERSION=2.2.5` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -523,7 +523,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.13. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.15. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -547,7 +547,6 @@ The bundled agent-fs service uses version 0.18.13. Provisioning seeds agent disp
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
 | `MULTI_RUNTIME_ENABLED` | No | Allow multiple worker processes to serve one logical `AGENT_ID` (default: `true`). Set consistently on the API server and every worker; shared-agent runtimes need compatible workspace state. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
-| `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | Path to system prompt file |
 | `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `false`) |

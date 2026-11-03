@@ -7,11 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  matchingRowIndex,
-  type SessionLogView,
-  type StreamRow,
-} from "@/components/shared/session-log-messages";
+import type { StreamRow } from "@/components/shared/session-log-messages";
 
 /** Above this many rows, the log renders through the virtualizer. */
 const VIRTUALIZE_THRESHOLD = 120;
@@ -51,21 +47,19 @@ interface LogScrollOptions {
    * `undefined`: the viewer scrolls the log itself (`parentRef`).
    */
   scrollElement: HTMLElement | null | undefined;
-  /** The rows that show, in order (after the view and the filter). */
+  /** The rows that show, in order (after the filter). */
   rows: StreamRow[];
   /** The virtualizer's height guess for the row at an index. */
   estimateSize: (index: number) => number;
   isRunning?: boolean;
-  view: SessionLogView;
-  /** The filter text. A new filter, like a view switch, resets the "N new" count. */
+  /** The filter text. A new filter resets the "N new" count. */
   query: string;
-  onViewChange?: (view: SessionLogView) => void;
 }
 
 /**
  * The session log's scroll plumbing, for both scroller kinds (the viewer's
  * own, or the caller's in page mode): the virtualizer, at-end detection and
- * follow mode, the "N new" pill count, jumps, the view-switch anchoring, and
+ * follow mode, the "N new" pill count, jumps, and
  * the CSS variables the sticky parts read. The viewer renders the rows and
  * attaches the returned refs.
  */
@@ -74,9 +68,7 @@ export function useLogScroll({
   rows,
   estimateSize,
   isRunning,
-  view,
   query,
-  onViewChange,
 }: LogScrollOptions) {
   // Fixed for the viewer's lifetime: callers pass `scrollElement` from the
   // first render (as `null` until the element mounts) or never.
@@ -311,10 +303,10 @@ export function useLogScroll({
     return () => ro.disconnect();
   }, [stickToBottom]);
 
-  // Track newly-appended events for the "N new" pill when scrolled up. A view
-  // switch or a new filter changes the row count with no new event: it only
-  // sets a new baseline.
-  const rowSetKey = `${view}\n${query}`;
+  // Track newly-appended events for the "N new" pill when scrolled up. A new
+  // filter changes the row count with no new event: it only sets a new
+  // baseline.
+  const rowSetKey = query;
   const prevRowSetKey = useRef(rowSetKey);
   useEffect(() => {
     const cur = rows.length;
@@ -330,106 +322,6 @@ export function useLogScroll({
     if (added > 0 && !atBottomRef.current) setPending((p) => p + added);
     prevCount.current = cur;
   }, [rows.length, rowSetKey]);
-
-  // A view switch keeps the reader's place:
-  // - The start of the log in view: nothing moves. An end that showed only
-  //   because the log is short does not pin the new view to its end.
-  // - Scrolled to the end of the log: the keep-pinned effect above keeps the
-  //   end in view.
-  // - Scrolled into the log: the first row that shows (the anchor) is found
-  //   in the new view (the same message, or the line that folds it) and kept
-  //   at the same height. A row the new view does not have (a filter hides
-  //   it) shows the new view from its first row.
-  // The browser's own scroll anchoring is off for the switch: rows are not
-  // anchor candidates, so it anchors on a node under the log and scrolls
-  // the page by the change in the log's height.
-  const switchPlan = useRef<
-    | { kind: "keep"; scrollTop: number }
-    | { kind: "anchor"; id: string | null; top: number; edge: number }
-    | null
-  >(null);
-  const changeView = useCallback(
-    (next: SessionLogView) => {
-      // The switch fires again on the selected option.
-      if (next === view || !onViewChange) return;
-      switchPlan.current = null;
-      const el = getScroller();
-      const content = contentRef.current;
-      if (el && content && content.getClientRects().length > 0) {
-        el.style.overflowAnchor = "none";
-        // Page mode: the rows show under the toolbar. Own scroller: under its top.
-        const edge = pageMode
-          ? (toolbarRef.current?.getBoundingClientRect().bottom ?? 0)
-          : el.getBoundingClientRect().top + el.clientTop;
-        if (content.getBoundingClientRect().top >= edge) {
-          atBottomRef.current = false;
-          switchPlan.current = { kind: "keep", scrollTop: el.scrollTop };
-        } else if (!atBottomRef.current) {
-          const anchor = [...content.querySelectorAll<HTMLElement>("[data-row-id]")].find(
-            (row) => row.getBoundingClientRect().bottom > edge + 1,
-          );
-          switchPlan.current = {
-            kind: "anchor",
-            id: anchor?.dataset.rowId ?? null,
-            top: anchor?.getBoundingClientRect().top ?? edge,
-            edge,
-          };
-        }
-      }
-      onViewChange(next);
-    },
-    [view, onViewChange, getScroller, pageMode],
-  );
-  const shownView = useRef(view);
-  useLayoutEffect(() => {
-    if (shownView.current === view) return;
-    shownView.current = view;
-    const plan = switchPlan.current;
-    switchPlan.current = null;
-    const el = getScroller();
-    const content = contentRef.current;
-    if (!el) return;
-    // Back on after the next frame: the browser applies its anchoring at the
-    // frame's layout, after this frame's callbacks. Later height changes
-    // above the log keep the browser's anchoring.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        el.style.overflowAnchor = "";
-      }),
-    );
-    if (plan?.kind === "keep") {
-      el.scrollTop = plan.scrollTop;
-      return;
-    }
-    if (!content || !plan) return;
-    const index = plan.id ? matchingRowIndex(rows, plan.id) : -1;
-    const row = rows[index];
-    // The same row keeps its exact height. A folding line or another row
-    // starts at the edge at the lowest, so it does not hide under the toolbar.
-    const targetTop = !row
-      ? plan.edge
-      : row.id === plan.id
-        ? plan.top
-        : Math.max(plan.top, plan.edge);
-    let rowTop: number | undefined;
-    if (!row) {
-      rowTop = content.getBoundingClientRect().top;
-    } else if (virtualize) {
-      // Not rendered yet: its place comes from the virtualizer. The rows
-      // that rendered at the old offset measured on commit, which moved the
-      // starts: `getTotalSize` refreshes them before the read. Not
-      // `getOffsetForIndex`: it reads the same cache without the refresh and
-      // clamps to the scroll range, which moves a row in the last screen.
-      virtualizer.getTotalSize();
-      const item = virtualizer.measurementsCache[index];
-      if (item) rowTop = el.getBoundingClientRect().top + el.clientTop + item.start - el.scrollTop;
-    } else {
-      rowTop = content
-        .querySelector(`[data-row-id="${CSS.escape(row.id)}"]`)
-        ?.getBoundingClientRect().top;
-    }
-    if (rowTop !== undefined) el.scrollTop = Math.max(0, el.scrollTop + rowTop - targetTop);
-  }, [view, getScroller, rows, virtualize, virtualizer]);
 
   // A minimap jump: the row lands centered.
   const scrollToRow = useCallback(
@@ -476,7 +368,6 @@ export function useLogScroll({
     pending,
     showJumpPill,
     stickToBottom,
-    changeView,
     scrollToRow,
     pageStyle,
     minimapStickyHeight,

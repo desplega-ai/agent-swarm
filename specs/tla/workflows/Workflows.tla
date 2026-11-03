@@ -28,6 +28,7 @@ CONSTANTS
   InputAwait,        \* TRUE: workflow.input resolution awaits between run INSERT and walkGraph
   ReplayUnreadable,  \* TRUE: a sealed replay read may fail (#1926: missing or rotated key, corrupt ciphertext)
   ChildRunResume,    \* TRUE (#2030): every async branch is a `sub-workflow` step whose "task" is a child run
+  TaskEndNoRetry,    \* TRUE: an agent task may also end cancelled or (#2571) skipped outside a run cancel ("nr"); its event and the recovery sweep fail the step with no retry
   \* --- historical guards (CALIBRATION.md removes them) ---
   GuardActiveWalk,   \* bf12ab53 / #1584: recovery skips runs with a live walk
   GuardConvergeSeed, \* d4753302 lineage: walkGraph gates start nodes on predecessors
@@ -703,7 +704,7 @@ H5 ==
                  \* CR: a sub-workflow step has no agent task, so the join finds no row.
                  !.R = IF run = "waiting" /\ ~ChildRunResume
                        THEN {<<i, steps[i].tg, steps[i].task>> :
-                               i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}
+                               i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail", "nr"}}}
                        ELSE {}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
@@ -716,6 +717,7 @@ H6 ==
             SetT(THb, [thr[THb] EXCEPT !.R = @ \ {r}, !.sid = r[1], !.g = r[2], !.cur = steps[r[1]].node,
                         !.pc = IF run # "waiting" THEN "h6"
                                ELSE IF r[3] = "fail" THEN (IF FixTaskRetry THEN "h7r" ELSE "h7")
+                               ELSE IF r[3] = "nr" THEN "h7"
                                ELSE "h8"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
@@ -928,10 +930,14 @@ Heartbeat == H1 \/ H2 \/ H2Unreadable \/ H8Unreadable \/ H3 \/ H4 \/ H5 \/ H6 \/
 (* Agent tasks and the task-event handlers (resume.ts)                     *)
 
 \* Task reaches a terminal state; its after-commit bus event is queued.
+\* "nr" (TaskEndNoRetry): task.cancelled or, since #2571, task.skipped
+\* (skipTask, db/tasks/write.ts). Both call handleTaskFailure with
+\* retryable: false (resume.ts:136-145, :149-163), so E1 goes straight to EF.
 TaskFinish(i) ==
   /\ i \in StepIds
   /\ steps[i].task = "run"
-  /\ \E r \in {"ok", "fail"} : steps' = [steps EXCEPT ![i].task = r]
+  /\ \E r \in {"ok", "fail"} \cup (IF TaskEndNoRetry /\ ~ChildRunResume THEN {"nr"} ELSE {}) :
+       steps' = [steps EXCEPT ![i].task = r]
   /\ SetT(Ev(i, steps[i].tg), [Idle EXCEPT !.pc = "e1", !.sid = i, !.cur = steps[i].node,
                                             !.g = steps[i].tg])
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
@@ -952,7 +958,7 @@ E1(t) ==
                 ELSE IF ChildRunResume /\ FixStepFence THEN "eC"
                 ELSE IF steps[i].task = "ok" THEN "e2"
                 ELSE IF ChildRunResume THEN "eF"
-                ELSE IF FixTaskRetry THEN "eR" ELSE "eF"])
+                ELSE IF FixTaskRetry /\ steps[i].task = "fail" THEN "eR" ELSE "eF"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* E2 resume.ts:231-266 -> task-step-routing.ts:263-314 — claim transaction

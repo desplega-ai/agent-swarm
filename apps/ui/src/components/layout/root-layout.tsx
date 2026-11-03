@@ -124,7 +124,7 @@ export function RootLayout() {
             >
               Skip to content
             </a>
-            <SidebarProvider className="h-svh max-w-full overflow-hidden">
+            <SidebarProvider className="h-dvh max-w-full overflow-hidden">
               <AppSidebar />
               <SidebarInset className="min-w-0">
                 <AppHeader />

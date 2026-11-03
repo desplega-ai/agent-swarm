@@ -63,6 +63,8 @@ declare module "swarm-sdk" {
     parentTaskId?: string;
     requestedByUserId?: string;
     outputSchema?: Record<string, unknown>;
+    /** Dispatch even when the follow-up re-delegation guard blocks this step (a run launched from a follow-up task in a Slack thread, checked at its first new step). */
+    allowRedelegation?: boolean;
     /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
     waitForCompletion?: boolean;
     /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */

@@ -65,6 +65,14 @@ export interface SteerComposerProps {
   extraActions?: React.ReactNode;
   /** A bottom bar: one line until used, 44 px controls. See `ComposerDock`. */
   bar?: boolean;
+  /**
+   * The send button's name, its aria-label and tooltip (`TaskComposer`:
+   * "Steer", "Follow up"). Omitted: "Send" ("Create follow-up task" without
+   * live delivery).
+   */
+  sendLabel?: string;
+  /** The task a send goes to, in the routing label's tooltip. See `ComposerDock`. */
+  routeDetail?: string;
   className?: string;
 }
 
@@ -102,6 +110,8 @@ export function SteerComposer({
   fullWidth,
   extraActions,
   bar,
+  sendLabel,
+  routeDetail,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -188,19 +198,19 @@ export function SteerComposer({
       isError={steerTask.isError}
       errorMessage={steerTask.error instanceof Error ? steerTask.error.message : "Failed to send"}
       pendingLabel={hasLiveDelivery ? "Sending…" : "Creating follow-up task…"}
+      // Short and calm: the routing label says when the message lands.
       placeholder={
         placeholder ??
         (userId
           ? hasLiveDelivery
-            ? notStarted
-              ? "Send a message to the queued task…"
-              : "Send a message to the running task…"
-            : "Add a follow-up for this task…"
+            ? "Steer the task…"
+            : "Follow up…"
           : "Pick an identity above to send messages.")
       }
       disabled={!userId}
       routeLabel={routeLabel}
-      sendLabel={hasLiveDelivery ? "Send" : "Create follow-up task"}
+      routeDetail={routeDetail}
+      sendLabel={sendLabel ?? (hasLiveDelivery ? "Send" : "Create follow-up task")}
       autoFocus={autoFocus}
       extraActions={extraActions}
       bar={bar}

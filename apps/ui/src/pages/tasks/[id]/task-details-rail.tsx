@@ -1,5 +1,5 @@
 import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
-import { ExternalLink, GitBranch, Github, Gitlab, GitPullRequest, Link2, User } from "lucide-react";
+import { ExternalLink, Github, Gitlab, GitPullRequest, Link2, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -9,28 +9,30 @@ import type {
   TaskContextResponse,
   TaskWithLogs,
 } from "@/api/types";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentLink } from "@/components/shared/agent-link";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { EffortMark } from "@/components/shared/effort-mark";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { SessionId } from "@/components/shared/session-id";
-import type { EndSummary } from "@/components/shared/session-log-messages";
-import { taskSourceLabel } from "@/components/shared/task-source-mark";
+import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useRevealText } from "@/hooks/use-reveal-text";
 import { findLatestUsableContextSnapshot } from "@/lib/context-display";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
-import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
-import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import { cn, formatElapsed, formatSmartTime, parseUTCDate } from "@/lib/utils";
 import type { CallUsageTotals } from "@/logs-parser";
 import { type RailComposition, RequestCompositionSection } from "./request-composition-section";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
@@ -136,29 +138,15 @@ export function taskRunTime(task: TaskWithLogs, costs: SessionCost[] | undefined
   return runTime(task, summarizeCosts(costs));
 }
 
+/** The rail's total cost in USD, for the header chip. Null without cost rows. */
+export function taskTotalCost(costs: SessionCost[] | undefined): number | null {
+  return summarizeCosts(costs)?.totalCost ?? null;
+}
+
 /** "26 turns". Devin bills in ACUs and has no turn count. */
 function turnsText(task: TaskWithLogs, stats: CostStats): string | null {
   if (task.provider === "devin" || stats.turns <= 0) return null;
   return `${stats.turns.toLocaleString()} ${stats.turns === 1 ? "turn" : "turns"}`;
-}
-
-/**
- * The cost, run time and turns of the Summary section, as text. The log's end
- * line shows the same text, so the page has one source for these numbers.
- * `null` when the task has no cost rows: the end line then shows the harness
- * result's numbers.
- */
-export function taskRunSummary(
-  task: TaskWithLogs,
-  costs: SessionCost[] | undefined,
-): EndSummary | null {
-  const stats = summarizeCosts(costs);
-  if (!stats) return null;
-  return {
-    cost: formatCost(stats.totalCost, { precision: 2 }),
-    duration: runTime(task, stats) ?? undefined,
-    turns: turnsText(task, stats) ?? undefined,
-  };
 }
 
 // RailSection and RailRow are local on purpose. `DetailPageSection` and
@@ -167,19 +155,34 @@ export function taskRunSummary(
 // h2 order. DESIGN.md §3 names this exception. The shared primitives keep
 // their style on the other detail pages.
 
-/** A rail section: a quiet uppercase heading over its rows. */
+/** The card's padding for each section, and for the collapsible ones. */
+const SECTION_PAD = "px-4 py-3";
+
+/** A collapsible section's title, in the same style as a section heading. */
+const SECTION_TOGGLE_TITLE = "text-meta font-medium normal-case tracking-normal";
+
+/**
+ * A card section: a quiet heading over its rows. The card draws a hairline
+ * between sections. `hideTitle` keeps the heading for screen readers only
+ * (the first section, as in T3 Code's details card).
+ */
 function RailSection({
   title,
   children,
-  className,
+  hideTitle = false,
 }: {
   title: ReactNode;
   children: ReactNode;
-  className?: string;
+  hideTitle?: boolean;
 }) {
   return (
-    <section className={cn("space-y-2", className)}>
-      <h2 className="text-meta font-semibold uppercase tracking-wider text-muted-foreground">
+    <section className={SECTION_PAD}>
+      <h2
+        className={cn(
+          "mb-1.5 flex items-center gap-1.5 text-meta font-medium text-muted-foreground",
+          hideTitle && "sr-only",
+        )}
+      >
         {title}
       </h2>
       {children}
@@ -187,7 +190,12 @@ function RailSection({
   );
 }
 
-/** One label and value. Labels are 12 px; values are 13 px. */
+/**
+ * One label and value. Labels are 12 px; values are 13 px. Centered: an
+ * agent's avatar and a 44 px narrow link have no text baseline to align to.
+ * In the narrow layout every row is 44 px tall, as its links are, so the
+ * rows keep one rhythm.
+ */
 function RailRow({
   label,
   children,
@@ -199,7 +207,12 @@ function RailRow({
   mono?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-x-3 py-1">
+    <div
+      className={cn(
+        "grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-3 py-1 @max-[60rem]:py-0",
+        NARROW_TARGET,
+      )}
+    >
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
         className={cn("min-w-0 break-words text-data leading-5", mono && "font-mono tabular-nums")}
@@ -232,54 +245,6 @@ function CopyableId({
         className={cn("shrink-0 text-muted-foreground hover:text-foreground", NARROW_ICON_TARGET)}
       />
     </span>
-  );
-}
-
-/**
- * Task events in words ("Started by Lead", never `pending → in_progress`).
- * `agentNameFor` names the agent an event is about.
- */
-function ActivityTimeline({
-  logs,
-  agentNameFor,
-}: {
-  logs: AgentLog[];
-  agentNameFor: (log: AgentLog) => string | null;
-}) {
-  return (
-    <ol>
-      {logs.map((log, i) => {
-        const event = describeTaskEvent(log, agentNameFor(log));
-        return (
-          <li key={log.id} className="flex gap-3">
-            {/* A 1px line joins the status-colored dots. */}
-            <div className="flex flex-col items-center">
-              <div
-                className={cn("mt-1.5 size-2 shrink-0 rounded-full", TASK_EVENT_DOT[event.tone])}
-              />
-              {i < logs.length - 1 && <div className="mt-0.5 w-px flex-1 bg-border" />}
-            </div>
-            <div className="min-w-0 pb-3">
-              <p
-                className={cn(
-                  "text-data leading-5",
-                  TASK_EVENT_TEXT[event.tone],
-                  event.tone === "muted" ? "line-clamp-2" : "font-medium",
-                )}
-              >
-                {event.label}
-              </p>
-              {event.detail ? (
-                <p className="truncate text-xs text-muted-foreground">{event.detail}</p>
-              ) : null}
-              <p className="text-xs tabular-nums text-muted-foreground">
-                {formatRelativeTime(log.createdAt)}
-              </p>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -389,7 +354,7 @@ function ContextBar({ percent, label }: { percent: number; label: string }) {
       <Progress
         value={percent}
         aria-label={label}
-        className={cn("h-1.5 flex-1", progressBarTone(percent))}
+        className={cn("h-1 flex-1", progressBarTone(percent))}
       />
       <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
         {percent.toFixed(0)}%
@@ -398,13 +363,26 @@ function ContextBar({ percent, label }: { percent: number; label: string }) {
   );
 }
 
+/**
+ * The repo's page: the PR or issue URL up to the repo path (it keeps a
+ * self-hosted GitLab's host). Without a URL only GitHub has a known host;
+ * GitLab and Bitbucket can be self-hosted, so their repo stays plain text.
+ */
+function repoUrl(task: TaskWithLogs): string | null {
+  if (!task.vcsRepo) return null;
+  const at = task.vcsUrl?.indexOf(`/${task.vcsRepo}`) ?? -1;
+  if (task.vcsUrl && at > 0) return task.vcsUrl.slice(0, at + task.vcsRepo.length + 1);
+  return task.vcsProvider === "github" ? `https://github.com/${task.vcsRepo}` : null;
+}
+
 function SourceControlSection({ task }: { task: TaskWithLogs }) {
   if (!(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor)) {
     return null;
   }
+  const repoHref = repoUrl(task);
   return (
     <RailSection title="Source control">
-      <div className="space-y-2 rounded-md border border-border px-3 py-2.5">
+      <div className="space-y-1.5 py-1">
         {/* Row 1: provider icon and repo. The author is on row 2, so a long
             repo name is not truncated. */}
         <div className="flex min-w-0 items-center gap-2">
@@ -417,11 +395,25 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
           ) : task.vcsProvider ? (
             <Link2 className="size-4 shrink-0" />
           ) : null}
-          {task.vcsRepo && (
+          {task.vcsRepo && repoHref ? (
+            <a
+              href={repoHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={task.vcsRepo}
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 font-mono text-xs text-primary hover:underline",
+                NARROW_TARGET,
+              )}
+            >
+              <span className="truncate">{task.vcsRepo}</span>
+              <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
+            </a>
+          ) : task.vcsRepo ? (
             <span className="truncate font-mono text-xs text-foreground" title={task.vcsRepo}>
               {task.vcsRepo}
             </span>
-          )}
+          ) : null}
         </div>
         {/* Row 2: PR or MR link, then the author. */}
         {(task.vcsUrl || task.vcsAuthor) && (
@@ -475,8 +467,6 @@ interface TaskDetailsRailProps {
   agentName: string | null;
   /** The requesting user's name, when the users list has it. */
   requestedByName: string | null;
-  /** Names the agent an Activity event is about. */
-  agentNameFor: (log: AgentLog) => string | null;
   costs: SessionCost[] | undefined;
   costsLoading: boolean;
   context: TaskContextResponse | undefined;
@@ -485,25 +475,37 @@ interface TaskDetailsRailProps {
   callUsage?: CallUsageTotals | null;
   /** The latest session's request composition, with usage details on. */
   composition?: RailComposition | null;
+  /** The session this task belongs to, when the caller can open it. */
+  session?: { href: string; title: string } | null;
+  className?: string;
 }
 
 /**
  * Everything about a task that is not its outcome or its log: who, where
- * from, when, how much, context use, the event history, and the technical
- * ids. The wide layout shows it as the right rail; the narrow layout shows it
- * in the Details tab.
+ * from, when, how much, its files, context use, and the technical ids. One
+ * card of sections, after T3 Code's thread details card. The wide layout
+ * shows it next to the column; the narrow layout shows it in the Details tab.
  */
+/**
+ * A poll lands a whole new progress line; reveal it word by word while the
+ * task runs. Its own component, so each reveal step re-renders only the line.
+ */
+function RevealedText({ text, live }: { text: string; live: boolean }) {
+  return useRevealText(text, live);
+}
+
 export function TaskDetailsRail({
   task,
   agentName,
   requestedByName,
-  agentNameFor,
   costs,
   costsLoading,
   context,
   contextLoading,
   callUsage = null,
   composition = null,
+  session = null,
+  className,
 }: TaskDetailsRailProps) {
   const stats = summarizeCosts(costs);
   const isTerminal = TERMINAL_STATUSES.has(task.status);
@@ -513,8 +515,6 @@ export function TaskDetailsRail({
   const startedAt = firstStartedAt(task.logs);
   const timeLabel = startedAt ? "Started" : "Created";
   const timeValue = startedAt ?? task.createdAt;
-  // The run time, cost and turns use the same helpers as `taskRunSummary`
-  // (the log's end line).
   const ran = runTime(task, stats);
   const turns = stats ? turnsText(task, stats) : null;
 
@@ -528,19 +528,33 @@ export function TaskDetailsRail({
       ? latestSnapshot.contextFormula
       : null;
   const harness = harnessLine(task);
-  const hasEvents = (task.logs?.length ?? 0) > 0;
+  const fileCount = task.attachments?.length ?? 0;
 
   return (
-    <div className="space-y-6">
-      <RailSection title="Summary">
+    <div
+      className={cn(
+        "divide-y divide-border-subtle rounded-xl border border-border bg-card shadow-sm",
+        className,
+      )}
+    >
+      <RailSection title="Summary" hideTitle>
         <dl>
           <RailRow label="Agent">
             {task.agentId ? (
               <Link
                 to={`/agents/${task.agentId}`}
-                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
+                className={cn(
+                  "inline-flex max-w-full items-center gap-1.5 text-primary hover:underline",
+                  NARROW_INLINE_TARGET,
+                )}
               >
-                {agentName ?? `${task.agentId.slice(0, 8)}…`}
+                <AgentAvatar
+                  agentId={task.agentId}
+                  agentName={agentName}
+                  size="xs"
+                  className="size-4.5 shadow-none"
+                />
+                <span className="truncate">{agentName ?? `${task.agentId.slice(0, 8)}…`}</span>
               </Link>
             ) : (
               <span className="text-muted-foreground">Not assigned</span>
@@ -551,6 +565,31 @@ export function TaskDetailsRail({
               <AgentLink agentId={task.creatorAgentId} className={NARROW_INLINE_TARGET} />
             </RailRow>
           ) : null}
+          {/* The task that started this one. The page's transcript lists the
+              tasks this one started. */}
+          {task.parentTaskId ? (
+            <RailRow label="Parent task" mono>
+              <Link
+                to={`/tasks/${task.parentTaskId}`}
+                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
+              >
+                #{task.parentTaskId.slice(0, 8)}
+              </Link>
+            </RailRow>
+          ) : null}
+          {session ? (
+            <RailRow label="Session">
+              <Link
+                to={session.href}
+                className={cn(
+                  "inline-flex max-w-full items-center text-primary hover:underline",
+                  NARROW_INLINE_TARGET,
+                )}
+              >
+                <span className="truncate">{session.title}</span>
+              </Link>
+            </RailRow>
+          ) : null}
           {task.requestedByUserId ? (
             <RailRow label="Requested by">
               {requestedByName ?? (
@@ -558,13 +597,22 @@ export function TaskDetailsRail({
               )}
             </RailRow>
           ) : null}
-          {task.source ? <RailRow label="Source">{taskSourceLabel(task.source)}</RailRow> : null}
+          {task.source ? (
+            <RailRow label="Source">
+              <span className="inline-flex items-center gap-1.5">
+                <TaskSourceMark source={task.source} className="text-muted-foreground" />
+                {taskSourceLabel(task.source)}
+              </span>
+            </RailRow>
+          ) : null}
           <RailRow label={timeLabel} mono>
-            <span title={parseUTCDate(timeValue).toLocaleString()}>
-              {formatSmartTime(timeValue)}
-            </span>
-            {ran ? ` · ran ${ran}` : null}
+            <RelativeTime at={timeValue}>{formatSmartTime(timeValue)}</RelativeTime>
           </RailRow>
+          {ran ? (
+            <RailRow label="Duration" mono>
+              {ran}
+            </RailRow>
+          ) : null}
           {costsLoading ? (
             <RailRow label="Cost">
               <Skeleton className="mt-1 h-3 w-24" />
@@ -597,13 +645,31 @@ export function TaskDetailsRail({
 
       <SourceControlSection task={task} />
 
+      {fileCount > 0 ? (
+        <RailSection
+          title={
+            <>
+              Files
+              <span className="font-mono tabular-nums">{fileCount}</span>
+            </>
+          }
+        >
+          <TaskAttachmentsSection
+            taskId={task.id}
+            attachments={task.attachments}
+            variant="plain"
+            className="-mx-2"
+          />
+        </RailSection>
+      ) : null}
+
       {task.dependsOn && task.dependsOn.length > 0 ? (
         <RailSection
           title={
-            <span className="inline-flex items-center gap-1.5">
-              <GitBranch className="size-3" />
-              Dependencies ({task.dependsOn.length})
-            </span>
+            <>
+              Dependencies
+              <span className="font-mono tabular-nums">{task.dependsOn.length}</span>
+            </>
           }
         >
           <ul className="space-y-1">
@@ -629,7 +695,7 @@ export function TaskDetailsRail({
       {task.progress && !isTerminal ? (
         <RailSection title="Progress">
           <p className="max-h-32 overflow-auto whitespace-pre-wrap text-data leading-5 text-muted-foreground">
-            {task.progress}
+            <RevealedText text={task.progress} live={!isTerminal} />
           </p>
         </RailSection>
       ) : null}
@@ -642,28 +708,29 @@ export function TaskDetailsRail({
         callUsage={callUsage}
       />
 
-      {composition ? <RequestCompositionSection composition={composition} /> : null}
-
-      {hasEvents ? (
-        <RailSection title={`Activity (${task.logs.length})`}>
-          <ActivityTimeline logs={task.logs} agentNameFor={agentNameFor} />
-        </RailSection>
+      {composition ? (
+        <RequestCompositionSection
+          composition={composition}
+          className={SECTION_PAD}
+          titleClassName={SECTION_TOGGLE_TITLE}
+        />
       ) : null}
 
-      {/* A rail section like the others: an h2 at the meta size. */}
+      {/* A card section like the others: an h2 at the meta size. */}
       <CollapsibleSection
         title="Technical details"
         persistKey="tasks:technical-details-open"
+        className={SECTION_PAD}
         headerClassName={NARROW_TARGET}
         heading="h2"
-        titleClassName="text-meta"
+        titleClassName={SECTION_TOGGLE_TITLE}
       >
         <dl className="pt-1">
           <RailRow label="Task id">
             <CopyableId value={task.id} label="Copy task id" />
           </RailRow>
           {task.claudeSessionId ? (
-            <RailRow label="Session">
+            <RailRow label="Harness session">
               <CopyableId value={task.claudeSessionId} label="Copy session id">
                 <SessionId
                   sessionId={task.claudeSessionId}
@@ -739,19 +806,7 @@ export function TaskDetailsRail({
           ) : null}
           {task.finishedAt ? (
             <RailRow label="Finished" mono>
-              <span title={parseUTCDate(task.finishedAt).toLocaleString()}>
-                {formatSmartTime(task.finishedAt)}
-              </span>
-            </RailRow>
-          ) : null}
-          {task.parentTaskId ? (
-            <RailRow label="Parent" mono>
-              <Link
-                to={`/tasks/${task.parentTaskId}`}
-                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
-              >
-                #{task.parentTaskId.slice(0, 8)}
-              </Link>
+              <RelativeTime at={task.finishedAt}>{formatSmartTime(task.finishedAt)}</RelativeTime>
             </RailRow>
           ) : null}
           {task.dir ? (

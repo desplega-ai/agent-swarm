@@ -4,6 +4,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { devNotes } from "./dev-notes/vite-plugin";
 
 const packageJson = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8"),
@@ -86,7 +87,7 @@ const allowedHosts =
     : process.env.VITE_ALLOWED_HOSTS?.split(",").map((host) => host.trim());
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), plausibleAnalytics(), buildVersionManifest()],
+  plugins: [react(), tailwindcss(), plausibleAnalytics(), buildVersionManifest(), devNotes()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
   },

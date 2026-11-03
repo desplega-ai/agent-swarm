@@ -1,7 +1,11 @@
 import type { ReactionEvent } from "@/integrations/reaction-events";
 
-/** The shared lifecycle events; Slack maps each one to a shortcode below. */
-export type SlackReactionEvent = ReactionEvent;
+/**
+ * The shared lifecycle events, plus Slack's own `skipped`: the swarm saw the
+ * message and decided it was not its to answer (a `skipped` task, or a
+ * `pre.task.create` extension block). Slack maps each one to a shortcode below.
+ */
+export type SlackReactionEvent = ReactionEvent | "skipped";
 
 export const SLACK_REACTION_DEFAULTS: Record<SlackReactionEvent, string> = {
   accepted: "eyes",
@@ -10,6 +14,7 @@ export const SLACK_REACTION_DEFAULTS: Record<SlackReactionEvent, string> = {
   steered: "speech_balloon",
   completed: "white_check_mark",
   failed: "x",
+  skipped: "mute",
 };
 
 export const SLACK_REACTION_CONFIG_KEYS: Record<SlackReactionEvent, string> = {
@@ -19,6 +24,7 @@ export const SLACK_REACTION_CONFIG_KEYS: Record<SlackReactionEvent, string> = {
   steered: "SLACK_REACTION_STEERED",
   completed: "SLACK_REACTION_COMPLETED",
   failed: "SLACK_REACTION_FAILED",
+  skipped: "SLACK_REACTION_SKIPPED",
 };
 
 /**

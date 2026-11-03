@@ -19,6 +19,7 @@ import {
   getPendingApprovalsForTasks,
   getRootTaskChain,
   getTaskById,
+  getTasksDispatchedFrom,
   listRecentSessions,
 } from "../be/db";
 import { getSessionLabels } from "../be/db/session-labels";
@@ -37,9 +38,11 @@ import {
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
+  getSessionRoots,
   hasSessionAccess,
   listActiveSessionShares,
   type SessionAccess,
+  type SessionRoot,
   sessionAccessForRoot,
   setSessionShares,
   toSessionSharesState,
@@ -84,6 +87,7 @@ import {
   resolveSessionActor,
   type SessionActor,
   sessionAccessFor,
+  withReadAll,
 } from "./session-access";
 import { jsonError } from "./utils";
 
@@ -593,12 +597,17 @@ const listSessions = route({
      * an empty list for mine or shared.
      * tree: Sessions that GET /api/session-tree counts: mine plus shared with me,
      * no ownerless roots. A bypass actor sees every root.
+     * all: every user's sessions, read-only. Honored for a user whose role
+     * lists `session.read.all` (the built-in `auditor` role; grant-all admin
+     * alone does not count); anyone else gets the default list. The
+     * `X-Swarm-Session-Scope: all` header opts in the same way and also lifts
+     * the tree scope.
      */
     scope: z
-      .enum(["mine", "shared", "tree"])
+      .enum(["mine", "shared", "tree", "all"])
       .optional()
       .describe(
-        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
+        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
       ),
     /** With `scope=tree`: `mine` (default) or `all`. Must match the tree's `show`. */
     show: SessionShowSchema,
@@ -782,6 +791,40 @@ async function checkSessionMove(
   return { taskIds: tasks.map((task) => task.id) };
 }
 
+/**
+ * The chain plus the tasks it dispatched that hang elsewhere: a
+ * continuation's parentTaskId points at an earlier task, so the walk from a
+ * non-root task misses it, and that task can sit in another session. A task
+ * in another session joins only when the viewer can read that session, so
+ * the route grants no access beyond what the viewer already has.
+ */
+async function withDispatchedTasks(
+  chain: AgentTask[],
+  sessionRootId: string,
+  actor: SessionActor,
+): Promise<AgentTask[]> {
+  const dispatched = await getTasksDispatchedFrom(chain.map((task) => task.id));
+  if (dispatched.length === 0) return chain;
+  const roots = await getSessionRoots(dispatched.map((task) => task.id));
+  const foreignRoots = new Map<string, SessionRoot>();
+  for (const root of roots.values()) {
+    if (root.id !== sessionRootId) foreignRoots.set(root.id, root);
+  }
+  const readable = new Set<string>([sessionRootId]);
+  await Promise.all(
+    [...foreignRoots.values()].map(async (root) => {
+      if ((await accessForRoot(actor, root)) !== "none") readable.add(root.id);
+    }),
+  );
+  const visible = dispatched.filter((task) => {
+    const root = roots.get(task.id);
+    return root !== undefined && readable.has(root.id);
+  });
+  if (visible.length === 0) return chain;
+  // A stable sort keeps the chain's insertion order on equal timestamps.
+  return [...chain, ...visible].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 const getSession = route({
   method: "get",
   path: "/api/sessions/{rootTaskId}",
@@ -793,7 +836,7 @@ const getSession = route({
   responses: {
     200: {
       description:
-        "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
+        "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read.",
       schema: z.object({
         root: TaskWithSteeringSchema,
         chain: z.array(TaskWithSteeringSchema),
@@ -862,7 +905,9 @@ async function accessForRoot(
   actor: SessionActor,
   root: { id: string; requestedByUserId: string | null },
 ): Promise<SessionAccess> {
-  return actor.kind === "bypass" ? "owner" : sessionAccessForRoot(actor.userId, root);
+  return actor.kind === "bypass"
+    ? "owner"
+    : withReadAll(actor, await sessionAccessForRoot(actor.userId, root));
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -972,9 +1017,13 @@ export async function handleSessions(
           .map((s) => s.trim())
           .filter(Boolean)
       : undefined;
-    const actor = await resolveSessionActor(req, myAgentId);
+    const allUsers = parsed.query.scope === "all";
+    const actor = await resolveSessionActor(req, myAgentId, { allUsers });
     const limit = Math.min(200, Math.max(0, parsed.query.limit ?? 25));
-    if (actor.kind === "bypass" && parsed.query.scope && parsed.query.scope !== "tree") {
+    if (
+      actor.kind === "bypass" &&
+      (parsed.query.scope === "mine" || parsed.query.scope === "shared")
+    ) {
       // No user to own or receive a share.
       listSessions.respond(res, 200, {
         sessions: [],
@@ -1004,7 +1053,11 @@ export async function handleSessions(
         ? {
             viewer: {
               userId: actor.userId,
-              scope: parsed.query.scope === "tree" ? "all" : (parsed.query.scope ?? "all"),
+              scope:
+                parsed.query.scope === "mine" || parsed.query.scope === "shared"
+                  ? parsed.query.scope
+                  : "all",
+              readAll: actor.readAll,
             } as const,
           }
         : {}),
@@ -1067,6 +1120,7 @@ export async function handleSessions(
       actor.userId,
       { ...list, mine: show !== "all" },
       action,
+      actor.readAll,
     );
     triageSessionListRoute.respond(res, 200, { updated });
     return true;
@@ -1209,7 +1263,11 @@ export async function handleSessions(
           name: ownerUser?.name ?? sessionRoot.requestedByUserId,
         }
       : null;
-    const chain = await getRootTaskChain(parsed.params.rootTaskId);
+    const chain = await withDispatchedTasks(
+      await getRootTaskChain(parsed.params.rootTaskId),
+      sessionRoot.id,
+      actor,
+    );
     // Load steering, citations and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
     const [steering, citations, approvals, read, groupKey] = await Promise.all([
@@ -1219,7 +1277,7 @@ export async function handleSessions(
       // The viewer's read state, so a client marks a session read on open
       // without the list row (the same rule as `GET /api/sessions`).
       actor.kind === "user" && actor.userId
-        ? getSessionReadState(sessionRoot.id, actor.userId)
+        ? getSessionReadState(sessionRoot.id, actor.userId, undefined, actor.readAll)
         : Promise.resolve(null),
       getSessionGroupKey(root),
     ]);

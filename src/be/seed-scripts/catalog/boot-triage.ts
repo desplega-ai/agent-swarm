@@ -195,7 +195,7 @@ export default async function bootTriage(args: any, ctx: any) {
          FROM agent_tasks c
          WHERE c.parentTaskId = p.id
            AND c.taskType = 'resume'
-           AND c.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+           AND c.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        )
      ORDER BY datetime(p.lastUpdatedAt) DESC
      LIMIT 50`,

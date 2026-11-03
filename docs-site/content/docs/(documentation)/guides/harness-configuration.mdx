@@ -191,7 +191,7 @@ The following keys are stored in the swarm config store (via `PUT /api/config` o
 
 ### Model Selection
 
-The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+Codex uses `gpt-5.6-terra` as its no-tier fallback only when no worker-wide `MODEL_OVERRIDE`, task-level `model`, task `modelTier`, or task/agent model profile selects a model. A task `modelTier` or task/agent model profile can resolve to a different model even when neither of the first two overrides is set. Set `MODEL_OVERRIDE` to choose a worker-wide baseline model, or set a task-level `model` to choose a concrete model for one task. `MODEL_TIER_CODEX_REGULAR` affects explicit regular-tier resolution only; it does not change the no-tier fallback.
 
 ### Reasoning / Effort
 

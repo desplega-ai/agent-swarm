@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -156,6 +157,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
+import { isEffectiveOutputSchema } from "../utils/output-schema";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
@@ -198,6 +200,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageSearchSql } from "./db/page-search";
+import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import {
   assertAssetKeyMovesAllowed,
@@ -313,7 +316,11 @@ export {
   getContextVersionHistory,
   getLatestContextVersion,
 } from "./db/context-versions";
-export { getScriptRunExecutionArgs } from "./db/script-runs";
+export {
+  getScriptRunExecutionArgs,
+  getScriptRunFollowUpGuard,
+  setScriptRunFollowUpGuard,
+} from "./db/script-runs";
 export {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -336,12 +343,14 @@ export {
 } from "./db/runtime";
 
 export {
+  countAgentDispatchesInThread,
   type ExistingTrackerContextWork,
   type ExistingTrackerContextWorkReason,
   findActiveTasksByVcs,
-  findCompletedTaskInThread,
+  findCompletedTasksInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
+  findRecentFailedTaskInThread,
   findTaskByGitHub,
   findTaskByVcs,
   getAgentCurrentTask,
@@ -371,6 +380,7 @@ export {
   getTasksByAgentId,
   getTasksByStatus,
   getTasksCount,
+  getTasksDispatchedFrom,
   giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
@@ -407,7 +417,9 @@ export {
   recordTaskProviderIfUnset,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
+  setTaskTitleIfUnset,
   settleSupersededTaskDependents,
+  skipTask,
   startTask,
   supersedeTask,
   updateTaskClaudeSessionId,
@@ -889,7 +901,7 @@ export async function getResolvableDeferralOutcomes(
            WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled')
+         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
     [limit],
@@ -984,7 +996,7 @@ export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
            AND task.createdAt >= state.activated_at
-           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          )
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
@@ -2373,7 +2385,7 @@ export async function findRecentSimilarTasks(opts: {
 
   // Exclude all terminal statuses — only active or recently created.
   // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2514,6 +2526,12 @@ export async function createTaskExtended(
       "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
     );
   }
+  // An explicit empty `outputSchema: {}` means "no output schema": it stores
+  // NULL and blocks the parent-schema inheritance below. Callers pass `{}` on
+  // purpose to keep a delegated child free of their own output contract.
+  if (options.outputSchema !== undefined && !isEffectiveOutputSchema(options.outputSchema)) {
+    options = { ...options, outputSchema: undefined, inheritParentOutputSchema: false };
+  }
   let requestedByUserIdInherited = false;
   // The parent key is read again inside the INSERT transaction (see below).
   let keyInherited = false;
@@ -2603,32 +2621,44 @@ export async function createTaskExtended(
       // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
-      if (parent.vcsProvider && !options.vcsProvider) {
-        options.vcsProvider = parent.vcsProvider;
-      }
-      if (parent.vcsRepo && !options.vcsRepo) {
-        options.vcsRepo = parent.vcsRepo;
-      }
-      if (parent.vcsNumber != null && options.vcsNumber == null) {
-        options.vcsNumber = parent.vcsNumber;
-      }
-      if (parent.vcsEventType && !options.vcsEventType) {
-        options.vcsEventType = parent.vcsEventType;
-      }
-      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
-        options.vcsCommentId = parent.vcsCommentId;
-      }
-      if (parent.vcsAuthor && !options.vcsAuthor) {
-        options.vcsAuthor = parent.vcsAuthor;
-      }
-      if (parent.vcsUrl && !options.vcsUrl) {
-        options.vcsUrl = parent.vcsUrl;
-      }
-      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
-        options.vcsInstallationId = parent.vcsInstallationId;
-      }
-      if (parent.vcsNodeId && !options.vcsNodeId) {
-        options.vcsNodeId = parent.vcsNodeId;
+      //
+      // Inherited as an atomic unit, like Slack context above: a child that
+      // names its own vcsRepo different from the parent's (e.g. `send-task
+      // vcsRepo=...`) inherits NONE of the parent's vcs* fields. Otherwise it
+      // would pair its repo with the parent's number/URL, so PR reconciliation
+      // attaches the parent's PR as the child's deliverable and
+      // `findTaskByVcs` matches an unrelated PR with the same number.
+      const inheritParentVcs =
+        !options.vcsRepo ||
+        (!!parent.vcsRepo && options.vcsRepo.toLowerCase() === parent.vcsRepo.toLowerCase());
+      if (inheritParentVcs) {
+        if (parent.vcsProvider && !options.vcsProvider) {
+          options.vcsProvider = parent.vcsProvider;
+        }
+        if (parent.vcsRepo && !options.vcsRepo) {
+          options.vcsRepo = parent.vcsRepo;
+        }
+        if (parent.vcsNumber != null && options.vcsNumber == null) {
+          options.vcsNumber = parent.vcsNumber;
+        }
+        if (parent.vcsEventType && !options.vcsEventType) {
+          options.vcsEventType = parent.vcsEventType;
+        }
+        if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+          options.vcsCommentId = parent.vcsCommentId;
+        }
+        if (parent.vcsAuthor && !options.vcsAuthor) {
+          options.vcsAuthor = parent.vcsAuthor;
+        }
+        if (parent.vcsUrl && !options.vcsUrl) {
+          options.vcsUrl = parent.vcsUrl;
+        }
+        if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+          options.vcsInstallationId = parent.vcsInstallationId;
+        }
+        if (parent.vcsNodeId && !options.vcsNodeId) {
+          options.vcsNodeId = parent.vcsNodeId;
+        }
       }
 
       // Execution context (per-task overrides)
@@ -2663,7 +2693,7 @@ export async function createTaskExtended(
       // Lead reroute-decision) that must not be held to the original work's
       // output contract.
       if (
-        parent.outputSchema &&
+        isEffectiveOutputSchema(parent.outputSchema) &&
         !options.outputSchema &&
         options.inheritParentOutputSchema !== false
       ) {
@@ -2945,9 +2975,9 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, profile, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -2986,6 +3016,7 @@ export async function createTaskExtended(
         options?.mentionChannelId ?? null,
         options?.dir ?? null,
         options?.parentTaskId ?? null,
+        options?.dispatchedByTaskId ?? null,
         options?.model ?? null,
         options?.modelTier ?? null,
         options?.effort ?? null,
@@ -3649,7 +3680,9 @@ export async function checkDependencies(taskId: string): Promise<{
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
     const depTask = await getTaskById(depId);
-    if (!depTask || depTask.status !== "completed") {
+    // A skipped dependency settled without work to hand on; it does not
+    // block, the same as a completed one.
+    if (!depTask || (depTask.status !== "completed" && depTask.status !== "skipped")) {
       blockedBy.push(depId);
     }
   }
@@ -4401,11 +4434,12 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
  */
 export async function claimMentions(
   agentId: string,
-): Promise<{ channelId: string; lastReadAt: string | null }[]> {
+): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const client = getDbClient();
   const channels = await getAllChannels();
-  const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
+  const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
+    [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
@@ -4449,7 +4483,11 @@ export async function claimMentions(
 
       // Only add to claimed list if we actually claimed it (not already processing)
       if (result.changes > 0) {
-        claimedChannels.push({ channelId: channel.id, lastReadAt });
+        claimedChannels.push({
+          channelId: channel.id,
+          lastReadAt,
+          mentionsCount: mentionCountRow.count,
+        });
       }
     }
   }
@@ -5019,13 +5057,22 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
       thinkingTokens,
       input.durationMs,
       input.numTurns,
-      input.model,
+      // Cost rows group by the underlying model, while task configuration and
+      // session logs retain the pi route used to select credentials.
+      chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
       input.isError ? 1 : 0,
       costSource,
       input.harnessCostUsd ?? null,
       input.cacheWrite5mTokens ?? null,
       input.cacheWrite1hTokens ?? null,
-      input.modelBreakdown ? JSON.stringify(input.modelBreakdown) : null,
+      input.modelBreakdown
+        ? JSON.stringify(
+            input.modelBreakdown.map((entry) => ({
+              ...entry,
+              model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
+            })),
+          )
+        : null,
     ],
   );
 
@@ -7189,24 +7236,29 @@ export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapp
   );
 }
 
+/**
+ * Map an inbox to an agent. Re-registering an inbox the same agent already owns
+ * refreshes its email. Returns null, and changes nothing, when the inbox is
+ * already mapped to a different agent.
+ */
 export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): Promise<AgentMailInboxMapping> {
+): Promise<AgentMailInboxMapping | null> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = await getDbClient().get<AgentMailInboxMapping>(
     `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
+       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
+         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
        RETURNING *`,
     [id, inboxId, agentId, inboxEmail ?? null, now],
   );
 
-  if (!row) throw new Error("Failed to create AgentMail inbox mapping");
-  return row;
+  return row ?? null;
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
@@ -8335,7 +8387,7 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
       CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wrs.status = 'waiting'
         AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')
+        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );
 }
@@ -8613,6 +8665,9 @@ type PageRow = {
   createdAt: string;
   updatedAt: string;
   view_count: number;
+  theme: string | null;
+  theme_tokens: string | null;
+  design_version: number;
 };
 
 function rowToPage(row: PageRow): Page {
@@ -8630,6 +8685,9 @@ function rowToPage(row: PageRow): Page {
     needsCredentials: row.needsCredentials
       ? (JSON.parse(row.needsCredentials) as string[])
       : undefined,
+    theme: row.theme ?? null,
+    themeTokens: parsePageThemeTokens(row.theme_tokens),
+    designVersion: typeof row.design_version === "number" ? row.design_version : 1,
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -8647,13 +8705,17 @@ export async function createPage(data: {
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
+  theme?: string | null;
+  themeTokens?: Page["themeTokens"];
+  /** Defaults to 2 (the swarm design system). Rows inserted outside this function default to 1. */
+  designVersion?: number;
 }): Promise<Page> {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
   const row = await getDbClient().get<PageRow>(
-    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
@@ -8666,6 +8728,9 @@ export async function createPage(data: {
       data.passwordHash ?? null,
       data.body,
       data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+      data.theme ?? null,
+      data.themeTokens ? JSON.stringify(data.themeTokens) : null,
+      data.designVersion ?? 2,
     ],
   );
   if (!row) throw new Error("Failed to create page");
@@ -8852,6 +8917,11 @@ export async function updatePage(
     body?: string;
     needsCredentials?: string[] | null;
     slug?: string;
+    /** undefined keeps the stored value, null clears it. */
+    theme?: string | null;
+    /** undefined keeps the stored value, null clears it. */
+    themeTokens?: Page["themeTokens"];
+    designVersion?: number;
   },
 ): Promise<Page | null> {
   const updates: string[] = [];
@@ -8891,6 +8961,18 @@ export async function updatePage(
   if (data.slug !== undefined) {
     updates.push("slug = ?");
     params.push(data.slug);
+  }
+  if (data.theme !== undefined) {
+    updates.push("theme = ?");
+    params.push(data.theme);
+  }
+  if (data.themeTokens !== undefined) {
+    updates.push("theme_tokens = ?");
+    params.push(data.themeTokens ? JSON.stringify(data.themeTokens) : null);
+  }
+  if (data.designVersion !== undefined) {
+    updates.push("design_version = ?");
+    params.push(data.designVersion);
   }
   if (updates.length === 0) return getPage(id);
   updates.push("updatedAt = ?");
@@ -14116,6 +14198,7 @@ type ScriptRunRow = {
   last_heartbeat_at: string | null;
   idempotencyKey: string | null;
   requestedByUserId: string | null;
+  sourceTaskId: string | null;
   created_by: string | null;
   updated_by: string | null;
 };
@@ -14160,6 +14243,7 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
+    sourceTaskId: row.sourceTaskId ?? undefined,
   };
 }
 
@@ -14188,6 +14272,7 @@ export async function createScriptRun(data: {
   scriptName?: string;
   idempotencyKey?: string;
   requestedByUserId?: string;
+  sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
@@ -14202,8 +14287,9 @@ export async function createScriptRun(data: {
 
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
-        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
+         created_by, updated_by, startedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14216,8 +14302,11 @@ export async function createScriptRun(data: {
       sealJson(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
+      data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      new Date().toISOString(),
     ],
   );
   if (!row) throw new Error("Failed to create script run");

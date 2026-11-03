@@ -1979,7 +1979,7 @@ export interface paths {
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
-                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                         } | {
                             ok: boolean;
                             result: {
@@ -2921,7 +2921,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Agent not found */
+                /** @description Agent not found, or changedByAgentId names no agent */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -4044,6 +4044,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                             label?: string;
+                            /** @default true */
                             required?: boolean;
                             description?: string;
                             placeholder?: string;
@@ -11392,7 +11393,7 @@ export interface paths {
         };
         /**
          * Get the live model catalog for the picker-reachable providers
-         * @description Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
+         * @description Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
          */
         get: {
             parameters: {
@@ -11971,6 +11972,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -12297,7 +12307,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke and delete the OAuth token for an MCP server */
+        /**
+         * Revoke and delete the OAuth token for an MCP server
+         * @description Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.
+         */
         delete: {
             parameters: {
                 query?: {
@@ -12506,6 +12519,7 @@ export interface paths {
                                 marketing_url: string | null;
                                 hide_cloud_promo: boolean;
                                 org_id: string | null;
+                                dashboard_url?: string | null;
                             };
                             setup: {
                                 /** @enum {string} */
@@ -13778,7 +13792,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
          */
         get: {
             parameters: {
@@ -13803,6 +13817,8 @@ export interface paths {
                     offset?: number | null;
                     fields?: "full" | "slim" | "timeline";
                     includeTotal?: "true" | "false";
+                    /** @description all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
+                    scope?: "all";
                 };
                 header?: never;
                 path?: never;
@@ -13827,7 +13843,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -13875,7 +13891,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -14759,7 +14775,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -14907,7 +14923,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark task as completed or failed (runner endpoint) */
+        /**
+         * Mark task as completed, failed, or skipped (runner endpoint)
+         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -14921,7 +14940,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        status: "completed" | "failed";
+                        status: "completed" | "failed" | "skipped";
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
@@ -14950,7 +14969,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid status */
+                /** @description Invalid status, or a skip without a reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15233,7 +15252,7 @@ export interface paths {
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
-                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                         };
                     };
                 };
@@ -15449,6 +15468,9 @@ export interface paths {
                                 passwordHash?: string;
                                 body?: string;
                                 needsCredentials?: string[];
+                                theme?: string | null;
+                                themeTokens?: components["schemas"]["PageThemeTokens"];
+                                designVersion?: number;
                                 /** @default 0 */
                                 viewCount: number;
                                 createdAt: string;
@@ -15492,6 +15514,22 @@ export interface paths {
                         password?: string;
                         body: string;
                         needsCredentials?: string[];
+                        /** @description Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it. */
+                        theme?: string | null;
+                        /** @description Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: "css", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them. */
+                        themeTokens?: {
+                            /** @enum {string} */
+                            format?: "tokens" | "css";
+                            light?: {
+                                [key: string]: string;
+                            };
+                            dark?: {
+                                [key: string]: string;
+                            };
+                            css?: string;
+                        } | null;
+                        /** @description Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value. */
+                        designVersion?: number;
                     };
                 };
             };
@@ -15510,10 +15548,14 @@ export interface paths {
                             version: 1;
                             api_url: string;
                             app_url: string;
+                            /** @description Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored. */
+                            ignoredTokens?: string[];
+                            /** @description The design version of the new page: 2 unless the body set designVersion: 1. */
+                            designVersion: number;
                         };
                     };
                 };
-                /** @description Invalid body */
+                /** @description Invalid body, unknown theme, or invalid themeTokens */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15605,6 +15647,22 @@ export interface paths {
                         password?: string | null;
                         body?: string;
                         needsCredentials?: string[] | null;
+                        /** @description Theme preset id that restyles the whole page. One of: hive, meadow, iris, rose, cobalt, ember, carbon, paper, github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin. Omit to follow the viewer's theme. Pass null on update to clear it. */
+                        theme?: string | null;
+                        /** @description Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value, or { format: "css", css } with a CSS variable block (:root, .dark, @theme). Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and listed in ignoredTokens. Replaces the stored overrides. Pass null on update to clear them. */
+                        themeTokens?: {
+                            /** @enum {string} */
+                            format?: "tokens" | "css";
+                            light?: {
+                                [key: string]: string;
+                            };
+                            dark?: {
+                                [key: string]: string;
+                            };
+                            css?: string;
+                        } | null;
+                        /** @description Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value. */
+                        designVersion?: number;
                     };
                 };
             };
@@ -15620,7 +15678,20 @@ export interface paths {
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
                             version: number;
+                            /** @description Theme tokens the importer ignored. A bare name is outside the token contract. Other entries give the reason, for example --font-sans (references --font-geist-sans) or --ring (in .card). Absent when none were ignored. */
+                            ignoredTokens?: string[];
+                            /** @description The design version the page has after the update. An omitted designVersion keeps the stored one, so an older page stays on 1. */
+                            designVersion: number;
                         };
+                    };
+                };
+                /** @description Unknown theme or invalid themeTokens */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Page not found */
@@ -19166,7 +19237,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write a script run journal step */
+        /**
+         * Write a script run journal step
+         * @description Write-once per stepKey; a replay keeps the first journal entry and still answers 201.
+         */
         post: operations["script_runs_internal_step_create"];
         delete?: never;
         options?: never;
@@ -20041,8 +20115,8 @@ export interface paths {
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
-                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. */
-                    scope?: "mine" | "shared" | "tree";
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree. */
+                    scope?: "mine" | "shared" | "tree" | "all";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
                     /** @description Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it. */
@@ -20074,7 +20148,7 @@ export interface paths {
                                     task: string;
                                     title?: string;
                                     /** @enum {string} */
-                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                     /**
                                      * @default mcp
                                      * @enum {string}
@@ -20113,7 +20187,7 @@ export interface paths {
                                 chainTaskCount: number;
                                 lastActivityAt: string;
                                 /** @enum {string} */
-                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** @enum {string} */
                                 readState?: "unread" | "read" | "later" | "done";
                                 snoozeUntil?: string | null;
@@ -20503,7 +20577,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner` */
+                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -22255,6 +22329,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A server with this name already exists in the same scope and owner (mcp_server_name_taken) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24074,6 +24157,376 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/improvements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List product improvements
+         * @description Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Improvements and the switch state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            improvements: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Draft a product improvement, or send one as a person
+         * @description Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        text: string;
+                        /** Format: email */
+                        email?: string;
+                        sendNow?: boolean;
+                        /** @enum {string} */
+                        source?: "ui" | "api";
+                    };
+                };
+            };
+            responses: {
+                /** @description A person's `sendNow` was approved and sent (see `status`) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Draft stored as `pending_approval` */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid text or email, or `sendNow` without an email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller may not draft improvements */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve and send a drafted improvement
+         * @description Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: email
+                         * @description The approver's email, sent with the text.
+                         */
+                        email: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Approved. `status` is `sent`, or `failed` with the proxy status and error. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Missing or invalid email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is an agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent, sending or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a drafted improvement
+         * @description A person may discard any pending or failed improvement. An agent may discard only a draft it requested.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Discarded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Caller is an agent that did not request this draft */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet-benchmark": {
         parameters: {
             query?: never;
@@ -24190,7 +24643,7 @@ export interface paths {
         get: operations["users_getRbacRoles"];
         /**
          * Set a user's RBAC roles
-         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
          */
         put: operations["users_setRbacRoles"];
         post?: never;
@@ -24232,6 +24685,7 @@ export interface paths {
                                 verbs: string[];
                                 roles: string[];
                             };
+                            sessionReadAll?: boolean;
                         };
                     };
                 };
@@ -24404,6 +24858,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A user with this email already exists (user_exists) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -24547,6 +25010,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24744,6 +25216,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
                     headers: {
@@ -24833,6 +25314,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24993,6 +25483,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25447,6 +25946,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target or source user not found */
                 404: {
                     headers: {
@@ -25584,7 +26092,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error or PK collision */
+                /** @description Validation error */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -25602,8 +26110,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The (kind, externalId) identity is already linked (identity_taken) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -27222,6 +27748,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -27802,7 +28337,7 @@ export interface components {
             task: string;
             title?: string;
             /** @enum {string} */
-            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
             /**
              * @default mcp
              * @enum {string}
@@ -27866,6 +28401,7 @@ export interface components {
             mentionChannelId?: string;
             dir?: string;
             parentTaskId?: string;
+            dispatchedByTaskId?: string;
             claudeSessionId?: string;
             model?: string;
             /** @enum {string} */
@@ -28561,7 +29097,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -28575,6 +29111,14 @@ export interface components {
             language?: string;
             verbosity?: string;
         };
+        PageThemeTokens: {
+            light: {
+                [key: string]: string;
+            };
+            dark: {
+                [key: string]: string;
+            };
+        } | null;
         Page: {
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
@@ -28590,6 +29134,9 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+            theme: string | null;
+            themeTokens: components["schemas"]["PageThemeTokens"];
+            designVersion: number;
             /** @default 0 */
             viewCount: number;
             createdAt: string;
@@ -28614,6 +29161,9 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+            theme?: string | null;
+            themeTokens?: components["schemas"]["PageThemeTokens"];
+            designVersion?: number;
         };
         PromptTemplateResponse: components["schemas"]["PromptTemplate"] & {
             defaultDrifted: boolean;
@@ -28677,16 +29227,12 @@ export interface components {
             defaultBranch: string;
             /** @default true */
             autoClone: boolean;
-            hooks?: components["schemas"]["RepoHooks"];
+            hooks: components["schemas"]["RepoHooks"];
             guidelines?: components["schemas"]["RepoGuidelines"];
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /**
-         * @default {
-         *       "enabled": false
-         *     }
-         */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -28724,6 +29270,7 @@ export interface components {
             lastHeartbeatAt?: string;
             idempotencyKey?: string;
             requestedByUserId?: string;
+            sourceTaskId?: string;
         };
         ScriptRunJournalEntry: {
             /** Format: uuid */
@@ -32255,6 +32802,7 @@ export interface operations {
                     outputSchema?: {
                         [key: string]: unknown;
                     };
+                    allowRedelegation?: boolean;
                 };
             };
         };
@@ -32280,12 +32828,39 @@ export interface operations {
                     "application/json": {
                         taskId: string;
                         /** @enum {string} */
-                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                     };
+                };
+            };
+            /** @description Script run belongs to another agent, or the run's agent may not create a child task under parentTaskId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Script run not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent task failed, was cancelled, or was superseded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Blocked by the follow-up re-delegation guard */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33276,7 +33851,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Not allowed to change roles */
+            /** @description Not allowed to change roles, or adding an operator-only role with a user token */
             403: {
                 headers: {
                     [name: string]: unknown;

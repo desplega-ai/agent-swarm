@@ -167,6 +167,7 @@ value:completeApprovalCancellationNotificationClaim
 value:completeTask
 value:computeContentHash
 value:countActiveScriptRuns
+value:countAgentDispatchesInThread
 value:countAllMetrics
 value:countAllPages
 value:countKv
@@ -241,9 +242,10 @@ value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findRecentSimilarTasks
 value:findTaskByAgentMailThread
 value:findTaskByGitHub
@@ -392,6 +394,7 @@ value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
 value:getScriptRunExecutionArgs
+value:getScriptRunFollowUpGuard
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -445,6 +448,7 @@ value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
 value:getTasksCount
+value:getTasksDispatchedFrom
 value:getUnassignedPoolTasks
 value:getUnassignedTaskIds
 value:getUnassignedTaskIdsForAgent
@@ -584,10 +588,13 @@ value:setApiKeyName
 value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
+value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
+value:setTaskTitleIfUnset
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
+value:skipTask
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv
@@ -655,7 +662,9 @@ value:pauseTask
 value:recordTaskProviderIfUnset
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
+value:setTaskTitleIfUnset
 value:settleSupersededTaskDependents
+value:skipTask
 value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId

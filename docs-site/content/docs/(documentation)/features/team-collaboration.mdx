@@ -7,9 +7,9 @@ One Agent Swarm deployment is shared by your whole team: people talk to it from 
 
 ## Shared company context
 
-A swarm keeps several kinds of shared state, and each one is visible to every agent on the team.
+A swarm keeps several kinds of state, with visibility depending on the kind.
 
-**Memory.** Agents store memories with an `agent` or `swarm` scope. Agent scope is visible only to the owner; swarm scope is visible to all agents. Memories come from session summaries, completed tasks, explicit `memory-store` calls and files under the shared or personal memory directories, and retrieval is vector search. The lead agent can also push a learning into every worker with `inject-learning`, so a fix discovered once becomes swarm-wide knowledge. See [Memory](/docs/architecture/memory).
+**Memory.** Agents store memories with an `agent` or `swarm` scope. Agent scope is visible to its owner and searchable by the lead agent; swarm scope is visible to all agents. Memories come from session summaries, completed tasks, explicit `memory-store` calls and files under the shared or personal memory directories, and retrieval is vector search. The lead agent can also push a learning into every worker with `inject-learning`, so a fix discovered once becomes swarm-wide knowledge. See [Memory](/docs/architecture/memory).
 
 **Repositories.** Repositories are registered with the swarm and can be auto-cloned into every worker container at startup. Before each task the runner refreshes the repo and reads its `CLAUDE.md`, so every agent works against the same code with the same project instructions. See [Agents](/docs/architecture/agents).
 
@@ -77,7 +77,16 @@ One deployment serves the whole team, and you run it on your own infrastructure.
 
 **One lead.** A swarm has exactly one lead agent — joining a second lead is rejected, and the Helm chart enforces one lead pool with one replica. The lead holds the privileged verbs: user management, editing other agents' profiles, injecting swarm-wide learnings, all Slack posting and channel tools, credential bindings and script connections, writing config and reading secrets, swarm and global skills, global scripts, and installing skills or MCP servers for other agents. Which tool groups exist on a worker at all is decided separately by its capabilities environment variable.
 
-**Users and roles.** Role-based access control ships with three built-in roles: `admin` (full access), `requester` (create, read, cancel and act on their own tasks, plus their own files and favorites) and `viewer` (read-only). Every new user is assigned `admin` by a database trigger. Enforcement is on by default via `RBAC_ENABLED` and gates only requests made with user tokens — operator-key and agent calls are not affected. A user acting on tasks is limited to tasks they requested. See [Environment variables](/docs/reference/environment-variables) and the [2026-07-13 release notes](/docs/releases/2026-07-13).
+**Users and roles.** Role-based access control ships with three built-in primary roles: `admin` (full access), `requester` (create, read, cancel and act on their own tasks, plus their own files and favorites) and `viewer` (read-only). Each user holds exactly one primary role, plus any extra roles. Every new user is assigned `admin` by a database trigger. Enforcement is on by default via `RBAC_ENABLED` and gates only requests made with user tokens — operator-key and agent calls are not affected. A user acting on tasks is limited to tasks they requested. A dashboard identity sees only its own sessions, ownerless and schedule sessions, and sessions shared with it. A user whose role lists `session.read.all` explicitly can opt in to every user's tasks and sessions with the dashboard's **All users** toggle (`scope=all` on `GET /api/tasks` and `GET /api/sessions`); the opt-in is read-only. The `admin` role alone does not grant it, since every new user is admin. The built-in extra role `auditor` holds only `session.read.all` and is never assigned by default. Add it next to the user's primary role with `PUT /api/users/{id}/roles` and the operator key. A user token gets 403 when it adds `auditor`, even with a grant-all role, since every user could otherwise grant it to itself. The call replaces the user's roles, so list the primary role too:
+
+```bash
+curl -X PUT "$MCP_BASE_URL/api/users/<user-id>/roles" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"roles": ["admin", "auditor"]}'
+```
+
+To revoke it, send the primary role alone (`{"roles": ["admin"]}`); any role manager can revoke it. For a user holding `auditor`, only the operator key, or the user itself with a live MCP token, can mint an MCP token or connector code, link an identity, change the email or email aliases, resolve an unmapped identity to it, or merge another user into it. Adding `auditor` revokes every MCP token the user holds and spends every unused connector and invite code for it, whoever created them, since any admin could have minted one for that user. Afterwards the operator key issues the first new token, and a request already in flight with a revoked token is refused. Adding `auditor` leaves the user's linked identities and email addresses in place. They attribute integration events (Slack, GitHub, Linear) to the user but give no API credential, so review them as part of the grant. A page session cookie already issued for the user lasts at most one hour and cannot be revoked; it cannot mint credentials or link identities for an `auditor`. See [Environment variables](/docs/reference/environment-variables) and the [2026-07-13 release notes](/docs/releases/2026-07-13).
 
 **Invites.** An admin invites a teammate with `POST /api/invites`, passing an email and a role: `requester` (the default), `viewer` or `admin`. The operator key can invite too. A user whose role holds `user.role.manage` must also hold a grant-all role, as for `PUT /api/users/{id}/roles`. The swarm creates the user as `invited` with exactly that role and returns a one-time link to the dashboard's `/join` page. No email is sent: copy the link to the teammate yourself.
 
@@ -93,7 +102,7 @@ State plainly what does not exist today:
 
 - There is no UI to assign roles yet. An operator or admin sets them with `PUT /api/users/{id}/roles`; every user is an admin until then. A user below `admin` cannot answer approval requests, even when listed as an approver. The People page "Role" field is still a free-text label. Agents are governed by the fixed lead and owner rules, not roles.
 - There is no SSO group-to-role mapping and no per-user identity behind SSO; SSO users share the operator key. There is no built-in login, native OIDC or SAML.
-- Approval requests accept an `approvers` field, but the respond endpoint does not enforce it — any authenticated caller can respond. Do not rely on named approvers being the only ones who can approve.
+- Responding to approval requests requires `approval.respond` permission. When `approvers` lists users or roles, the caller must match a listed user or role; the shared operator key can always respond. With no users or roles listed, any caller with that permission can respond.
 - There are no per-agent long-lived API keys, no multi-tenant workspaces inside one swarm (one deployment is one swarm), no Slack per-channel allowlist, and no read privacy for `personal/` asset keys.
 
 **Audit.** Every permission decision — allow and deny, with principal, verb, resource and reason — is recorded in an audit log with a default 30-day retention that can be disabled. Identity changes are kept in a separate append-only log, and rows carry created-by and updated-by user columns.

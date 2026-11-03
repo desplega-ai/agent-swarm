@@ -179,7 +179,7 @@ describe("Stop-hook profile sync visibility", () => {
             throw new Error("network unavailable");
           }) as typeof fetch,
         }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe(false);
       expect(String(errorSpy.mock.calls[0]?.[0])).toContain(
         "claudeMd profile sync errored: network unavailable",
       );

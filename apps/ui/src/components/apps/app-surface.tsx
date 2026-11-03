@@ -7,7 +7,7 @@
  *    pages) is fetched by the caller and handed in as `app`.
  * 2. Every named query runs via `GET /api/apps/:id/queries/<name>` on the
  *    standard 5s react-query poll, and is mirrored into json-render state at
- *    `/queries/<name>` as `{ data, loading, error }` — which is what the
+ *    `/queries/<name>` as `{ data, loading, fetching, error }` — which is what the
  *    catalog's `Table` binds to. A query with `{ "$param": … }` filters is run
  *    with the current route params (and parked, with an explicit error in its
  *    slot, while any of them is missing from the URL).
@@ -87,8 +87,14 @@ import {
   useAppRefresh,
   useAppUserConfig,
 } from "@/api/hooks/use-apps";
-import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
+import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import {
+  buildQuerySlot,
+  errorMessage,
+  type QuerySlot,
+  sameQuerySlot,
+} from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -106,13 +112,12 @@ import {
   assemblePageSpec,
   collectElementRefAppIds,
   DEFINING_APP_PARAM,
+  OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
-
-const EMPTY_ROWS: AppRow[] = [];
 
 /** Task-backed actions are watched on the same 5s cadence as the app queries. */
 const TASK_POLL_MS = 5000;
@@ -122,6 +127,7 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<AgentTaskStatus> = new Set<AgentTaskSt
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 
 // Dev-only read-out of the whole global apps store, for console QA:
@@ -141,12 +147,6 @@ export function viewModeFromParam(mode: string | null): ViewMode {
   if (mode === "full") return "full";
   if (mode === "chromeless") return "chromeless";
   return "default";
-}
-
-interface QuerySlot {
-  data: AppRow[];
-  loading: boolean;
-  error: string | null;
 }
 
 /**
@@ -343,10 +343,7 @@ function definingAppOf(params: { [key: string]: unknown } | undefined, ownAppId:
   return typeof tagged === "string" && tagged ? tagged : ownAppId;
 }
 
-export function errorMessage(error: unknown): string | null {
-  if (!error) return null;
-  return error instanceof Error ? error.message : String(error);
-}
+export { errorMessage };
 
 /** Resolves `true` after `ms`, or `false` if the runtime unmounted first. */
 function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
@@ -372,6 +369,11 @@ function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
  * still `running`, mirrored into `/actions/<name>`) instead of escaping as an
  * unhandled rejection that would leave the app stuck on "running".
  *
+ * `outcomePath` is the invoking bulk chain's private outcome slot
+ * (`OUTCOME_PARAM`). A newer invocation of the same action takes over
+ * `<path>`, but not the outcome slot, so the watcher keeps going until it can
+ * report this task's terminal status there.
+ *
  * The `PollRegistry` is captured ONCE, at start: it identifies the mount that
  * owns this watcher. Reading it live off `ctxRef` would let a watcher from a
  * disposed mount be revived by the next mount's registry (React StrictMode's
@@ -383,8 +385,11 @@ async function pollActionTask(
   path: string,
   taskId: string,
   onError: (message: string) => void,
+  outcomePath: string | null = null,
 ): Promise<void> {
   const poll = ctxRef.current.poll;
+  const owns = (ctx: RuntimeCtx, slotPath: string | null): boolean =>
+    slotPath !== null && (ctx.store.get(slotPath) as ActionSlot | undefined)?.taskId === taskId;
   try {
     for (;;) {
       if (!(await waitUnlessDisposed(poll, TASK_POLL_MS))) return;
@@ -399,22 +404,32 @@ async function pollActionTask(
       }
       if (poll.disposed) return;
 
-      // A newer invocation of the same action supersedes this watcher.
-      const current = ctx.store.get(path) as ActionSlot | undefined;
-      if (current?.taskId !== taskId) return;
+      // A newer invocation of the same action supersedes this watcher on the
+      // shared slot. It stops only once no slot it reports to names its task.
+      const ownsSlot = owns(ctx, path);
+      const ownsOutcome = owns(ctx, outcomePath);
+      if (!ownsSlot && !ownsOutcome) return;
 
       if (!TERMINAL_TASK_STATUSES.has(status)) {
-        ctx.store.set(path, { status: "running", taskId, taskStatus: status } satisfies ActionSlot);
+        if (ownsSlot) {
+          ctx.store.set(path, {
+            status: "running",
+            taskId,
+            taskStatus: status,
+          } satisfies ActionSlot);
+        }
         continue;
       }
 
       const ok = status === "completed";
-      ctx.store.set(path, {
+      const terminal = {
         status: ok ? "ok" : "error",
         taskId,
         taskStatus: status,
         ...(ok ? {} : { error: `task ${status}` }),
-      } satisfies ActionSlot);
+      } satisfies ActionSlot;
+      if (ownsSlot) ctx.store.set(path, terminal);
+      if (ownsOutcome && outcomePath !== null) ctx.store.set(outcomePath, terminal);
       if (ok) {
         await ctx.refetchAll();
       } else {
@@ -428,16 +443,19 @@ async function pollActionTask(
     const ctx = ctxRef.current;
     if (poll.disposed) return;
     const message = e instanceof Error ? e.message : String(e);
-    // Only claim the slot while it is still this watcher's running slot — a
+    // Only claim a slot while it is still this watcher's running slot — a
     // terminal state already written above (or a newer invocation) wins.
-    const current = ctx.store.get(path) as ActionSlot | undefined;
-    if (current?.taskId === taskId && current.status === "running") {
-      ctx.store.set(path, {
-        status: "error",
-        taskId,
-        ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
-        error: message,
-      } satisfies ActionSlot);
+    for (const slotPath of [path, outcomePath]) {
+      if (slotPath === null) continue;
+      const current = ctx.store.get(slotPath) as ActionSlot | undefined;
+      if (current?.taskId === taskId && current.status === "running") {
+        ctx.store.set(slotPath, {
+          status: "error",
+          taskId,
+          ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
+          error: message,
+        } satisfies ActionSlot);
+      }
     }
     onError(message);
   }
@@ -771,34 +789,10 @@ export function AppSurface({
     queryPlans.forEach((plan, index) => {
       const result = results[index];
       const prev = store.get(plan.statePath) as QuerySlot | undefined;
-      // A `$param` query whose params aren't all in the route never ran —
-      // say so in the slot instead of leaving it on a permanent spinner. The
-      // previous rows are RETAINED (not blanked) so content driven by the
-      // param — a closing Drawer mid slide-out — doesn't flash empty; a fresh
-      // deep link has no previous rows and still shows the empty state.
-      const next: QuerySlot = plan.missing.length
-        ? {
-            data: prev?.data ?? EMPTY_ROWS,
-            loading: false,
-            error: `missing route param(s): ${plan.missing.join(", ")}`,
-          }
-        : {
-            // `rows` is `[]` for a genuinely empty result, so `??` only falls
-            // through when the query has NO result yet (fresh mount, evicted
-            // cache) — exactly the case where the warm rows should survive
-            // under the spinner.
-            data: result?.data?.rows ?? prev?.data ?? EMPTY_ROWS,
-            loading: result?.isLoading ?? true,
-            error: errorMessage(result?.error),
-          };
-      if (
-        prev &&
-        prev.data === next.data &&
-        prev.loading === next.loading &&
-        prev.error === next.error
-      ) {
-        return;
-      }
+      // A `$param` query whose params aren't all in the route never ran — the
+      // slot says so instead of leaving a permanent spinner.
+      const next = buildQuerySlot(plan.missing, result, prev);
+      if (sameQuerySlot(prev, next)) return;
       store.set(plan.statePath, next);
     });
   }, [queryPlans, results, store]);
@@ -910,6 +904,11 @@ export function AppSurface({
           if (!params) return;
           const ctx = ctxRef.current;
           const targetAppId = definingAppOf(params, ctx.app.id);
+          // A caller that must know whether the write landed (Table bulk
+          // actions) names a state path; this handler swallows its own errors.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
           try {
             if (params.op === "create") {
               setLastResponse(
@@ -934,8 +933,10 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
             // A mutate dispatched from a Form carries its formId — scope the
             // failure to that form (`/forms/<id>/$error`, rendered inline
             // under the fields) instead of the page-level banner.
@@ -971,6 +972,15 @@ export function AppSurface({
             targetAppId === ctx.app.id
               ? `/actions/${name}`
               : `/refs/${targetAppId}/actions/${name}`;
+          // A Table bulk chain names a private outcome slot: `path` is shared
+          // with every other invocation of this action, so it cannot tell the
+          // chain how ITS invocation (and its task) ended.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          const report = (slot: ActionSlot): void => {
+            if (outcomePath) ctx.store.set(outcomePath, slot);
+          };
           // A `$chain` binding only resolves inside a component that publishes
           // chain scope. Elsewhere the sentinel object arrives intact: json-render
           // hands it through, and `resolveScopedValue` keeps an unresolved `$chain`
@@ -986,6 +996,7 @@ export function AppSurface({
             const message =
               "app.action parentTaskId must resolve to a task id; a $chain binding only resolves inside a component that publishes chain scope";
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
             return;
           }
@@ -1000,12 +1011,14 @@ export function AppSurface({
             setLastResponse(response);
 
             if (response.taskId) {
-              ctx.store.set(path, {
+              const running = {
                 status: "running",
                 taskId: response.taskId,
                 taskStatus: response.status,
-              } satisfies ActionSlot);
-              void pollActionTask(ctxRef, path, response.taskId, setActionError);
+              } satisfies ActionSlot;
+              ctx.store.set(path, running);
+              report(running);
+              void pollActionTask(ctxRef, path, response.taskId, setActionError, outcomePath);
               return;
             }
 
@@ -1016,6 +1029,7 @@ export function AppSurface({
               } satisfies ActionSlot);
               // A script action can touch any model of any app on the surface.
               await ctx.refetchAll();
+              report({ status: "ok" });
               return;
             }
 
@@ -1025,10 +1039,12 @@ export function AppSurface({
               error: message,
               result: response.result,
             } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
             setActionError(message);
           }
         },

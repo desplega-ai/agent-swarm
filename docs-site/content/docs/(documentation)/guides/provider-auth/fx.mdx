@@ -3,7 +3,7 @@ title: fx
 description: Run fx workers on Vercel Labs' fx agent with an OpenRouter, OpenAI or Vercel AI Gateway key, pick a model, and understand how fx runs are priced
 ---
 
-`fx` workers run [fx](https://fx.sh), Vercel Labs' open-source terminal coding agent ([source](https://github.com/vercel-labs/fx), Apache-2.0, pinned to 0.0.15), as an [Agent Client Protocol](https://agentclientprotocol.com) server: `fx acp`. The agent loop and tools run inside the worker. Inference runs on OpenRouter, OpenAI or Vercel AI Gateway, picked by the model string.
+`fx` workers run [fx](https://fx.sh), Vercel Labs' open-source terminal coding agent ([source](https://github.com/vercel-labs/fx), Apache-2.0, pinned to 0.0.16), as an [Agent Client Protocol](https://agentclientprotocol.com) server: `fx acp`. The agent loop and tools run inside the worker. Inference runs on OpenRouter, OpenAI or Vercel AI Gateway, picked by the model string.
 
 For the adapter internals, see [Harness Providers](/docs/guides/harness-providers).
 
@@ -83,7 +83,7 @@ See [Cost and context computation](/docs/guides/cost-and-context-computation).
 
 ## Limits
 
-- **NaN keys do not work** with fx 0.0.15. Every NaN model fails with `InconsistentFinishReason`: NaN's trailing usage chunk carries a choice with no `finish_reason` after the `stop` chunk, and fx's parser rejects it. `nan/...` and `helmcode/...` models are refused until a fixed fx ships.
+- **NaN keys do not work** with fx 0.0.16. Every NaN model fails with `InconsistentFinishReason`: NaN's trailing usage chunk carries a choice with no `finish_reason` after the `stop` chunk, and fx's parser rejects it. `nan/...` and `helmcode/...` models are refused until a fixed fx ships.
 - **No Anthropic keys.** fx has no Anthropic Messages protocol and no custom-header auth.
 - **No fx subscription logins** (fx's Codex or Grok sign-in), no `fx ask`, no Ultrafast and no `auto` mode.
 - The AI Gateway route has not run live yet.

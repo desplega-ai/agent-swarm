@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
+import { MessageCopyButton, MessageRawToggle } from "@/components/shared/message-copy-button";
 import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
+import { MessageText } from "@/components/shared/transcript/message-text";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { userName } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
-import { MessageCopyButton, MessageTime } from "./swarm-reply";
+import { MessageTime } from "./swarm-reply";
 
 /** Where a message came from, when not the dashboard (SPEC R10.1). */
 function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {
@@ -22,8 +25,9 @@ function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {
 /**
  * A person's message (SPEC R10.1). Mine sit on the right with no name;
  * other people's sit on the left with their name. The avatar is beside the
- * bubble, on its first line. The meta row under the bubble holds the time,
- * the via note, and a Copy that fades in on hover.
+ * bubble, on its first line. The text shows as markdown. The meta row under
+ * the bubble holds the time, the via note, and "Show raw" and Copy, which
+ * fade in on hover.
  */
 export function PersonBubble({
   task,
@@ -37,6 +41,7 @@ export function PersonBubble({
   const { data: users } = useUsers();
   const personId = task.requestedByUserId;
   const mine = !!personId && personId === userId;
+  const [raw, setRaw] = useState(false);
   const text = stripContextFooter(task.task);
   // Slack and chat prompts carry their thread as a wrapper block before the ask.
   const prompt = parsePromptDisplay(text);
@@ -66,7 +71,7 @@ export function PersonBubble({
           )}
         >
           <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />
-          {prompt.ask}
+          <MessageText text={prompt.ask} raw={raw} />
         </div>
         <div
           className={cn(
@@ -85,6 +90,7 @@ export function PersonBubble({
               · {via}
             </span>
           ) : null}
+          {prompt.ask.trim() ? <MessageRawToggle raw={raw} onRawChange={setRaw} hover /> : null}
           <MessageCopyButton text={text} hover />
         </div>
       </div>

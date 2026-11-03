@@ -68,7 +68,6 @@ services:
       - AGENT_ROLE=lead
       - TEMPLATE_ID=official/lead
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=2
 
@@ -104,7 +103,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/researcher
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
@@ -140,7 +138,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/reviewer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 

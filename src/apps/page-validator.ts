@@ -54,6 +54,7 @@ const UI_STATE_COMPONENTS = new Set([
   "Chips",
   "Tree",
   "SchemaForm",
+  "Table",
 ]);
 
 // A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
@@ -66,7 +67,7 @@ const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
  * whose items each carry a chain) are listed in `ITEM_ACTION_CHAINS`.
  */
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
-  Table: ["onRowClick"],
+  Table: ["onRowClick", "onRetry"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
@@ -77,11 +78,12 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
 /**
  * `[arrayProp, chainKey]` pairs: every item of `props[arrayProp]` carries an
  * action chain under `chainKey` (Table `rowActions[].actions`, Table
- * `columns[].onChange`, Drawer footer `actions[].actions`).
+ * `bulkActions[].actions`, Table `columns[].onChange`, Drawer footer `actions[].actions`).
  */
 const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]> = {
   Table: [
     ["rowActions", "actions"],
+    ["bulkActions", "actions"],
     ["columns", "onChange"],
   ],
   Drawer: [["actions", "actions"]],
@@ -703,6 +705,66 @@ function fieldBindingIssue(
   // System fields are queryable and renderable even though they are not declared columns.
   if (allowSystemField && Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName)) return null;
   return issue(path, `unknown or hidden column "${columnName}" on model "${modelName}"`);
+}
+
+/** Most fields a Table cell popover lists. */
+const POPOVER_MAX_FIELDS = 12;
+
+/** Props of each component holding items whose `href` (and a column's popover fields) name row fields. */
+const LINK_FIELD_PROPS: Record<string, string> = {
+  Table: "columns",
+  DetailList: "fields",
+  CardGrid: "fields",
+};
+
+/**
+ * `href` on Table columns, DetailList fields and CardGrid fields, and the
+ * `key` / `href` of a Table column's popover fields, name row fields of the
+ * bound query's model. A typo'd name would render a link with no target, so
+ * cross-check them like the other row-field props.
+ */
+function collectLinkFieldIssues(
+  definition: AppDefinition,
+  type: unknown,
+  props: Record<string, unknown>,
+  elementPath: string,
+  issues: AppValidationIssue[],
+): void {
+  const itemsProp = typeof type === "string" ? LINK_FIELD_PROPS[type] : undefined;
+  const items = itemsProp ? props[itemsProp] : undefined;
+  if (!itemsProp || !Array.isArray(items)) return;
+  // The JSON-schema subset this validator evaluates has no `minItems` / `maxItems`.
+  for (const [index, item] of items.entries()) {
+    const fields = isPlainObject(item) && isPlainObject(item.popover) ? item.popover.fields : null;
+    if (Array.isArray(fields) && (fields.length === 0 || fields.length > POPOVER_MAX_FIELDS)) {
+      issues.push(
+        issue(
+          `${elementPath}.props.${itemsProp}.${index}.popover.fields`,
+          `must list 1 to ${POPOVER_MAX_FIELDS} fields`,
+        ),
+      );
+    }
+  }
+  const queryModel = queryModelFromDataBinding(definition, props.data);
+  if (!queryModel) return;
+  const check = (name: unknown, path: string) => {
+    if (typeof name !== "string") return;
+    const found = fieldBindingIssue(queryModel.modelName, queryModel.model, name, path);
+    if (found) issues.push(found);
+  };
+  for (const [index, item] of items.entries()) {
+    if (!isPlainObject(item)) continue;
+    const itemPath = `${elementPath}.props.${itemsProp}.${index}`;
+    check(item.href, `${itemPath}.href`);
+    const popoverFields = isPlainObject(item.popover) ? item.popover.fields : undefined;
+    if (!Array.isArray(popoverFields)) continue;
+    for (const [fieldIndex, field] of popoverFields.entries()) {
+      if (!isPlainObject(field)) continue;
+      const fieldPath = `${itemPath}.popover.fields.${fieldIndex}`;
+      check(field.key, `${fieldPath}.key`);
+      check(field.href, `${fieldPath}.href`);
+    }
+  }
 }
 
 function collectRowFieldIssues(
@@ -1396,7 +1458,58 @@ export function validatePage(
           ),
         );
       }
+      collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
       if (type === "Table") {
+        // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
+        const tableProps = rawElement.props;
+        const selectionProps = ["selectable", "bulkActions"].filter((prop) => {
+          const value = tableProps[prop];
+          return value === true || (Array.isArray(value) && value.length > 0);
+        });
+        if (
+          selectionProps.length > 0 &&
+          (typeof tableProps.id !== "string" || tableProps.id === "")
+        ) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${selectionProps.join(" / ")}: the selection is stored at /ui/<id>/selected`,
+            ),
+          );
+        }
+        // Column filters live at `/ui/<id>/filters`: same id requirement.
+        const filterProps: string[] = [];
+        if (tableProps.filterable === true) filterProps.push("filterable");
+        if (
+          Array.isArray(tableProps.columns) &&
+          tableProps.columns.some(
+            (column) =>
+              isPlainObject(column) && (column.filter === "values" || column.filter === "text"),
+          )
+        ) {
+          filterProps.push("columns[].filter");
+        }
+        if (filterProps.length > 0 && (typeof tableProps.id !== "string" || tableProps.id === "")) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${filterProps.join(" / ")}: the filters are stored at /ui/<id>/filters`,
+            ),
+          );
+        }
+        // `clearState` entries are state paths "Clear filters" resets: only UI
+        // control slots, and the control must exist on the page.
+        if (Array.isArray(tableProps.clearState)) {
+          for (const [index, entry] of tableProps.clearState.entries()) {
+            if (typeof entry !== "string") continue;
+            const entryPath = `${elementPath}.props.clearState.${index}`;
+            if (!/^\/ui\/[^/]+\/.+/.test(entry)) {
+              issues.push(issue(entryPath, `must be a /ui/<id>/... state path (got "${entry}")`));
+            } else {
+              stateRefs.push({ path: entryPath, value: entry });
+            }
+          }
+        }
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {
           if (Array.isArray(rawElement.props.columns)) {

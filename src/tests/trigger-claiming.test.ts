@@ -468,6 +468,8 @@ describe("Trigger Claiming - Mentions", () => {
     // Should claim both channels
     expect(claimed.length).toBe(2);
     expect(claimed.map((c) => c.channelId).sort()).toEqual([channel1.id, channel2.id].sort());
+    // Each claimed channel reports the mentions it took (the poll trigger sums them).
+    expect(claimed.map((c) => c.mentionsCount)).toEqual([1, 1]);
   });
 
   test("concurrent claims do not return duplicate mentions", async () => {

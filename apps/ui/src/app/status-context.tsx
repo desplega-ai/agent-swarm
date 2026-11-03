@@ -38,6 +38,11 @@ export function StatusProvider({ pollIntervalMs = 30_000, children }: StatusProv
   return <StatusContext.Provider value={value}>{children}</StatusContext.Provider>;
 }
 
+/** The shared status snapshot, or null outside a `<StatusProvider>` (shared renderers). */
+export function useOptionalStatusContext(): StatusContextValue | null {
+  return useContext(StatusContext);
+}
+
 /**
  * Read the shared status snapshot. Returns the same shape as `useStatus()`.
  * Throws if used outside a `<StatusProvider>`.

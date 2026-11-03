@@ -46,6 +46,6 @@ export default async function getChildOutputs(args: any, ctx: any) {
     children,
     allDone:
       children.length > 0 &&
-      children.every((t: any) => ["completed", "failed", "cancelled"].includes(t.status)),
+      children.every((t: any) => ["completed", "failed", "cancelled", "skipped"].includes(t.status)),
   };
 }

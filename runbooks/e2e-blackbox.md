@@ -1,0 +1,137 @@
+# Black-box E2E: the reliability contract
+
+`bun run e2e --strict` is the proof that the swarm works when all you hold is the API, the
+keys and the database file. It boots the real server, mocks every external edge, drives the
+whole surface over HTTP and MCP, and fails when anything the server exposes went untested.
+
+This runbook is for operators and reviewers. Authors read
+[scripts/e2e/README.md](../scripts/e2e/README.md).
+
+## What a strict run guarantees
+
+| Surface | Universe | Covered when | Gate |
+|---|---|---|---|
+| Route operations | every `METHOD /template` in `GET /openapi.json` | a recorded request matched the template | uncovered and not excluded → fail |
+| MCP tools | `tools/list` for a worker registered before any scenario, every capability on | a scenario called the tool over `/mcp` | uncovered and not excluded → fail |
+| Workflow node types | `GET /api/executor-types` | a run executed the node (`workflow_run_steps.nodeType`) | uncovered and not excluded → fail |
+| Engine states | `stateSurfaces` in `coverage-manifest.json`: task, workflow run, workflow step and script run statuses, script step types, scopes, fs modes, executors | the suite left at least one row in that state (read from the database after the run) | a declared value never produced, or a database value the universe does not list → fail |
+| Flows | `flows` in `coverage-manifest.json` | every named scenario ran and passed, and every scenario belongs to a flow | missing, failing or orphan → fail |
+| Manifest hygiene | the manifest itself | | stale (excluded but covered) or dead (matches nothing) → fail |
+
+Exclusions live in `scripts/e2e/coverage-manifest.json` with a reason each. Adding one is a
+review decision: the reason must be verifiable ("provider webhook, needs a Basic auth secret
+the mock cannot issue"), never "flaky" or "later".
+
+## Mocked edges
+
+| Edge | Mock | SUT configuration |
+|---|---|---|
+| Chat completions, structured output (`workflow-llm`, `raw-llm`, memory rater, session summaries) | `scripts/e2e/mocks/llm.ts`, OpenAI chat + Responses API | `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` |
+| Embeddings (memory, script search) | same mock, deterministic vectors | `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_KEY` |
+| SystemOne decisions | same mock, `/v1/systemone` | global config `LAYA_URL`, `LAYA_API_KEY`, node `provider: "laya"` |
+| Cloudflare Clairic extraction | same mock, `/client/v4/accounts/<id>/ai/run/@cf/cloudflare/clairic`, with the Workers AI response envelope | deployment env `CLOUDFLARE_API_BASE_URL`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN` |
+| Slack | `@desplega.ai/slack-mock` over Socket Mode | `SLACK_*` from the mock |
+| Chat SDK Telegram | Loopback Telegram API in `platform-chat-sdk` | `CHAT_SDK_ENABLED=true`, `CHAT_SDK_API_URL_OVERRIDES`, and fake adapter credentials |
+| GitHub, GitLab, Linear, Jira, AgentMail, Kapso | none, disabled | `*_DISABLE=true` |
+| Harness workers | none in the contract run; `--harness` legs spawn real workers with real credentials | |
+
+Two scenarios touch the network on purpose and accept every documented outcome, so an
+offline run still passes: `platformb-models` forces a models.dev catalog refresh, and
+`knowledge-skills` exercises only the validation paths of remote skill installs. Everything
+else is hermetic.
+
+`CLOUDFLARE_API_BASE_URL` works only with `NODE_ENV=test` and a loopback HTTP origin.
+The config API and MCP tools reject this reserved key.
+Production uses `https://api.cloudflare.com`.
+
+Every request the mocks receive is journaled. Scenarios assert on the journal
+(`ctx.llm.requests`, `ctx.slack.apiCalls(...)`) so a silent "the server never called the
+model" is a failure, not a pass.
+
+## Running
+
+```bash
+bun run e2e --strict                               # the CI contract (merge-gate "E2E Contract")
+bun run e2e                                        # same scenarios, report only, no gate
+bun run e2e --only <name>,<name>                   # a subset while debugging
+bun run e2e --strict --json out.json --summary-md out.md
+bun run e2e --keep                                 # keep db, logs, temp dirs (paths printed as KEEP ...)
+```
+
+Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios dominate.
+
+## Reading a failure
+
+1. The console prints `FAIL <scenario>: <message>` per scenario, then the last 40 lines of the
+   API log, then the coverage lines, then one `Strict coverage gate failed: ...` block per
+   contract breach with the exact uncovered items.
+2. `e2e-results.json` has the same data: `scenarios[]`, `coverage.routes.uncovered`,
+   `coverage.mcpTools.uncovered`, `coverage.nodeTypes.uncovered`, `coverage.flows`,
+   `gates.failures`.
+3. A new route or tool without a scenario fails strict with its name. Either write the
+   scenario (preferred) or add a manifest exclusion with a reviewable reason.
+4. A scenario that starts failing after a server change is a contract change. Decide whether
+   the server or the scenario is wrong before touching either.
+
+## Benchmarks
+
+Every `ctx.api` call records its latency. The result JSON carries p50, p95, max and count
+per route group and overall. Diff two runs:
+
+```bash
+bun run e2e --json /tmp/before.json
+bun run e2e --json /tmp/after.json
+bun run e2e:bench /tmp/before.json /tmp/after.json
+```
+
+The suite runs with a fresh database and loopback networking, so the numbers are a
+regression signal for server work per request, not a capacity figure. Run both sides on the
+same machine, back to back.
+
+### In CI
+
+The **E2E Contract** job uploads `e2e-results.json` in the `e2e-contract-results` artifact.
+Download two reports and compare them locally with `bun run e2e:bench`.
+Use runs from the same environment because timing depends on runner load.
+The job uses only `contents: read` permission.
+
+## CI
+
+`.github/workflows/merge-gate.yml` job **E2E Contract** runs `check-e2e-boundary.sh`,
+`e2e:tsc`, then `bun run e2e --strict` and uploads `e2e-results.json`. The job is required by
+the merge gate. The nightly workflow runs the same scenarios plus real harness legs.
+
+## Relation to unit tests
+
+The strict suite is the outer contract. Unit tests remain for logic that the black box cannot
+reach with a deterministic input (parsers, scrubbers, scheduling math, migrations against
+fixtures). When a unit test only re-checks what a scenario already proves end to end, it is a
+candidate for deletion.
+
+### Retiring unit tests
+
+Retire in batches, one domain per PR, and only after the strict suite has been green on `main`
+for that domain. The method:
+
+1. Pick a unit test file. Find the flows in `coverage-manifest.json` that cover its subject
+   (`grep -l <route or tool> scripts/e2e/scenarios/*.ts`).
+2. For each `test(...)` in the file, ask: does a scenario assert this behaviour through the API
+   with a persisted effect? If yes, the test is redundant. If the test pins an internal detail
+   (a helper's return value, a SQL shape, an error class) that no API contract exposes, it stays.
+3. Delete the redundant tests, run `bun run e2e --strict` and the remaining unit tests of the
+   area, and note the deleted names in the PR so a reviewer can object.
+
+`bun scripts/e2e/unit-overlap.ts` prints the current list: every unit test file that drives the
+server over HTTP or MCP, the route templates and tools it names, and a verdict (candidate,
+review, keep). It is a starting list for a human review, never a deletion script.
+
+First batch (highest overlap; every one boots the real server and drives it over HTTP or MCP,
+which is exactly what the scenarios do): `src/tests/http-api-integration.test.ts`,
+`events-http.test.ts`, `agentfs-proxy.test.ts`, `kv-page-proxy.test.ts`, `page-proxy.test.ts`,
+`page-proxy-authed.test.ts`, `page-guest-session.test.ts`, `memory-rate-endpoint.test.ts`,
+`memory-edges.test.ts`, `realtime-transport.test.ts`, `rbac-wire-e2e.test.ts`,
+`scripts-mcp-e2e.test.ts`, `script-workflows-runtime-e2e.test.ts`, `workflow-e2e.test.ts`.
+
+Keep, whatever the overlap: migration tests, `secret-scrubber`, `db-client` transaction
+semantics, the model catalog and pricing math, prompt-template rendering, and anything that
+runs the harness adapters against fake providers (`claude-routes-e2e`, `fake-codex-app-server`).

@@ -155,7 +155,7 @@ A concrete `model` or `latest:` alias must also run on the harness that will run
 | `claude-managed` | `anthropic` | same as `claude` | `latest:anthropic/...` |
 | `codex` | `openai` | an `openai` id that passes `isHarnessCatalogModel("codex", id)` | `latest:openai/...` |
 | `grok` | `xai` | a `grok-*` or `xai` id, bare or `xai/`-qualified (the adapter drops the prefix; the API catalog has no `xai` section, so `xai/<id>` needs `allowCustomModel`), or `openrouter/<vendor>/<id>`; another vendor's catalog id or namespace is refused | `latest:openrouter/...` |
-| `fx` | none (`src/utils/fx-models.ts`) | `openrouter/<vendor>/<id>` (`OPENROUTER_API_KEY`), `vercel/<vendor>/<id>` (`AI_GATEWAY_API_KEY`) or a bare OpenAI id (`OPENAI_API_KEY`); `nan/`, `helmcode/` and direct `anthropic` ids are refused (fx 0.0.15 fails on NaN streams and has no Anthropic protocol) | `latest:openrouter/...`, `latest:openai/...` |
+| `fx` | none (`src/utils/fx-models.ts`) | `openrouter/<vendor>/<id>` (`OPENROUTER_API_KEY`), `vercel/<vendor>/<id>` (`AI_GATEWAY_API_KEY`) or a bare OpenAI id (`OPENAI_API_KEY`); `nan/`, `helmcode/` and direct `anthropic` ids are refused (fx 0.0.16 fails on NaN streams and has no Anthropic protocol) | `latest:openrouter/...`, `latest:openai/...` |
 | `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified, including `nan/<id>` and `helmcode/<id>` | any |
 | `dsh`, `cursor`, `devin`, `acp` | free-form | any string | any |
 | `amp` | none (`src/utils/amp-models.ts`) | a mode (`low`, `medium`, `high`, `ultra`) or a `provider/model` pin (for example `openai/gpt-5-nano`) | none |

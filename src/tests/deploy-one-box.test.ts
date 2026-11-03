@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { makeDeployStubs } from "./deploy-stubs";
@@ -73,6 +73,44 @@ describe("one-box bootstrap.sh", () => {
       const link = await readFile(join(root, "root/agent-swarm-setup-link.txt"), "utf8");
       expect(link).toContain(`/setup?apiUrl=https%3A%2F%2F${HOST}&apiKey=${API_KEY}`);
       expect(r.out).not.toContain(API_KEY);
+      expect(await readFile(join(root, "var/log/agent-swarm-deploy.log"), "utf8")).not.toContain(
+        API_KEY,
+      );
+      expect((await stat(join(root, "root/agent-swarm-setup-link.txt"))).mode & 0o777).toBe(0o600);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "reads the root-only log for an older installer and rejects a redacted-only link",
+    async () => {
+      const script = join(dir, "legacy-install.sh");
+      const writeInstaller = async (key: string) => {
+        await Bun.write(
+          script,
+          [
+            "#!/usr/bin/env bash",
+            'install_dir="$AGENT_SWARM_BOOTSTRAP_ROOT/root/agent-swarm"',
+            'mkdir -p "$install_dir"',
+            'touch "$install_dir/.env"',
+            `echo 'https://app.agent-swarm.dev/setup?apiUrl=https%3A%2F%2F${HOST}&apiKey=${key}'`,
+            "",
+          ].join("\n"),
+        );
+      };
+      await writeInstaller(API_KEY);
+      const r = await bootstrap(`file://${script}`);
+      expect(r.exitCode).toBe(0);
+      expect(r.out).not.toContain(API_KEY);
+      expect(await readFile(join(root, "root/agent-swarm-setup-link.txt"), "utf8")).toContain(
+        `apiKey=${API_KEY}`,
+      );
+
+      // Reuse the stand-ins, but run the bootstrap again with a masked-only installer.
+      await writeInstaller("<redacted>");
+      const rejected = await runChild(["bash", BOOTSTRAP], { env: r.stubs.env });
+      expect(rejected.exitCode).not.toBe(0);
+      expect(rejected.stderr).toContain("did not save a full setup link");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

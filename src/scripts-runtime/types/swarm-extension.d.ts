@@ -5,6 +5,7 @@ declare module "swarm-extension" {
     agentId?: string | null | undefined;
     creatorAgentId?: string | undefined;
     source?:
+      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -20,7 +21,6 @@ declare module "swarm-extension" {
       | "ui"
       | "system"
       | "comb"
-      | "chat"
       | undefined;
     routingReason?:
       | "skill"
@@ -60,12 +60,13 @@ declare module "swarm-extension" {
     parentTaskId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | undefined;
     workflowRunStepId?: string | undefined;
     sourceTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     outputSchema?: Record<string, unknown> | undefined;
     inheritParentOutputSchema?: boolean | undefined;
     inheritParentRequester?: boolean | undefined;
@@ -87,18 +88,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
-            | "claude"
-            | "codex"
             | "pi"
-            | "devin"
+            | "claude"
             | "claude-managed"
-            | "opencode"
-            | "acp"
-            | "dsh"
-            | "amp"
-            | "cursor"
+            | "codex"
             | "grok"
             | "fx"
+            | "opencode"
+            | "dsh"
+            | "cursor"
+            | "amp"
+            | "devin"
+            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -111,6 +112,7 @@ declare module "swarm-extension" {
     agentId: string | null;
     task: string;
     status:
+      | "skipped"
       | "draft"
       | "backlog"
       | "unassigned"
@@ -124,6 +126,7 @@ declare module "swarm-extension" {
       | "cancelled"
       | "superseded";
     source:
+      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -138,8 +141,7 @@ declare module "swarm-extension" {
       | "api"
       | "ui"
       | "system"
-      | "comb"
-      | "chat";
+      | "comb";
     tags: string[];
     priority: number;
     dependsOn: string[];
@@ -191,14 +193,15 @@ declare module "swarm-extension" {
     mentionChannelId?: string | undefined;
     dir?: string | undefined;
     parentTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     claudeSessionId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     resolvedModel?: string | undefined;
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
-    resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    resolvedEffort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
     resolvedProfile?: string | undefined;
     scheduleId?: string | undefined;
@@ -223,18 +226,18 @@ declare module "swarm-extension" {
     requestedByUserId?: string | undefined;
     swarmVersion?: string | undefined;
     provider?:
-      | "claude"
-      | "codex"
       | "pi"
-      | "devin"
+      | "claude"
       | "claude-managed"
-      | "opencode"
-      | "acp"
-      | "dsh"
-      | "amp"
-      | "cursor"
+      | "codex"
       | "grok"
       | "fx"
+      | "opencode"
+      | "dsh"
+      | "cursor"
+      | "amp"
+      | "devin"
+      | "acp"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -246,18 +249,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
-            | "claude"
-            | "codex"
             | "pi"
-            | "devin"
+            | "claude"
             | "claude-managed"
-            | "opencode"
-            | "acp"
-            | "dsh"
-            | "amp"
-            | "cursor"
+            | "codex"
             | "grok"
             | "fx"
+            | "opencode"
+            | "dsh"
+            | "cursor"
+            | "amp"
+            | "devin"
+            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -281,7 +284,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "script" | "slack" | "mcp" | "api" | "ui" | "chat";
+  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui";
 
   export type RequestInfo = {
     sessionId: string | undefined;

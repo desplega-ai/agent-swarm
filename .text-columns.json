@@ -265,6 +265,9 @@
     "parentTaskId": {
       "exempt": "identifier"
     },
+    "dispatchedByTaskId": {
+      "exempt": "identifier"
+    },
     "claudeSessionId": {
       "exempt": "identifier"
     },
@@ -1815,6 +1818,12 @@
     },
     "key": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "theme": {
+      "exempt": "enum or fixed-format value"
+    },
+    "theme_tokens": {
+      "exempt": "JSON map of page token names to CSS values that importThemeTokens (src/themes/import.ts) normalizes and checks"
     }
   },
   "permission_audit": {
@@ -2425,6 +2434,12 @@
     },
     "apiEndpointId": {
       "exempt": "identifier"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier"
+    },
+    "followUpGuard": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "script_versions": {
@@ -3978,5 +3993,22 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "improvements": {
+    "id": { "exempt": "identifier" },
+    "text": "scrubbed",
+    "email": { "exempt": "email address validated by the route schema" },
+    "status": { "exempt": "status enum" },
+    "source": { "exempt": "source enum" },
+    "requested_by_agent_id": { "exempt": "agent identifier" },
+    "approved_by": { "exempt": "user id or the literal operator" },
+    "approved_at": { "exempt": "timestamp" },
+    "sent_at": { "exempt": "timestamp" },
+    "proxy_id": { "exempt": "proxy-generated identifier" },
+    "proxy_error": "scrubbed",
+    "created_at": { "exempt": "timestamp" },
+    "updated_at": { "exempt": "timestamp" },
+    "created_by": { "exempt": "audit principal foreign key" },
+    "updated_by": { "exempt": "audit principal foreign key" }
   }
 }

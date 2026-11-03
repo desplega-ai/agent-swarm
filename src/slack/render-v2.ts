@@ -353,6 +353,8 @@ async function taskStateGlyph(
       return "🚫";
     case "superseded":
       return "↪️";
+    case "skipped":
+      return `:${reactionName("skipped")}:`;
     default:
       return "🕒";
   }
@@ -378,7 +380,7 @@ function terminalEnd(task: AgentTask, now: Date): Date {
 }
 
 function isTerminalTreeStatus(status: AgentTask["status"]): boolean {
-  return ["completed", "failed", "cancelled", "superseded"].includes(status);
+  return ["completed", "failed", "cancelled", "superseded", "skipped"].includes(status);
 }
 
 function cleanTaskDescription(task: AgentTask): string {
@@ -440,6 +442,16 @@ function renderProgress(progress: string | undefined): string | undefined {
   return `${normalized.slice(0, cut).trimEnd()}…`;
 }
 
+/** A skipped row's reason: one line, bounded like progress, no trailing ellipsis. */
+function renderSkipReason(reason: string | undefined): string | undefined {
+  const normalized = markdownToSlack(reason ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= MAX_TREE_PROGRESS_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_TREE_PROGRESS_LENGTH - 1).trimEnd()}…`;
+}
+
 async function renderNodeLines(
   node: RenderNode,
   depth: number,
@@ -456,8 +468,15 @@ async function renderNodeLines(
       ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : indent;
   let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now, threadTasks)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
-  const progress = renderProgress(node.task.progress);
-  const suffix = isTerminalTreeStatus(node.task.status) ? "" : progress ? ` · ${progress}` : "";
+  // A skip posts no outcome card, so its row carries the reason. Editing the
+  // tree is silent; it notifies no one.
+  const detail =
+    node.task.status === "skipped"
+      ? renderSkipReason(node.task.failureReason)
+      : isTerminalTreeStatus(node.task.status)
+        ? undefined
+        : renderProgress(node.task.progress);
+  const suffix = detail ? ` · ${detail}` : "";
   if (suffix && line.length + suffix.length <= MAX_TREE_NODE_LINE_LENGTH) {
     line += suffix;
   }
@@ -723,19 +742,37 @@ export async function ensureSlackThreadTree(
   );
   if (!task?.slackChannelId || !task.slackThreadTs) return null;
   // Every accepted ask passes through here: start Slack's own "working" state
-  // with the tree. A no-op when the thread is already showing it.
-  await reconcileSlackSessionStatus({
-    channelId: task.slackChannelId,
-    threadTs: task.slackThreadTs,
-    budget: statusBudget,
-  });
+  // with the tree. A no-op when the thread is already showing it. The native
+  // status is not cleared by a bot post and never throws, so it is written
+  // while the tree is found or posted instead of before it. allSettled keeps
+  // the old guarantee that the status write has finished before a tree
+  // failure propagates.
+  const [tree] = await Promise.allSettled([
+    findOrCreateThreadTree(task, task.slackChannelId, task.slackThreadTs, taskIds, statusBudget),
+    reconcileSlackSessionStatus({
+      channelId: task.slackChannelId,
+      threadTs: task.slackThreadTs,
+      budget: statusBudget,
+    }),
+  ]);
+  if (tree.status === "rejected") throw tree.reason;
+  return tree.value;
+}
+
+async function findOrCreateThreadTree(
+  task: AgentTask,
+  channelId: string,
+  threadTs: string,
+  taskIds: string[],
+  statusBudget: StatusBudget | undefined,
+): Promise<SlackMessageRecord | null> {
   const contextKey =
     task.contextKey ??
     slackContextKey({
-      channelId: task.slackChannelId,
-      threadTs: task.slackThreadTs,
+      channelId,
+      threadTs,
     });
-  const existing = await findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
+  const existing = await findThreadTree(contextKey, channelId, threadTs);
   if (existing && !isPendingSlackMessage(existing)) {
     const app = getSlackApp();
     try {
@@ -748,7 +785,7 @@ export async function ensureSlackThreadTree(
       return ensureSlackThreadTree(taskIds, statusBudget);
     }
   }
-  const creationKey = physicalThreadKey(task.slackChannelId, task.slackThreadTs);
+  const creationKey = physicalThreadKey(channelId, threadTs);
   const inFlight = treeCreationPromises.get(creationKey);
   if (inFlight) return inFlight;
   const creation = createThreadTree(task).finally(() => treeCreationPromises.delete(creationKey));
@@ -901,6 +938,14 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
     return withStatusLead(
       "🚫 **Cancelled:**",
       outcomeText(task.failureReason, "Task was cancelled."),
+    );
+  }
+  // Only a deferral card resolved by a skipped wake-up reaches here: a skip
+  // gets no outcome card of its own. The rewrite is an edit, so it is silent.
+  if (task.status === "skipped") {
+    return withStatusLead(
+      `:${reactionName("skipped")}: **Skipped:**`,
+      outcomeText(task.failureReason, "Task was skipped."),
     );
   }
   // A deferral's output is engine-authored, never posted by hand via
@@ -1423,13 +1468,20 @@ export async function streamOutcomeCard(
   // what normally clears Slack's own "is working…" assistant indicator.
   // Clear it explicitly too, so a delivery that only ever fails still
   // doesn't leave the thread stuck spinning.
-  await clearAssistantStatus(
-    app.client,
-    task.slackChannelId,
-    task.slackThreadTs,
-    options?.statusBudget,
-  );
-  const permalink = await resolvePermalink(app.client, task.slackChannelId, outcome.ts);
+  // The permalink needs only `outcome.ts`, so it is fetched while the status
+  // clears. allSettled keeps the old order of effects: the status write (which
+  // never throws) has finished before a permalink failure propagates.
+  const [, permalinkResult] = await Promise.allSettled([
+    clearAssistantStatus(
+      app.client,
+      task.slackChannelId,
+      task.slackThreadTs,
+      options?.statusBudget,
+    ),
+    resolvePermalink(app.client, task.slackChannelId, outcome.ts),
+  ]);
+  if (permalinkResult.status === "rejected") throw permalinkResult.reason;
+  const permalink = permalinkResult.value;
   return await updateSlackMessageRecord(outcome.id, {
     permalink,
     finalized: true,

@@ -45,6 +45,8 @@ export default async function main(args, ctx) {
 
 `ctx.step.agentTask` blocks until the dispatched task reaches a terminal status (default `waitForCompletion: true`, default `timeoutMs` 2h) and journals its real output — a sequential `plan → implement → review` chain will not fan out. Pass `failOnTaskFailure: false` to receive `{taskId, status: "failed", error}` instead of a throw when the task fails/is cancelled.
 
+A run launched from a `follow-up` task in a Slack thread passes the same re-delegation guard as `send-task`, decided once for the whole run at its first new step: a step that repeats completed thread work, or a run past the thread's dispatch cap (a run counts once), throws with the rule's message, and every later new step of that run throws too. Pass `allowRedelegation: true` on a step only for a deliberate re-run. Do not wrap a single dispatch in a durable run; use `send-task`.
+
 `waitForCompletion: false` does not return right after dispatch. The first call still waits up to ~30s while the server polls the task, then returns one of three shapes:
 
 - The task finished in that window: its output string or `null`, as on success.

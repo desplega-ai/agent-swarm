@@ -132,8 +132,9 @@ describe("Tracker Sync CRUD", () => {
 
   test("deleteTrackerSync removes the mapping", async () => {
     const sync = (await getTrackerSyncByExternalId("jira", "task", "JIRA-456"))!;
-    await deleteTrackerSync(sync.id);
+    expect(await deleteTrackerSync(sync.id)).toBe(true);
     expect(await getTrackerSyncByExternalId("jira", "task", "JIRA-456")).toBeNull();
+    expect(await deleteTrackerSync(sync.id)).toBe(false);
   });
 });
 

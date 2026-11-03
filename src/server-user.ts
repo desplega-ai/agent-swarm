@@ -61,7 +61,7 @@ export const userSendTaskInputSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items.",
+        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. An empty object {} means no schema.",
       ),
   })
   .superRefine((data, ctx) => checkOutputSchemaShape(data.outputSchema, ctx));
@@ -130,6 +130,7 @@ export function createUserServer(user: User): McpServer {
       offerMode: false,
       leadOnly: false,
       allowDuplicate: false,
+      allowRedelegation: false,
       overrideSlackContext: false,
     });
   });
