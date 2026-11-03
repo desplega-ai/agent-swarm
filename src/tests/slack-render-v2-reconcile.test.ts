@@ -157,18 +157,26 @@ describe("slack render-v2 reconcile scheduling", () => {
     expect(seen.filter(isTreeSweep)).toHaveLength(0);
   });
 
-  test("the full reconcile yields to timers between trees", async () => {
-    for (const label of ["YIELD_A", "YIELD_B", "YIELD_C"]) await runningThread(label);
+  test("the full reconcile yields to the event loop between trees", async () => {
+    const labels = ["YIELD_A", "YIELD_B", "YIELD_C"];
+    for (const label of labels) await runningThread(label);
     await processSlackRenderV2();
-    let timerFired = false;
-    setTimeout(() => {
-      timerFired = true;
-    }, 0);
-    let firedBeforeDone = false;
-    await processSlackRenderV2().then(() => {
-      firedBeforeDone = timerFired;
-    });
-    expect(firedBeforeDone).toBe(true);
+    // Count event-loop turns during the pass. A setTimeout(0) probe is clamped
+    // to ~1 ms and races a fast pass on CI, so tick with setImmediate instead.
+    let turns = 0;
+    let ticking = true;
+    const tick = () => {
+      if (!ticking) return;
+      turns++;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+    try {
+      await processSlackRenderV2();
+    } finally {
+      ticking = false;
+    }
+    expect(turns).toBeGreaterThanOrEqual(labels.length);
   });
 });
 
