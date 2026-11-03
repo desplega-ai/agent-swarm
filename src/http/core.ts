@@ -42,6 +42,8 @@ import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
+import { getSlackConnectionState, getSlackLastConnectedAt } from "../slack/connection-state";
+import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
@@ -180,7 +182,11 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   // request's frame they capture that request's auth slot for their whole
   // lifetime, and their later DB writes get attributed to whichever user
   // happened to save config.
-  return runWithoutRequestAuth(() => reloadGlobalConfigsAndIntegrationsInner());
+  // The shared Slack lifecycle lock keeps the socket watchdog from restarting
+  // the Slack app while a reload tears it down and rebuilds it.
+  return runWithoutRequestAuth(() =>
+    runSlackLifecycleExclusive(() => reloadGlobalConfigsAndIntegrationsInner()),
+  );
 }
 
 async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigResult> {
@@ -481,11 +487,18 @@ export async function handleCore(
     res.writeHead(200, { "Content-Type": "application/json" });
     // NOTE: /health is unauthenticated — never expose server configuration
     // here (feature flags, capabilities, integration state). `steeringEnabled`
-    // lives on the authenticated /api/stats payload instead.
+    // lives on the authenticated /api/stats payload instead. One exception:
+    // the Slack socket link state, so SRE probes see a dead socket. It is an
+    // informational field only; `status` stays "ok" whatever its value.
+    const slackLastConnectedAt = getSlackLastConnectedAt();
     res.end(
       JSON.stringify({
         status: "ok",
         version,
+        slack: {
+          socket: getSlackConnectionState(),
+          lastConnectedAt: slackLastConnectedAt ? slackLastConnectedAt.toISOString() : null,
+        },
       }),
     );
 
