@@ -144,7 +144,7 @@ const publicPageOgImageRoute = route({
   responses: {
     200: { description: "The card", unstructured: "PNG image bytes" },
     404: { description: "No public page with this id" },
-    503: { description: "The card renderer failed to load" },
+    503: { description: "The card renderer is busy (Retry-After) or failed to load" },
   },
   auth: { apiKey: false },
 });
@@ -828,7 +828,8 @@ async function handlePublicPageOg(
 /**
  * `/p/:id/og.png`: the page's share card. Public pages only (same 404 as
  * `/p/:id/og`), no view bump, and `no-store` so a card stops being served the
- * moment its page turns private. The renderer loads on first use.
+ * moment its page turns private. The renderer loads on first use, draws one
+ * card at a time and answers 503 when its queue is full.
  */
 async function handlePublicPageOgImage(
   req: IncomingMessage,
@@ -841,10 +842,23 @@ async function handlePublicPageOgImage(
   const page = await getSharablePage(parsed.params.id);
   if (!page) return shareNotFound(res);
   let png: Uint8Array;
+  let renderer: typeof import("../pages/page-og-card") | null = null;
   try {
-    const { renderPageOgPng } = await import("../pages/page-og-card");
-    png = await renderPageOgPng(page.title, page.description?.trim() ? page.description : null);
+    renderer = await import("../pages/page-og-card");
+    png = await renderer.renderPageOgPng(
+      page.title,
+      page.description?.trim() ? page.description : null,
+    );
   } catch (err) {
+    if (renderer && err instanceof renderer.CardRendererBusyError) {
+      res.writeHead(503, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Retry-After": "5",
+      });
+      res.end(JSON.stringify({ error: "Card renderer busy" }));
+      return true;
+    }
     console.error(
       "[pages-public] share card render failed:",
       scrubSecrets(err instanceof Error ? err.message : String(err)),

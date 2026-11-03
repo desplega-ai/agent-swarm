@@ -63,7 +63,64 @@ function loadAssets(): Promise<CardAssets> {
 const CACHE_LIMIT = 32;
 const cache = new Map<string, Uint8Array>();
 
-/** The 1200x630 PNG card for a page title and description. */
+/** Raised when a {@link BoundedRenderQueue} is full. */
+export class CardRendererBusyError extends Error {
+  constructor() {
+    super("page card renderer busy");
+  }
+}
+
+/**
+ * Runs jobs one at a time with at most `maxPending` waiting or running, and
+ * shares one job between callers asking for the same key. Each job starts on a
+ * fresh event-loop turn, so a queue of synchronous rasterizations never starves
+ * the API's other requests.
+ */
+export class BoundedRenderQueue<T> {
+  private pending = 0;
+  private tail: Promise<unknown> = Promise.resolve();
+  private readonly inflight = new Map<string, Promise<T>>();
+
+  constructor(private readonly maxPending: number) {}
+
+  run(key: string, work: () => Promise<T>): Promise<T> {
+    const shared = this.inflight.get(key);
+    if (shared) return shared;
+    if (this.pending >= this.maxPending) return Promise.reject(new CardRendererBusyError());
+    this.pending++;
+    const job = this.tail
+      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+      .then(work)
+      .finally(() => {
+        this.pending--;
+        this.inflight.delete(key);
+      });
+    this.tail = job.catch(() => undefined);
+    this.inflight.set(key, job);
+    return job;
+  }
+}
+
+/** The route is unauthenticated: a burst of card requests waits here or gets a 503. */
+export const MAX_PENDING_RENDERS = 4;
+export const cardQueue = new BoundedRenderQueue<Uint8Array>(MAX_PENDING_RENDERS);
+
+/** Renders so far, for tests. */
+export const pageOgCardStats = { renders: 0 };
+
+async function draw(params: URLSearchParams): Promise<Uint8Array> {
+  const { fonts, logo, mascot } = await loadAssets();
+  const card = pageOgCard({ input: parseOgParams(params), logo, mascot });
+  const svg = await satori(card as Parameters<typeof satori>[0], { ...OG_SIZE, fonts });
+  const png = new Resvg(svg, { fitTo: { mode: "width", value: OG_SIZE.width } }).render().asPng();
+  pageOgCardStats.renders++;
+  return png;
+}
+
+/**
+ * The 1200x630 PNG card for a page title and description. Rejects with
+ * {@link CardRendererBusyError} when the render queue is full.
+ */
 export async function renderPageOgPng(
   title: string,
   description: string | null,
@@ -76,10 +133,7 @@ export async function renderPageOgPng(
     cache.set(key, hit);
     return hit;
   }
-  const { fonts, logo, mascot } = await loadAssets();
-  const card = pageOgCard({ input: parseOgParams(params), logo, mascot });
-  const svg = await satori(card as Parameters<typeof satori>[0], { ...OG_SIZE, fonts });
-  const png = new Resvg(svg, { fitTo: { mode: "width", value: OG_SIZE.width } }).render().asPng();
+  const png = await cardQueue.run(key, () => draw(params));
   cache.set(key, png);
   if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value as string);
   return png;

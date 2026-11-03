@@ -28,6 +28,13 @@ import {
   pageOgImageUrl,
   renderPageShareMeta,
 } from "../pages/page-og";
+import {
+  BoundedRenderQueue,
+  CardRendererBusyError,
+  cardQueue,
+  MAX_PENDING_RENDERS,
+  pageOgCardStats,
+} from "../pages/page-og-card";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-og.sqlite";
@@ -218,6 +225,75 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     const other = new Uint8Array(await (await fetch(`${BASE}/p/${second}/og.png`)).arrayBuffer());
     expect(Buffer.from(other).equals(Buffer.from(png))).toBe(false);
   }, 30_000);
+
+  test("concurrent requests for one card share a single render", async () => {
+    const id = await createPage({
+      slug: "og-png-single-flight",
+      title: "One render for many crawlers",
+      authMode: "public",
+      body: "<p>x</p>",
+    });
+    const before = pageOgCardStats.renders;
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () => fetch(`${BASE}/p/${id}/og.png`)),
+    );
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 200]);
+    await Promise.all(responses.map((r) => r.arrayBuffer()));
+    expect(pageOgCardStats.renders - before).toBe(1);
+  }, 30_000);
+
+  test("the render queue admits a bounded burst and shares one job per key", async () => {
+    const queue = new BoundedRenderQueue<string>(2);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let runs = 0;
+    const work = (value: string) => async () => {
+      runs++;
+      await gate;
+      return value;
+    };
+    const a = queue.run("a", work("a"));
+    expect(queue.run("a", work("a again"))).toBe(a);
+    const b = queue.run("b", work("b"));
+    await expect(queue.run("c", work("c"))).rejects.toBeInstanceOf(CardRendererBusyError);
+    release();
+    expect(await Promise.all([a, b])).toEqual(["a", "b"]);
+    expect(runs).toBe(2);
+    // A drained queue admits again.
+    expect(await queue.run("c", work("c"))).toBe("c");
+  });
+
+  test("a full render queue answers 503 with Retry-After, without a render", async () => {
+    const id = await createPage({
+      slug: "og-png-busy",
+      title: "Queued behind a burst",
+      authMode: "public",
+      body: "<p>x</p>",
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fill = Array.from({ length: MAX_PENDING_RENDERS }, (_, i) =>
+      cardQueue.run(`busy-filler-${i}`, async () => {
+        await gate;
+        return new Uint8Array();
+      }),
+    );
+    const before = pageOgCardStats.renders;
+    const res = await fetch(`${BASE}/p/${id}/og.png`);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).not.toContain("Queued behind");
+    expect(pageOgCardStats.renders).toBe(before);
+    release();
+    await Promise.all(fill);
+    // Once the queue drains, the same card renders.
+    expect((await fetch(`${BASE}/p/${id}/og.png`)).status).toBe(200);
+  }, 60_000);
 
   test("/p/:id/share is the crawler view of the dashboard link, without a view bump", async () => {
     process.env.APP_URL = "https://app.example.com";

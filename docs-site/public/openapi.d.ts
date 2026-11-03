@@ -16324,7 +16324,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description The card renderer failed to load */
+                /** @description The card renderer is busy (Retry-After) or failed to load */
                 503: {
                     headers: {
                         [name: string]: unknown;

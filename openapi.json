@@ -38281,7 +38281,7 @@
             }
           },
           "503": {
-            "description": "The card renderer failed to load",
+            "description": "The card renderer is busy (Retry-After) or failed to load",
             "content": {
               "application/json": {
                 "schema": {
