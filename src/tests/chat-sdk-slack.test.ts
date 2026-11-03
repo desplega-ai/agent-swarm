@@ -227,9 +227,10 @@ describe("Chat SDK Slack adapter, socket mode", () => {
       (m) => !seen.has(m.ts) && m.text.includes("Latest task"),
       { timeoutMs: 5_000 },
     );
-    // Alice's task picks the thread; the reply names its latest task, Bob's follow-up.
-    const latest = (await chatTasks(contextKey)).at(-1)!;
-    expect(reply.text).toContain(latest.id.slice(0, 8));
+    // Alice's task picks the thread; Bob's later follow-up there is not hers to read.
+    const [alicesTask, bobsFollowUp] = await chatTasks(contextKey);
+    expect(reply.text).toContain(alicesTask!.id.slice(0, 8));
+    expect(reply.text).not.toContain(bobsFollowUp!.id.slice(0, 8));
     expect(reply.text).toContain("pending");
     expect(reply.text).not.toContain("Unknown command");
   });

@@ -93,8 +93,48 @@ async function assigneeLabel(task: AgentTask): Promise<string> {
   return agent ? `assigned to ${agent.name}` : "assigned to a removed agent";
 }
 
-async function statusText(contextKey: string): Promise<string> {
-  const latest = await getLatestTaskByContextKey(contextKey);
+/**
+ * Whose tasks a command may touch. `owner` is set for a command that comes from
+ * a place several people share (a Slack or Discord channel): it sees and
+ * changes only that user's tasks. Without `owner`, the thread belongs to the
+ * conversation (a Telegram chat, a Discord thread, a private DM).
+ */
+interface CommandTarget {
+  threadId: string;
+  owner?: string;
+}
+
+/**
+ * True for a chat id that names a place several people share without naming a
+ * conversation in it: a Slack or Discord channel, as a slash command reports
+ * it. Telegram's id is the conversation itself, a Discord thread or a Slack
+ * thread names one, and a DM has a single human. An adapter this does not know
+ * counts as shared, so the sender filter applies.
+ */
+function isSharedChannel(threadId: string): boolean {
+  const separator = threadId.indexOf(":");
+  const adapter = threadId.slice(0, separator);
+  const parts = threadId.slice(separator + 1).split(":");
+  switch (adapter) {
+    case "telegram":
+      return false;
+    case "discord":
+      // `<guild>:<channel>[:<thread>]`; a DM has the guild `@me`.
+      return parts.length <= 2 && parts[0] !== "@me";
+    case "slack":
+      // `<channel>[:<thread ts>]`; a 1:1 DM channel id starts with `D`.
+      return !parts[1] && !parts[0]?.startsWith("D");
+    default:
+      return true;
+  }
+}
+
+async function statusText(target: CommandTarget | null): Promise<string> {
+  const latest = target
+    ? await getLatestTaskByContextKey(chatSdkContextKey(target.threadId), {
+        requestedByUserId: target.owner,
+      })
+    : null;
   if (!latest) return "No task yet for this chat. Send a message to create one.";
   const lines = [
     `Latest task ${shortId(latest)}: ${latest.status}, ${await assigneeLabel(latest)}.`,
@@ -106,20 +146,25 @@ async function statusText(contextKey: string): Promise<string> {
 }
 
 async function cancelActiveTasks(
-  contextKey: string,
-  threadId: string,
+  target: CommandTarget | null,
   requestedBy: string,
 ): Promise<string> {
   const cancelled: AgentTask[] = [];
-  for (let i = 0; i < CANCEL_LIMIT; i++) {
-    const active = await getLatestActiveTaskByContextKey(contextKey, "chat");
-    if (!active) break;
-    const task = await cancelTask(active.id, `Cancelled from chat by ${requestedBy}`);
-    if (!task) break;
-    if (task.agentId) await updateAgentStatusFromCapacity(task.agentId);
-    cancelled.push(task);
+  if (target) {
+    const contextKey = chatSdkContextKey(target.threadId);
+    for (let i = 0; i < CANCEL_LIMIT; i++) {
+      const active = await getLatestActiveTaskByContextKey(contextKey, "chat", target.owner);
+      if (!active) break;
+      const task = await cancelTask(active.id, `Cancelled from chat by ${requestedBy}`);
+      if (!task) break;
+      if (task.agentId) await updateAgentStatusFromCapacity(task.agentId);
+      cancelled.push(task);
+    }
+    // Another user's task may still run in this thread: its indicator stays.
+    if (!(await getLatestActiveTaskByContextKey(contextKey, "chat"))) {
+      stopTypingKeepalive(target.threadId);
+    }
   }
-  stopTypingKeepalive(threadId);
   if (cancelled.length === 0) return "No running task in this chat.";
   const ids = cancelled.map(shortId).join(", ");
   return cancelled.length === 1
@@ -128,33 +173,59 @@ async function cancelActiveTasks(
 }
 
 /**
- * The thread a command acts on. Telegram hands the command its thread id, so
- * the chat's own task is found at once. Slack and Discord hand it the channel,
- * while their tasks are keyed `<channel>:<thread>` (a Slack thread root, a
- * Discord thread made for a mention) and a slash command carries no thread. When
- * the channel itself has no task, the command acts on the thread of the sender's
- * most recent task in the channel (the most recent running one for `/cancel`).
- * Only the sender's own tasks count: a channel member must not cancel, reset or
- * read another user's thread, which on Discord may be private. An unknown
- * sender gets no cross-thread target.
+ * The conversation a command acts on, or null when there is none for this
+ * sender. Telegram hands the command its thread id, so the chat's own task is
+ * found at once. Slack and Discord hand it the channel, while their tasks are
+ * keyed `<channel>:<thread>` (a Slack thread root, a Discord thread made for a
+ * mention) or, when Discord cannot open a thread, by the channel itself; a
+ * slash command carries no thread. The command then acts on the sender's most
+ * recent task in the channel (the most recent running one for `/cancel`), and
+ * only on the sender's own tasks: a channel member must not read, cancel or
+ * reset another user's conversation, which on Discord may be private. An
+ * unknown sender gets no target.
  */
-async function resolveCommandThread(
+async function resolveCommandTarget(
   threadId: string,
   activeOnly: boolean,
   senderUserId: string | undefined,
-): Promise<string> {
+): Promise<CommandTarget | null> {
+  if (!isSharedChannel(threadId)) return { threadId };
+  if (!senderUserId) return null;
   const contextKey = chatSdkContextKey(threadId);
-  const own = activeOnly
-    ? await getLatestActiveTaskByContextKey(contextKey, "chat")
-    : await getLatestTaskByContextKey(contextKey);
-  if (own || !senderUserId) return threadId;
-  const latest = await getLatestTaskByContextKeyPrefix(
+  const exact = activeOnly
+    ? await getLatestActiveTaskByContextKey(contextKey, "chat", senderUserId)
+    : await getLatestTaskByContextKey(contextKey, { requestedByUserId: senderUserId });
+  const threaded = await getLatestTaskByContextKeyPrefix(
     `${contextKey}${encodeURIComponent(":")}`,
     activeOnly
       ? { activeOnly, source: "chat", requestedByUserId: senderUserId }
       : { requestedByUserId: senderUserId },
   );
-  return chatThreadOfContextKey(latest?.contextKey)?.threadId ?? threadId;
+  const latest =
+    exact && threaded && threaded.createdAt > exact.createdAt ? threaded : (exact ?? threaded);
+  const found = chatThreadOfContextKey(latest?.contextKey)?.threadId;
+  return found ? { threadId: found, owner: senderUserId } : null;
+}
+
+async function resetText(target: CommandTarget | null): Promise<string> {
+  if (!target) return "No conversation of yours here to reset.";
+  const contextKey = chatSdkContextKey(target.threadId);
+  // The mark covers the whole thread. When someone else also asked in it, the
+  // mark would cut their context too.
+  if (
+    target.owner &&
+    (await getLatestTaskByContextKey(contextKey, { notRequestedByUserId: target.owner }))
+  ) {
+    return "Other people also asked in your latest thread, so a reset would change their context. Nothing was reset.";
+  }
+  await markChatThreadReset(target.threadId);
+  const lines = ["Context reset. Your next message starts a new conversation."];
+  // A running task is state, not context: it keeps going, and the next task
+  // is still created next to it. Only /cancel stops it.
+  if (await getLatestActiveTaskByContextKey(contextKey, "chat")) {
+    lines.push("A task is still running in this chat. Send /cancel to stop it.");
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -181,24 +252,14 @@ export async function runChatCommand(
   }
   switch (name) {
     case "status":
-      return statusText(
-        chatSdkContextKey(await resolveCommandThread(threadId, false, senderUserId)),
+      return statusText(await resolveCommandTarget(threadId, false, senderUserId));
+    case "cancel":
+      return cancelActiveTasks(
+        await resolveCommandTarget(threadId, true, senderUserId),
+        requestedBy,
       );
-    case "cancel": {
-      const target = await resolveCommandThread(threadId, true, senderUserId);
-      return cancelActiveTasks(chatSdkContextKey(target), target, requestedBy);
-    }
-    case "reset": {
-      const target = await resolveCommandThread(threadId, false, senderUserId);
-      await markChatThreadReset(target);
-      const lines = ["Context reset. Your next message starts a new conversation."];
-      // A running task is state, not context: it keeps going, and the next task
-      // is still created next to it. Only /cancel stops it.
-      if (await getLatestActiveTaskByContextKey(chatSdkContextKey(target), "chat")) {
-        lines.push("A task is still running in this chat. Send /cancel to stop it.");
-      }
-      return lines.join("\n");
-    }
+    case "reset":
+      return resetText(await resolveCommandTarget(threadId, false, senderUserId));
     default:
       return helpText();
   }

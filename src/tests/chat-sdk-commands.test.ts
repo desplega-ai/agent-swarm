@@ -289,6 +289,137 @@ describe("Chat SDK commands on a channel-keyed platform (Discord)", () => {
   });
 });
 
+describe.each([
+  { name: "Discord", channel: "discord:G2:C2", thread: (id: string) => `discord:G2:C2:${id}` },
+  { name: "Slack", channel: "slack:CSHARED", thread: (id: string) => `slack:CSHARED:${id}` },
+])("Chat SDK channel-level commands are scoped to the sender ($name)", ({ channel, thread }) => {
+  let aliceId: string;
+  let bobId: string;
+  let agentId: string;
+  const alice = (command: string) => runChatCommand(command, channel, "alice", aliceId);
+  const bob = (command: string) => runChatCommand(command, channel, "bob", bobId);
+  const stranger = (command: string) => runChatCommand(command, channel, "stranger");
+
+  const seed = async (key: string, text: string, requestedByUserId?: string) => {
+    const task = await createTaskExtended(text, {
+      agentId,
+      source: "chat",
+      contextKey: chatSdkContextKey(key),
+      requestedByUserId,
+    });
+    await Bun.sleep(5);
+    return task.id;
+  };
+  const statusOf = async (id: string) => (await getTaskById(id))?.status;
+
+  beforeAll(async () => {
+    aliceId = (await createUser({ name: "Alice" })).id;
+    bobId = (await createUser({ name: "Bob" })).id;
+    agentId = (
+      await createAgent({
+        id: crypto.randomUUID(),
+        name: `ScopedCmdWorker-${channel}`,
+        isLead: false,
+        status: "idle",
+      })
+    ).id;
+  });
+
+  test("one thread with a task each: /cancel and /status stay on the sender's own task", async () => {
+    const shared = thread("T-mixed");
+    const aliceTask = await seed(shared, "alice asks", aliceId);
+    const bobTask = await seed(shared, "bob asks", bobId);
+    const anonymousTask = await seed(shared, "an unmapped member asks");
+
+    const aliceStatus = await alice("/status");
+    expect(aliceStatus).toContain(aliceTask.slice(0, 8));
+    expect(aliceStatus).not.toContain(bobTask.slice(0, 8));
+    expect(aliceStatus).not.toContain(anonymousTask.slice(0, 8));
+
+    expect(await alice("/cancel")).toBe(`Cancelled task ${aliceTask.slice(0, 8)}.`);
+    expect(await statusOf(aliceTask)).toBe("cancelled");
+    expect(await statusOf(bobTask)).toBe("pending");
+    expect(await statusOf(anonymousTask)).toBe("pending");
+    expect(await alice("/cancel")).toContain("No running task");
+
+    expect(await bob("/cancel")).toBe(`Cancelled task ${bobTask.slice(0, 8)}.`);
+    expect(await statusOf(anonymousTask)).toBe("pending");
+    // Nobody can reach a task that has no requester from the channel.
+    expect(await stranger("/cancel")).toContain("No running task");
+    expect(await statusOf(anonymousTask)).toBe("pending");
+  });
+
+  test("/reset does not change a thread another user also asked in", async () => {
+    const shared = thread("T-reset-mixed");
+    await seed(shared, "alice asks", aliceId);
+    await seed(shared, "bob asks", bobId);
+
+    expect(await alice("/reset")).toContain("Nothing was reset");
+    expect(await getChatThreadResetAt(shared)).toBeNull();
+  });
+
+  test("/reset on the sender's own thread still works", async () => {
+    const own = thread("T-reset-own");
+    await seed(own, "alice asks alone", aliceId);
+    expect(await alice("/reset")).toContain("Context reset");
+    expect(await getChatThreadResetAt(own)).not.toBeNull();
+  });
+
+  test("a nonowner, mapped or unmapped, cannot reach the channel-keyed task", async () => {
+    // Discord falls back to the channel itself when it cannot open a thread.
+    const channelTask = await seed(channel, "asked in the channel itself", aliceId);
+    // Carol has no task of her own in this channel.
+    const carolId = (await createUser({ name: "Carol" })).id;
+    const carol = (command: string) => runChatCommand(command, channel, "carol", carolId);
+
+    for (const other of [carol, stranger]) {
+      expect(await other("/status")).toContain("No task yet");
+      expect(await other("/cancel")).toContain("No running task");
+      await other("/reset");
+    }
+    expect(await getChatThreadResetAt(channel)).toBeNull();
+    expect(await statusOf(channelTask)).toBe("pending");
+
+    expect(await alice("/status")).toContain(channelTask.slice(0, 8));
+    expect(await alice("/reset")).toContain("Context reset");
+    expect(await getChatThreadResetAt(channel)).not.toBeNull();
+    expect(await alice("/cancel")).toBe(`Cancelled task ${channelTask.slice(0, 8)}.`);
+  });
+});
+
+describe("Chat SDK commands that belong to one conversation stay unscoped", () => {
+  test("a Discord thread and a Discord DM answer any sender", async () => {
+    const agent = await createAgent({
+      id: crypto.randomUUID(),
+      name: "UnscopedCmdWorker",
+      isLead: false,
+      status: "idle",
+    });
+    const owner = (await createUser({ name: "ThreadOwner" })).id;
+    const seed = async (key: string, requestedByUserId?: string) =>
+      (
+        await createTaskExtended("ask", {
+          agentId: agent.id,
+          source: "chat",
+          contextKey: chatSdkContextKey(key),
+          requestedByUserId,
+        })
+      ).id;
+    const inThread = await seed("discord:G3:C3:T1", owner);
+    const inDm = await seed("discord:@me:D9");
+
+    expect(await runChatCommand("/status", "discord:G3:C3:T1", "member")).toContain(
+      inThread.slice(0, 8),
+    );
+    expect(await runChatCommand("/cancel", "discord:G3:C3:T1", "member")).toContain(
+      `Cancelled task ${inThread.slice(0, 8)}`,
+    );
+    expect(await runChatCommand("/cancel", "discord:@me:D9", "dm-user")).toContain(
+      `Cancelled task ${inDm.slice(0, 8)}`,
+    );
+  });
+});
+
 describe("chatMessageText", () => {
   const message = (markdown: string) => {
     const formatted = parseMarkdown(markdown);

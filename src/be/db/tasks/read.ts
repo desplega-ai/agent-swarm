@@ -1778,14 +1778,28 @@ export async function findExistingLinearTrackerContextWork(
   return null;
 }
 
-export async function getLatestTaskByContextKey(contextKey: string): Promise<AgentTask | null> {
+/**
+ * Latest task on a contextKey. `requestedByUserId` keeps only that user's
+ * tasks; `notRequestedByUserId` keeps only tasks of anyone else, including
+ * tasks with no requester.
+ */
+export async function getLatestTaskByContextKey(
+  contextKey: string,
+  options: { requestedByUserId?: string; notRequestedByUserId?: string } = {},
+): Promise<AgentTask | null> {
   if (!contextKey) return null;
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       ${options.requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
+       ${options.notRequestedByUserId !== undefined ? "AND requestedByUserId IS NOT ?" : ""}
        ORDER BY createdAt DESC
        LIMIT 1`,
-    [contextKey],
+    [
+      contextKey,
+      ...(options.requestedByUserId !== undefined ? [options.requestedByUserId] : []),
+      ...(options.notRequestedByUserId !== undefined ? [options.notRequestedByUserId] : []),
+    ],
   );
   return row ? rowToAgentTask(row) : null;
 }
@@ -1966,15 +1980,23 @@ export async function getLatestTaskByContextKeyPrefix(
 export async function getLatestActiveTaskByContextKey(
   contextKey: string,
   source?: string,
+  requestedByUserId?: string,
 ): Promise<AgentTask | null> {
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND ${contextKeySourceSql()}
        AND status IN ('in_progress', 'pending')
+       ${requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null, source ?? null],
+    [
+      contextKey,
+      source ?? null,
+      source ?? null,
+      source ?? null,
+      ...(requestedByUserId !== undefined ? [requestedByUserId] : []),
+    ],
   );
 
   return row ? rowToAgentTask(row) : null;
