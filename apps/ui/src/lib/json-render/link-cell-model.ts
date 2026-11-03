@@ -91,3 +91,14 @@ export function cellHasControls(column: ControlColumn): boolean {
   if (column.format) return false;
   return column.kind === "copy" || column.kind === "switch" || column.kind === "checkbox";
 }
+
+/**
+ * True when the phone card gives a column a real control beside the row: an
+ * editable checkbox / switch. It follows the desktop cell rule: a templated
+ * (`format`) column and a link column render as text, so they stay card text.
+ */
+export function isPhoneControlColumn(column: ControlColumn & { onChange?: unknown }): boolean {
+  if (column.format || isLinkColumn(column)) return false;
+  if (column.kind !== "checkbox" && column.kind !== "switch") return false;
+  return Array.isArray(column.onChange) && column.onChange.length > 0;
+}

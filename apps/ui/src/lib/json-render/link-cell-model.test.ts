@@ -3,6 +3,7 @@ import {
   cellHasControls,
   isClipped,
   isLinkColumn,
+  isPhoneControlColumn,
   linkCell,
   TIP_MAX_CHARS,
   tipText,
@@ -129,5 +130,29 @@ describe("cellHasControls", () => {
     expect(isLinkColumn({ kind: "link" })).toBe(true);
     expect(isLinkColumn({ href: "url" })).toBe(true);
     expect(isLinkColumn({ kind: "copy" })).toBe(false);
+  });
+});
+
+describe("isPhoneControlColumn", () => {
+  const onChange = [{ action: "app.mutate" }];
+
+  test("an editable checkbox or switch gets a phone control", () => {
+    expect(isPhoneControlColumn({ kind: "checkbox", onChange })).toBe(true);
+    expect(isPhoneControlColumn({ kind: "switch", onChange })).toBe(true);
+  });
+
+  test("a formatted column stays card text, as on desktop", () => {
+    expect(isPhoneControlColumn({ kind: "checkbox", format: "{{name}}", onChange })).toBe(false);
+    expect(isPhoneControlColumn({ kind: "switch", format: "{{name}}", onChange })).toBe(false);
+  });
+
+  test("a link column stays card text", () => {
+    expect(isPhoneControlColumn({ kind: "checkbox", href: "url", onChange })).toBe(false);
+  });
+
+  test("a read-only checkbox or another kind gets none", () => {
+    expect(isPhoneControlColumn({ kind: "checkbox" })).toBe(false);
+    expect(isPhoneControlColumn({ kind: "checkbox", onChange: [] })).toBe(false);
+    expect(isPhoneControlColumn({ kind: "text", onChange })).toBe(false);
   });
 });
