@@ -1320,7 +1320,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const db = getDbClient();
 
     const expiredIds = await db.query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
     );
 
     if (expiredIds.length === 0) return 0;

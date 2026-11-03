@@ -211,6 +211,31 @@ describe("kv-storage helpers", () => {
     expect(yields).toBe(2);
   });
 
+  test.each([
+    undefined,
+    500,
+  ])("prefix sweep caps each DELETE at 50 rows (requested: %s)", async (batchSize) => {
+    const now = Date.now();
+    for (let i = 0; i < 101; i++) {
+      await upsertKv({
+        namespace: "mcp:overflow:batch-cap",
+        key: `expired-${i}`,
+        value: "expired",
+        valueType: "string",
+        expiresAt: now,
+      });
+    }
+    const run = spyOn(getDbClient(), "run");
+    let calls: (typeof run.mock.calls)[number][];
+    try {
+      expect(await sweepExpiredKvPrefix("mcp:overflow:batch-cap", now, batchSize)).toBe(101);
+      calls = [...run.mock.calls];
+    } finally {
+      run.mockRestore();
+    }
+    expect(calls.map(([, params]) => params?.[3])).toEqual([50, 50, 50]);
+  });
+
   test("integer value type stores as number", async () => {
     await upsertKv({ namespace: NS, key: "n", value: 42, valueType: "integer" });
     expect((await getKv(NS, "n"))?.value).toBe(42);
