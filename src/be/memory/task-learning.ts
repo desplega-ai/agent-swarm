@@ -4,18 +4,21 @@
  * `sourceTaskId`, so "what did we learn doing X" is one `keyPrefix` search.
  *
  * Source stays `manual` so nightly curation (memtax B1 reads only manual and
- * file_index rows) picks learnings up without a new source value.
+ * file_index rows) picks learnings up without a new source value. The key
+ * gives it a LEARNING_TTL_DAYS expiry: what is worth keeping gets distilled
+ * into `/longterm`, the rest ages out.
  *
- * A learning close to an existing swarm memory (raw cosine at or above
- * LEARNING_DUPLICATE_MIN_SIMILARITY) is not stored: the existing row gets a
- * positive rating instead. Known gap: embeddings are written in the background,
- * so two near-identical learnings seconds apart can both pass the check.
- * Nightly curation catches those.
+ * A learning close to an existing swarm memory under `/learnings` or
+ * `/longterm` (raw cosine at or above LEARNING_DUPLICATE_MIN_SIMILARITY) is
+ * not stored: the existing row gets a positive rating instead. Known gap:
+ * embeddings are written in the background, so two near-identical learnings
+ * seconds apart can both pass the check. Nightly curation catches those.
  */
 import { getDbClient } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { LEARNING_DUPLICATE_MIN_SIMILARITY } from "@/be/memory/constants";
 import { indexMemoryContent } from "@/be/memory/index-content";
+import { LEARNINGS_ROOT, LONGTERM_ROOT } from "@/be/memory/key-paths";
 import { applyRating } from "@/be/memory/raters/store";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentTask } from "@/types";
@@ -24,11 +27,10 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 /** ~500 tokens at ceil(chars / 4); also keeps a learning to one memory chunk. */
 export const LEARNING_MAX_CHARS = 2000;
 export const LEARNING_MAX_TAGS = 5;
-const LEARNINGS_ROOT = "/learnings";
 const SEGMENT_MAX_CHARS = 60;
 const KEY_ATTEMPTS = 4;
-/** Where a near duplicate can already live: any workstream's learnings and the workstream digests. */
-const DUPLICATE_SEARCH_PREFIXES = [`${LEARNINGS_ROOT}/`, "/longterm/workstreams/"];
+/** Where a near duplicate can already live: any workstream's learnings and the whole curated tree. */
+const DUPLICATE_SEARCH_PREFIXES = [`${LEARNINGS_ROOT}/`, `${LONGTERM_ROOT}/`];
 /** memory_rating.source for the positive rating a duplicate gives the existing row. */
 export const LEARNING_DUPLICATE_RATING_SOURCE = "learning-duplicate";
 

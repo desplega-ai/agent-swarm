@@ -6,11 +6,12 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 import {
   EMBEDDING_DIMENSIONS,
   isHybridSearchEnabled,
+  LEARNING_TTL_DAYS,
   minSimilarity,
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
-import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
+import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
 import type {
@@ -193,7 +194,7 @@ export function applyEditMode(
 }
 
 function computeExpiresAt(source: AgentMemorySource, key: string | null): string | null {
-  const ttlDays = TTL_DEFAULTS[tierSource(source, key)];
+  const ttlDays = isLearningKey(key) ? LEARNING_TTL_DAYS : TTL_DEFAULTS[tierSource(source, key)];
   if (ttlDays == null) return null;
   return new Date(Date.now() + ttlDays * 86400000).toISOString();
 }

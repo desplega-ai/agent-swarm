@@ -15,6 +15,11 @@ export const TTL_DEFAULTS: Record<AgentMemorySource, number | null> = {
   manual: null,
 };
 
+// TTL (in days) of a `/learnings/*` memory, whatever its source. A learning is
+// raw material: one worth keeping is distilled into `/longterm` (a move there
+// clears the expiry); the rest age out.
+export const LEARNING_TTL_DAYS = 30;
+
 // Per-source recency decay half-life (in days).
 // manual = Infinity (no decay — curated knowledge stays relevant forever).
 // A global MEMORY_RECENCY_HALF_LIFE_DAYS override forces ALL sources to the
@@ -104,5 +109,6 @@ export const EMBEDDING_DIMENSIONS = numEnv("EMBEDDING_DIMENSIONS", 512);
 export const DEFAULT_EMBEDDING_DIMENSIONS = EMBEDDING_DIMENSIONS;
 export const DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small";
 
-// Manual memories must NEVER be deleted by automated processes (curator, GC, etc.)
+// Manual memories must NEVER be deleted by automated processes (curator, GC, etc.).
+// The one exception is the expiry purge of `/learnings/*` rows (LEARNING_TTL_DAYS).
 export const PROTECTED_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual"]);

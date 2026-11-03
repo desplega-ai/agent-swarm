@@ -84,7 +84,7 @@ The `inject-learning` tool creates swarm-scoped memories by default, so learning
 
 ## TTL & Expiry
 
-Memories have a time-to-live (TTL) based on their source type. Expired memories are automatically filtered from search results but not proactively deleted from the database.
+Memories have a time-to-live (TTL) based on their source type. Expired memories are filtered from search results at once, and the periodic memory GC deletes them.
 
 | Source | TTL | Rationale |
 |--------|-----|-----------|
@@ -92,6 +92,8 @@ Memories have a time-to-live (TTL) based on their source type. Expired memories 
 | `session_summary` | 3 days | Session context is ephemeral |
 | `file_index` | 30 days | File contents may change |
 | `manual` | Never expires | Explicitly stored knowledge is permanent |
+
+The key overrides the source in two cases. A memory under `/longterm/` never expires, whatever its source. A store-progress learning under `/learnings/` expires 30 days after it is written: one worth keeping is moved under `/longterm/`, which clears the expiry, and the rest ages out. An in-place edit keeps the expiry.
 
 Expired memories can still be retrieved by ID via `memory-get` — only search results are filtered. The `memory-delete` tool provides explicit cleanup when needed.
 
