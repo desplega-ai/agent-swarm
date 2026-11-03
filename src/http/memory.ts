@@ -1568,8 +1568,12 @@ const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
 
 const SEARCH_RETRIEVAL_TTL_DAYS = 90;
-/** Rows per purge statement. The purge yields the event loop between batches. */
-const SEARCH_RETRIEVAL_PURGE_BATCH = 2000;
+/**
+ * Rows per purge statement. The purge yields the event loop between batches.
+ * A 2,000-row batch blocked the loop for 1.1 s in production; 500 keeps one
+ * batch near the 250 ms target.
+ */
+const SEARCH_RETRIEVAL_PURGE_BATCH = 500;
 
 export async function purgeStaleSearchRetrievals(
   batchSize = SEARCH_RETRIEVAL_PURGE_BATCH,

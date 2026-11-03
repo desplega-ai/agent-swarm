@@ -1315,6 +1315,9 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const batchSize = 500;
     for (let i = 0; i < expiredIds.length; i += batchSize) {
+      // Yield a macrotask between batches: chained awaits on the DB client are
+      // microtasks, so without it the whole purge is one event-loop stall.
+      if (i > 0) await new Promise<void>((resolve) => setImmediate(resolve));
       await this.purgeByIds(expiredIds.slice(i, i + batchSize).map((r) => r.id));
     }
 
