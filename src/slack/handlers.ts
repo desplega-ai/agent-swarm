@@ -189,6 +189,8 @@ interface MessageEvent {
   thread_ts?: string;
   files?: SlackFile[];
   assistant_thread?: Record<string, unknown>;
+  /** `im` for a direct message with the bot. */
+  channel_type?: string;
 }
 
 /**
@@ -575,8 +577,15 @@ export function registerMessageHandler(app: App): void {
     // Guard: suppress implicit mention when the message @-mentions someone else but NOT us —
     // those messages are addressed to a different agent/user (e.g. Devin) and must not spawn.
     const isAssistantThread = !!msg.assistant_thread;
+    // A top-level DM with the bot is addressed to it without a mention: the app's Messages tab
+    // is writable (`messages_tab_read_only_enabled: false`), so a user who types there expects
+    // an answer. Threaded DM messages are Bolt's Assistant middleware's (`isAssistantMessage`
+    // claims `im` + `thread_ts`), so only the top level counts here: no double handling.
+    const isDirectMessage = msg.channel_type === "im" && !msg.thread_ts;
     const isImplicitMention =
-      isAssistantThread && !botMentioned && !isAddressedToOtherUser(effectiveText, botUserId);
+      (isAssistantThread || isDirectMessage) &&
+      !botMentioned &&
+      !isAddressedToOtherUser(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);

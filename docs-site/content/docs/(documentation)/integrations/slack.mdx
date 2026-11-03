@@ -76,6 +76,8 @@ The handler responds to `entity_details_requested` events; this flag does not ad
 3. **Thread follow-up** — if in a thread where a worker is already active, or the thread was originally started by the swarm, routes directly to that worker/flow
 4. **Lead fallback** — if the bot was @mentioned and no other match, routes to the lead agent
 
+A top-level direct message to the bot counts as a mention, so a plain DM with no @mention reaches the lead agent. A DM that @mentions someone else and not the bot is ignored. Replies inside a DM thread are handled by the Slack Assistant handler.
+
 If no agents are online, the message is queued as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
 
 The bot's own @mention is identified as “that's you” in task text from assistant DMs and buffered follow-ups, including their thread context. Other user mentions resolve to names when available.

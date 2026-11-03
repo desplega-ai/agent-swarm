@@ -281,6 +281,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     bot_id?: string;
     assistant_thread?: Record<string, unknown>;
     thread_ts?: string;
+    channel_type?: string;
   };
 
   type HandlerArgs = {
@@ -367,6 +368,77 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
 
     expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
+  async function deliver(event: MessageEventArg, prefix: string): Promise<void> {
+    expect(capturedHandler).not.toBeNull();
+    const delivery = nextSlackDelivery(prefix);
+    await capturedHandler!({
+      event: { ...event, ts: delivery.ts, user: "U_HUMAN_HDLR_001" },
+      body: { event_id: delivery.eventId },
+      client: mockClient,
+      say: mock(async () => {}),
+    });
+  }
+
+  test("DOES spawn a task for a top-level DM with no mention and no assistant thread", async () => {
+    await deliver(
+      {
+        channel: "D_HANDLER_PROD_TEST",
+        channel_type: "im",
+        ts: "",
+        text: "What is the current status of all agents?",
+      },
+      "evt_prod_hdlr_plain_dm",
+    );
+
+    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy.mock.calls[0]?.[0]).toContain(
+      "What is the current status of all agents?",
+    );
+  });
+
+  test("does NOT spawn a task for a top-level DM that @-mentions another user but not our bot", async () => {
+    await deliver(
+      {
+        channel: "D_HANDLER_PROD_TEST",
+        channel_type: "im",
+        ts: "",
+        text: `<@${DEVIN_USER_ID}> are you here?`,
+      },
+      "evt_prod_hdlr_dm_comention",
+    );
+
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+  });
+
+  test("leaves a threaded DM message to Bolt's Assistant middleware", async () => {
+    await deliver(
+      {
+        channel: "D_HANDLER_PROD_TEST",
+        channel_type: "im",
+        ts: "",
+        thread_ts: "1000000000.000001",
+        text: "a reply in the DM thread",
+      },
+      "evt_prod_hdlr_dm_thread",
+    );
+
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+  });
+
+  test("still ignores an unaddressed message in a channel", async () => {
+    await deliver(
+      {
+        channel: "C_HANDLER_PROD_TEST",
+        channel_type: "channel",
+        ts: "",
+        text: "just chatting, nobody asked the bot",
+      },
+      "evt_prod_hdlr_channel_chatter",
+    );
+
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+  });
+
   test("DOES spawn a task for an assistant_thread other-user mention when SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true", async () => {
     expect(capturedHandler).not.toBeNull();
     const delivery = nextSlackDelivery("evt_prod_hdlr_wake_any");
