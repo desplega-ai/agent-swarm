@@ -2380,6 +2380,8 @@ function TableComponent({ props }: { props: TableProps }) {
               }
             : undefined,
           title: (titleKey ? mobileCellText(titleKey, row) : "") || "Untitled",
+          // No hover tooltip on a phone: show the whole title, never an ellipsis.
+          titleLines: "full",
           status: statusKey
             ? statusNode(
                 columnByKey.get(statusKey) ?? { key: statusKey, kind: "badge" },
