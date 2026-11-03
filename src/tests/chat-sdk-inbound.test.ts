@@ -189,6 +189,26 @@ describe("Chat SDK inbound pipeline", () => {
     expect(skippedCounts.every((count) => count === 0)).toBe(true);
   });
 
+  test("link URLs, inline code and code blocks reach the task text", async () => {
+    const text = "see the docs then run bun test\nfn main() {}";
+    const at = (needle: string) => ({ offset: text.indexOf(needle), length: needle.length });
+    await postTelegramUpdate(
+      telegramUpdate(dm(2090), text, {
+        entities: [
+          { type: "text_link", url: "https://example.com/docs?a=1", ...at("the docs") },
+          { type: "code", ...at("bun test") },
+          { type: "pre", ...at("fn main() {}") },
+        ],
+      }),
+    );
+    await flushChatBuffers();
+    const [task] = await chatTasks(2090);
+    expect(task!.task).toContain("[the docs](https://example.com/docs?a=1)");
+    expect(task!.task).toContain("`bun test`");
+    expect(task!.task).toContain("fn main() {}");
+    expect(task!.task).toMatch(/```[a-z]*\nfn main\(\) \{\}\n```/);
+  });
+
   test("!now flushes the thread at once", async () => {
     await postTelegramUpdate(telegramUpdate(dm(2002), "!now ship the hotfix"));
     const tasks = await chatTasks(2002);
