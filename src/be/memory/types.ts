@@ -160,7 +160,8 @@ export interface MemorySearchOptions {
   /**
    * Score every eligible row's stored embedding instead of the vector index's
    * top-K. Exact whatever the corpus size, at O(eligible rows). Ignores
-   * `queryText`.
+   * `queryText` and the `MEMORY_MIN_SIMILARITY` floor: the caller applies its
+   * own threshold to the returned raw cosine.
    */
   exhaustive?: boolean;
 }

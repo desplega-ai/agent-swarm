@@ -414,6 +414,55 @@ describe("store-progress learning near-duplicate guard", () => {
     expect(learningRows(t.id)).toHaveLength(0);
   }, 120_000);
 
+  /** Run `fn` with MEMORY_MIN_SIMILARITY set to `value`, then restore it. */
+  async function withMinSimilarity<T>(value: string, fn: () => Promise<T>): Promise<T> {
+    const original = process.env.MEMORY_MIN_SIMILARITY;
+    process.env.MEMORY_MIN_SIMILARITY = value;
+    try {
+      return await fn();
+    } finally {
+      if (original === undefined) delete process.env.MEMORY_MIN_SIMILARITY;
+      else process.env.MEMORY_MIN_SIMILARITY = original;
+    }
+  }
+
+  test("a /longterm duplicate is found when MEMORY_MIN_SIMILARITY is above the dedup threshold", async () => {
+    const existing = await seedLongterm("/longterm/facts/dedup/above-the-floor", vector(80));
+    const text = "Above the retrieval floor\nThe dedup threshold holds on its own.";
+    vectors.set(text, vector(80, 0.86));
+    const t = await task();
+    const result = await withMinSimilarity("0.9", () => call({ taskId: t.id, learning: text }));
+
+    expect(learningData(result)).toMatchObject({ status: "duplicate", memoryId: existing.id });
+    expect(learningData(result)?.similarity).toBeCloseTo(0.86, 2);
+    expect(learningRows(t.id)).toHaveLength(0);
+  });
+
+  for (const mode of ["vec", "fallback"] as const) {
+    test(`a ${mode} memory search still drops a 0.86 row when MEMORY_MIN_SIMILARITY is 0.9`, async () => {
+      const keyPrefix = `/longterm/facts/floor-${mode}/`;
+      const existing = await seedLongterm(`${keyPrefix}row`, vector(mode === "vec" ? 90 : 94));
+      const query = vector(mode === "vec" ? 90 : 94, 0.86);
+      const store = getMemoryStore();
+      const health = store.getHealth();
+      expect(health.retrievalMode).toBe("vec");
+      const healthSpy = spyOn(store, "getHealth").mockReturnValue({
+        ...health,
+        retrievalMode: mode,
+      });
+      const search = () => store.search(query, agentId, { scope: "swarm", keyPrefix, limit: 5 });
+      try {
+        // Control: under the default floor the same search returns the row.
+        const unfiltered = await search();
+        expect(unfiltered.map((c) => c.id)).toEqual([existing.id]);
+        expect(unfiltered[0]?.retrievalSource).toBe(mode);
+        expect(await withMinSimilarity("0.9", search)).toEqual([]);
+      } finally {
+        healthSpy.mockRestore();
+      }
+    });
+  }
+
   test("a related learning below the threshold is stored", async () => {
     await seed("Retry flaky pushes once\nThe pre-push hook is slow.", vector(20));
     const text = "Pre-push hooks take five minutes\nLet them finish.";

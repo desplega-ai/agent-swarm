@@ -141,7 +141,9 @@ async function findReplay(
  * The closest swarm memory under the duplicate prefixes when its raw cosine to
  * the learning reaches the threshold. The search is exhaustive over each
  * prefix, so `similarity` is raw cosine (not an FTS rank or a fused score) and
- * no amount of closer rows outside the prefixes can hide a match. Any failure (no embedding provider, a search error) returns
+ * no amount of closer rows outside the prefixes can hide a match. It also skips
+ * the MEMORY_MIN_SIMILARITY retrieval floor, so the duplicate threshold holds
+ * whatever that is set to. Any failure (no embedding provider, a search error) returns
  * null so the learning is stored as usual.
  */
 async function findNearDuplicate(params: {
