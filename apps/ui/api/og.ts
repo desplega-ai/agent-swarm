@@ -1,6 +1,6 @@
 /**
  * GET /api/og?title=&subtitle=[&accent=]: the 1200x630 page share card
- * (`src/lib/page-og-card.ts`), the agent-swarm.dev landing card ported here so
+ * (`og/page-card.ts`), the agent-swarm.dev landing card ported here so
  * a self-hosted dashboard renders its own previews.
  *
  * Vercel Node.js function (not Edge): the Edge bundler turns
@@ -12,7 +12,7 @@
 // Node ESM runs this file unbundled, so relative imports carry `.js`.
 import { readFile } from "node:fs/promises";
 import { ImageResponse } from "@vercel/og";
-import { MONO, pageOgCard, SANS } from "../src/lib/page-og-card.js";
+import { MONO, pageOgCard, SANS } from "../og/page-card.js";
 import { OG_SIZE, parseOgParams } from "../src/lib/page-share.js";
 
 type Font = { name: string; data: ArrayBuffer; weight: 400 | 500; style: "normal" };

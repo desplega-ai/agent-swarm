@@ -178,7 +178,7 @@ describe("vercel.json og function", () => {
   });
 
   test("imports relative modules with explicit .js extensions", async () => {
-    for (const file of ["../../api/og.ts", "./page-og-card.ts", "./page-share.ts"]) {
+    for (const file of ["../../api/og.ts", "../../og/page-card.ts", "./page-share.ts"]) {
       const source = await Bun.file(new URL(file, import.meta.url)).text();
       for (const [, spec] of source.matchAll(/from "(\.{1,2}\/[^"]+)"/g)) {
         expect(spec).toEndWith(".js");
