@@ -1,4 +1,3 @@
-import { SidebarAppsSettings } from "@/components/apps/sidebar-apps-settings";
 import { THEME_MODES, ThemePresetPicker } from "@/components/shared/theme-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -60,7 +59,6 @@ export default function AppearancePage() {
           <ThemePresetPicker />
         </CardContent>
       </Card>
-      <SidebarAppsSettings />
     </div>
   );
 }

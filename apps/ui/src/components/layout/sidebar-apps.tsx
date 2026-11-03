@@ -1,6 +1,7 @@
+import { useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useApps } from "@/api/hooks/use-apps";
-import { LayoutGridIcon } from "@/components/icons/layout-grid";
+import { LayoutGridIcon, type LayoutGridIconHandle } from "@/components/icons/layout-grid";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import {
   SidebarGroup,
@@ -12,6 +13,24 @@ import {
 import { useAppSidebarPreferences } from "@/hooks/use-app-sidebar-preferences";
 import { visibleSidebarApps } from "@/lib/app-sidebar-preferences";
 import { useIsAdmin } from "@/lib/use-can";
+
+function SidebarAppLink({ label, path, active }: { label: string; path: string; active: boolean }) {
+  const iconRef = useRef<LayoutGridIconHandle>(null);
+  return (
+    <SidebarMenuButton asChild isActive={active} tooltip={label}>
+      <NavLink
+        to={path}
+        end={path === "/apps"}
+        aria-label={label}
+        onMouseEnter={() => iconRef.current?.startAnimation()}
+        onMouseLeave={() => iconRef.current?.stopAnimation()}
+      >
+        <LayoutGridIcon ref={iconRef} aria-hidden size={16} className="shrink-0" />
+        <span className="truncate">{label}</span>
+      </NavLink>
+    </SidebarMenuButton>
+  );
+}
 
 export function SidebarApps() {
   const isAdmin = useIsAdmin();
@@ -36,12 +55,7 @@ export function SidebarApps() {
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.path}>
-            <SidebarMenuButton asChild isActive={item.active} tooltip={item.label}>
-              <NavLink to={item.path} end={item.path === "/apps"} aria-label={item.label}>
-                <LayoutGridIcon aria-hidden size={16} />
-                <span className="truncate">{item.label}</span>
-              </NavLink>
-            </SidebarMenuButton>
+            <SidebarAppLink {...item} />
           </SidebarMenuItem>
         ))}
       </SidebarMenu>

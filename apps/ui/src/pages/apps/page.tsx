@@ -9,6 +9,7 @@ import { useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApps } from "@/api/hooks/use-apps";
 import type { AppListItem } from "@/api/types";
+import { SidebarAppsSettings } from "@/components/apps/sidebar-apps-settings";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -66,7 +67,7 @@ export default function AppsListingPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Apps" />
+      <PageHeader title="Apps" action={<SidebarAppsSettings />} />
       {error ? (
         <AlertCallout tone="error" icon={LayoutGrid} title="Failed to load apps">
           {error instanceof Error ? error.message : String(error)}
