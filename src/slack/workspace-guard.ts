@@ -30,12 +30,21 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
  *   supplies only the ids. An org install owns a delivery that names its
  *   enterprise and is marked as an org-wide install.
  * - `is_enterprise_install` is optional on interactive payloads and absent from
- *   the documented slash command payload. An org install also owns a delivery
- *   that names its enterprise, omits the flag, and either names no workspace
- *   (only an org-wide install can own that, because a workspace install never
- *   matches an enterprise alone) or names a workspace the install is granted
- *   (`auth.teams.list`). A payload for a workspace granted after the last lookup
- *   triggers a throttled refresh of that list.
+ *   the documented slash command payload. Without it, a workspace install and
+ *   an org install granted the same workspace could both match, so exactly one
+ *   claims the delivery:
+ *   - A payload that names the bot it belongs to (`message.bot_id` on a button,
+ *     `view.bot_id` on a view) belongs to the installation with that bot
+ *     (`auth.test` `bot_id`). Each installation has its own bot.
+ *   - Otherwise (slash commands, shortcuts), a delivery that names an
+ *     enterprise belongs to the org install when the install is granted the
+ *     workspace (`auth.teams.list`) or no workspace is named. Only the org
+ *     install can see its grants, so a workspace install in an enterprise does
+ *     not claim it. A workspace install claims a flag-less delivery only for a
+ *     workspace outside any enterprise, which no org install can be granted.
+ * - A delivery for a workspace granted after the last lookup is held while the
+ *   grant list refreshes, then classified again. The refresh runs at most once
+ *   per 30 s for each workspace.
  */
 
 export interface SlackWorkspaceIdentity {
@@ -43,6 +52,8 @@ export interface SlackWorkspaceIdentity {
   enterpriseId: string | null;
   /** Org-wide Enterprise install, from trusted OAuth metadata. */
   isEnterpriseInstall: boolean;
+  /** This installation's bot (`auth.test` `bot_id`). */
+  botId?: string;
   /** Org install only: workspaces it is granted, from `auth.teams.list`. */
   orgTeamIds?: ReadonlySet<string>;
 }
@@ -53,6 +64,8 @@ export interface InboundInstallation {
   enterpriseId: string | null;
   /** null when the payload does not say. */
   isEnterpriseInstall: boolean | null;
+  /** The bot whose message or view the payload came from, when it names one. */
+  botId?: string;
 }
 
 export type InboundOwnership =
@@ -120,12 +133,19 @@ export function readInboundInstallations(body: unknown): InboundInstallation[] {
   if (fromAuthorizations.length > 0 || record.type === "event_callback") return fromAuthorizations;
 
   const team = asRecord(record.team);
+  const view = asRecord(record.view);
   const installation = toInstallation(
-    asId(asRecord(record.view)?.app_installed_team_id) ?? record.team_id ?? team?.id,
+    asId(view?.app_installed_team_id) ?? record.team_id ?? team?.id,
     record.enterprise_id ?? asRecord(record.enterprise)?.id ?? team?.enterprise_id,
     record.is_enterprise_install,
   );
-  return installation ? [installation] : [];
+  if (!installation) return [];
+  // A button's message, or a view, was posted or opened by one installation's
+  // bot. A message shortcut's message can be anyone's, so it proves nothing.
+  const botId =
+    asId(view?.bot_id) ??
+    (record.type === "block_actions" ? asId(asRecord(record.message)?.bot_id) : null);
+  return [botId ? { ...installation, botId } : installation];
 }
 
 /** Does this swarm's installation own the delivery? Anything unproven is not ours. */
@@ -136,18 +156,23 @@ export function classifyInboundOwnership(
   if (!identity || installations.length === 0) {
     return { own: false, reason: "unverified_workspace" };
   }
-  const owns = identity.isEnterpriseInstall
-    ? (installation: InboundInstallation) =>
-        identity.enterpriseId !== null &&
-        installation.enterpriseId === identity.enterpriseId &&
-        (installation.isEnterpriseInstall === true ||
-          (installation.isEnterpriseInstall === null &&
-            (installation.teamId === null ||
-              identity.orgTeamIds?.has(installation.teamId) === true)))
-    : (installation: InboundInstallation) =>
-        identity.teamId !== null &&
-        installation.teamId === identity.teamId &&
-        installation.isEnterpriseInstall !== true;
+  // The two branches are complementary: a workspace install and an org install
+  // granted that workspace never both claim one delivery.
+  const owns = (installation: InboundInstallation): boolean => {
+    if (identity.isEnterpriseInstall) {
+      if (identity.enterpriseId === null || installation.enterpriseId !== identity.enterpriseId) {
+        return false;
+      }
+      if (installation.isEnterpriseInstall !== null) return installation.isEnterpriseInstall;
+      if (installation.botId) return installation.botId === identity.botId;
+      return installation.teamId === null || identity.orgTeamIds?.has(installation.teamId) === true;
+    }
+    if (identity.teamId === null || installation.teamId !== identity.teamId) return false;
+    if (installation.isEnterpriseInstall !== null) return !installation.isEnterpriseInstall;
+    if (installation.botId) return installation.botId === identity.botId;
+    // In an enterprise, an org install granted this workspace may own it.
+    return installation.enterpriseId === null;
+  };
   return installations.some(owns) ? { own: true } : { own: false, reason: "foreign_workspace" };
 }
 
@@ -167,6 +192,7 @@ export function inboundPayloadType(body: unknown): string {
 export interface SlackAuthTestResult {
   team_id?: string;
   enterprise_id?: string;
+  bot_id?: string;
 }
 
 /** The Web API calls that resolve this swarm's identity. */
@@ -207,6 +233,8 @@ export async function resolveSlackIdentity(
     cursor = result.response_metadata?.next_cursor || undefined;
     if (!cursor) break;
   }
+  // A partial grant list would withhold the remaining workspaces for good.
+  if (cursor) throw new Error("auth.teams.list returned more pages than the safety limit");
   return { ...identity, orgTeamIds };
 }
 
@@ -222,22 +250,29 @@ export function identityFromAuthTest(
 ): SlackWorkspaceIdentity {
   const teamId = asId(result.team_id);
   const enterpriseId = asId(result.enterprise_id);
+  const botId = asId(result.bot_id);
   if (isEnterpriseInstall && !enterpriseId) {
     throw new Error("SLACK_ENTERPRISE_INSTALL is set but auth.test returned no enterprise_id");
   }
   if (!isEnterpriseInstall && !teamId) {
     throw new Error("auth.test returned no team_id");
   }
-  return { teamId: isEnterpriseInstall ? null : teamId, enterpriseId, isEnterpriseInstall };
+  return {
+    teamId: isEnterpriseInstall ? null : teamId,
+    enterpriseId,
+    isEnterpriseInstall,
+    ...(botId ? { botId } : {}),
+  };
 }
 
 let resolveIdentity: (() => Promise<SlackWorkspaceIdentity>) | null = null;
 let identity: SlackWorkspaceIdentity | null = null;
 let pending: Promise<SlackWorkspaceIdentity | null> | null = null;
 let refreshing: Promise<void> | null = null;
-let lastRefreshAt = 0;
+/** When each workspace last triggered a grant-list refresh. */
+const refreshedTeamsAt = new Map<string, number>();
 
-/** Minimum gap between refreshes of an org install's granted workspaces. */
+/** Minimum gap between grant-list refreshes for one workspace. */
 const ORG_TEAMS_REFRESH_INTERVAL_MS = 30_000;
 
 /** Register how to resolve this swarm's identity. Clears any cached identity. */
@@ -248,7 +283,7 @@ export function setSlackWorkspaceIdentitySource(
   identity = null;
   pending = null;
   refreshing = null;
-  lastRefreshAt = 0;
+  refreshedTeamsAt.clear();
 }
 
 /** The resolved identity, or null. Never calls Slack. */
@@ -289,15 +324,24 @@ export async function getSlackWorkspaceIdentity(): Promise<SlackWorkspaceIdentit
 }
 
 /**
- * Re-resolve a resolved identity, at most once per 30 s. Used when an org
- * install sees a workspace of its enterprise that it does not know yet. A
- * failure keeps the current identity. Returns the refresh, or null if skipped.
+ * Re-resolve a resolved identity because an org install saw `teamIds`,
+ * workspaces of its enterprise it does not know yet. Each workspace triggers a
+ * refresh at most once per 30 s. A failure keeps the current identity. Returns
+ * the refresh in flight (a new one or one already running), or null if none.
  */
-export function refreshSlackWorkspaceIdentity(): Promise<void> | null {
+export function refreshSlackWorkspaceIdentity(teamIds: readonly string[]): Promise<void> | null {
   const source = resolveIdentity;
-  if (!source || !identity || refreshing) return null;
-  if (Date.now() - lastRefreshAt < ORG_TEAMS_REFRESH_INTERVAL_MS) return null;
-  lastRefreshAt = Date.now();
+  if (!source || !identity) return null;
+  if (refreshing) return refreshing;
+  const now = Date.now();
+  const due = teamIds.filter(
+    (teamId) =>
+      now - (refreshedTeamsAt.get(teamId) ?? Number.NEGATIVE_INFINITY) >=
+      ORG_TEAMS_REFRESH_INTERVAL_MS,
+  );
+  if (due.length === 0) return null;
+  if (refreshedTeamsAt.size >= 1_000) refreshedTeamsAt.clear();
+  for (const teamId of due) refreshedTeamsAt.set(teamId, now);
   const current = (async () => {
     try {
       const resolved = await source();
@@ -314,19 +358,52 @@ export function refreshSlackWorkspaceIdentity(): Promise<void> | null {
   return current;
 }
 
-/** An org install saw its enterprise and a workspace it may not know yet. */
-function namesUnknownOrgWorkspace(
+/**
+ * Workspaces of an org install's enterprise that a delivery names and the
+ * grant list lacks, where a fresher grant list could change the verdict: the
+ * delivery omits the flag and names no bot.
+ */
+function unknownOrgTeams(
   own: SlackWorkspaceIdentity | null,
   installations: InboundInstallation[],
-): boolean {
-  if (!own?.isEnterpriseInstall || own.enterpriseId === null) return false;
-  return installations.some(
-    (i) =>
+): string[] {
+  if (!own?.isEnterpriseInstall || own.enterpriseId === null) return [];
+  const teams: string[] = [];
+  for (const i of installations) {
+    if (
       i.enterpriseId === own.enterpriseId &&
       i.isEnterpriseInstall === null &&
+      !i.botId &&
       i.teamId !== null &&
-      own.orgTeamIds?.has(i.teamId) !== true,
-  );
+      own.orgTeamIds?.has(i.teamId) !== true
+    ) {
+      teams.push(i.teamId);
+    }
+  }
+  return teams;
+}
+
+/**
+ * Hold a delivery naming an unknown workspace of our enterprise until the
+ * grant list refreshes, then classify it again (logging it if still withheld).
+ * Slack does not retry commands or actions, so the first one from a newly
+ * granted workspace must not be dropped.
+ */
+async function ownsAfterGrantRefresh(
+  body: unknown,
+  getIdentity: () => SlackWorkspaceIdentity | null,
+): Promise<boolean> {
+  // A refresh already running may predate the grant: allow one more.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const own = getIdentity();
+    const installations = readInboundInstallations(body);
+    if (classifyInboundOwnership(own, installations).own) return true;
+    if (own === null || own !== identity) break;
+    const refresh = refreshSlackWorkspaceIdentity(unknownOrgTeams(own, installations));
+    if (!refresh) break;
+    await refresh;
+  }
+  return checkInboundWorkspace(body, getIdentity()).own;
 }
 
 const WITHHELD_LOG_INTERVAL_MS = 60_000;
@@ -343,10 +420,6 @@ export function checkInboundWorkspace(
   const installations = readInboundInstallations(body);
   const ownership = classifyInboundOwnership(own, installations);
   if (ownership.own) return ownership;
-  // Only the live identity is refreshed; a caller-supplied one is left alone.
-  if (own === identity && namesUnknownOrgWorkspace(own, installations)) {
-    void refreshSlackWorkspaceIdentity();
-  }
 
   const team = installations.map((i) => i.teamId ?? "-").join(",") || "none";
   const enterprise = installations.map((i) => i.enterpriseId ?? "-").join(",") || "none";
@@ -371,7 +444,9 @@ interface SocketEventEmitter {
 /**
  * Wrap the Socket Mode client so a `slack_event` envelope reaches Bolt (which
  * acks it) only when it belongs to `getIdentity()`'s installation. Any other
- * envelope is left unacked and undispatched, so Slack redelivers it.
+ * envelope is left unacked and undispatched, so Slack redelivers it. One
+ * naming a workspace an org install may have been granted since the last
+ * lookup is held until the grant list refreshes, then gated again.
  *
  * Install it after every other `emit` wrapper: the last one installed runs
  * first, so nothing downstream sees, stores or acks a withheld envelope.
@@ -384,7 +459,22 @@ export function installSocketWorkspaceGate(
   client.emit = (event: string | symbol, ...args: unknown[]): boolean => {
     if (event !== "slack_event") return emit(event, ...args);
     const body = (args[0] as { body?: unknown } | undefined)?.body;
-    if (checkInboundWorkspace(body, getIdentity()).own) return emit(event, ...args);
+    const own = getIdentity();
+    const installations = readInboundInstallations(body);
+    if (classifyInboundOwnership(own, installations).own) return emit(event, ...args);
+    // Only the live identity is refreshed; a caller-supplied one is left alone.
+    if (own !== null && own === identity && unknownOrgTeams(own, installations).length > 0) {
+      void ownsAfterGrantRefresh(body, getIdentity)
+        .then((owned) => {
+          if (owned) emit(event, ...args);
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[Slack] Workspace guard: held delivery failed: ${message}`);
+        });
+      return true;
+    }
+    checkInboundWorkspace(body, own);
     return true;
   };
 }
