@@ -2,7 +2,6 @@ import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import {
   Activity,
   Calendar,
-  ChevronDown,
   Code2,
   FlaskConical,
   FolderOpen,
@@ -39,6 +38,7 @@ import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
+import { ColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -47,15 +47,6 @@ import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-ico
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskHoverCard } from "@/components/shared/task-hover-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
@@ -66,7 +57,7 @@ import {
   taskDisplayModel,
 } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // ─── Column model ────────────────────────────────────────────────────────────
 
@@ -499,49 +490,29 @@ export function TasksColumnsMenu({
   trigger?: ReactNode;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {trigger ?? (
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" />
-            Columns
-            <ChevronDown className="h-3 w-3 opacity-60" />
-          </Button>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel className="text-xs">Show columns</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {ALWAYS_VISIBLE.map((id) => (
-          <DropdownMenuCheckboxItem
-            key={id}
-            checked
-            disabled
-            className={cn("capitalize opacity-60")}
-            onCheckedChange={() => {}}
-          >
-            {id}
-          </DropdownMenuCheckboxItem>
-        ))}
-        <DropdownMenuSeparator />
-        {TOGGLEABLE_COLUMNS.filter(({ id }) => !state.gateHidden.has(id)).map(({ id, label }) => {
+    <ColumnsMenu
+      trigger={trigger}
+      groups={[
+        ALWAYS_VISIBLE.map((id) => ({
+          id,
+          label: id,
+          checked: true,
+          disabled: true,
+          className: "capitalize opacity-60",
+        })),
+        TOGGLEABLE_COLUMNS.filter(({ id }) => !state.gateHidden.has(id)).map(({ id, label }) => {
           const forced = state.forcedHidden.has(id);
-          return (
-            <DropdownMenuCheckboxItem
-              key={id}
-              checked={!state.isHidden(id)}
-              disabled={forced}
-              onCheckedChange={(checked) => state.toggle(id, Boolean(checked))}
-            >
-              {label}
-              {forced ? (
-                <span className="ml-auto text-[10px] text-muted-foreground">locked</span>
-              ) : null}
-            </DropdownMenuCheckboxItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          return {
+            id,
+            label,
+            checked: !state.isHidden(id),
+            disabled: forced,
+            note: forced ? "locked" : undefined,
+            onCheckedChange: (checked: boolean) => state.toggle(id, checked),
+          };
+        }),
+      ]}
+    />
   );
 }
 

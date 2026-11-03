@@ -14,6 +14,7 @@ import {
   isNoGroupKey,
   personalOwner,
   renamedGroupKey,
+  resourceOfGroupKey,
   restoreKey,
   sourceOfGroupKey,
 } from "@/lib/session-groups";
@@ -117,7 +118,7 @@ export function useTreeMoves({
     }
     const owner = personalOwner(key);
     if (owner && owner !== me) setOpen(ownerFoldId(owner), true);
-    const source = sourceOfGroupKey(key);
+    const source = sourceOfGroupKey(key) ?? resourceOfGroupKey(key)?.kind;
     if (source) setOpen(sourceFoldId(source), true);
     for (const id of withParents(key)) setOpen(id, true);
   };
