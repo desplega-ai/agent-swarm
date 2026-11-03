@@ -633,6 +633,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        minSimilarity: options.minSimilarity,
       });
     }
 
@@ -669,6 +670,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        minSimilarity: options.minSimilarity,
       });
     }
 
@@ -696,6 +698,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead,
       includeExpired,
       keyPrefix,
+      minSimilarity: options.minSimilarity,
     });
   }
 
@@ -868,9 +871,11 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
     // sqlite-vec hard ceiling is 4096 for knn queries
@@ -907,7 +912,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
       const similarity = 1 - row.distance;
-      if (similarity < minSimilarity()) continue;
+      if (similarity < floor) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "vec" });
     }
 
@@ -924,9 +929,11 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
@@ -956,7 +963,7 @@ export class SqliteMemoryStore implements MemoryStore {
       const emb = deserializeEmbedding(row.embedding);
       if (emb.length !== queryEmbedding.length) continue;
       const similarity = cosineSimilarity(queryEmbedding, emb);
-      if (similarity < minSimilarity()) continue;
+      if (similarity < floor) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "fallback" });
     }
 

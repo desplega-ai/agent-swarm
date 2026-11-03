@@ -163,6 +163,9 @@ async function findNearDuplicate(params: {
           // The vector index ranks the whole table before the prefix filter;
           // past 4096 closer rows elsewhere it would hide a real duplicate.
           exhaustive: true,
+          // The dedup bar, not the retrieval floor: MEMORY_MIN_SIMILARITY above
+          // it would drop a real duplicate before the threshold check below.
+          minSimilarity: LEARNING_DUPLICATE_MIN_SIMILARITY,
         }),
       ),
     );

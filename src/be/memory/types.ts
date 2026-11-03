@@ -163,6 +163,12 @@ export interface MemorySearchOptions {
    * `queryText`.
    */
   exhaustive?: boolean;
+  /**
+   * Raw-cosine floor for this call, replacing MEMORY_MIN_SIMILARITY. Honored by
+   * the exhaustive, vector and brute-force paths (raw cosine); the FTS and
+   * hybrid paths score differently and ignore it.
+   */
+  minSimilarity?: number;
 }
 
 /**

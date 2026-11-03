@@ -414,6 +414,41 @@ describe("store-progress learning near-duplicate guard", () => {
     expect(learningRows(t.id)).toHaveLength(0);
   }, 120_000);
 
+  /** Run `fn` with MEMORY_MIN_SIMILARITY set to `value`, then restore it. */
+  async function withRetrievalFloor<T>(value: string, fn: () => Promise<T>): Promise<T> {
+    const original = process.env.MEMORY_MIN_SIMILARITY;
+    process.env.MEMORY_MIN_SIMILARITY = value;
+    try {
+      return await fn();
+    } finally {
+      if (original === undefined) delete process.env.MEMORY_MIN_SIMILARITY;
+      else process.env.MEMORY_MIN_SIMILARITY = original;
+    }
+  }
+
+  test("a retrieval floor above the dedup threshold still catches a /longterm duplicate", async () => {
+    const existing = await seedLongterm("/longterm/facts/dedup/strict-floor", vector(80));
+    const text = "Strict retrieval floor\nMEMORY_MIN_SIMILARITY must not hide a duplicate.";
+    vectors.set(text, vector(80, 0.86));
+    const t = await task();
+    const result = await withRetrievalFloor("0.9", () => call({ taskId: t.id, learning: text }));
+
+    expect(learningData(result)).toMatchObject({ status: "duplicate", memoryId: existing.id });
+    expect(learningData(result)?.similarity).toBeCloseTo(0.86, 2);
+    expect(learningRows(t.id)).toHaveLength(0);
+  });
+
+  test("a retrieval floor below the dedup threshold does not lower it", async () => {
+    await seedLongterm("/longterm/facts/dedup/loose-floor", vector(90));
+    const text = "Loose retrieval floor\nA 0.7 match is related, not a duplicate.";
+    vectors.set(text, vector(90, 0.7));
+    const t = await task();
+    const result = await withRetrievalFloor("0.5", () => call({ taskId: t.id, learning: text }));
+
+    expect(learningData(result)?.status).toBe("stored");
+    expect(learningRows(t.id)).toHaveLength(1);
+  });
+
   test("a related learning below the threshold is stored", async () => {
     await seed("Retry flaky pushes once\nThe pre-push hook is slow.", vector(20));
     const text = "Pre-push hooks take five minutes\nLet them finish.";
