@@ -391,3 +391,88 @@ describe("bounded value walks", () => {
     expect(pending.size).toBe(1);
   });
 });
+
+describe("review regressions", () => {
+  test("keystroke previews never consume seen versions, so a delayed early response still matches", () => {
+    const base = doc();
+    const pending: PendingProps = new Map();
+    const mode = resolveMode(base, "a");
+    commitValue(mode, pending, { title: "v1" }); // dispatched
+    for (let i = 0; i < 40; i++) commitValue(mode, pending, { title: `typing-${i}` }, false);
+    commitValue(mode, pending, { title: "v2" }); // dispatched
+    // The server answers the FIRST commit late: the doc shows v1.
+    const stale = {
+      ...base,
+      elements: { ...base.elements, a: { type: "Text", props: { title: "v1", extra: 1 } } },
+    };
+    dropConfirmed(pending, stale);
+    expect(pending.get("a")?.props.title).toBe("v2");
+  });
+
+  test("an entry past the seen cap is only dropped on confirmation, not on a mismatch", () => {
+    const base = doc();
+    const pending: PendingProps = new Map();
+    const mode = resolveMode(base, "a");
+    for (let i = 0; i < 100; i++) commitValue(mode, pending, { title: `c${i}` });
+    expect(pending.get("a")?.overflowed).toBe(true);
+    const mid = {
+      ...base,
+      elements: { ...base.elements, a: { type: "Text", props: { title: "c3", extra: 1 } } },
+    };
+    dropConfirmed(pending, mid);
+    expect(pending.has("a")).toBe(true);
+    const done = {
+      ...base,
+      elements: { ...base.elements, a: { type: "Text", props: { title: "c99", extra: 1 } } },
+    };
+    dropConfirmed(pending, done);
+    expect(pending.has("a")).toBe(false);
+  });
+
+  test("a large schema cannot starve the seed and node key out of the signature", () => {
+    const many: Record<string, unknown> = {};
+    for (let i = 0; i < 11; i++) {
+      many[`f${i}`] = { enum: Array.from({ length: 200 }, (_, j) => `o${i}-${j}`) };
+    }
+    const { controls } = deriveControls({ properties: many });
+    const a = formSignature(controls, { f0: "o0-1" }, "a");
+    expect(formSignature(controls, { f0: "o0-2" }, "a")).not.toBe(a);
+    expect(formSignature(controls, { f0: "o0-1" }, "b")).not.toBe(a);
+  });
+
+  test("enumOptions visits a bounded number of entries", () => {
+    let reads = 0;
+    const hostile = new Proxy(new Array(5_000_000), {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const { controls } = deriveControls({ properties: { a: { enum: hostile } } });
+    expect(controls[0]?.kind).toBe("text");
+    expect(reads).toBeLessThanOrEqual(1001);
+  });
+
+  test("deriveControls stops scanning a huge properties object", () => {
+    const props: Record<string, unknown> = {};
+    for (let i = 0; i < 5000; i++) props[`k${i}`] = {};
+    const out = deriveControls({ properties: props });
+    expect(out.controls).toHaveLength(SCHEMA_FORM_MAX_PROPERTIES);
+    expect(out.truncated).toBe(true);
+  });
+
+  test("valuesEqual cannot be made to scan a long array of equal primitives", () => {
+    const a = new Array(5_000_000).fill(1);
+    const b = new Array(5_000_000).fill(1);
+    const start = performance.now();
+    expect(valuesEqual(a, b)).toBe(false); // over budget: "not confirmed"
+    expect(performance.now() - start).toBeLessThan(200);
+  });
+
+  test("a node with a huge props object is refused", () => {
+    const hugeProps: Record<string, unknown> = {};
+    for (let i = 0; i < 2000; i++) hugeProps[`p${i}`] = i;
+    const base = { root: "a", elements: { a: { type: "Text", props: hugeProps } } };
+    expect(resolveMode(base, "a").kind).toBe("too-large");
+  });
+});

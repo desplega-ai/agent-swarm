@@ -15,8 +15,10 @@
  * `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` receives the FULL doc
  * with the draft merged into that element — a synchronous, parent-side merge.
  * An `app.mutate` in `onChange` then persists the whole document column via
- * `{$state: "/ui/<id>/value"}` with no async round-trip (so the persisted doc
- * is never a commit behind the edit).
+ * `{$value: true}` (the merged doc of THIS commit) with no async round-trip, so
+ * the persisted doc is never a commit behind the edit. Do not use
+ * `{$state: "/ui/<id>/value"}` there: the renderer resolves it while resolving
+ * props, before the commit, so it would carry the previous value.
  *
  * The schema and doc are untrusted: controls, enum options and merged-doc size
  * are capped in `schema-form-model.ts`, which holds all the pure logic.
@@ -101,17 +103,20 @@ export function SchemaFormComponent({ props }: { props: SchemaFormProps }) {
   );
 
   /** Write to `/ui/<id>/value` (optimistic preview) without persisting. */
-  const writeDraft = (next: Draft) => {
+  const writeDraft = (next: Draft, dispatched: boolean): unknown => {
+    const value = commitValue(mode, pendingRef.current, next, dispatched);
     setDraft(next);
-    set(path, commitValue(mode, pendingRef.current, next));
+    set(path, value);
+    return value;
   };
 
   /** Mirror the value and queue the `onChange` chain, scoped to this exact commit. */
   const commit = (next: Draft): Promise<void> => {
-    writeDraft(next);
     const chain = propsRef.current.onChange as ActionChain | undefined;
-    if (!chain || chain.length === 0) return Promise.resolve();
-    const scope = { form: next, state: getSnapshotRef.current() };
+    const hasChain = chain !== undefined && chain.length > 0;
+    const value = writeDraft(next, hasChain);
+    if (!chain || !hasChain) return Promise.resolve();
+    const scope = { form: next, value, state: getSnapshotRef.current() };
     const dispatch = async () => {
       for (const binding of chain) {
         const params = resolveScopedParams(binding.params, scope);
@@ -201,7 +206,7 @@ export function SchemaFormComponent({ props }: { props: SchemaFormProps }) {
               onChange={(event) => {
                 const raw = event.target.value;
                 const parsed = isNumber ? parseControlNumber(raw, control.integer) : { value: raw };
-                if (parsed) writeDraft({ ...draft, [key]: parsed.value });
+                if (parsed) writeDraft({ ...draft, [key]: parsed.value }, false);
               }}
               onBlur={() => void commit(draft)}
             />

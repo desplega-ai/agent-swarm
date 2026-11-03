@@ -10,6 +10,8 @@
  * more than `SCHEMA_FORM_MAX_DOC_ELEMENTS` elements is refused. The merge is a
  * shallow structural-sharing copy (never a deep clone), and value comparison
  * and signatures stop at `SCHEMA_FORM_MAX_VALUE_DEPTH` / `SCHEMA_FORM_MAX_VALUE_NODES`.
+ * Bounds apply to entries VISITED, not just entries kept: no walk materializes
+ * or scans an untrusted array / object past its budget (`boundedKeys`).
  */
 
 import { parseNumberInputValue } from "./number-input-value";
@@ -20,6 +22,14 @@ export const SCHEMA_FORM_MAX_PROPERTIES = 100;
 export const SCHEMA_FORM_MAX_ENUM_OPTIONS = 200;
 /** Most elements in a `baseDoc` the form will merge into; above it the form refuses to edit. */
 export const SCHEMA_FORM_MAX_DOC_ELEMENTS = 5000;
+/** Most `schema.properties` keys visited (skipped and kept) before the rest are ignored. */
+export const SCHEMA_FORM_MAX_SCANNED_KEYS = 1000;
+/** Most `enum` entries visited (duplicates and non-strings included). */
+export const SCHEMA_FORM_MAX_SCANNED_ENUM = 1000;
+/** Most own keys the edited node's `props` may have; above it the form refuses to edit. */
+export const SCHEMA_FORM_MAX_NODE_PROPS = 1000;
+/** Most values `formSignature` visits per control default or seeded value. */
+const SIGNATURE_VALUE_NODES = 100;
 /** Deepest nesting `valuesEqual` / `boundedStringify` descend into. */
 export const SCHEMA_FORM_MAX_VALUE_DEPTH = 8;
 /** Most values `valuesEqual` / `boundedStringify` visit in one call. */
@@ -55,20 +65,25 @@ export type Draft = Record<string, unknown>;
 /**
  * One unconfirmed edit of a node: its latest `props`, plus `seen`, the props
  * the node has held since the edit began (the doc's own props at the first
- * commit, then each earlier overlay). Until `baseDoc` shows `props`, it may
- * still show any `seen` version; anything else means the doc changed under the
- * edit (another document, or someone else's change) and the entry is dropped.
+ * commit, then each version DISPATCHED to the `onChange` chain; keystroke
+ * previews never reach the doc, so they are not recorded). Until `baseDoc`
+ * shows `props`, it may still show any `seen` version; anything else means the
+ * doc changed under the edit (another document, or someone else's change) and
+ * the entry is dropped. `overflowed` marks a `seen` list that hit
+ * `MAX_SEEN_VERSIONS`: provenance can no longer be checked, so the entry is
+ * then dropped only when confirmed or when the node is gone.
  */
 export interface PendingEntry {
   props: Draft;
   seen: Draft[];
+  overflowed?: boolean;
 }
 
 /** Per-node overlay for commits `baseDoc` has not confirmed yet. */
 export type PendingProps = Map<string, PendingEntry>;
 
-/** Most earlier versions one overlay entry remembers (the first is always kept). */
-const MAX_SEEN_VERSIONS = 8;
+/** Most dispatched versions one overlay entry remembers before it stops checking provenance. */
+const MAX_SEEN_VERSIONS = 64;
 
 /** Select value standing in for the `""` option, which Radix Select cannot hold. */
 export const EMPTY_OPTION_VALUE = "\u0000empty";
@@ -94,6 +109,20 @@ function isUnsafeKey(key: string): boolean {
   return key === "__proto__";
 }
 
+/**
+ * Up to `limit` own enumerable keys of `value`, or `null` when it has more.
+ * Unlike `Object.keys` it stops at the limit instead of materializing them all.
+ */
+function boundedKeys(value: object, limit: number): string[] | null {
+  const keys: string[] = [];
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    if (keys.length >= limit) return null;
+    keys.push(key);
+  }
+  return keys;
+}
+
 /** Coerce `schema` into the capped list of controls (untrusted / mid-edit). */
 export function deriveControls(schema: unknown): FormControls {
   if (!isPlainObject(schema) || !isPlainObject(schema.properties)) {
@@ -101,7 +130,13 @@ export function deriveControls(schema: unknown): FormControls {
   }
   const controls: FormControl[] = [];
   let truncated = false;
-  for (const key of Object.keys(schema.properties)) {
+  let scanned = 0;
+  for (const key in schema.properties) {
+    if (!Object.hasOwn(schema.properties, key)) continue;
+    if (++scanned > SCHEMA_FORM_MAX_SCANNED_KEYS) {
+      truncated = true;
+      break;
+    }
     if (isUnsafeKey(key)) continue;
     if (controls.length >= SCHEMA_FORM_MAX_PROPERTIES) {
       truncated = true;
@@ -127,11 +162,13 @@ export function deriveControls(schema: unknown): FormControls {
   return { controls, truncated };
 }
 
-/** The distinct string members of `enum`, capped. */
+/** The distinct string members of `enum`, capped in options kept AND entries visited. */
 function enumOptions(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   const options = new Set<string>();
+  let scanned = 0;
   for (const value of values) {
+    if (++scanned > SCHEMA_FORM_MAX_SCANNED_ENUM) break;
     if (typeof value !== "string" || value === EMPTY_OPTION_VALUE) continue;
     options.add(value);
     if (options.size >= SCHEMA_FORM_MAX_ENUM_OPTIONS) break;
@@ -196,7 +233,11 @@ export function resolveMode(baseDoc: unknown, nodeKey: unknown): FormMode {
   if (!isPlainObject(baseDoc) || !isPlainObject(baseDoc.elements)) return { kind: "flat" };
   if (typeof nodeKey !== "string" || isUnsafeKey(nodeKey)) return { kind: "flat" };
   if (!Object.hasOwn(baseDoc.elements, nodeKey)) return { kind: "flat" };
-  if (Object.keys(baseDoc.elements).length > SCHEMA_FORM_MAX_DOC_ELEMENTS) {
+  if (boundedKeys(baseDoc.elements, SCHEMA_FORM_MAX_DOC_ELEMENTS) === null) {
+    return { kind: "too-large" };
+  }
+  const props = elementProps(baseDoc as unknown as Doc, nodeKey);
+  if (props !== null && boundedKeys(props, SCHEMA_FORM_MAX_NODE_PROPS) === null) {
     return { kind: "too-large" };
   }
   return { kind: "merge", doc: baseDoc as unknown as Doc, nodeKey };
@@ -226,7 +267,7 @@ export function dropConfirmed(pending: PendingProps, doc: Doc): void {
     if (
       shown === null ||
       valuesEqual(shown, entry.props) ||
-      !entry.seen.some((version) => valuesEqual(shown, version))
+      (!entry.overflowed && !entry.seen.some((version) => valuesEqual(shown, version)))
     ) {
       pending.delete(key);
     }
@@ -263,17 +304,29 @@ export function applyPending(doc: Doc, pending: PendingProps): Doc {
  * props the schema does not list are kept, the draft wins on the rest) and
  * returns the whole doc with every outstanding overlay applied, so a later
  * commit on a different node cannot revert this one before the row catches up.
+ * `dispatched` is true when this value is about to be persisted through the
+ * `onChange` chain (so the doc may later show it); a keystroke preview passes
+ * false and only moves the overlay, never `seen`.
  */
-export function commitValue(mode: FormMode, pending: PendingProps, draft: Draft): unknown {
+export function commitValue(
+  mode: FormMode,
+  pending: PendingProps,
+  draft: Draft,
+  dispatched = true,
+): unknown {
   if (mode.kind !== "merge") return draft;
   const entry = pending.get(mode.nodeKey);
   const shown = elementProps(mode.doc, mode.nodeKey) ?? {};
   const props: Draft = { ...(entry?.props ?? shown), ...draft };
   // A cleared field is `undefined`; JSON drops it, so the overlay must too.
   for (const key of Object.keys(props)) if (props[key] === undefined) delete props[key];
-  const seen = entry ? [...entry.seen, entry.props] : [shown];
-  if (seen.length > MAX_SEEN_VERSIONS) seen.splice(1, 1);
-  pending.set(mode.nodeKey, { props, seen });
+  const seen = entry ? entry.seen : [shown];
+  let overflowed = entry?.overflowed === true;
+  if (dispatched && !overflowed && !seen.some((version) => valuesEqual(version, props))) {
+    if (seen.length >= MAX_SEEN_VERSIONS) overflowed = true;
+    else seen.push(props);
+  }
+  pending.set(mode.nodeKey, { props, seen, ...(overflowed ? { overflowed } : {}) });
   return applyPending(mode.doc, pending);
 }
 
@@ -287,8 +340,10 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function equalWithin(a: unknown, b: unknown, depth: number, budget: { nodes: number }): boolean {
-  if (Object.is(a, b)) return true;
+  // Charge before the identity shortcut: a long array of equal primitives
+  // must run out of budget instead of being scanned in full.
   if (--budget.nodes < 0 || depth > SCHEMA_FORM_MAX_VALUE_DEPTH) return false;
+  if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -298,17 +353,31 @@ function equalWithin(a: unknown, b: unknown, depth: number, budget: { nodes: num
   const left = a as Record<string, unknown>;
   const right = b as Record<string, unknown>;
   // An `undefined` value counts as an absent key: JSON round-trips drop it.
-  const keys = Object.keys(left).filter((key) => left[key] !== undefined);
-  const rightKeys = Object.keys(right).filter((key) => right[key] !== undefined);
+  const leftAll = boundedKeys(left, budget.nodes);
+  const rightAll = boundedKeys(right, budget.nodes);
+  if (leftAll === null || rightAll === null) return false;
+  const keys = leftAll.filter((key) => left[key] !== undefined);
+  const rightKeys = rightAll.filter((key) => right[key] !== undefined);
   if (keys.length !== rightKeys.length) return false;
   return keys.every(
     (key) => Object.hasOwn(right, key) && equalWithin(left[key], right[key], depth + 1, budget),
   );
 }
 
+/** The first `limit` own enumerable keys of `value`. */
+function firstKeys(value: object, limit: number): string[] {
+  const keys: string[] = [];
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    keys.push(key);
+    if (keys.length >= limit) break;
+  }
+  return keys;
+}
+
 /** `JSON.stringify` that never recurses past the depth / node budget (cut parts render as "…"). */
-export function boundedStringify(value: unknown): string {
-  const budget = { nodes: SCHEMA_FORM_MAX_VALUE_NODES };
+export function boundedStringify(value: unknown, maxNodes = SCHEMA_FORM_MAX_VALUE_NODES): string {
+  const budget = { nodes: maxNodes };
   return stringifyWithin(value, 0, budget);
 }
 
@@ -319,7 +388,8 @@ function stringifyWithin(value: unknown, depth: number, budget: { nodes: number 
   if (typeof value !== "object" || value === null) return JSON.stringify(value) ?? "null";
   const parts: string[] = [];
   const asArray = Array.isArray(value);
-  const keys = asArray ? null : Object.keys(value);
+  // Never more keys than the budget can print; a wider object ends in "…".
+  const keys = asArray ? null : firstKeys(value, budget.nodes + 1);
   const length = asArray ? value.length : (keys?.length ?? 0);
   for (let i = 0; i < length; i++) {
     if (budget.nodes < 0) {
@@ -340,20 +410,28 @@ function stringifyWithin(value: unknown, depth: number, budget: { nodes: number 
 
 /**
  * Identity of the form's inputs: the draft re-seeds when it changes (a new
- * node selected, a new schema bound, a new seed). Built from the capped
- * controls and a bounded rendering of the seed, so a hostile schema or seed
- * cannot make rendering throw or hang.
+ * node selected, a new schema bound, a new seed). Each part has its own
+ * budget, so a large schema cannot starve the seed or node key out of the
+ * signature: the shape is one `JSON.stringify` of strings (already capped by
+ * `deriveControls`), defaults and seeded values are bounded one by one, and the
+ * seed is projected onto the controls' own keys (the only ones the draft reads).
  */
 export function formSignature(
   controls: readonly FormControl[],
   seed: unknown,
   nodeKey: string | undefined,
 ): string {
-  const shape = controls.map((control) => [
-    control.key,
-    control.kind,
-    control.options,
-    control.default,
-  ]);
-  return boundedStringify({ shape, seed: seed ?? null, nodeKey: nodeKey ?? null });
+  const source = isPlainObject(seed) ? seed : {};
+  const shape = JSON.stringify(
+    controls.map((control) => [control.key, control.kind, control.options]),
+  );
+  const defaults = controls.map((control) =>
+    boundedStringify(control.default, SIGNATURE_VALUE_NODES),
+  );
+  const seeded = controls.map((control) =>
+    Object.hasOwn(source, control.key)
+      ? boundedStringify(source[control.key], SIGNATURE_VALUE_NODES)
+      : "absent",
+  );
+  return JSON.stringify([shape, defaults, seeded, nodeKey ?? null]);
 }
