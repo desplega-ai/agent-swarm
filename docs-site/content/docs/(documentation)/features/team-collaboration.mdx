@@ -102,7 +102,7 @@ State plainly what does not exist today:
 
 - There is no UI to assign roles yet. An operator or admin sets them with `PUT /api/users/{id}/roles`; every user is an admin until then. A user below `admin` cannot answer approval requests, even when listed as an approver. The People page "Role" field is still a free-text label. Agents are governed by the fixed lead and owner rules, not roles.
 - There is no SSO group-to-role mapping and no per-user identity behind SSO; SSO users share the operator key. There is no built-in login, native OIDC or SAML.
-- Approval requests accept an `approvers` field, but the respond endpoint does not enforce it — any authenticated caller can respond. Do not rely on named approvers being the only ones who can approve.
+- Responding to approval requests requires `approval.respond` permission. When `approvers` lists users or roles, the caller must match a listed user or role; the shared operator key can always respond. With no users or roles listed, any caller with that permission can respond.
 - There are no per-agent long-lived API keys, no multi-tenant workspaces inside one swarm (one deployment is one swarm), no Slack per-channel allowlist, and no read privacy for `personal/` asset keys.
 
 **Audit.** Every permission decision — allow and deny, with principal, verb, resource and reason — is recorded in an audit log with a default 30-day retention that can be disabled. Identity changes are kept in a separate append-only log, and rows carry created-by and updated-by user columns.
