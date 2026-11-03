@@ -452,7 +452,7 @@ describe("db-client slow statement warning", () => {
       expect(elapsedMs).toBeGreaterThan(100);
       const lines = slowWarnings(warn);
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toMatch(/blocked the event loop for \d+ms: \/\* padding/);
+      expect(lines[0]).toMatch(/blocked the event loop for \d+ms path=unknown: \/\* padding/);
       expect(lines[0]).not.toContain(PARAM_SECRET);
       expect(lines[0]).not.toContain("WITH RECURSIVE");
       expect(lines[0]?.endsWith("…")).toBe(true);
