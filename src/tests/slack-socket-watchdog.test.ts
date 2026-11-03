@@ -18,7 +18,6 @@ import {
 } from "../slack/app";
 import {
   getSlackConnectionState,
-  getSlackLastConnectedAt,
   type SlackConnectionState,
   setSlackConnectionState,
 } from "../slack/connection-state";
@@ -254,7 +253,6 @@ describe("socket watchdog against a live Slack mock", () => {
       await slack.mock.waitForConnection(10_000);
       expect(getSlackConnectionState()).toBe("connected");
       expect(isSlackSocketWatchdogRunning()).toBe(true);
-      const firstConnectedAt = getSlackLastConnectedAt();
 
       // Reproduce the outage: apps.connections.open now fails with a network
       // RequestError, which @slack/socket-mode treats as unrecoverable during
@@ -301,7 +299,6 @@ describe("socket watchdog against a live Slack mock", () => {
       ).toBe(true);
       expect(slack.mock.apiCalls("apps.connections.open").length).toBe(opened + 1);
       expect(_getSlackSocketClientForTests()).not.toBe(client);
-      expect(getSlackLastConnectedAt()?.getTime()).toBeGreaterThan(firstConnectedAt!.getTime());
       // The reconnect died on the RequestError, as in the outage.
       expect(reconnectErrors.map((e) => (e as { code?: string }).code)).toContain(
         ErrorCode.RequestError,

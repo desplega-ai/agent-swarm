@@ -7,18 +7,11 @@
 export type SlackConnectionState = "disconnected" | "connecting" | "connected";
 
 let state: SlackConnectionState = "disconnected";
-let lastConnectedAt: Date | null = null;
 
 export function getSlackConnectionState(): SlackConnectionState {
   return state;
 }
 
-/** When the socket last reached `connected` in this process, or null if never. */
-export function getSlackLastConnectedAt(): Date | null {
-  return lastConnectedAt;
-}
-
 export function setSlackConnectionState(next: SlackConnectionState): void {
   state = next;
-  if (next === "connected") lastConnectedAt = new Date();
 }
