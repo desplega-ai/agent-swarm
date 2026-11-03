@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.316
+ARG CLAUDE_CODE_VERSION=2.1.317
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793606440-g4c7784
-ARG AMP_SHA512_AMD64=3fe460a48f711379301d15a7a3c3266c8d3acffe64f79347d8bfb3916e92d71c363aacd7c7a63d69fcdd96efc5fa0021ce0a33fc48db7ed20add02e08aeff47d
-ARG AMP_SHA512_ARM64=38f35c8c4f8c33c81ca258df575b1eab9aa7562aaf2e3685906f9da50520367bd93d860b67ec76fe4bf70826c6622f2cdddb7f119177b667970d682d1e9fc445
+ARG AMP_VERSION=0.0.1793682830-gad461e
+ARG AMP_SHA512_AMD64=46c23219c410ba503a5dcb9d84880e320816ebabf093af60a94253dda4fce80ae6414e75c20c3c3a6210c3b0607835e7b9183a0525819cb865524d9c14c10d9f
+ARG AMP_SHA512_ARM64=71c573312337337bc0d8bbc9b2c31bba2aa400ce61ba5c85ac1ca71316d6dc15b90c40eb12c0218d83e461b946b7263a4b1d499632b7995cd31e5bb68c7a5794
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -634,8 +634,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.5), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.5
+# scripts are not needed for ACP (verified on 0.26.6), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.6
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
