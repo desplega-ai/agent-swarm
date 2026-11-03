@@ -41,7 +41,8 @@ import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime"
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
-import { startSlackApp, stopSlackApp } from "../slack";
+import { startSlackApp, stopSlackAppUnderLifecycleLock } from "../slack";
+import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
@@ -180,7 +181,11 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   // request's frame they capture that request's auth slot for their whole
   // lifetime, and their later DB writes get attributed to whichever user
   // happened to save config.
-  return runWithoutRequestAuth(() => reloadGlobalConfigsAndIntegrationsInner());
+  // The shared Slack lifecycle lock keeps the socket watchdog from restarting
+  // the Slack app while a reload tears it down and rebuilds it.
+  return runWithoutRequestAuth(() =>
+    runSlackLifecycleExclusive(() => reloadGlobalConfigsAndIntegrationsInner()),
+  );
 }
 
 async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigResult> {
@@ -201,7 +206,8 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
 
   // Retire the old transport before any other integration can fail during
   // reload. HTTP/invalid selection must never leave the previous socket live.
-  await stopSlackApp();
+  // The reload already holds the Slack lifecycle lock (see the caller).
+  await stopSlackAppUnderLifecycleLock();
 
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late
