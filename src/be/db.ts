@@ -13890,9 +13890,10 @@ export async function sweepExpiredKv(namespace: string, now = Date.now()): Promi
 export async function sweepExpiredKvPrefix(
   prefix: string,
   now = Date.now(),
-  /** Rows per DELETE. The sweep yields the event loop between batches. */
-  batchSize = 500,
+  /** Rows per DELETE, capped at 50 for multi-MB values. Yields between batches. */
+  batchSize = 50,
 ): Promise<number> {
+  batchSize = Math.max(1, Math.min(batchSize, 50));
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
   // Batched, with a macrotask yield between batches: one DELETE of every
   // expired multi-MB overflow row blocked the event loop for seconds and
