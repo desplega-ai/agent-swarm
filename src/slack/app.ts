@@ -9,6 +9,7 @@ import { recoverSlackInboundAfterRestart, slackInboundOutcomeMiddleware } from "
 import { installSocketAckRecovery } from "./socket-ack";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
+import { getSlackWorkspaceIdentity, setSlackWorkspaceIdentitySource } from "./workspace-guard";
 
 let app: App | null = null;
 let receiver: SocketModeReceiver | null = null;
@@ -111,6 +112,11 @@ export async function initSlackApp(): Promise<App | null> {
   // them back to Bolt, so a crash or a failing listener leaves recoverable work.
   inboundDrain = installSocketAckRecovery(receiver.client, app);
 
+  // The bot token's workspace: deliveries from any other workspace sharing this
+  // Slack app are dropped by the first middleware below.
+  const authClient = app.client;
+  setSlackWorkspaceIdentitySource(() => authClient.auth.test());
+
   // Failed validation must remain retryable without requiring stopSlackApp().
   initialized = true;
 
@@ -156,6 +162,8 @@ export async function startSlackApp(): Promise<boolean> {
     // Receipts stored before the last restart: interrupted ones turn uncertain,
     // pending ones are processed once the app can dispatch them.
     await recoverSlackInboundAfterRestart();
+    // Resolve the workspace before the socket opens, so the first delivery is checked.
+    await getSlackWorkspaceIdentity();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
     void inboundDrain?.wake();
@@ -180,6 +188,7 @@ export async function stopSlackApp(): Promise<void> {
     console.log("[Slack] Bot disconnected");
   }
   receiver = null;
+  setSlackWorkspaceIdentitySource(null);
   setSlackConnectionState("disconnected");
   initialized = false;
 }

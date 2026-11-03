@@ -21,6 +21,7 @@ import {
 } from "../be/db-queries/slack-inbound";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration, type SlackMode } from "./config";
+import { checkInboundWorkspace } from "./workspace-guard";
 
 /**
  * Explicit outcomes for inbound Slack deliveries.
@@ -182,13 +183,20 @@ export function resetSlackInboundCountersForTests(): void {
  * here and rethrown unchanged.
  */
 export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
-  return async ({ next }) => {
+  return async ({ next, body }) => {
+    // Another workspace's delivery (a Slack app shared across swarms) stops
+    // here, before any listener can create a task from it.
+    const foreign = await checkInboundWorkspace(body);
     const existing = deliveryStorage.getStore();
     if (existing) {
       // A durable delivery: the drain resolves and stores the outcome. Record
       // the error here too, because Bolt's error handler may swallow it before
       // App.processEvent() returns to the drain.
       existing.dispatched = true;
+      if (foreign) {
+        existing.ignoredReasons.push(foreign);
+        return;
+      }
       try {
         await next();
       } catch (error) {
@@ -200,6 +208,11 @@ export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
 
     const state = newDeliveryState("socket", false);
     state.dispatched = true;
+    if (foreign) {
+      state.ignoredReasons.push(foreign);
+      recordOutcome("socket", resolveSlackInboundOutcome(state));
+      return;
+    }
     await deliveryStorage.run(state, async () => {
       try {
         await next();
