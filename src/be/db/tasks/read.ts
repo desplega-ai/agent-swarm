@@ -1927,6 +1927,32 @@ export async function getAgentWorkingOnContextKey(
   return null;
 }
 
+/**
+ * Latest task whose contextKey starts with `prefix` (a half-open key range, so
+ * the contextKey index serves it). The Chat SDK keys a Slack or Discord task by
+ * `<channel>:<thread>`, while a slash command only knows the channel: the
+ * prefix finds the tasks of every thread in it. `activeOnly` narrows to
+ * `in_progress` and `pending`; `source` narrows as in the exact-key twins.
+ */
+export async function getLatestTaskByContextKeyPrefix(
+  prefix: string,
+  options: { activeOnly?: boolean; source?: string } = {},
+): Promise<AgentTask | null> {
+  if (!prefix) return null;
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  const source = options.source ?? null;
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE contextKey >= ? AND contextKey < ?
+       AND ${contextKeySourceSql()}
+       ${options.activeOnly ? "AND status IN ('in_progress', 'pending')" : ""}
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [prefix, upper, source, source, source],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 /** Latest `in_progress` or `pending` task on a contextKey (dependency chaining). */
 export async function getLatestActiveTaskByContextKey(
   contextKey: string,

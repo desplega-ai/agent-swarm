@@ -368,6 +368,7 @@ export {
   getLatestLeadTaskInThread,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
+  getLatestTaskByContextKeyPrefix,
   getMostRecentTaskInThread,
   getPendingChatRelayTasks,
   getPendingSlackRelayTasks,

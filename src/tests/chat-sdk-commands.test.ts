@@ -1,7 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDbClient, getTaskById, initDb } from "../be/db";
-import { CHAT_COMMANDS } from "../integrations/chat-sdk/commands";
+import { Message, parseMarkdown, toPlainText } from "chat";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDbClient,
+  getTaskById,
+  initDb,
+} from "../be/db";
+import { CHAT_COMMANDS, runChatCommand } from "../integrations/chat-sdk/commands";
+import { chatMessageText } from "../integrations/chat-sdk/message-text";
 import { startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
 import { readPersistedThreadHistory } from "../integrations/chat-sdk/state";
 import { chatSdkContextKey } from "../tasks/context-key";
@@ -199,5 +208,121 @@ describe("Chat SDK thread context across an adapter restart", () => {
     expect(tasks[1]!.parentTaskId).toBe(tasks[0]!.id);
     expect(tasks[1]!.task).toContain("<thread_context>");
     expect(tasks[1]!.task).toContain("before the restart");
+  });
+});
+
+describe("Chat SDK commands on a channel-keyed platform (Discord)", () => {
+  // A Discord mention opens a thread: its tasks are keyed `guild:channel:thread`,
+  // while a slash command in the parent channel only knows `guild:channel`.
+  const channel = "discord:G1:C1";
+  const olderThread = "discord:G1:C1:T-old";
+  const newerThread = "discord:G1:C1:T-new";
+  let olderId: string;
+  let newerId: string;
+
+  beforeAll(async () => {
+    const agent = await createAgent({
+      id: crypto.randomUUID(),
+      name: "DiscordCmdWorker",
+      isLead: false,
+      status: "idle",
+    });
+    const seed = async (thread: string, text: string) =>
+      (
+        await createTaskExtended(text, {
+          agentId: agent.id,
+          source: "chat",
+          contextKey: chatSdkContextKey(thread),
+        })
+      ).id;
+    olderId = await seed(olderThread, "older thread ask");
+    await Bun.sleep(5);
+    newerId = await seed(newerThread, "newer thread ask");
+    // A task in another channel whose id merely starts with this channel's.
+    await seed("discord:G1:C10:T-x", "another channel");
+  });
+
+  test("/status in the channel reports the most recent thread's task", async () => {
+    const reply = await runChatCommand("/status", channel, "tester");
+    expect(reply).toContain(newerId.slice(0, 8));
+    expect(reply).not.toContain("No task yet");
+  });
+
+  test("/status inside a thread reports that thread", async () => {
+    expect(await runChatCommand("/status", olderThread, "tester")).toContain(olderId.slice(0, 8));
+  });
+
+  test("/cancel in the channel cancels the most recent running thread, one at a time", async () => {
+    expect(await runChatCommand("/cancel", channel, "tester")).toContain(
+      `Cancelled task ${newerId.slice(0, 8)}`,
+    );
+    expect((await getTaskById(olderId))?.status).toBe("pending");
+    expect(await runChatCommand("/cancel", channel, "tester")).toContain(
+      `Cancelled task ${olderId.slice(0, 8)}`,
+    );
+    // Neither the task of C10 nor any other channel counts.
+    expect(await runChatCommand("/cancel", channel, "tester")).toContain("No running task");
+  });
+});
+
+describe("chatMessageText", () => {
+  const message = (markdown: string) => {
+    const formatted = parseMarkdown(markdown);
+    return new Message({
+      id: "m1",
+      threadId: "discord:G1:C1",
+      text: toPlainText(formatted),
+      formatted,
+      raw: {},
+      author: { userId: "u1", userName: "u", fullName: "U", isBot: false, isMe: false },
+      metadata: { dateSent: new Date(), edited: false },
+      attachments: [],
+    });
+  };
+
+  test("keeps link URLs, code and emphasis that the plain text drops", () => {
+    const m = message(
+      "see [docs](https://example.com/a?b=1) and `bun test`\n\n```ts\nlet x = 1;\n```",
+    );
+    expect(m.text).not.toContain("https://example.com");
+    const text = chatMessageText(m);
+    expect(text).toContain("[docs](https://example.com/a?b=1)");
+    expect(text).toContain("`bun test`");
+    expect(text).toContain("```ts\nlet x = 1;\n```");
+  });
+
+  test("plain text stays as typed", () => {
+    expect(chatMessageText(message("just a plain request"))).toBe("just a plain request");
+  });
+
+  test("falls back to the plain text when there is no AST", () => {
+    expect(chatMessageText({ text: "fallback text", formatted: undefined as never })).toBe(
+      "fallback text",
+    );
+  });
+});
+
+describe("chatMessageText fidelity", () => {
+  const textOf = (markdown: string) => {
+    const formatted = parseMarkdown(markdown);
+    return chatMessageText({ text: toPlainText(formatted), formatted });
+  };
+
+  test("does not escape underscores, brackets or mention names", () => {
+    expect(textOf("@swarm_test_bot !now fix snake_case_name in [x]")).toBe(
+      "@swarm_test_bot !now fix snake_case_name in [x]",
+    );
+  });
+
+  test("keeps emphasis, lists, quotes and a code span with a backtick", () => {
+    const text = textOf("**bold** and _soft_\n\n- one\n- two\n  - nested\n\n> quoted\n\n``a`b``");
+    expect(text).toContain("**bold** and _soft_");
+    expect(text).toContain("- one\n- two\n  - nested");
+    expect(text).toContain("> quoted");
+    expect(text).toContain("``a`b``");
+  });
+
+  test("an autolink stays a bare URL", () => {
+    expect(textOf("see https://example.com/x now")).toBe("see https://example.com/x now");
   });
 });

@@ -4,9 +4,10 @@ import {
   getAgentById,
   getLatestActiveTaskByContextKey,
   getLatestTaskByContextKey,
+  getLatestTaskByContextKeyPrefix,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
-import { chatSdkContextKey } from "@/tasks/context-key";
+import { chatSdkContextKey, chatThreadOfContextKey } from "@/tasks/context-key";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { resolveAdapterApiUrl } from "./adapters";
@@ -35,6 +36,12 @@ export const CHAT_COMMANDS: readonly ChatCommandSpec[] = [
   { command: "cancel", description: "Cancel the running task of this chat" },
   { command: "reset", description: "Start over: the next message gets no earlier context" },
 ];
+
+/**
+ * The shipped Slack manifest declares `/agent-swarm-status` and
+ * `/agent-swarm-help`. They run the same commands as `/status` and `/help`.
+ */
+const COMMAND_ALIAS_PREFIX = "agent-swarm-";
 
 const RESET_KEY_PREFIX = "swarm:reset:";
 const RESET_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -119,35 +126,59 @@ async function cancelActiveTasks(
     : `Cancelled ${cancelled.length} tasks: ${ids}.`;
 }
 
+/**
+ * The thread a command acts on. Telegram hands the command its thread id, so
+ * the chat's own task is found at once. Slack and Discord hand it the channel,
+ * while their tasks are keyed `<channel>:<thread>` (a Slack thread root, a
+ * Discord thread made for a mention) and a slash command carries no thread. When
+ * the channel itself has no task, the command acts on the thread of the most
+ * recent task in the channel (the most recent running one for `/cancel`).
+ */
+async function resolveCommandThread(threadId: string, activeOnly: boolean): Promise<string> {
+  const contextKey = chatSdkContextKey(threadId);
+  const own = activeOnly
+    ? await getLatestActiveTaskByContextKey(contextKey, "chat")
+    : await getLatestTaskByContextKey(contextKey);
+  if (own) return threadId;
+  const latest = await getLatestTaskByContextKeyPrefix(
+    `${contextKey}${encodeURIComponent(":")}`,
+    activeOnly ? { activeOnly, source: "chat" } : {},
+  );
+  return chatThreadOfContextKey(latest?.contextKey)?.threadId ?? threadId;
+}
+
 /** The reply for one command. Exported for tests; the handler posts it. */
 export async function runChatCommand(
   command: string,
   threadId: string,
   requestedBy: string,
 ): Promise<string> {
-  const name = command.replace(/^\//, "").toLowerCase();
+  let name = command.replace(/^\//, "").toLowerCase();
+  if (name.startsWith(COMMAND_ALIAS_PREFIX)) name = name.slice(COMMAND_ALIAS_PREFIX.length);
   if (name === "help") return helpText();
   if (name === "start") return welcomeText();
   if (!CHAT_COMMANDS.some((c) => c.command === name)) {
     return `Unknown command /${name}.\n${helpText()}`;
   }
-  let contextKey: string;
   try {
-    contextKey = chatSdkContextKey(threadId);
+    chatSdkContextKey(threadId);
   } catch {
     return "This command works only in a chat the swarm can address.";
   }
   switch (name) {
     case "status":
-      return statusText(contextKey);
-    case "cancel":
-      return cancelActiveTasks(contextKey, threadId, requestedBy);
+      return statusText(chatSdkContextKey(await resolveCommandThread(threadId, false)));
+    case "cancel": {
+      const target = await resolveCommandThread(threadId, true);
+      return cancelActiveTasks(chatSdkContextKey(target), target, requestedBy);
+    }
     case "reset": {
-      await markChatThreadReset(threadId);
+      const target = await resolveCommandThread(threadId, false);
+      await markChatThreadReset(target);
       const lines = ["Context reset. Your next message starts a new conversation."];
       // A running task is state, not context: it keeps going, and the next task
       // is still created next to it. Only /cancel stops it.
-      if (await getLatestActiveTaskByContextKey(contextKey, "chat")) {
+      if (await getLatestActiveTaskByContextKey(chatSdkContextKey(target), "chat")) {
         lines.push("A task is still running in this chat. Send /cancel to stop it.");
       }
       return lines.join("\n");
@@ -160,7 +191,7 @@ export async function runChatCommand(
 async function onSlashCommand(event: SlashCommandEvent): Promise<void> {
   const adapter = event.adapter.name;
   // Telegram passes the thread id as the channel id. Slack and Discord pass
-  // the channel, so a command there addresses the channel-level thread.
+  // the channel; `runChatCommand` resolves it to a thread of that channel.
   const threadId = event.channel.id;
   const requestedBy = event.user.userName || event.user.fullName || event.user.userId;
   console.log(`[chat-sdk] ${adapter} ${threadId}: command ${event.command} from ${requestedBy}`);

@@ -3,9 +3,10 @@ import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { unlink } from "node:fs/promises";
 import { SlackMock } from "@desplega.ai/slack-mock";
-import { closeDb, completeTask, createAgent, getDbClient, initDb } from "../be/db";
+import { closeDb, completeTask, createAgent, getDbClient, getTaskById, initDb } from "../be/db";
 import { watchSocketConnection } from "../integrations/chat-sdk/adapters";
 import { drainBackground } from "../integrations/chat-sdk/background";
+import { runChatCommand } from "../integrations/chat-sdk/commands";
 import { createScrubbingLogger } from "../integrations/chat-sdk/logger";
 import { processPendingChatRelays, stopChatRelayWatcher } from "../integrations/chat-sdk/relay";
 import { getChatSdkHealth, startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
@@ -203,6 +204,32 @@ describe("Chat SDK Slack adapter, socket mode", () => {
     expect(JSON.parse(followUp.dependsOn ?? "[]")).toEqual([firstTaskId]);
   });
 
+  test("/agent-swarm-status in the channel reports the thread's task", async () => {
+    const seen = new Set(slack.messages("general").map((m) => m.ts));
+    await slack.slashCommand({ command: "/agent-swarm-status", channel: "general", user: "alice" });
+    const reply = await slack.waitForMessage(
+      (m) => !seen.has(m.ts) && m.text.includes("Latest task"),
+      { timeoutMs: 5_000 },
+    );
+    const latest = (await chatTasks(contextKey)).at(-1)!;
+    expect(reply.text).toContain(latest.id.slice(0, 8));
+    expect(reply.text).toContain("pending");
+    expect(reply.text).not.toContain("Unknown command");
+  });
+
+  test("/agent-swarm-help answers with the command list", async () => {
+    const seen = new Set(slack.messages("general").map((m) => m.ts));
+    await slack.slashCommand({ command: "/agent-swarm-help", channel: "general", user: "alice" });
+    const reply = await slack.waitForMessage(
+      (m) => !seen.has(m.ts) && m.text.includes("Commands:"),
+      {
+        timeoutMs: 5_000,
+      },
+    );
+    expect(reply.text).toContain("/cancel");
+    expect(reply.text).not.toContain("Unknown command");
+  });
+
   test("completing the task posts its output in the Slack thread", async () => {
     await completeTask(firstTaskId, "Three tasks are open.");
     await processPendingChatRelays();
@@ -211,6 +238,70 @@ describe("Chat SDK Slack adapter, socket mode", () => {
       { timeoutMs: 5_000 },
     );
     expect(reply.text).toContain("Three tasks are open.");
+  });
+});
+
+describe("Chat SDK Slack adapter, channel-level commands and inbound text", () => {
+  const channelThread = `slack:${CHANNEL_ID}`;
+  let askTs: string;
+  let taskKey: string;
+
+  beforeAll(async () => {
+    await startSlackAdapter("socket");
+    await slack.waitForConnection();
+  });
+
+  afterAll(async () => {
+    await stopChatSdk();
+  });
+
+  test("a mention keeps link URLs, code fences and inline code in the task text", async () => {
+    const ask = await slack.postMessage({
+      channel: "general",
+      user: "alice",
+      text: [
+        `<@${slack.bot.userId}> read <https://example.com/docs?a=1|the docs> and <https://example.com/bare>`,
+        "```",
+        "bun test --bail",
+        "```",
+        "then run `bun run lint`",
+      ].join("\n"),
+    });
+    askTs = ask.ts;
+    const threadId = `slack:${CHANNEL_ID}:${askTs}`;
+    taskKey = chatSdkContextKey(threadId);
+    await waitForBuffered(threadId);
+    await flushChatBuffers();
+
+    const [task] = await chatTasks(taskKey);
+    expect(task).toBeDefined();
+    expect(task!.task).toContain("[the docs](https://example.com/docs?a=1)");
+    expect(task!.task).toContain("https://example.com/bare");
+    expect(task!.task).toContain("```\nbun test --bail\n```");
+    expect(task!.task).toContain("`bun run lint`");
+  });
+
+  test("/status, /reset and /cancel at channel level act on the thread's task", async () => {
+    const [task] = await chatTasks(taskKey);
+    const short = task!.id.slice(0, 8);
+
+    expect(await runChatCommand("/status", channelThread, "alice")).toContain(short);
+
+    // Slack slash commands carry no thread: /cancel takes the most recent running task.
+    const reset = await runChatCommand("/reset", channelThread, "alice");
+    expect(reset).toContain("Context reset");
+    expect(reset).toContain("still running");
+
+    expect(await runChatCommand("/cancel", channelThread, "alice")).toContain(
+      `Cancelled task ${short}`,
+    );
+    expect((await getTaskById(task!.id))?.status).toBe("cancelled");
+    // The next /cancel moves on to the next most recent running task in the channel,
+    // here the earlier thread's follow-up, never the task it already cancelled.
+    const next = await runChatCommand("/cancel", channelThread, "alice");
+    expect(next).toContain("Cancelled task");
+    expect(next).not.toContain(short);
+    expect(await runChatCommand("/cancel", channelThread, "alice")).toContain("No running task");
   });
 });
 
