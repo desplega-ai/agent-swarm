@@ -123,6 +123,9 @@ describe("slack render-v2 watcher queries", () => {
       /SEARCH wake USING INDEX idx_agent_tasks_parentTaskId(_source|_id)? \(parentTaskId=\?\)/,
     );
     expect(detail).not.toContain("idx_agent_tasks_taskType");
+    // The NOT EXISTS seeks the wake's children, not every deferred-type task.
+    expect(detail).toMatch(/SEARCH child USING (COVERING )?INDEX idx_agent_tasks_parentTaskId/);
+    expect(detail).not.toContain("idx_agent_tasks_list_filter");
     expect(detail).not.toContain("idx_agent_tasks_status_last_updated");
   });
 

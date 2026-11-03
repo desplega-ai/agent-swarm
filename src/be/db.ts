@@ -872,6 +872,8 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * CROSS JOIN and `+wake.taskType` pin the join order to the small chain. Without
  * them the planner drives the outer join from every terminal task (~1s at 150k tasks).
+ * `+child.taskType` does the same for the NOT EXISTS: without it the planner
+ * walks every deferred-type task through idx_agent_tasks_list_filter per row.
  */
 export async function getResolvableDeferralOutcomes(
   limit = 50,
@@ -898,7 +900,7 @@ export async function getResolvableDeferralOutcomes(
          AND card.ts NOT LIKE 'pending:%'
          AND NOT EXISTS (
            SELECT 1 FROM agent_tasks child
-           WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
+           WHERE child.parentTaskId = wake.id AND +child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
          AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
