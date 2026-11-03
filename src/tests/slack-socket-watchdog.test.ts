@@ -9,7 +9,6 @@ import {
   _getSlackSocketClientForTests,
   _setSlackSocketWatchdogOptionsForTests,
   createSlackSocketWatchdog,
-  getSlackApp,
   isSlackSocketWatchdogRunning,
   SLACK_SOCKET_WATCHDOG_DEFAULTS,
   type SlackSocketWatchdogDeps,
@@ -411,11 +410,13 @@ describe("socket watchdog against a live Slack mock", () => {
 
         gate.release();
         await stopping;
-        expect(getSlackApp()).toBeNull();
+        // Probe the receiver, not getSlackApp(): other test files mock
+        // getSlackApp, and bun keeps that mock when files share a process.
+        expect(_getSlackSocketClientForTests()).toBeNull();
         expect(isSlackSocketWatchdogRunning()).toBe(false);
         // Nothing brings the app back after stopSlackApp() returned.
         await Bun.sleep(200);
-        expect(getSlackApp()).toBeNull();
+        expect(_getSlackSocketClientForTests()).toBeNull();
         expect(await pollUntil(() => slack.mock.connectionCount === 0, 5_000, 20)).toBe(true);
       } finally {
         gate.restore();

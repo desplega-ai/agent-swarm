@@ -22,7 +22,11 @@ const busyMessages = Array.from({ length: FULL_MESSAGE_COUNT }, (_, index) => ({
   ts: `1700000000.${String(index).padStart(6, "0")}`,
 }));
 
+// Spread the real module so a later file in the same process still finds
+// every export (bun keeps module mocks for the whole process).
+const realSlackApp = await import("../slack/app");
 mock.module("../slack/app", () => ({
+  ...realSlackApp,
   getSlackApp: () => ({
     client: {
       auth: { test: async () => ({ user_id: "U_BOT" }) },
@@ -36,10 +40,6 @@ mock.module("../slack/app", () => ({
       },
     },
   }),
-  initSlackApp: async () => null,
-  startSlackApp: async () => {},
-  stopSlackApp: async () => {},
-  stopSlackAppUnderLifecycleLock: async () => {},
 }));
 
 type RegisteredTool = {
