@@ -7,9 +7,9 @@ One Agent Swarm deployment is shared by your whole team: people talk to it from 
 
 ## Shared company context
 
-A swarm keeps several kinds of shared state, and each one is visible to every agent on the team.
+A swarm keeps several kinds of state, with visibility depending on the kind.
 
-**Memory.** Agents store memories with an `agent` or `swarm` scope. Agent scope is visible only to the owner; swarm scope is visible to all agents. Memories come from session summaries, completed tasks, explicit `memory-store` calls and files under the shared or personal memory directories, and retrieval is vector search. The lead agent can also push a learning into every worker with `inject-learning`, so a fix discovered once becomes swarm-wide knowledge. See [Memory](/docs/architecture/memory).
+**Memory.** Agents store memories with an `agent` or `swarm` scope. Agent scope is visible to its owner and searchable by the lead agent; swarm scope is visible to all agents. Memories come from session summaries, completed tasks, explicit `memory-store` calls and files under the shared or personal memory directories, and retrieval is vector search. The lead agent can also push a learning into every worker with `inject-learning`, so a fix discovered once becomes swarm-wide knowledge. See [Memory](/docs/architecture/memory).
 
 **Repositories.** Repositories are registered with the swarm and can be auto-cloned into every worker container at startup. Before each task the runner refreshes the repo and reads its `CLAUDE.md`, so every agent works against the same code with the same project instructions. See [Agents](/docs/architecture/agents).
 
