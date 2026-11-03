@@ -24,6 +24,10 @@
  *   - `{ $row: "col" }` / `{ $row: "" }`    — row field / whole row
  *   - `{ $rowIndex: true }`                 — row index
  *   - `{ $form: "field" }` / `{ $form: "" }`— form field / all collected values
+ *   - `{ $value: true }`                    — the committed value of a component that mirrors
+ *     one to `/ui/<id>/value` (SchemaForm). Needed because a `{ $state: "/ui/<id>/value" }`
+ *     in the chain is resolved by the renderer BEFORE the commit, so it carries the
+ *     previous value.
  *   - `{ $state: "/path" }`                 — json-render state read
  *   - `{ $chain: "key" }` / `{ $chain: "" }`— chain-derived value (e.g. `leafTaskId` /
  *     `newTaskId` set by a component that runs a task chain) / whole chain object.
@@ -40,6 +44,8 @@ export interface ParamScope {
   rowIndex?: number;
   /** Collected form values (Form submit). */
   form?: Record<string, unknown>;
+  /** The value a component just committed (SchemaForm) — target of `$value`. */
+  value?: unknown;
   /** Live json-render state snapshot, for `$state` reads. */
   state?: Record<string, unknown>;
   /**
@@ -70,6 +76,9 @@ export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
   if ("$form" in value && typeof value.$form === "string") {
     if (scope.form === undefined) return undefined;
     return value.$form === "" ? scope.form : getByPath(scope.form, value.$form);
+  }
+  if ("$value" in value && value.$value === true) {
+    return scope.value;
   }
   if ("$state" in value && typeof value.$state === "string") {
     return getByPath(scope.state ?? {}, value.$state);
