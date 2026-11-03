@@ -10,8 +10,15 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+import { getDbClient } from "../be/db/runtime";
+import { serializeEmbedding } from "../be/embedding";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
-import { EMBEDDING_DIMENSIONS, LEARNING_TTL_DAYS, TTL_DEFAULTS } from "../be/memory/constants";
+import {
+  EMBEDDING_DIMENSIONS,
+  EXHAUSTIVE_SEARCH_MAX_ROWS,
+  LEARNING_TTL_DAYS,
+  TTL_DEFAULTS,
+} from "../be/memory/constants";
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 interface ToolResult {
@@ -412,6 +419,64 @@ describe("store-progress learning near-duplicate guard", () => {
     expect(learningData(result)).toMatchObject({ status: "duplicate", memoryId: existing.id });
     expect(learningData(result)?.similarity).toBeCloseTo(0.86, 2);
     expect(learningRows(t.id)).toHaveLength(0);
+  }, 120_000);
+
+  test("the dedup scan reads at most EXHAUSTIVE_SEARCH_MAX_ROWS rows per prefix, newest first", async () => {
+    // A match older than a full cap of newer rows under the same prefix.
+    const old = await seedLongterm("/longterm/facts/dedup/past-the-scan-cap", vector(210));
+    getDb().run("UPDATE agent_memory SET updatedAt = '2020-01-01T00:00:00.000Z' WHERE id = ?", [
+      old.id,
+    ]);
+    // A full cap of newer, unrelated rows under the same prefix, inserted in one
+    // transaction: the store path would take minutes for this many rows.
+    const noise = new Float32Array(EMBEDDING_DIMENSIONS);
+    noise[400] = 1;
+    const noiseBlob = serializeEmbedding(noise);
+    const now = new Date().toISOString();
+    const noiseIds = Array.from({ length: EXHAUSTIVE_SEARCH_MAX_ROWS }, () => crypto.randomUUID());
+    const insert = getDb().prepare(
+      `INSERT INTO agent_memory (id, agentId, scope, key, name, content, embedding, embeddingModel, source, createdAt, updatedAt, accessedAt)
+       VALUES (?, ?, 'swarm', ?, ?, ?, ?, 'test-embedding', 'manual', ?, ?, ?)`,
+    );
+    getDb()
+      .transaction(() => {
+        noiseIds.forEach((id, i) => {
+          const key = `/longterm/facts/cap-noise/n-${i}`;
+          insert.run(id, agentId, key, key, `cap noise ${i}`, noiseBlob, now, now, now);
+        });
+      })
+      .immediate();
+
+    const text =
+      "Past the scan cap\nWhen the prefix outgrows the cap, the oldest rows go unscored.";
+    vectors.set(text, vector(210, 0.9));
+    const querySpy = spyOn(getDbClient(), "query");
+    try {
+      const t = await task();
+      const result = await call({ taskId: t.id, learning: text });
+
+      const scans = querySpy.mock.calls.filter(([sql]) =>
+        /SELECT id, embedding FROM agent_memory/.test(sql),
+      );
+      expect(scans).toHaveLength(2);
+      for (const [sql, params] of scans) {
+        expect(sql).toContain("LIMIT ?");
+        expect(params?.at(-1)).toBe(EXHAUSTIVE_SEARCH_MAX_ROWS);
+      }
+      for (const returned of querySpy.mock.results) {
+        const rows = await returned.value;
+        if (Array.isArray(rows))
+          expect(rows.length).toBeLessThanOrEqual(EXHAUSTIVE_SEARCH_MAX_ROWS);
+      }
+      // The old twin sits past the cap, so it is not seen and the learning is stored.
+      expect(learningData(result)?.status).toBe("stored");
+    } finally {
+      querySpy.mockRestore();
+      getDb().run(
+        `UPDATE agent_memory SET expiresAt = '2000-01-01T00:00:00.000Z' WHERE id IN (${[old.id, ...noiseIds].map(() => "?").join(", ")})`,
+        [old.id, ...noiseIds],
+      );
+    }
   }, 120_000);
 
   /** Run `fn` with MEMORY_MIN_SIMILARITY set to `value`, then restore it. */

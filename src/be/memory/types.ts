@@ -158,9 +158,11 @@ export interface MemorySearchOptions {
    */
   keyPrefix?: string;
   /**
-   * Score every eligible row's stored embedding instead of the vector index's
-   * top-K. Exact whatever the corpus size, at O(eligible rows). Ignores
-   * `queryText`.
+   * Score eligible rows' stored embeddings instead of the vector index's
+   * top-K, so rows outside `keyPrefix` can never hide a match. Bounded: it
+   * scores at most EXHAUSTIVE_SEARCH_MAX_ROWS rows, newest `updatedAt` first,
+   * reading only id and embedding, and loads full rows for the top `limit`.
+   * Ignores `queryText`.
    */
   exhaustive?: boolean;
   /**

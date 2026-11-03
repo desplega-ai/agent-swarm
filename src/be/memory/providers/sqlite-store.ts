@@ -5,6 +5,7 @@ import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import {
   EMBEDDING_DIMENSIONS,
+  EXHAUSTIVE_SEARCH_MAX_ROWS,
   isHybridSearchEnabled,
   LEARNING_TTL_DAYS,
   minSimilarity,
@@ -625,8 +626,7 @@ export class SqliteMemoryStore implements MemoryStore {
     } = options;
 
     if (options.exhaustive) {
-      console.log(`[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit}`);
-      return this.searchBruteForce(embedding, agentId, {
+      return this.searchExhaustive(embedding, agentId, {
         scope,
         limit,
         source,
@@ -916,6 +916,74 @@ export class SqliteMemoryStore implements MemoryStore {
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "vec" });
     }
 
+    return candidates;
+  }
+
+  /**
+   * Exact cosine over the newest EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows. Reads
+   * only id + embedding for the scan, then loads full rows for the top `limit`,
+   * so one call's memory and CPU stay fixed whatever the corpus size.
+   */
+  private async searchExhaustive(
+    queryEmbedding: Float32Array,
+    agentId: string,
+    options: {
+      scope: string;
+      limit: number;
+      source?: AgentMemorySource;
+      isLead: boolean;
+      includeExpired: boolean;
+      keyPrefix?: string;
+      minSimilarity?: number;
+    },
+  ): Promise<MemoryCandidate[]> {
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
+
+    const conditions: string[] = ["embedding IS NOT NULL"];
+    const params: (string | number | null)[] = [];
+    this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
+    if (source) {
+      conditions.push("source = ?");
+      params.push(source);
+    }
+    if (!includeExpired) {
+      conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
+    }
+
+    const scanned = await getDbClient().query<{ id: string; embedding: Buffer }>(
+      `SELECT id, embedding FROM agent_memory
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY updatedAt DESC, id
+       LIMIT ?`,
+      [...params, EXHAUSTIVE_SEARCH_MAX_ROWS],
+    );
+    console.log(
+      `[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit} scanned=${scanned.length}${scanned.length >= EXHAUSTIVE_SEARCH_MAX_ROWS ? " capped=true" : ""}`,
+    );
+
+    const scored: { id: string; similarity: number }[] = [];
+    for (const row of scanned) {
+      const emb = deserializeEmbedding(row.embedding);
+      if (emb.length !== queryEmbedding.length) continue;
+      const similarity = cosineSimilarity(queryEmbedding, emb);
+      if (similarity >= floor) scored.push({ id: row.id, similarity });
+    }
+    const top = scored.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+    if (top.length === 0) return [];
+
+    const rows = await getDbClient().query<AgentMemoryRow>(
+      `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
+      top.map((hit) => hit.id),
+    );
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const candidates: MemoryCandidate[] = [];
+    for (const hit of top) {
+      const row = byId.get(hit.id);
+      if (row)
+        candidates.push({ ...rowToCandidate(row, hit.similarity), retrievalSource: "fallback" });
+    }
     return candidates;
   }
 
