@@ -21,7 +21,7 @@ import {
 } from "../be/db-queries/slack-inbound";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration, type SlackMode } from "./config";
-import { checkInboundWorkspace } from "./workspace-guard";
+import { checkInboundWorkspace, getCachedSlackWorkspaceIdentity } from "./workspace-guard";
 
 /**
  * Explicit outcomes for inbound Slack deliveries.
@@ -184,17 +184,21 @@ export function resetSlackInboundCountersForTests(): void {
  */
 export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
   return async ({ next, body }) => {
-    // Another workspace's delivery (a Slack app shared across swarms) stops
-    // here, before any listener can create a task from it.
-    const foreign = await checkInboundWorkspace(body);
+    // The socket gate withholds deliveries that are not ours before Bolt acks
+    // them. This check covers what reaches Bolt another way (receipt replay)
+    // and fails closed: no listener runs for a delivery we cannot attribute.
+    const identity = getCachedSlackWorkspaceIdentity();
+    const ownership = checkInboundWorkspace(body, identity);
     const existing = deliveryStorage.getStore();
     if (existing) {
       // A durable delivery: the drain resolves and stores the outcome. Record
       // the error here too, because Bolt's error handler may swallow it before
       // App.processEvent() returns to the drain.
       existing.dispatched = true;
-      if (foreign) {
-        existing.ignoredReasons.push(foreign);
+      if (!ownership.own) {
+        // No identity yet: a retryable failure, so the receipt waits for one.
+        if (!identity) existing.failures.push("workspace_identity_unavailable");
+        else existing.ignoredReasons.push(ownership.reason);
         return;
       }
       try {
@@ -208,8 +212,8 @@ export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
 
     const state = newDeliveryState("socket", false);
     state.dispatched = true;
-    if (foreign) {
-      state.ignoredReasons.push(foreign);
+    if (!ownership.own) {
+      state.ignoredReasons.push(ownership.reason);
       recordOutcome("socket", resolveSlackInboundOutcome(state));
       return;
     }

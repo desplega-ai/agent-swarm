@@ -55,6 +55,17 @@ SLACK_DISABLE=true
 
 Development API processes do not open Socket Mode by default, even when Slack tokens are present in the ambient environment. This prevents a local `bun run start:http` process from consuming events intended for production. Set `SLACK_ALLOW_DEV_SOCKET_MODE=true` only when that development process must connect to the configured Slack app; the server logs the blocked reason and this opt-in name otherwise.
 
+### Workspace guard
+
+Socket Mode sends each payload to any one of a Slack app's open connections, whatever workspace it came from. When several swarms share one Slack app (same `SLACK_APP_TOKEN`, different bot tokens), a swarm receives deliveries meant for the others. The swarm processes only deliveries proven to belong to its own installation:
+
+- At startup it calls `auth.test` with the bot token and opens the socket only after that succeeds. While it fails, Slack stays disconnected and the start is retried with backoff (5 seconds up to 5 minutes).
+- A delivery belongs to a workspace install when its `authorizations` (events) or `team` (interactive payloads, slash commands) names the bot's workspace. An enterprise id alone never matches.
+- Set `SLACK_ENTERPRISE_INSTALL=true` when the bot token comes from an org-wide Enterprise Grid install (`is_enterprise_install` in the `oauth.v2.access` response). The swarm then matches deliveries made to an org-wide install of its enterprise.
+- Any other delivery, or one with no installation field, is neither acked nor dispatched. Slack retries an unacked event a few times, and a retry can reach the owning swarm's connection. Interactive payloads and slash commands are not retried; the user sees an error.
+
+Retries make a misrouted event likely, not certain, to reach its owner. For reliable delivery, give each swarm its own Slack app.
+
 ## How It Works
 
 ### Task Work Objects

@@ -19,6 +19,11 @@ import {
   slackInboundOutcomeMiddleware,
 } from "../slack/inbound-dispatch";
 import { installSocketAckRecovery } from "../slack/socket-ack";
+import {
+  getSlackWorkspaceIdentity,
+  resetSlackWorkspaceGuardForTests,
+  setSlackWorkspaceIdentitySource,
+} from "../slack/workspace-guard";
 
 type SocketClient = SocketModeReceiver["client"];
 type Drain = ReturnType<typeof installSocketAckRecovery>;
@@ -42,7 +47,14 @@ function removeTestDb(): void {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  // Deliveries below belong to T_TEST; the workspace guard fails closed otherwise.
+  setSlackWorkspaceIdentitySource(async () => ({
+    teamId: "T_TEST",
+    enterpriseId: null,
+    isEnterpriseInstall: false,
+  }));
+  await getSlackWorkspaceIdentity();
   closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
@@ -52,6 +64,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  resetSlackWorkspaceGuardForTests();
   if (previousRenderV2 === undefined) delete process.env.SLACK_RENDER_V2;
   else process.env.SLACK_RENDER_V2 = previousRenderV2;
   closeDb();
@@ -126,6 +139,7 @@ async function deliverEvent(
       team_id: "T_TEST",
       api_app_id: "A_TEST",
       event_id: eventId,
+      authorizations: [{ team_id: "T_TEST", enterprise_id: null, is_enterprise_install: false }],
       event,
     },
     retry_num: retryNum,
@@ -276,6 +290,7 @@ describe("Socket Mode ack failures", () => {
       body: {
         type: "event_callback",
         api_app_id: "A_TEST",
+        authorizations: [{ team_id: "T_TEST", enterprise_id: null, is_enterprise_install: false }],
         event: {
           type: "message",
           channel: "C_TEST",
