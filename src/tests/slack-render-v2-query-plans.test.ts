@@ -126,6 +126,10 @@ describe("slack render-v2 watcher queries", () => {
     // The NOT EXISTS seeks the wake's children, not every deferred-type task.
     expect(detail).toMatch(/SEARCH child USING (COVERING )?INDEX idx_agent_tasks_parentTaskId/);
     expect(detail).not.toContain("idx_agent_tasks_list_filter");
+    // The anchor reads only tasks that ever deferred, then seeks their card.
+    expect(detail).toContain("SCAN deferred USING INDEX idx_agent_tasks_deferred");
+    expect(detail).toContain("SEARCH card USING INDEX idx_slack_messages_outcome_task (task_id=?)");
+    expect(detail).not.toMatch(/SCAN card\b/);
     expect(detail).not.toContain("idx_agent_tasks_status_last_updated");
   });
 

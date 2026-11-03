@@ -872,6 +872,9 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * CROSS JOIN and `+wake.taskType` pin the join order to the small chain. Without
  * them the planner drives the outer join from every terminal task (~1s at 150k tasks).
+ * The anchor drives from the partial index idx_agent_tasks_deferred (tasks
+ * that ever deferred), not from every outcome card: `deferral_resolved_at IS
+ * NULL` stays true forever on cards of tasks that never deferred.
  * `+child.taskType` does the same for the NOT EXISTS: without it the planner
  * walks every deferred-type task through idx_agent_tasks_list_filter per row.
  */
@@ -880,9 +883,9 @@ export async function getResolvableDeferralOutcomes(
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
   const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
     `WITH RECURSIVE chain(card_id, task_id) AS (
-         SELECT card.id, deferred.id FROM slack_messages card
-         JOIN agent_tasks deferred ON deferred.id = card.task_id
-         WHERE card.kind = 'outcome' AND deferred.deferredAt IS NOT NULL
+         SELECT card.id, deferred.id FROM agent_tasks deferred
+         CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+         WHERE deferred.deferredAt IS NOT NULL
            AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
            AND card.ts NOT LIKE 'pending:%'
          UNION
