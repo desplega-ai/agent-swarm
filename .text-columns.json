@@ -3020,6 +3020,9 @@
     },
     "delivery_last_error": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "closed_at": {
+      "exempt": "timestamp"
     }
   },
   "slack_relay_obligations": {

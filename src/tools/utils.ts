@@ -19,6 +19,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { upsertKv } from "../be/db";
+import { bindLoopPath } from "../be/event-loop-lag";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
@@ -1122,7 +1123,7 @@ export const createToolRegistrar = (server: McpServer) => {
     // When inputSchema is undefined, the MCP SDK calls handler(extra) with a single arg.
     // When inputSchema is defined, it calls handler(args, extra) with two args.
     if (config.inputSchema === undefined) {
-      return server.registerTool(name, toolConfig, (async (meta: Meta) => {
+      const handler = async (meta: Meta) => {
         const requestInfo = getRequestInfo(meta);
         return withSpan(
           "mcp.tool",
@@ -1150,13 +1151,16 @@ export const createToolRegistrar = (server: McpServer) => {
           },
           toolRequestAttributes(name, requestInfo),
         );
-      }) as Parameters<typeof server.registerTool>[2]);
+      };
+      // Name the entry point for the event-loop stall line.
+      return server.registerTool(
+        name,
+        toolConfig,
+        bindLoopPath(`mcp.tool ${name}`, handler) as Parameters<typeof server.registerTool>[2],
+      );
     }
 
-    return server.registerTool(name, toolConfig, (async (
-      args: InferInput<InputArgs>,
-      meta: Meta,
-    ) => {
+    const handler = async (args: InferInput<InputArgs>, meta: Meta) => {
       const requestInfo = getRequestInfo(meta);
       return withSpan(
         // Span name carries the tool: a static `mcp.tool` is unreadable in a
@@ -1195,6 +1199,11 @@ export const createToolRegistrar = (server: McpServer) => {
         },
         toolRequestAttributes(name, requestInfo, args),
       );
-    }) as Parameters<typeof server.registerTool>[2]);
+    };
+    return server.registerTool(
+      name,
+      toolConfig,
+      bindLoopPath(`mcp.tool ${name}`, handler) as Parameters<typeof server.registerTool>[2],
+    );
   };
 };

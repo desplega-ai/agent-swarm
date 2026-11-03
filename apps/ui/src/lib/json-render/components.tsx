@@ -210,6 +210,7 @@ import {
   tipText,
 } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
+import { SchemaFormComponent } from "./schema-form";
 import { SmartLink } from "./smart-link";
 import {
   activeFilterCount,
@@ -4152,4 +4153,5 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Calendar: ({ props }) => <CalendarComponent props={props} />,
   ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
   Tree: ({ props }) => <TreeComponent props={props} />,
+  SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
 };

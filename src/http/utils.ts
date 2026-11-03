@@ -274,6 +274,24 @@ export function redactShareTokenInPath(pathname: string): string {
   return pathname;
 }
 
+/**
+ * Event-loop path label for an HTTP request: method plus the first three path
+ * segments. Segments past the third are ids, so they are left out to bound
+ * the label cardinality. Invite codes and share tokens are credentials, so
+ * the label is redacted before it can reach a log line.
+ */
+export function loopPathForRequest(
+  method: string | undefined,
+  segments: readonly string[],
+): string {
+  const redacted = redactShareTokenInPath(`/${segments.join("/")}`)
+    .split("/")
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("/");
+  return scrubSecrets(`http ${method} ${redacted}`);
+}
+
 export function safeRequestUrlForLog(rawUrl: string | undefined): string {
   if (!rawUrl) return "";
 

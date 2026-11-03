@@ -77,6 +77,14 @@ function useFilterSnapshot(store: FilterStore): FilterSnapshot {
 /** Past this many distinct values the checkbox list gets its own search field. */
 const SEARCHABLE_AFTER = 8;
 
+// Both menus cap at the space Radix leaves beside the trigger, so a short or mid-screen anchor
+// scrolls the content instead of pushing its top edge out of the viewport.
+// Tailwind scans for whole class literals, so keep these unsplit.
+const COLUMN_MENU_CLASS =
+  "max-h-(--radix-popover-content-available-height) w-64 overflow-y-auto p-2";
+const PHONE_FILTERS_CLASS =
+  "max-h-[min(70vh,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto p-3";
+
 export interface ColumnFilterTarget {
   key: string;
   label: string;
@@ -232,7 +240,7 @@ function ColumnFilterMenu({ target, store }: { target: ColumnFilterTarget; store
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-2" {...store.themeAttr}>
+      <PopoverContent align="start" className={COLUMN_MENU_CLASS} {...store.themeAttr}>
         <ColumnFilterPanel target={target} store={store} autoFocus />
       </PopoverContent>
     </Popover>
@@ -362,7 +370,7 @@ export function PhoneFilterButton({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="max-h-[70vh] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto p-3"
+        className={PHONE_FILTERS_CLASS}
         // Opening must not focus the first field: on a phone that raises the keyboard over the list.
         onOpenAutoFocus={(event) => event.preventDefault()}
         {...store.themeAttr}
