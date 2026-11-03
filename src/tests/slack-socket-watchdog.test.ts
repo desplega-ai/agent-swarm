@@ -398,6 +398,58 @@ describe("socket watchdog against a live Slack mock", () => {
       }
     });
   }, 20_000);
+
+  test("a reconnect still in flight at teardown opens no socket next to the replacement", async () => {
+    // downAfterMs is longer than the client's own 5s reconnect delay, so the
+    // retired client is waiting for apps.connections.open at teardown.
+    await withLiveSlack({ tickMs: 50, downAfterMs: 6_000 }, async (slack) => {
+      const old = _getSlackSocketClientForTests() as unknown as SocketModeClient & {
+        webClient: {
+          apps: { connections: { open: (args?: Record<string, unknown>) => Promise<unknown> } };
+        };
+      };
+      const connections = old.webClient.apps.connections;
+      const realOpen = connections.open;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let reconnectAsked = false;
+      connections.open = async (args) => {
+        reconnectAsked = true;
+        await gate;
+        return realOpen(args);
+      };
+      const opened = slack.mock.apiCalls("apps.connections.open").length;
+      slack.mock.disconnectSockets();
+
+      // The old client's reconnect is in flight, then the watchdog replaces it.
+      expect(await pollUntil(() => reconnectAsked, 10_000, 20)).toBe(true);
+      expect(
+        await pollUntil(
+          () =>
+            _getSlackSocketClientForTests() !== (old as unknown) &&
+            getSlackConnectionState() === "connected" &&
+            slack.mock.connectionCount === 1,
+          10_000,
+          20,
+        ),
+      ).toBe(true);
+
+      // The old reconnect now gets its URL. The fence stops it before it opens a socket.
+      release();
+      expect(
+        await pollUntil(
+          () => slack.mock.apiCalls("apps.connections.open").length === opened + 2,
+          5_000,
+          20,
+        ),
+      ).toBe(true);
+      await Bun.sleep(500);
+      expect(slack.mock.connectionCount).toBe(1);
+      expect(old.websocket?.isActive() ?? false).toBe(false);
+    });
+  }, 30_000);
 });
 
 type LiveSlack = Awaited<ReturnType<typeof startSlackMock>>;

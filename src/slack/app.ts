@@ -13,6 +13,7 @@ import { installSlackExternalChannelGuard } from "./external-channel-egress";
 import { recoverSlackInboundAfterRestart, slackInboundOutcomeMiddleware } from "./inbound-dispatch";
 import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "./lifecycle-lock";
 import { installSocketAckRecovery } from "./socket-ack";
+import { fenceSocketModeClient, type SlackSocketFence } from "./socket-fence";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -20,6 +21,9 @@ let app: App | null = null;
 let receiver: SocketModeReceiver | null = null;
 let initialized = false;
 let inboundDrain: ReturnType<typeof installSocketAckRecovery> | null = null;
+// Retires the current client at teardown, so a reconnect it still has in
+// flight cannot open a socket next to the replacement.
+let socketFence: SlackSocketFence | null = null;
 // Last sign of life on the current socket: Slack's hello or any envelope.
 let lastSocketActivityAt: number | null = null;
 
@@ -301,6 +305,7 @@ export async function initSlackApp(): Promise<App | null> {
     installerOptions: clientOptions ? { clientOptions } : {},
   });
   trackConnectionState(receiver);
+  socketFence = fenceSocketModeClient(receiver.client);
   app = new App({
     token: botToken,
     receiver,
@@ -393,6 +398,10 @@ export async function stopSlackAppUnderLifecycleLock(): Promise<void> {
 
 /** Stop the app but keep the watchdog armed; the watchdog restart uses this. */
 async function teardownSlackApp(): Promise<void> {
+  // Retire the client first: app.stop() cannot cancel a start that is still
+  // waiting for apps.connections.open.
+  socketFence?.retire();
+  socketFence = null;
   stopTaskWatcher();
   inboundDrain?.stop();
   inboundDrain = null;
