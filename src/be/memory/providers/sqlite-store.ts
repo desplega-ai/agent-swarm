@@ -3,6 +3,7 @@ import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
   EXHAUSTIVE_SEARCH_MAX_ROWS,
@@ -615,6 +616,17 @@ export class SqliteMemoryStore implements MemoryStore {
     embedding: Float32Array,
     agentId: string,
     options: MemorySearchOptions = {},
+  ): Promise<MemoryCandidate[]> {
+    // Nested breadcrumb: the stall line keeps the caller and names the search.
+    return withLoopPath(`${currentLoopPath()} > memory.search`, () =>
+      this.searchInLoopPath(embedding, agentId, options),
+    );
+  }
+
+  private async searchInLoopPath(
+    embedding: Float32Array,
+    agentId: string,
+    options: MemorySearchOptions,
   ): Promise<MemoryCandidate[]> {
     const {
       scope = "all",
@@ -1410,18 +1422,37 @@ export class SqliteMemoryStore implements MemoryStore {
     if (expiredIds.length === 0) return 0;
 
     const batchSize = 500;
+    let purged = 0;
     for (let i = 0; i < expiredIds.length; i += batchSize) {
-      await this.purgeByIds(expiredIds.slice(i, i + batchSize).map((r) => r.id));
+      // Yield a macrotask between batches: chained awaits on the DB client are
+      // microtasks, so without it the whole purge is one event-loop stall.
+      if (i > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+      const batch = expiredIds.slice(i, i + batchSize).map((r) => r.id);
+      // A memory can be curated (moved to /longterm, expiry cleared) during
+      // the yield. Recheck expiry and delete the index rows and memory rows of
+      // the batch in one transaction, so a live row never loses its index.
+      purged += await db.transaction(async (tx) => {
+        const placeholders = batch.map(() => "?").join(",");
+        const still = await tx.query<{ id: string }>(
+          `SELECT id FROM agent_memory WHERE id IN (${placeholders})
+           AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')`,
+          batch,
+        );
+        const ids = still.map((r) => r.id);
+        if (ids.length === 0) return 0;
+        await this.purgeByIds(ids);
+        const result = await tx.run(
+          `DELETE FROM agent_memory WHERE id IN (${ids.map(() => "?").join(",")})`,
+          ids,
+        );
+        return result.changes;
+      });
     }
 
-    const result = await db.run(
-      "DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-    );
-
     console.log(
-      `[memory] Purged ${result.changes} expired memory row(s) (vec cleanup: ${expiredIds.length} id(s))`,
+      `[memory] Purged ${purged} expired memory row(s) (candidates: ${expiredIds.length} id(s))`,
     );
-    return result.changes;
+    return purged;
   }
 
   async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {

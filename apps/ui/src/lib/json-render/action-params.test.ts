@@ -64,3 +64,17 @@ describe("$chain sentinel", () => {
     expect(params).toEqual({ input: { parentTaskId: "task-1" } });
   });
 });
+
+describe("$value sentinel", () => {
+  test("resolves to the committed value, not the state snapshot", () => {
+    const params = resolveScopedParams(
+      { values: { doc: { $value: true } } },
+      { value: { v: 2 }, state: { ui: { f: { value: { v: 1 } } } } },
+    );
+    expect(params).toEqual({ values: { doc: { v: 2 } } });
+  });
+
+  test("is undefined when the scope carries no value", () => {
+    expect(resolveScopedValue({ $value: true }, {})).toBeUndefined();
+  });
+});

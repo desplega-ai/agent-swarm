@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createBunSqliteClient, type DbClient } from "../be/db-client";
 
@@ -319,29 +319,80 @@ describe("db-client SQLITE_BUSY retry", () => {
       finalAttemptSpinMs: 50,
     });
     const writers = 60;
+    // The gate logs "(N spinning probes)" when the episode ends. Counting
+    // probes measures the thing that blocks the loop (each probe is one
+    // synchronous attemptSpinMs wait) without sampling wall-clock timer lag,
+    // which stalls for 700-1100ms on loaded CI runners although the gate held.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    // Record every driver attempt with the busy_timeout it ran under and
+    // whether it hit BUSY. The gate's own probe count cannot see attempts it
+    // classed as gated, so this checks what the driver was actually told to
+    // wait, independent of the gate's bookkeeping and of runner scheduling.
+    const attempts: { spinMs: number; busy: boolean }[] = [];
+    let busyTimeoutMs = -1;
+    const exec = main.exec.bind(main);
+    const query = main.query.bind(main);
+    const execSpy = spyOn(main, "exec").mockImplementation(((sql: string) => {
+      const set = /^PRAGMA busy_timeout = (\d+)$/.exec(sql);
+      if (set) busyTimeoutMs = Number(set[1]);
+      return exec(sql);
+    }) as typeof main.exec);
+    const querySpy = spyOn(main, "query").mockImplementation(((sql: string) => {
+      const stmt = query(sql);
+      if (!sql.startsWith("INSERT INTO items")) return stmt;
+      return {
+        run: (...params: unknown[]) => {
+          const spinMs = busyTimeoutMs;
+          try {
+            const out = stmt.run(...(params as never[]));
+            attempts.push({ spinMs, busy: false });
+            return out;
+          } catch (err) {
+            attempts.push({ spinMs, busy: (err as { code?: string }).code === "SQLITE_BUSY" });
+            throw err;
+          }
+        },
+      };
+    }) as unknown as typeof main.query);
     const released = holdWriteLock(1_500);
 
-    let maxLagMs = 0;
-    let last = performance.now();
-    const ticker = setInterval(() => {
-      const now = performance.now();
-      maxLagMs = Math.max(maxLagMs, now - last - 10);
-      last = now;
-    }, 10);
-
     const startedAt = performance.now();
-    const results = await Promise.allSettled(
-      Array.from({ length: writers }, (_, i) =>
-        crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
-      ),
-    );
+    let results: PromiseSettledResult<unknown>[];
+    try {
+      results = await Promise.allSettled(
+        Array.from({ length: writers }, (_, i) =>
+          crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
+        ),
+      );
+    } finally {
+      await released;
+      execSpy.mockRestore();
+      querySpy.mockRestore();
+    }
     const wallMs = performance.now() - startedAt;
-    clearInterval(ticker);
-    await released;
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    warn.mockRestore();
 
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
-    // Ungated: 60 writers x 50ms = 3s of blocked loop per round of attempts.
-    expect(maxLagMs).toBeLessThan(500);
+    const episode = messages.map((m) => /released after \d+ms \((\d+) spinning probes\)/.exec(m));
+    const probes = Number(episode.find((m) => m)?.[1]);
+    // The episode must have been observed and closed, or the count proves nothing.
+    expect(Number.isFinite(probes)).toBe(true);
+    // Ungated every one of the 60 writers spins on every round of attempts
+    // (60 x 50ms = 3s of blocked loop per round). Gated, only one probe runs
+    // per gate interval (50, 100, 200, 400, 800ms), so a 1.5s hold needs ~6.
+    expect(probes).toBeGreaterThan(0);
+    expect(probes).toBeLessThanOrEqual(15);
+    const busy = attempts.filter((a) => a.busy);
+    const spinning = busy.filter((a) => a.spinMs > 0).length;
+    // Every other writer hit the held lock with a zero busy_timeout, so it
+    // failed in microseconds instead of blocking the loop. Without the gate
+    // there are no such attempts at all.
+    expect(busy.length - spinning).toBeGreaterThan(writers);
+    // The only BUSY attempts allowed to wait are the gate's probes: a gated
+    // attempt that waits any time (even 10ms x hundreds of attempts) shows up
+    // here as more spinning attempts than the gate reported probes.
+    expect(spinning).toBe(probes);
     // Ungated the crowd needed several seconds of spin rounds after release.
     expect(wallMs).toBeLessThan(3_000);
     const rows = await crowdClient.query<{ n: number }>(
