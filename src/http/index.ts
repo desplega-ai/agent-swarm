@@ -152,6 +152,7 @@ import { handleUsers } from "./users";
 import {
   getPathSegments,
   httpServerSemconvAttributes,
+  loopPathForRequest,
   parseQueryParams,
   redactShareTokenInPath,
   safeRequestUrlForLog,
@@ -457,9 +458,8 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    // Name the entry point for the event-loop stall line. Segments past the
-    // third are ids, so they are left out to bound the path cardinality.
-    await withLoopPath(`http ${req.method} ${pathSegments.slice(0, 3).join("/")}`, () =>
+    // Name the entry point for the event-loop stall line.
+    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
       span ? withSpanContext(span, handleRequest) : handleRequest(),
     );
   });
