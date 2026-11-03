@@ -92,11 +92,14 @@ describe("event-loop lag probe", () => {
       // Pure CPU in one driver call. Params are never logged.
       const sql =
         "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c WHERE ? IS NOT NULL";
-      // Calibrate: one statement of about 300 ms on this machine.
-      const t0 = performance.now();
-      await client.get(sql, [200_000, "calibrate"]);
-      const perRow = (performance.now() - t0) / 200_000;
-      const rows = Math.max(10_000, Math.round(300 / perRow));
+      // Calibrate: one statement of about 350 ms on this machine. Two passes,
+      // because the first (cold) pass overestimates the per-row cost.
+      let rows = 200_000;
+      for (let pass = 0; pass < 2; pass++) {
+        const t0 = performance.now();
+        await client.get(sql, [rows, "calibrate"]);
+        rows = Math.max(10_000, Math.round((350 * rows) / (performance.now() - t0)));
+      }
       await settle();
       warn.mockClear();
 
