@@ -76,6 +76,12 @@ export interface SlackSocketWatchdogOptions {
    * waiting on the lock gets it.
    */
   restartTimeoutMs: number;
+  /**
+   * Bound on stopSlackApp()'s wait for the lifecycle lock. Shutdown must
+   * finish inside the pod's termination grace, which is shorter than
+   * `restartTimeoutMs`.
+   */
+  stopLockWaitMs: number;
 }
 
 export const SLACK_SOCKET_WATCHDOG_DEFAULTS: SlackSocketWatchdogOptions = {
@@ -85,6 +91,7 @@ export const SLACK_SOCKET_WATCHDOG_DEFAULTS: SlackSocketWatchdogOptions = {
   backoffBaseMs: 30_000,
   backoffMaxMs: 5 * 60_000,
   restartTimeoutMs: 2 * 60_000,
+  stopLockWaitMs: 10_000,
 };
 
 export interface SlackSocketWatchdogDeps {
@@ -200,8 +207,9 @@ async function restartSlackAppForWatchdog(owner: ReturnType<typeof setInterval>)
     let abandoned = false;
     const restart = (async () => {
       await teardownSlackApp();
-      // A teardown that outlived the timeout must not start an app outside the lock.
-      if (!abandoned) await startSlackApp();
+      // A teardown that outlived the timeout must not start an app outside the
+      // lock, and one that a forced stopSlackApp() disarmed must not start one at all.
+      if (!abandoned && watchdogTimer === owner) await startSlackApp();
     })();
     const timeoutMs = watchdogOptions.restartTimeoutMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -418,10 +426,31 @@ export async function startSlackApp(): Promise<boolean> {
 /**
  * Stop the app and disarm the watchdog. Takes the Slack lifecycle lock, so a
  * watchdog restart in flight finishes first and cannot bring the app back
- * after this returns.
+ * after this returns. The wait for the lock is bounded by `stopLockWaitMs`:
+ * after that, the stop disarms the watchdog and drops the app without the
+ * lock, and stops again once the lock frees.
  */
 export async function stopSlackApp(): Promise<void> {
-  await runSlackLifecycleExclusive(stopSlackAppUnderLifecycleLock);
+  const locked = runSlackLifecycleExclusive(stopSlackAppUnderLifecycleLock);
+  const waitMs = watchdogOptions.stopLockWaitMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<true>((resolve) => {
+    timer = setTimeout(() => resolve(true), waitMs);
+  });
+  try {
+    const outcome = await Promise.race([locked.then(() => false as const), timedOut]);
+    if (!outcome) return;
+  } finally {
+    clearTimeout(timer);
+  }
+  // The late stop under the lock still runs; its error is no longer news.
+  void locked.catch(() => {});
+  console.error(
+    `[Slack] stop: lifecycle lock still held after ${seconds(waitMs)}s; stopping without it`,
+  );
+  // The restart holding the lock sees the disarmed watchdog and starts nothing.
+  stopSocketWatchdog();
+  abandonSlackApp();
 }
 
 /**

@@ -424,6 +424,53 @@ describe("socket watchdog against a live Slack mock", () => {
     });
   }, 20_000);
 
+  test("stopSlackApp stops within its lock-wait bound while a restart stalls", async () => {
+    // The restart bound is far longer than the stop's wait for the lock.
+    const options = { tickMs: 20, downAfterMs: 50, restartTimeoutMs: 60_000, stopLockWaitMs: 300 };
+    await withLiveSlack(options, async (slack) => {
+      const errors: string[] = [];
+      const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      });
+      const first = _getSlackSocketClientForTests();
+      const gate = gateSocketUrls();
+      try {
+        setSlackConnectionState("disconnected");
+        // The watchdog restart holds the lock while its start waits at the gate.
+        expect(
+          await pollUntil(
+            () =>
+              isSlackLifecycleBusy() &&
+              _getSlackSocketClientForTests() !== null &&
+              _getSlackSocketClientForTests() !== first,
+            5_000,
+            10,
+          ),
+        ).toBe(true);
+
+        const stopStarted = Date.now();
+        await stopSlackApp();
+        // Bounded by stopLockWaitMs, not by restartTimeoutMs.
+        expect(Date.now() - stopStarted).toBeLessThan(2_000);
+        expect(errors.some((line) => line.includes("stopping without it"))).toBe(true);
+        expect(_getSlackSocketClientForTests()).toBeNull();
+        expect(isSlackSocketWatchdogRunning()).toBe(false);
+
+        // The stalled start gets its URL now. Nothing comes back.
+        gate.release();
+        expect(await pollUntil(() => !isSlackLifecycleBusy(), 5_000, 20)).toBe(true);
+        await Bun.sleep(200);
+        expect(_getSlackSocketClientForTests()).toBeNull();
+        expect(isSlackSocketWatchdogRunning()).toBe(false);
+        expect(await pollUntil(() => slack.mock.connectionCount === 0, 5_000, 20)).toBe(true);
+      } finally {
+        gate.release();
+        gate.restore();
+        errorSpy.mockRestore();
+      }
+    });
+  }, 20_000);
+
   test("a reconnect still in flight at teardown opens no socket next to the replacement", async () => {
     // downAfterMs is longer than the client's own 5s reconnect delay, so the
     // retired client is waiting for apps.connections.open at teardown.
