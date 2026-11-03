@@ -53,6 +53,11 @@ COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
 COPY templates/ ./templates/
+# The binary embeds the API (src/cli.tsx can boot it), including the page share card
+# renderer src/pages/page-og-card.ts: the dashboard's card module, text helpers and assets.
+COPY apps/ui/og/ ./apps/ui/og/
+COPY apps/ui/src/lib/page-share.ts ./apps/ui/src/lib/page-share.ts
+COPY apps/ui/public/logo.png ./apps/ui/public/logo.png
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./
 COPY tsconfig.json ./
