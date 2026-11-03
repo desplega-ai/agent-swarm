@@ -682,6 +682,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "269_pages_design_system.sql");
       // 271 normalizes session_costs, which this migration-112-only fixture lacks.
       markMigrationApplied(database, "271_subscription_usage_model.sql");
+      // 278 indexes agent_tasks columns and alters slack_messages, neither of
+      // which this fixture's partial schema has.
+      markMigrationApplied(database, "278_slack_render_v2_reconcile.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

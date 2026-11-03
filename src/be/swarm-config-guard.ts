@@ -606,6 +606,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SLACK_CONCLUSION_SETTLE_SEC",
       "SLACK_CONCLUSION_TIMEOUT_MIN",
       "SLACK_TREE_STALL_MIN",
+      "SLACK_TASK_WATCHER_INTERVAL_MS",
     ],
     1,
   ),

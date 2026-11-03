@@ -27,6 +27,11 @@ import {
   type SlackMessageRecord,
   updateSlackMessageRecord,
 } from "../be/db";
+import {
+  closeSlackTreeIfSettled,
+  getSlackThreadsOfTasks,
+  slackThreadHasOutcomeWork,
+} from "../be/db/slack-trees";
 import { getTaskCitations } from "../be/task-citations";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
@@ -35,6 +40,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import { workflowEventBus } from "../workflows/event-bus";
 import {
   finalizeSlackMessageReaction,
   finalizeSlackSteerReactions,
@@ -1612,6 +1618,8 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
       } else {
         await markSlackDeferralResolved(card.id);
       }
+      // The rewrite changes the card, so the thread's tree re-renders next tick.
+      markSlackThreadDirty(card.channelId, card.threadTs);
       deferralRefreshAttempts.delete(card.id);
       // The rewrite is the wake-up's outcome, so it settles the ask's reaction.
       if (!isDeferredTask(wake)) await finalizeTerminalSlackReactions([wake]);
@@ -1638,257 +1646,457 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
   }
 }
 
-export async function processSlackRenderV2(): Promise<void> {
-  if (!isSlackRenderV2Enabled()) return;
+type RenderPassContext = {
+  activatedAt: string;
+  delegationEnabled: boolean;
+  delegationActivatedAt: string | null;
+  statusTick: ReturnType<typeof beginSlackStatusTick>;
+};
+
+/**
+ * One tree's render pass: outcome, child and conclusion cards, the tree
+ * itself, the session status, then the close check. "stop" means render v2
+ * was switched off mid-pass; "skipped" that the pass bailed out early (an
+ * error, or a pending tree that could not be recovered).
+ */
+async function renderStoredTree(
+  storedTree: SlackMessageRecord,
+  { activatedAt, delegationEnabled, delegationActivatedAt, statusTick }: RenderPassContext,
+): Promise<"stop" | "skipped" | "open" | "closed"> {
+  if (!isSlackRenderV2Enabled()) return "stop";
+  let tree = storedTree;
+  const initialTasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
+  if (isPendingSlackMessage(tree)) {
+    try {
+      const recovered = await ensureSlackThreadTree(
+        initialTasks.map((task) => task.id),
+        statusTick.budget,
+      );
+      if (!recovered) return "skipped";
+      tree = recovered;
+    } catch (error) {
+      console.error(`[Slack] Failed to recover pending v2 tree ${tree.id}:`, error);
+      return "skipped";
+    }
+  }
+  const app = getSlackApp();
+  if (app && !tree.permalink) {
+    try {
+      tree = await ensureTreePermalink(app.client, tree);
+    } catch (error) {
+      if (isSlackMessageNotFound(error)) {
+        try {
+          await replaceMissingTree(tree, statusTick.budget);
+        } catch (replacementError) {
+          console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
+        }
+        return "skipped";
+      }
+      console.error(`[Slack] Failed to resolve v2 tree permalink ${tree.id}:`, error);
+      return "skipped";
+    }
+  }
+  let tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
+  let needsOutcome = false;
+  for (const task of tasks) {
+    const card = await getSlackOutcomeMessage(task.id);
+    if (card && isSettledSlackMessage(card)) continue;
+    // In-progress asks are eligible only for the timeout backstop. They do
+    // not represent immediately active outcome work, so avoid waking an old
+    // tree solely to verify its permalink on every render tick.
+    const isDirectCandidate =
+      (await taskNeedsDirectOutcome(task, activatedAt)) &&
+      isOutcomeStatus(task.status) &&
+      !(await isAnsweredByDeferralCard(task, tasks));
+    const isChildCandidate =
+      delegationEnabled &&
+      delegationActivatedAt !== null &&
+      isChildCardCandidate(task, delegationActivatedAt) &&
+      !task.slackReplySent;
+    if (isDirectCandidate || isChildCandidate) {
+      needsOutcome = true;
+      break;
+    }
+  }
+  if (needsOutcome && app) {
+    try {
+      await resolvePermalink(app.client, tree.channelId, tree.ts);
+    } catch (error) {
+      if (!isSlackMessageNotFound(error)) {
+        console.error(`[Slack] Failed to verify v2 tree ${tree.id}:`, error);
+        return "skipped";
+      }
+      try {
+        const replacement = await replaceMissingTree(tree, statusTick.budget);
+        if (!replacement) return "skipped";
+        tree = replacement;
+        tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
+      } catch (replacementError) {
+        console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
+        return "skipped";
+      }
+    }
+  }
+  const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
+  const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
+  const closuresByAskId = new Map<string, AgentTask[]>();
+  const ownerAskId = new Map<string, string>();
+  if (delegationEnabled) {
+    for (const ask of tasks.filter((candidate) => candidate.source === "slack")) {
+      const closure = buildAskClosure(ask, tasks);
+      closuresByAskId.set(ask.id, closure);
+      for (const member of closure) {
+        if (!ownerAskId.has(member.id)) ownerAskId.set(member.id, ask.id);
+      }
+    }
+  }
+  const childCardCounts = new Map<string, number>();
+  async function childCardCountFor(askId: string): Promise<number> {
+    const cached = childCardCounts.get(askId);
+    if (cached !== undefined) return cached;
+    const closure = closuresByAskId.get(askId) ?? [];
+    let count = 0;
+    for (const member of closure) {
+      if (await getSlackOutcomeMessage(member.id)) count++;
+    }
+    childCardCounts.set(askId, count);
+    return count;
+  }
+
+  let outcomeCreated = false;
+  // Child cards post before ask conclusions, in two passes over the same
+  // tick. Tasks are walked in creation order, so an ask is otherwise
+  // visited before the delegated children it owns; if their conclusion
+  // ran first, a closure that goes fully terminal within one tick would
+  // compute conclusionResultsLines() against children that have no card
+  // yet, permanently fall back to digest text, and never self-correct —
+  // the conclusion card is immutable once finalized.
+  let childCardsThisTick = 0;
+  for (const task of tasks) {
+    if (!isSlackRenderV2Enabled()) return "stop";
+    if (task.source === "slack") continue;
+    const card = await getSlackOutcomeMessage(task.id);
+    if (card && isSettledSlackMessage(card)) continue;
+    if (!delegationEnabled || delegationActivatedAt === null) continue;
+    if (!isChildCardCandidate(task, delegationActivatedAt) || task.slackReplySent) continue;
+    const askId = ownerAskId.get(task.id);
+    const ownerAsk = askId ? tasks.find((candidate) => candidate.id === askId) : undefined;
+    if (!ownerAsk || ownerAsk.createdAt < delegationActivatedAt) continue;
+    if (childCardsThisTick >= CHILD_CARDS_PER_TICK) continue;
+    if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
+    if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
+    try {
+      const outcome = await streamOutcomeCard(task, tree, {
+        buildContent: childOutcomeContent,
+        statusBudget: statusTick.budget,
+      });
+      if (outcome) {
+        noteOutcomeDeliverySuccess(task.id);
+        childCardsThisTick++;
+        if (askId) childCardCounts.set(askId, (childCardCounts.get(askId) ?? 0) + 1);
+        await recordSlackDelivery(task, outcome, "child_outcome");
+      }
+      outcomeCreated ||= !!outcome;
+    } catch (error) {
+      await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+    }
+  }
+
+  for (const task of tasks) {
+    if (!isSlackRenderV2Enabled()) return "stop";
+    if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
+    const card = await getSlackOutcomeMessage(task.id);
+    if (card && isSettledSlackMessage(card)) continue;
+    if (await isAnsweredByDeferralCard(task, tasks)) continue;
+    const deferByClosure =
+      task.source === "slack" &&
+      delegationEnabled &&
+      delegationActivatedAt !== null &&
+      task.createdAt >= delegationActivatedAt;
+
+    if (!deferByClosure) {
+      if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
+      try {
+        const outcome = await streamOutcomeCard(task, tree, { statusBudget: statusTick.budget });
+        if (outcome) {
+          noteOutcomeDeliverySuccess(task.id);
+          await finalizeTerminalSlackReactions([task]);
+        }
+        outcomeCreated ||= !!outcome;
+      } catch (error) {
+        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+      }
+      continue;
+    }
+
+    const closure = closuresByAskId.get(task.id) ?? buildAskClosure(task, tasks);
+    // A conclusion is immutable, so wait until every eligible terminal
+    // child has its card. The per-tick cap may leave overflow children
+    // uncarded even though the closure itself is otherwise settled.
+    let childCardPending = false;
+    const existingChildCards = await childCardCountFor(task.id);
+    for (const member of closure) {
+      if (!isChildCardCandidate(member, delegationActivatedAt!) || member.slackReplySent) continue;
+      // Once the per-ask cap is reached, remaining terminal children are
+      // represented in the conclusion digest rather than blocking it.
+      if (existingChildCards >= CHILD_CARDS_PER_ASK) break;
+      const memberCard = await getSlackOutcomeMessage(member.id);
+      if (!memberCard || !isSettledSlackMessage(memberCard)) {
+        childCardPending = true;
+        break;
+      }
+    }
+    if (childCardPending) continue;
+    const state = closureState(task, closure, new Date(), settleSec, timeoutMin);
+    if (state === "open") continue;
+    if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
+    try {
+      const outcome = await streamOutcomeCard(task, tree, {
+        buildContent: (_t, slackReplySent) =>
+          askConclusionContent(task, closure, state, slackReplySent),
+        conclusionKind: state === "timedOut" ? "timeout" : "complete",
+        statusBudget: statusTick.budget,
+      });
+      if (outcome) {
+        noteOutcomeDeliverySuccess(task.id);
+        const app = getSlackApp();
+        if (app && task.slackChannelId && task.slackTriggerMessageTs) {
+          const reaction = conclusionReactionChoice(state, task, closure);
+          await finalizeSlackMessageReaction(
+            app.client,
+            task.slackChannelId,
+            task.slackTriggerMessageTs,
+            reaction.name,
+            reaction.event,
+          );
+          await finalizeSlackSteerReactions([task], () => reaction);
+        }
+        await recordSlackDelivery(
+          task,
+          outcome,
+          state === "timedOut" ? "conclusion_timeout" : "conclusion",
+        );
+      }
+      outcomeCreated ||= !!outcome;
+    } catch (error) {
+      await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+    }
+  }
+  try {
+    await updateThreadTree(tree, outcomeCreated, statusTick.budget);
+  } catch (error) {
+    console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
+  }
+  await statusTick.reconcile(tree.channelId, tree.threadTs);
+  try {
+    // Drop the tree from later sweeps once its thread has no work left.
+    // Any later task or outcome write in the thread reopens it.
+    if (await closeSlackTreeIfSettled(tree.id)) return "closed";
+  } catch (error) {
+    console.error(`[Slack] Failed to close settled v2 tree ${tree.id}:`, error);
+  }
+  return "open";
+}
+
+/** Task events that can change what a thread's tree or cards should show. */
+const SLACK_RENDER_TASK_EVENTS = [
+  "task.created",
+  "task.completed",
+  "task.failed",
+  "task.cancelled",
+  "task.skipped",
+  "task.superseded",
+  "task.progress",
+] as const;
+
+/** Coalesces a burst of task events into one render of the threads they touch. */
+const DIRTY_FLUSH_DEBOUNCE_MS = 500;
+/** Re-check cadence for a thread that still owes an outcome card (settle wait, backoff). */
+const DIRTY_REVISIT_MS = 3_000;
+
+type SlackThreadAddress = { channelId: string; threadTs: string };
+
+const dirtyTaskIds = new Set<string>();
+const dirtyThreads = new Map<string, SlackThreadAddress>();
+let renderInFlight: Promise<void> | null = null;
+let renderEventsSubscribed = false;
+let dirtyFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let dirtyFlushAt = 0;
+
+/** Let pending I/O (the Slack socket) run between synchronous SQLite phases. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Arm the dirty-thread flush to run in `delayMs`, unless one is already armed
+ * to run sooner. Only armed while task events are subscribed (watcher running).
+ */
+function scheduleDirtyFlush(delayMs: number): void {
+  if (!renderEventsSubscribed) return;
+  const at = Date.now() + delayMs;
+  if (dirtyFlushTimer && dirtyFlushAt <= at) return;
+  if (dirtyFlushTimer) clearTimeout(dirtyFlushTimer);
+  dirtyFlushAt = at;
+  dirtyFlushTimer = setTimeout(() => {
+    dirtyFlushTimer = null;
+    void flushSlackRenderV2DirtyThreads().catch((error) => {
+      console.error("[Slack] Event-driven v2 render failed:", error);
+    });
+  }, delayMs);
+}
+
+/** Queue one thread for the event-driven render. */
+export function markSlackThreadDirty(
+  channelId: string,
+  threadTs: string,
+  delayMs = DIRTY_FLUSH_DEBOUNCE_MS,
+): void {
+  dirtyThreads.set(`${channelId}\u0000${threadTs}`, { channelId, threadTs });
+  scheduleDirtyFlush(delayMs);
+}
+
+function onSlackRenderTaskEvent(data: unknown): void {
+  const taskId = (data as { taskId?: unknown } | null)?.taskId;
+  if (typeof taskId !== "string") return;
+  dirtyTaskIds.add(taskId);
+  scheduleDirtyFlush(DIRTY_FLUSH_DEBOUNCE_MS);
+}
+
+/**
+ * Render a thread shortly after a task event touches it, instead of waiting
+ * for the watcher's full reconcile. Started and stopped with the watcher.
+ */
+export function startSlackRenderV2Events(): void {
+  if (renderEventsSubscribed) return;
+  for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.on(event, onSlackRenderTaskEvent);
+  renderEventsSubscribed = true;
+}
+
+export function stopSlackRenderV2Events(): void {
+  if (!renderEventsSubscribed) return;
+  for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.off(event, onSlackRenderTaskEvent);
+  renderEventsSubscribed = false;
+  if (dirtyFlushTimer) clearTimeout(dirtyFlushTimer);
+  dirtyFlushTimer = null;
+}
+
+/**
+ * Run `work` unless a render pass is already running. An overlapping call
+ * waits for the running pass and does not start its own, so two passes never
+ * interleave their Slack writes.
+ */
+function runExclusive(work: () => Promise<void>): Promise<void> {
+  if (renderInFlight) return renderInFlight;
+  const run = (async () => {
+    try {
+      await work();
+    } finally {
+      renderInFlight = null;
+    }
+  })();
+  renderInFlight = run;
+  return run;
+}
+
+async function beginRenderPass(): Promise<RenderPassContext> {
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
-  const statusTick = beginSlackStatusTick();
+  return {
+    activatedAt,
+    delegationEnabled,
+    delegationActivatedAt,
+    statusTick: beginSlackStatusTick(),
+  };
+}
+
+/**
+ * Event-driven render: only the threads that task events, deferral rewrites
+ * or unfinished outcome work marked. Waits for a running pass instead of
+ * overlapping it, then runs if anything is still queued.
+ */
+export async function flushSlackRenderV2DirtyThreads(): Promise<void> {
+  if (!isSlackRenderV2Enabled() || !getSlackApp()) return;
+  if (renderInFlight) {
+    await renderInFlight;
+    if (dirtyTaskIds.size === 0 && dirtyThreads.size === 0) return;
+  }
+  await runExclusive(renderDirtyThreads);
+}
+
+/**
+ * Full reconcile, run on every watcher tick (the safety net behind the
+ * event-driven render): every recent tree-less Slack task, every open tree,
+ * every deferral card, then the session-status sweep.
+ */
+export function processSlackRenderV2(): Promise<void> {
+  if (!isSlackRenderV2Enabled()) return Promise.resolve();
+  return runExclusive(reconcileAllThreads);
+}
+
+async function reconcileAllThreads(): Promise<void> {
+  // The full pass covers everything queued so far.
+  dirtyTaskIds.clear();
+  dirtyThreads.clear();
+  const context = await beginRenderPass();
 
   for (const task of await getSlackTasksMissingTree()) {
     if (!isSlackRenderV2Enabled()) return;
     if (!task.slackChannelId || !task.slackThreadTs) continue;
     try {
-      await ensureSlackThreadTree([task.id], statusTick.budget);
+      await ensureSlackThreadTree([task.id], context.statusTick.budget);
     } catch (error) {
       console.error(`[Slack] Failed to create v2 tree for task ${task.id}:`, error);
     }
   }
+  await yieldToEventLoop();
 
   for (const storedTree of await getSlackTreeMessages()) {
-    if (!isSlackRenderV2Enabled()) return;
-    let tree = storedTree;
-    const initialTasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-    if (isPendingSlackMessage(tree)) {
-      try {
-        const recovered = await ensureSlackThreadTree(
-          initialTasks.map((task) => task.id),
-          statusTick.budget,
-        );
-        if (!recovered) continue;
-        tree = recovered;
-      } catch (error) {
-        console.error(`[Slack] Failed to recover pending v2 tree ${tree.id}:`, error);
-        continue;
-      }
-    }
-    const app = getSlackApp();
-    if (app && !tree.permalink) {
-      try {
-        tree = await ensureTreePermalink(app.client, tree);
-      } catch (error) {
-        if (isSlackMessageNotFound(error)) {
-          try {
-            await replaceMissingTree(tree, statusTick.budget);
-          } catch (replacementError) {
-            console.error(
-              `[Slack] Failed to replace missing v2 tree ${tree.id}:`,
-              replacementError,
-            );
-          }
-          continue;
-        }
-        console.error(`[Slack] Failed to resolve v2 tree permalink ${tree.id}:`, error);
-        continue;
-      }
-    }
-    let tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-    let needsOutcome = false;
-    for (const task of tasks) {
-      const card = await getSlackOutcomeMessage(task.id);
-      if (card && isSettledSlackMessage(card)) continue;
-      // In-progress asks are eligible only for the timeout backstop. They do
-      // not represent immediately active outcome work, so avoid waking an old
-      // tree solely to verify its permalink on every render tick.
-      const isDirectCandidate =
-        (await taskNeedsDirectOutcome(task, activatedAt)) &&
-        isOutcomeStatus(task.status) &&
-        !(await isAnsweredByDeferralCard(task, tasks));
-      const isChildCandidate =
-        delegationEnabled &&
-        delegationActivatedAt !== null &&
-        isChildCardCandidate(task, delegationActivatedAt) &&
-        !task.slackReplySent;
-      if (isDirectCandidate || isChildCandidate) {
-        needsOutcome = true;
-        break;
-      }
-    }
-    if (needsOutcome && app) {
-      try {
-        await resolvePermalink(app.client, tree.channelId, tree.ts);
-      } catch (error) {
-        if (!isSlackMessageNotFound(error)) {
-          console.error(`[Slack] Failed to verify v2 tree ${tree.id}:`, error);
-          continue;
-        }
-        try {
-          const replacement = await replaceMissingTree(tree, statusTick.budget);
-          if (!replacement) continue;
-          tree = replacement;
-          tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-        } catch (replacementError) {
-          console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
-          continue;
-        }
-      }
-    }
-    const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
-    const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
-    const closuresByAskId = new Map<string, AgentTask[]>();
-    const ownerAskId = new Map<string, string>();
-    if (delegationEnabled) {
-      for (const ask of tasks.filter((candidate) => candidate.source === "slack")) {
-        const closure = buildAskClosure(ask, tasks);
-        closuresByAskId.set(ask.id, closure);
-        for (const member of closure) {
-          if (!ownerAskId.has(member.id)) ownerAskId.set(member.id, ask.id);
-        }
-      }
-    }
-    const childCardCounts = new Map<string, number>();
-    async function childCardCountFor(askId: string): Promise<number> {
-      const cached = childCardCounts.get(askId);
-      if (cached !== undefined) return cached;
-      const closure = closuresByAskId.get(askId) ?? [];
-      let count = 0;
-      for (const member of closure) {
-        if (await getSlackOutcomeMessage(member.id)) count++;
-      }
-      childCardCounts.set(askId, count);
-      return count;
-    }
-
-    let outcomeCreated = false;
-    // Child cards post before ask conclusions, in two passes over the same
-    // tick. Tasks are walked in creation order, so an ask is otherwise
-    // visited before the delegated children it owns; if their conclusion
-    // ran first, a closure that goes fully terminal within one tick would
-    // compute conclusionResultsLines() against children that have no card
-    // yet, permanently fall back to digest text, and never self-correct —
-    // the conclusion card is immutable once finalized.
-    let childCardsThisTick = 0;
-    for (const task of tasks) {
-      if (!isSlackRenderV2Enabled()) return;
-      if (task.source === "slack") continue;
-      const card = await getSlackOutcomeMessage(task.id);
-      if (card && isSettledSlackMessage(card)) continue;
-      if (!delegationEnabled || delegationActivatedAt === null) continue;
-      if (!isChildCardCandidate(task, delegationActivatedAt) || task.slackReplySent) continue;
-      const askId = ownerAskId.get(task.id);
-      const ownerAsk = askId ? tasks.find((candidate) => candidate.id === askId) : undefined;
-      if (!ownerAsk || ownerAsk.createdAt < delegationActivatedAt) continue;
-      if (childCardsThisTick >= CHILD_CARDS_PER_TICK) continue;
-      if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
-      if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
-      try {
-        const outcome = await streamOutcomeCard(task, tree, {
-          buildContent: childOutcomeContent,
-          statusBudget: statusTick.budget,
-        });
-        if (outcome) {
-          noteOutcomeDeliverySuccess(task.id);
-          childCardsThisTick++;
-          if (askId) childCardCounts.set(askId, (childCardCounts.get(askId) ?? 0) + 1);
-          await recordSlackDelivery(task, outcome, "child_outcome");
-        }
-        outcomeCreated ||= !!outcome;
-      } catch (error) {
-        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
-      }
-    }
-
-    for (const task of tasks) {
-      if (!isSlackRenderV2Enabled()) return;
-      if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
-      const card = await getSlackOutcomeMessage(task.id);
-      if (card && isSettledSlackMessage(card)) continue;
-      if (await isAnsweredByDeferralCard(task, tasks)) continue;
-      const deferByClosure =
-        task.source === "slack" &&
-        delegationEnabled &&
-        delegationActivatedAt !== null &&
-        task.createdAt >= delegationActivatedAt;
-
-      if (!deferByClosure) {
-        if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
-        try {
-          const outcome = await streamOutcomeCard(task, tree, { statusBudget: statusTick.budget });
-          if (outcome) {
-            noteOutcomeDeliverySuccess(task.id);
-            await finalizeTerminalSlackReactions([task]);
-          }
-          outcomeCreated ||= !!outcome;
-        } catch (error) {
-          await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
-        }
-        continue;
-      }
-
-      const closure = closuresByAskId.get(task.id) ?? buildAskClosure(task, tasks);
-      // A conclusion is immutable, so wait until every eligible terminal
-      // child has its card. The per-tick cap may leave overflow children
-      // uncarded even though the closure itself is otherwise settled.
-      let childCardPending = false;
-      const existingChildCards = await childCardCountFor(task.id);
-      for (const member of closure) {
-        if (!isChildCardCandidate(member, delegationActivatedAt!) || member.slackReplySent)
-          continue;
-        // Once the per-ask cap is reached, remaining terminal children are
-        // represented in the conclusion digest rather than blocking it.
-        if (existingChildCards >= CHILD_CARDS_PER_ASK) break;
-        const memberCard = await getSlackOutcomeMessage(member.id);
-        if (!memberCard || !isSettledSlackMessage(memberCard)) {
-          childCardPending = true;
-          break;
-        }
-      }
-      if (childCardPending) continue;
-      const state = closureState(task, closure, new Date(), settleSec, timeoutMin);
-      if (state === "open") continue;
-      if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
-      try {
-        const outcome = await streamOutcomeCard(task, tree, {
-          buildContent: (_t, slackReplySent) =>
-            askConclusionContent(task, closure, state, slackReplySent),
-          conclusionKind: state === "timedOut" ? "timeout" : "complete",
-          statusBudget: statusTick.budget,
-        });
-        if (outcome) {
-          noteOutcomeDeliverySuccess(task.id);
-          const app = getSlackApp();
-          if (app && task.slackChannelId && task.slackTriggerMessageTs) {
-            const reaction = conclusionReactionChoice(state, task, closure);
-            await finalizeSlackMessageReaction(
-              app.client,
-              task.slackChannelId,
-              task.slackTriggerMessageTs,
-              reaction.name,
-              reaction.event,
-            );
-            await finalizeSlackSteerReactions([task], () => reaction);
-          }
-          await recordSlackDelivery(
-            task,
-            outcome,
-            state === "timedOut" ? "conclusion_timeout" : "conclusion",
-          );
-        }
-        outcomeCreated ||= !!outcome;
-      } catch (error) {
-        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
-      }
-    }
-    try {
-      await updateThreadTree(tree, outcomeCreated, statusTick.budget);
-    } catch (error) {
-      console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
-    }
-    await statusTick.reconcile(tree.channelId, tree.threadTs);
+    if ((await renderStoredTree(storedTree, context)) === "stop") return;
+    await yieldToEventLoop();
   }
 
   await refreshResolvedDeferralCards();
-  await statusTick.finish();
+  await yieldToEventLoop();
+  await context.statusTick.finish();
+}
+
+async function renderDirtyThreads(): Promise<void> {
+  const taskIds = [...dirtyTaskIds];
+  dirtyTaskIds.clear();
+  const threads = new Map(dirtyThreads);
+  dirtyThreads.clear();
+  const touched = await getSlackThreadsOfTasks(taskIds);
+  for (const thread of touched.threads) {
+    threads.set(`${thread.channelId}\u0000${thread.threadTs}`, thread);
+  }
+  if (threads.size === 0 && !touched.wakeTouched) return;
+  const context = await beginRenderPass();
+
+  for (const thread of threads.values()) {
+    if (!isSlackRenderV2Enabled()) return;
+    for (const task of await getSlackTasksMissingTree({ thread })) {
+      try {
+        await ensureSlackThreadTree([task.id], context.statusTick.budget);
+      } catch (error) {
+        console.error(`[Slack] Failed to create v2 tree for task ${task.id}:`, error);
+      }
+    }
+    for (const storedTree of await getSlackTreeMessages({ thread })) {
+      const result = await renderStoredTree(storedTree, context);
+      if (result === "stop") return;
+      // Time-based waits (conclusion settle, delivery backoff) emit no event:
+      // keep the thread queued while it still owes an outcome card.
+      if (result !== "closed" && (await slackThreadHasOutcomeWork(thread))) {
+        markSlackThreadDirty(thread.channelId, thread.threadTs, DIRTY_REVISIT_MS);
+      }
+    }
+    await yieldToEventLoop();
+  }
+
+  // A settled wake-up can resolve a ⏳ card in a thread it does not belong to.
+  if (touched.wakeTouched) await refreshResolvedDeferralCards();
 }
 
 export function _resetSlackRenderV2ForTests(): void {
@@ -1901,6 +2109,10 @@ export function _resetSlackRenderV2ForTests(): void {
   cachedTeamId = undefined;
   outcomeDeliveryNextAttemptAt.clear();
   outcomeReservedWithoutAttempt.clear();
+  dirtyTaskIds.clear();
+  dirtyThreads.clear();
+  renderInFlight = null;
+  stopSlackRenderV2Events();
   _resetSlackSessionStatusForTests();
 }
 
