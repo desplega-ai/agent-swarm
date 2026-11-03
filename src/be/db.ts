@@ -2621,32 +2621,44 @@ export async function createTaskExtended(
       // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
-      if (parent.vcsProvider && !options.vcsProvider) {
-        options.vcsProvider = parent.vcsProvider;
-      }
-      if (parent.vcsRepo && !options.vcsRepo) {
-        options.vcsRepo = parent.vcsRepo;
-      }
-      if (parent.vcsNumber != null && options.vcsNumber == null) {
-        options.vcsNumber = parent.vcsNumber;
-      }
-      if (parent.vcsEventType && !options.vcsEventType) {
-        options.vcsEventType = parent.vcsEventType;
-      }
-      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
-        options.vcsCommentId = parent.vcsCommentId;
-      }
-      if (parent.vcsAuthor && !options.vcsAuthor) {
-        options.vcsAuthor = parent.vcsAuthor;
-      }
-      if (parent.vcsUrl && !options.vcsUrl) {
-        options.vcsUrl = parent.vcsUrl;
-      }
-      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
-        options.vcsInstallationId = parent.vcsInstallationId;
-      }
-      if (parent.vcsNodeId && !options.vcsNodeId) {
-        options.vcsNodeId = parent.vcsNodeId;
+      //
+      // Inherited as an atomic unit, like Slack context above: a child that
+      // names its own vcsRepo different from the parent's (e.g. `send-task
+      // vcsRepo=...`) inherits NONE of the parent's vcs* fields. Otherwise it
+      // would pair its repo with the parent's number/URL, so PR reconciliation
+      // attaches the parent's PR as the child's deliverable and
+      // `findTaskByVcs` matches an unrelated PR with the same number.
+      const inheritParentVcs =
+        !options.vcsRepo ||
+        (!!parent.vcsRepo && options.vcsRepo.toLowerCase() === parent.vcsRepo.toLowerCase());
+      if (inheritParentVcs) {
+        if (parent.vcsProvider && !options.vcsProvider) {
+          options.vcsProvider = parent.vcsProvider;
+        }
+        if (parent.vcsRepo && !options.vcsRepo) {
+          options.vcsRepo = parent.vcsRepo;
+        }
+        if (parent.vcsNumber != null && options.vcsNumber == null) {
+          options.vcsNumber = parent.vcsNumber;
+        }
+        if (parent.vcsEventType && !options.vcsEventType) {
+          options.vcsEventType = parent.vcsEventType;
+        }
+        if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+          options.vcsCommentId = parent.vcsCommentId;
+        }
+        if (parent.vcsAuthor && !options.vcsAuthor) {
+          options.vcsAuthor = parent.vcsAuthor;
+        }
+        if (parent.vcsUrl && !options.vcsUrl) {
+          options.vcsUrl = parent.vcsUrl;
+        }
+        if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+          options.vcsInstallationId = parent.vcsInstallationId;
+        }
+        if (parent.vcsNodeId && !options.vcsNodeId) {
+          options.vcsNodeId = parent.vcsNodeId;
+        }
       }
 
       // Execution context (per-task overrides)
