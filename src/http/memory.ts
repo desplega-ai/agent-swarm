@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById, getDbClient, getTaskById } from "../be/db";
+import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
@@ -1633,12 +1634,12 @@ export async function startMemoryGc(
   // Clear any backlog soon after startup, but off the boot path.
   memoryGcInitialTimer = setTimeout(() => {
     memoryGcInitialTimer = null;
-    void runMemoryGcTick("Initial");
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Initial"));
   }, initialDelayMs);
   if (typeof memoryGcInitialTimer?.unref === "function") memoryGcInitialTimer.unref();
 
   memoryGcTimer = setInterval(() => {
-    void runMemoryGcTick("Periodic");
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Periodic"));
   }, intervalMs);
   if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
 }

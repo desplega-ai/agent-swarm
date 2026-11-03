@@ -51,6 +51,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { withLoopPath } from "../be/event-loop-lag";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
 import {
   countActiveRuntimeInstancesForAgent,
@@ -2031,8 +2032,8 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   // `finally` but has no `catch`, so a throw anywhere inside it escapes as an
   // unhandled rejection unless it is caught here.
   setTimeout(() => {
-    runRebootSweep()
-      .then(() => runHeartbeatSweep())
+    withLoopPath("heartbeat.boot-sweep", () => runRebootSweep())
+      .then(() => withLoopPath("heartbeat.sweep", () => runHeartbeatSweep()))
       .catch((err) =>
         console.error(
           "[Heartbeat] boot sweep failed:",
@@ -2042,7 +2043,7 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   }, 5000);
 
   heartbeatInterval = setInterval(() => {
-    runHeartbeatSweep().catch((err) =>
+    withLoopPath("heartbeat.sweep", () => runHeartbeatSweep()).catch((err) =>
       console.error(
         "[Heartbeat] sweep failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),
@@ -2163,7 +2164,7 @@ export function startHeartbeatChecklist(intervalMs = heartbeatChecklistIntervalM
 
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
-    checkHeartbeatChecklist().catch((err) =>
+    withLoopPath("heartbeat.checklist", () => checkHeartbeatChecklist()).catch((err) =>
       console.error(
         "[Heartbeat] checklist check failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),

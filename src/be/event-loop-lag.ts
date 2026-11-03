@@ -26,6 +26,14 @@ export function withLoopPath<T>(path: string, fn: () => T): T {
   return pathContext.run(path, fn);
 }
 
+/** Wrap `fn` so each call runs with `path` as its entry point. */
+export function bindLoopPath<A extends unknown[], R>(
+  path: string,
+  fn: (...args: A) => R,
+): (...args: A) => R {
+  return (...args) => pathContext.run(path, fn, ...args);
+}
+
 /** Entry point of the code that runs now, or `unknown`. */
 export function currentLoopPath(): string {
   return pathContext.getStore() ?? "unknown";

@@ -3,6 +3,7 @@ import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
   isHybridSearchEnabled,
@@ -613,6 +614,17 @@ export class SqliteMemoryStore implements MemoryStore {
     embedding: Float32Array,
     agentId: string,
     options: MemorySearchOptions = {},
+  ): Promise<MemoryCandidate[]> {
+    // Nested breadcrumb: the stall line keeps the caller and names the search.
+    return withLoopPath(`${currentLoopPath()} > memory.search`, () =>
+      this.searchInLoopPath(embedding, agentId, options),
+    );
+  }
+
+  private async searchInLoopPath(
+    embedding: Float32Array,
+    agentId: string,
+    options: MemorySearchOptions,
   ): Promise<MemoryCandidate[]> {
     const {
       scope = "all",
