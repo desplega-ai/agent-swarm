@@ -516,35 +516,45 @@ function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
   }
 }
 
+/** Most unanswered calls named in the preamble line. */
+const MAX_INTERRUPTED_CALLS = 3;
+
 /**
- * Find the tool call the interrupted session was waiting on. Walks back from
- * the most recent tool_use through the trailing run of unanswered calls (a
- * parallel batch) and returns the latest one that is not read-only, as
- * `<tool> <arg summary>`. Returns null when the most recent call got its
- * result or carries no id to pair on. The caller scrubs the result.
+ * Find the tool calls the interrupted session was waiting on: every call
+ * with an id that never got its result, in start order, so a parallel batch
+ * whose later call answered first still flags the earlier one (Codex: start
+ * push, start search, complete search). Read-only calls are skipped. Returns
+ * the newest `MAX_INTERRUPTED_CALLS` as `<tool> <arg summary>` joined by
+ * `; `, or null when nothing is open. A call without an id cannot be paired
+ * and is never flagged. The caller scrubs the result.
  */
 function findInterruptedToolCall(logs: SessionLogForPreamble[]): string | null {
-  const uses: Extract<ToolLogEvent, { kind: "use" }>[] = [];
+  const open = new Map<string, Extract<ToolLogEvent, { kind: "use" }>>();
   const answered = new Set<string>();
   const lateInput = new Map<string, ToolInput>();
   for (const line of logs) {
     for (const event of extractToolLogEvents(line)) {
-      if (event.kind === "use") uses.push(event);
-      else if (event.kind === "input") lateInput.set(event.id, event.input);
-      else answered.add(event.id);
+      if (event.kind === "use") {
+        // cursor repeats a `running` row per state change on one call_id.
+        if (event.id && !answered.has(event.id) && !open.has(event.id)) open.set(event.id, event);
+      } else if (event.kind === "input") {
+        lateInput.set(event.id, event.input);
+      } else {
+        answered.add(event.id);
+        open.delete(event.id);
+      }
     }
   }
-  for (let i = uses.length - 1; i >= 0; i--) {
-    const use = uses[i];
-    if (!use?.id || answered.has(use.id)) return null;
+  const calls: string[] = [];
+  for (const use of open.values()) {
     if (READ_ONLY_TOOLS.has(use.name.toLowerCase())) continue;
-    const input = { ...use.input, ...lateInput.get(use.id) };
+    const input = { ...use.input, ...(use.id ? lateInput.get(use.id) : undefined) };
     const primary = firstString(input?.file_path, input?.path, input?.command);
-    const raw = primary ?? (input && Object.keys(input).length > 0 ? JSON.stringify(input) : "");
+    const raw = primary ?? (Object.keys(input).length > 0 ? JSON.stringify(input) : "");
     const args = raw.replace(/\s+/g, " ").trim().slice(0, 200);
-    return args ? `${use.name} ${args}` : use.name;
+    calls.push(args ? `${use.name} ${args}` : use.name);
   }
-  return null;
+  return calls.length > 0 ? calls.slice(-MAX_INTERRUPTED_CALLS).join("; ") : null;
 }
 
 /**
@@ -635,7 +645,14 @@ export async function buildResumeContextPreamble(
 
   // An unanswered side-effecting call may have landed before the cut-off
   // (git push, PR comment, message send). Flag it so the agent checks first.
-  const interrupted = findInterruptedToolCall(recentLogs);
+  // Only the newest attempt's session was cut; an earlier attempt's open call
+  // was already the previous resume's to check.
+  const interruptedSession = logsBatches.find((batch) => batch.length > 0) ?? [];
+  const interrupted = findInterruptedToolCall(
+    [...interruptedSession]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(-CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT),
+  );
   const interruptedLine = interrupted
     ? scrubSecrets(
         `Interrupted: ${interrupted} may have landed. Check its effect before calling it again.`,

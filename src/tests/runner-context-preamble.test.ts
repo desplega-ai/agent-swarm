@@ -596,6 +596,182 @@ describe("buildResumeContextPreamble interrupted tool call", () => {
     expect(preamble).not.toContain("Interrupted:");
   });
 
+  // Parallel batches: a later call can answer before an earlier one.
+  const codexStart = (id: string, item: Record<string, unknown>) =>
+    raw({ type: "item.started", item: { id, status: "inProgress", ...item } });
+  const codexDone = (id: string, item: Record<string, unknown>) =>
+    raw({ type: "item.completed", item: { id, status: "completed", ...item } });
+  const parallelCases: {
+    name: string;
+    logs: () => ReturnType<typeof logLine>[];
+    expected: string | null;
+  }[] = [
+    {
+      name: "codex: start push, start search, complete search flags the push",
+      logs: () => [
+        codexStart("push", { type: "command_execution", command: "git push origin fix/x" }),
+        codexStart("search", { type: "web_search", query: "bun test" }),
+        codexDone("search", { type: "web_search", query: "bun test" }),
+      ],
+      expected: "bash git push origin fix/x",
+    },
+    {
+      name: "codex: start push, start mcp comment, complete comment flags the push",
+      logs: () => [
+        codexStart("push", { type: "command_execution", command: "git push origin fix/x" }),
+        codexStart("comment", {
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "slack-reply",
+          arguments: { text: "hi" },
+        }),
+        codexDone("comment", { type: "mcp_tool_call", server: "agent-swarm", tool: "slack-reply" }),
+      ],
+      expected: "bash git push origin fix/x",
+    },
+    {
+      name: "codex: two open side-effecting calls are both flagged in start order",
+      logs: () => [
+        codexStart("push", { type: "command_execution", command: "git push origin fix/x" }),
+        codexStart("comment", { type: "command_execution", command: "gh pr comment 1 --body hi" }),
+      ],
+      expected: "bash git push origin fix/x; bash gh pr comment 1 --body hi",
+    },
+    {
+      name: "codex: a parallel batch answered out of order is not flagged",
+      logs: () => [
+        codexStart("push", { type: "command_execution", command: "git push origin fix/x" }),
+        codexStart("search", { type: "web_search", query: "bun test" }),
+        codexDone("search", { type: "web_search" }),
+        codexDone("push", { type: "command_execution" }),
+      ],
+      expected: null,
+    },
+    {
+      name: "claude: one message with two calls, only the second answered, flags the first",
+      logs: () => [
+        logLine({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", id: "toolu_a", name: "Bash", input: { command: "git push" } },
+              { type: "tool_use", id: "toolu_b", name: "Grep", input: { pattern: "x" } },
+            ],
+          },
+        }),
+        toolResult("toolu_b"),
+      ],
+      expected: "Bash git push",
+    },
+    {
+      name: "opencode: start push, start read, end read flags the push",
+      logs: () => [
+        raw({
+          type: "tool_start",
+          toolCallId: "c1",
+          toolName: "shell",
+          args: { command: "git push" },
+        }),
+        raw({ type: "tool_start", toolCallId: "c2", toolName: "read", args: { path: "/a.ts" } }),
+        raw({ type: "tool_end", toolCallId: "c2", toolName: "read", result: "ok" }),
+      ],
+      expected: "shell git push",
+    },
+    {
+      name: "claude-managed: use push, use mcp, mcp result flags the push",
+      logs: () => [
+        raw({ type: "agent.tool_use", id: "t1", name: "bash", input: { command: "git push" } }),
+        raw({
+          type: "agent.mcp_tool_use",
+          id: "t2",
+          mcp_server_name: "agent-swarm",
+          name: "send-task",
+          input: { task: "x" },
+        }),
+        raw({ type: "agent.mcp_tool_result", id: "r2", mcp_tool_use_id: "t2", content: [] }),
+      ],
+      expected: "bash git push",
+    },
+    {
+      name: "dsh: call push, call read, read result flags the push",
+      logs: () => [
+        raw({ type: "tool_call", callId: "d1", tool: "bash", input: { command: "git push" } }),
+        raw({ type: "tool_call", callId: "d2", tool: "read", input: { path: "/a.ts" } }),
+        raw({ type: "tool_result", callId: "d2", status: "completed", result: "ok" }),
+      ],
+      expected: "bash git push",
+    },
+    {
+      name: "cursor: repeated running rows on one call_id flag it once",
+      logs: () => [
+        raw({
+          type: "tool_call",
+          call_id: "k1",
+          name: "shell",
+          status: "running",
+          args: { command: "git push" },
+        }),
+        raw({
+          type: "tool_call",
+          call_id: "k1",
+          name: "shell",
+          status: "running",
+          args: { command: "git push" },
+        }),
+        raw({
+          type: "tool_call",
+          call_id: "k2",
+          name: "read",
+          status: "running",
+          args: { path: "/a" },
+        }),
+        raw({ type: "tool_call", call_id: "k2", name: "read", status: "completed" }),
+      ],
+      expected: "shell git push",
+    },
+  ];
+
+  for (const c of parallelCases) {
+    test(c.name, async () => {
+      const preamble = await preambleFor(c.logs());
+      if (c.expected === null) expect(preamble).not.toContain("Interrupted:");
+      else
+        expect(preamble).toContain(
+          `Interrupted: ${c.expected} may have landed. Check its effect before calling it again.`,
+        );
+    });
+  }
+
+  test("caps the flagged calls at the newest three", async () => {
+    const preamble = await preambleFor(
+      [1, 2, 3, 4].map((n) =>
+        codexStart(`c${n}`, { type: "command_execution", command: `gh pr comment ${n}` }),
+      ),
+    );
+    expect(preamble).toContain(
+      "Interrupted: bash gh pr comment 2; bash gh pr comment 3; bash gh pr comment 4 may have landed.",
+    );
+  });
+
+  test("does not flag an open call from an earlier resume attempt", async () => {
+    seedTask({ id: "attempt-1", task: "Ship the fix", status: "failed" });
+    seedTask({
+      id: "attempt-2",
+      task: "Resume interrupted task",
+      status: "failed",
+      taskType: "resume",
+      parentTaskId: "attempt-1",
+    });
+    mockSessionLogs["attempt-1"] = [toolUse("toolu_old", "Bash", { command: "git push origin x" })];
+    mockSessionLogs["attempt-2"] = [
+      toolUse("toolu_new", "Bash", { command: "git status" }),
+      toolResult("toolu_new"),
+    ];
+    const preamble = (await buildResumeContextPreamble(API_URL, API_KEY, "attempt-2")) ?? "";
+    expect(preamble).toContain("## Resuming Interrupted Task");
+    expect(preamble).not.toContain("Interrupted:");
+  });
+
   test("redacts a token in the interrupted call's args", async () => {
     const fakeToken = `ghp_${"a".repeat(36)}`;
     const preamble = await preambleFor([
