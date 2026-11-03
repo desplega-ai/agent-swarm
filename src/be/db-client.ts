@@ -219,13 +219,17 @@ const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
 function warnIfSlowStatement(sql: string, durationMs: number): void {
   recordStatement(sql, durationMs);
   if (durationMs < SLOW_STATEMENT_WARN_MS) return;
-  const flat = sql.replace(/\s+/g, " ").trim();
+  // Scrub the complete SQL before truncation, so a secret that straddles the
+  // cut cannot leave a partial token, then scrub the complete line at egress.
+  const flat = scrubSecrets(sql.replace(/\s+/g, " ").trim());
   const shown =
     flat.length > SLOW_STATEMENT_SQL_MAX_CHARS
       ? `${flat.slice(0, SLOW_STATEMENT_SQL_MAX_CHARS)}…`
       : flat;
   console.warn(
-    `[db-client] slow sync statement blocked the event loop for ${Math.round(durationMs)}ms path=${currentLoopPath()}: ${scrubSecrets(shown)}`,
+    scrubSecrets(
+      `[db-client] slow sync statement blocked the event loop for ${Math.round(durationMs)}ms path=${currentLoopPath()}: ${shown}`,
+    ),
   );
 }
 

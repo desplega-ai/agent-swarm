@@ -67,8 +67,12 @@ function stallWarnMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_STALL_WARN_MS;
 }
 
+/**
+ * Scrub the complete SQL before truncation: a secret that straddles the cut
+ * would otherwise leave a partial token that no pattern matches.
+ */
 function statementLabel(sql: string): string {
-  return scrubSecrets(sql.replace(/\s+/g, " ").trim().slice(0, LABEL_MAX_CHARS));
+  return scrubSecrets(sql.replace(/\s+/g, " ").trim()).slice(0, LABEL_MAX_CHARS);
 }
 
 /**
@@ -99,7 +103,8 @@ export function formatStallLine(lagMs: number, statements: readonly RecordedStat
         .join(",")}`,
     );
   }
-  return parts.join(" ");
+  // Paths are labels from code, but scrub the complete line at egress anyway.
+  return scrubSecrets(parts.join(" "));
 }
 
 let stopProbe: (() => void) | null = null;

@@ -9,6 +9,7 @@ import {
   stopEventLoopLagProbe,
   withLoopPath,
 } from "../be/event-loop-lag";
+import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
 const PROBE_MS = 20;
 
@@ -155,5 +156,29 @@ describe("formatStallLine", () => {
     expect(label.length).toBe(60);
     expect(label).not.toContain("\n");
     expect(label.startsWith("SELECT x, x,")).toBe(true);
+  });
+
+  describe("secret scrubbing", () => {
+    const SECRET = "lagsecretVALUE0123456789abcdef";
+
+    beforeEach(() => registerVolatileSecret(SECRET, "LAG_TEST_SECRET"));
+    afterEach(() => clearVolatileSecretsForTesting());
+
+    test("a secret that straddles the label cutoff leaks no partial token", () => {
+      // "SELECT '" is 8 chars, so the secret starts at char 50 and the
+      // 60-char label cut falls inside it.
+      const sql = `SELECT '${"a".repeat(42)}${SECRET}' FROM t`;
+      expect(sql.indexOf(SECRET)).toBeLessThan(60);
+      expect(sql.indexOf(SECRET) + SECRET.length).toBeGreaterThan(60);
+      const line = formatStallLine(1000, [{ path: "p", sql, ms: 20 }]);
+      expect(line).not.toContain(SECRET.slice(0, 10));
+      expect(line).toContain("[REDACTED");
+    });
+
+    test("a secret in a path is redacted from the complete line", () => {
+      const line = formatStallLine(1000, [{ path: `route ${SECRET}`, sql: "SELECT 1", ms: 20 }]);
+      expect(line).not.toContain(SECRET);
+      expect(line).toContain("path=route [REDACTED:LAG_TEST_SECRET]");
+    });
   });
 });
