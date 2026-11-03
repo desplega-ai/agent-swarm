@@ -303,6 +303,299 @@ describe("buildResumeContextPreamble interrupted tool call", () => {
     expect(preamble).not.toContain("Interrupted:");
   });
 
+  // One row shape per harness, copied from real session_logs rows (scrubbed;
+  // claude-managed from its adapter, which has no stored rows yet). Each case
+  // lists the unanswered call's rows and the row that answers it.
+  const raw = (content: unknown) => logLine(content);
+  const harnessCases: {
+    harness: string;
+    call: ReturnType<typeof logLine>[];
+    answer: ReturnType<typeof logLine>;
+    expected: string;
+  }[] = [
+    {
+      harness: "pi",
+      call: [
+        raw({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "call_00_ET_abc",
+                name: "bash",
+                input: { command: "git push origin fix/x" },
+              },
+            ],
+          },
+        }),
+      ],
+      answer: raw({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_result", tool_use_id: "call_00_ET_abc", content: "ok" }],
+        },
+      }),
+      expected: "bash git push origin fix/x",
+    },
+    {
+      harness: "amp",
+      call: [
+        raw({
+          type: "assistant",
+          message: {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "TU-034ap7w",
+                name: "shell_command",
+                input: { command: "gh pr comment 1 --body hi" },
+              },
+            ],
+          },
+        }),
+      ],
+      answer: raw({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "TU-034ap7w", content: "ok" }],
+        },
+        parent_tool_use_id: null,
+      }),
+      expected: "shell_command gh pr comment 1 --body hi",
+    },
+    {
+      harness: "codex",
+      call: [
+        raw({
+          type: "item.started",
+          item: {
+            id: "exec-9b08ea05",
+            type: "command_execution",
+            command: "/bin/bash -lc 'git push origin fix/x'",
+            aggregated_output: null,
+            exit_code: null,
+            status: "inProgress",
+          },
+        }),
+      ],
+      answer: raw({
+        type: "item.completed",
+        item: {
+          id: "exec-9b08ea05",
+          type: "command_execution",
+          command: "/bin/bash -lc 'git push origin fix/x'",
+          aggregated_output: "ok",
+          exit_code: 0,
+          status: "completed",
+        },
+      }),
+      expected: "bash /bin/bash -lc 'git push origin fix/x'",
+    },
+    {
+      harness: "codex mcp",
+      call: [
+        raw({
+          type: "item.started",
+          item: {
+            id: "exec-26e02993",
+            type: "mcp_tool_call",
+            server: "agent-swarm",
+            tool: "send-task",
+            arguments: { task: "ship it" },
+            status: "inProgress",
+            result: null,
+            error: null,
+          },
+        }),
+      ],
+      answer: raw({
+        type: "item.completed",
+        item: {
+          id: "exec-26e02993",
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "send-task",
+          arguments: { task: "ship it" },
+          status: "completed",
+          result: { content: [] },
+          error: null,
+        },
+      }),
+      expected: 'agent-swarm.send-task {"task":"ship it"}',
+    },
+    {
+      harness: "opencode",
+      call: [
+        raw({
+          type: "tool_start",
+          toolCallId: "call_1f8a83e2",
+          toolName: "shell",
+          args: { command: "git push origin fix/x" },
+        }),
+      ],
+      answer: raw({
+        type: "tool_end",
+        toolCallId: "call_1f8a83e2",
+        toolName: "shell",
+        result: "ok",
+      }),
+      expected: "shell git push origin fix/x",
+    },
+    {
+      // grok and fx run through the same ACP adapter and store the same rows.
+      harness: "acp",
+      call: [
+        raw({
+          sessionId: "ses_f4fc",
+          update: {
+            toolCallId: "call_7d2aa750",
+            title: "bash",
+            kind: "execute",
+            status: "pending",
+            rawInput: { cwd: "/workspace" },
+            sessionUpdate: "tool_call",
+          },
+        }),
+        raw({
+          type: "tool_start",
+          toolCallId: "call_7d2aa750",
+          toolName: "bash",
+          args: { cwd: "/workspace" },
+        }),
+        raw({
+          sessionId: "ses_f4fc",
+          update: {
+            toolCallId: "call_7d2aa750",
+            kind: "execute",
+            status: "in_progress",
+            title: "git push origin fix/x",
+            rawInput: { command: "git push origin fix/x", cwd: "/workspace" },
+            sessionUpdate: "tool_call_update",
+          },
+        }),
+      ],
+      answer: raw({
+        type: "tool_end",
+        toolCallId: "call_7d2aa750",
+        toolName: "git push origin fix/x",
+        result: { status: "completed", content: [] },
+      }),
+      expected: "bash git push origin fix/x",
+    },
+    {
+      harness: "claude-managed",
+      call: [
+        raw({
+          type: "agent.tool_use",
+          id: "sevt_tool_1",
+          name: "bash",
+          input: { command: "git push origin fix/x" },
+        }),
+      ],
+      answer: raw({
+        type: "agent.tool_result",
+        id: "sevt_res_1",
+        tool_use_id: "sevt_tool_1",
+        content: [],
+        is_error: false,
+      }),
+      expected: "bash git push origin fix/x",
+    },
+    {
+      harness: "claude-managed mcp",
+      call: [
+        raw({
+          type: "agent.mcp_tool_use",
+          id: "sevt_mcp_1",
+          mcp_server_name: "agent-swarm",
+          name: "send-task",
+          input: { task: "ship it" },
+        }),
+      ],
+      answer: raw({
+        type: "agent.mcp_tool_result",
+        id: "sevt_res_2",
+        mcp_tool_use_id: "sevt_mcp_1",
+        content: [],
+        is_error: false,
+      }),
+      expected: 'agent-swarm.send-task {"task":"ship it"}',
+    },
+    {
+      harness: "cursor",
+      call: [
+        raw({
+          type: "tool_call",
+          agent_id: "agent-883d",
+          run_id: "run-d9ad",
+          call_id: "toolu_0199Lz",
+          name: "mcp",
+          status: "running",
+          args: {
+            providerIdentifier: "agent-swarm",
+            toolName: "send-task",
+            args: { task: "ship it" },
+          },
+        }),
+      ],
+      answer: raw({
+        type: "tool_call",
+        agent_id: "agent-883d",
+        run_id: "run-d9ad",
+        call_id: "toolu_0199Lz",
+        name: "mcp",
+        status: "completed",
+        result: { status: "success", value: { content: [] } },
+      }),
+      expected: 'mcp__agent-swarm__send-task {"task":"ship it"}',
+    },
+    {
+      harness: "dsh",
+      call: [
+        raw({
+          type: "tool_call",
+          callId: "call_cbebc13a",
+          tool: "bash",
+          input: { command: "git push origin fix/x" },
+        }),
+      ],
+      answer: raw({
+        type: "tool_result",
+        callId: "call_cbebc13a",
+        status: "completed",
+        result: "ok",
+      }),
+      expected: "bash git push origin fix/x",
+    },
+  ];
+
+  for (const c of harnessCases) {
+    test(`${c.harness}: flags an unanswered call`, async () => {
+      const preamble = await preambleFor(c.call);
+      expect(preamble).toContain(
+        `Interrupted: ${c.expected} may have landed. Check its effect before calling it again.`,
+      );
+    });
+
+    test(`${c.harness}: does not flag an answered call`, async () => {
+      const preamble = await preambleFor([...c.call, c.answer]);
+      expect(preamble).not.toContain("Interrupted:");
+    });
+  }
+
+  test("does not flag an unanswered lowercase read-only call (pi, opencode, acp)", async () => {
+    const preamble = await preambleFor([
+      toolUse("call_01_ET_read", "read", { path: "/workspace/a.ts" }),
+    ]);
+    expect(preamble).not.toContain("Interrupted:");
+  });
+
   test("redacts a token in the interrupted call's args", async () => {
     const fakeToken = `ghp_${"a".repeat(36)}`;
     const preamble = await preambleFor([

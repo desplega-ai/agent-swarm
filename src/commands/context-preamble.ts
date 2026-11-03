@@ -316,19 +316,35 @@ function summarizeSessionLogLine(line: SessionLogForPreamble): string | null {
   return snippet ? `[${ts}] ${snippet}` : null;
 }
 
-/** Tools with no side effect: an unanswered call to one of them is safe to repeat. */
+/**
+ * Tools with no side effect: an unanswered call to one of them is safe to
+ * repeat. Compared lowercased, so one entry covers Claude's `Read` and the
+ * `read` of pi, opencode, ACP, dsh and cursor.
+ */
 const READ_ONLY_TOOLS = new Set([
-  "Read",
-  "Grep",
-  "Glob",
-  "LS",
-  "WebFetch",
-  "WebSearch",
-  "ToolSearch",
+  "read",
+  "grep",
+  "glob",
+  "ls",
+  "list",
+  "find",
+  "webfetch",
+  "websearch",
+  "web_search",
+  "toolsearch",
+  "tool_search",
+  "skill",
+  "todowrite",
+  "todoread",
+  "todo_list",
+  "shell_command_status",
 ]);
 
+type ToolInput = Record<string, unknown> | undefined;
+
 type ToolLogEvent =
-  | { kind: "use"; id: string | null; name: string; input: Record<string, unknown> | undefined }
+  | { kind: "use"; id: string | null; name: string; input: ToolInput }
+  | { kind: "input"; id: string; input: ToolInput }
   | { kind: "result"; id: string };
 
 function firstString(...values: unknown[]): string | null {
@@ -336,11 +352,51 @@ function firstString(...values: unknown[]): string | null {
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Codex item types that are tool calls (mirrors the UI logs-parser codex adapter). */
+const CODEX_TOOL_ITEMS = new Set([
+  "command_execution",
+  "mcp_tool_call",
+  "collab_tool_call",
+  "web_search",
+  "todo_list",
+  "file_change",
+]);
+
+function codexToolUse(item: Record<string, unknown>): ToolLogEvent {
+  const id = firstString(item.id);
+  if (item.type === "command_execution") {
+    const command = Array.isArray(item.command) ? item.command.join(" ") : item.command;
+    return { kind: "use", id, name: "bash", input: { command } };
+  }
+  if (item.type === "mcp_tool_call") {
+    return {
+      kind: "use",
+      id,
+      name: `${item.server ?? "mcp"}.${item.tool ?? "unknown"}`,
+      input: asRecord(item.arguments),
+    };
+  }
+  return { kind: "use", id, name: String(item.type), input: undefined };
+}
+
 /**
- * Extract tool_use / tool_result events from one session_log line, in order.
- * Claude message shape pairs `tool_use.id` with `tool_result.tool_use_id`.
- * The flat event shape pairs only when the line carries a call id; a
- * tool_use without one gets `id: null` and is never flagged.
+ * Extract tool call / result events from one session_log line, in order.
+ * Each harness stores its own shape; every branch pairs on a call id:
+ * - claude, pi, amp: `message.content[]` `tool_use.id` / `tool_result.tool_use_id`
+ * - codex: `item.started` / `item.completed` on `item.id`
+ * - opencode, acp, grok, fx: `tool_start` / `tool_end` on `toolCallId`
+ *   (ACP fills the real args in a later raw `tool_call_update.rawInput`)
+ * - claude-managed: `agent.{mcp_,}tool_use.id` / `agent.tool_result.tool_use_id`,
+ *   `agent.mcp_tool_result.mcp_tool_use_id`
+ * - cursor: `tool_call` on `call_id`, `status: "running"` until it completes
+ * - dsh: `tool_call` / `tool_result` on `callId`
+ * A call without an id gets `id: null` and is never flagged.
  */
 function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
   let parsed: unknown;
@@ -349,22 +405,17 @@ function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
   } catch {
     return [];
   }
-  if (!parsed || typeof parsed !== "object") return [];
-  const obj = parsed as Record<string, unknown>;
-  const events: ToolLogEvent[] = [];
+  const obj = asRecord(parsed);
+  if (!obj) return [];
 
-  const content = (obj.message as Record<string, unknown> | undefined)?.content;
+  const content = asRecord(obj.message)?.content;
   if (Array.isArray(content)) {
+    const events: ToolLogEvent[] = [];
     for (const block of content) {
-      if (!block || typeof block !== "object") continue;
-      const b = block as Record<string, unknown>;
+      const b = asRecord(block);
+      if (!b) continue;
       if (b.type === "tool_use" && typeof b.name === "string") {
-        events.push({
-          kind: "use",
-          id: firstString(b.id),
-          name: b.name,
-          input: b.input as Record<string, unknown> | undefined,
-        });
+        events.push({ kind: "use", id: firstString(b.id), name: b.name, input: asRecord(b.input) });
       } else if (b.type === "tool_result") {
         const id = firstString(b.tool_use_id);
         if (id) events.push({ kind: "result", id });
@@ -373,18 +424,96 @@ function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
     return events;
   }
 
-  if (obj.type === "tool_use" && typeof obj.name === "string") {
-    events.push({
-      kind: "use",
-      id: firstString(obj.id, obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId),
-      name: obj.name,
-      input: obj.input as Record<string, unknown> | undefined,
-    });
-  } else if (obj.type === "tool_result") {
-    const id = firstString(obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId, obj.id);
-    if (id) events.push({ kind: "result", id });
+  const update = asRecord(obj.update);
+  if (update?.sessionUpdate === "tool_call_update") {
+    const id = firstString(update.toolCallId);
+    const input = asRecord(update.rawInput);
+    return id && input ? [{ kind: "input", id, input }] : [];
   }
-  return events;
+
+  const item = asRecord(obj.item);
+  const result = (...ids: unknown[]): ToolLogEvent[] => {
+    const id = firstString(...ids);
+    return id ? [{ kind: "result", id }] : [];
+  };
+
+  switch (obj.type) {
+    case "item.started": {
+      return item && CODEX_TOOL_ITEMS.has(String(item.type)) ? [codexToolUse(item)] : [];
+    }
+    case "item.completed":
+      return item && CODEX_TOOL_ITEMS.has(String(item.type)) ? result(item.id) : [];
+    case "tool_start":
+      return [
+        {
+          kind: "use",
+          id: firstString(obj.toolCallId),
+          name: firstString(obj.toolName) ?? "tool",
+          input: asRecord(obj.args),
+        },
+      ];
+    case "tool_end":
+      return result(obj.toolCallId);
+    case "agent.tool_use":
+    case "agent.mcp_tool_use": {
+      const name = firstString(obj.name) ?? "tool";
+      const server = firstString(obj.mcp_server_name);
+      return [
+        {
+          kind: "use",
+          id: firstString(obj.id),
+          name: obj.type === "agent.mcp_tool_use" && server ? `${server}.${name}` : name,
+          input: asRecord(obj.input),
+        },
+      ];
+    }
+    case "agent.tool_result":
+      return result(obj.tool_use_id);
+    case "agent.mcp_tool_result":
+      return result(obj.mcp_tool_use_id);
+    case "tool_call": {
+      // cursor: one `tool_call` row per state change on the same call_id.
+      if (typeof obj.status === "string" && obj.call_id !== undefined) {
+        if (obj.status !== "running") return result(obj.call_id);
+        const args = asRecord(obj.args);
+        const mcpTool = obj.name === "mcp" ? firstString(args?.toolName) : null;
+        return [
+          {
+            kind: "use",
+            id: firstString(obj.call_id),
+            name: mcpTool
+              ? `mcp__${firstString(args?.providerIdentifier) ?? "mcp"}__${mcpTool}`
+              : (firstString(obj.name) ?? "tool"),
+            input: mcpTool ? asRecord(args?.args) : args,
+          },
+        ];
+      }
+      // dsh
+      return [
+        {
+          kind: "use",
+          id: firstString(obj.callId),
+          name: firstString(obj.tool, obj.name) ?? "tool",
+          input: asRecord(obj.input),
+        },
+      ];
+    }
+    case "tool_use":
+      return typeof obj.name === "string"
+        ? [
+            {
+              kind: "use",
+              id: firstString(obj.id, obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId),
+              name: obj.name,
+              input: asRecord(obj.input),
+            },
+          ]
+        : [];
+    case "tool_result":
+      return result(obj.tool_use_id, obj.call_id, obj.callId, obj.toolCallId, obj.id);
+    default:
+      return [];
+  }
 }
 
 /**
@@ -397,17 +526,19 @@ function extractToolLogEvents(line: SessionLogForPreamble): ToolLogEvent[] {
 function findInterruptedToolCall(logs: SessionLogForPreamble[]): string | null {
   const uses: Extract<ToolLogEvent, { kind: "use" }>[] = [];
   const answered = new Set<string>();
+  const lateInput = new Map<string, ToolInput>();
   for (const line of logs) {
     for (const event of extractToolLogEvents(line)) {
       if (event.kind === "use") uses.push(event);
+      else if (event.kind === "input") lateInput.set(event.id, event.input);
       else answered.add(event.id);
     }
   }
   for (let i = uses.length - 1; i >= 0; i--) {
     const use = uses[i];
     if (!use?.id || answered.has(use.id)) return null;
-    if (READ_ONLY_TOOLS.has(use.name)) continue;
-    const input = use.input;
+    if (READ_ONLY_TOOLS.has(use.name.toLowerCase())) continue;
+    const input = { ...use.input, ...lateInput.get(use.id) };
     const primary = firstString(input?.file_path, input?.path, input?.command);
     const raw = primary ?? (input && Object.keys(input).length > 0 ? JSON.stringify(input) : "");
     const args = raw.replace(/\s+/g, " ").trim().slice(0, 200);
