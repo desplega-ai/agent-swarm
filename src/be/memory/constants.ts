@@ -83,6 +83,13 @@ export function minSimilarity(): number {
 // pair 0.705.
 export const LEARNING_DUPLICATE_MIN_SIMILARITY = 0.8;
 
+// Most eligible rows an exhaustive search scores per call, newest `updatedAt`
+// first. The learning dedup runs it on every store-progress learning (once per
+// prefix), so its cost must not grow with the corpus. Below the cap the scan is
+// exact; past it, older rows are not scored and the search logs `capped=true`.
+// Production holds about 1,260 `/learnings` + `/longterm` rows.
+export const EXHAUSTIVE_SEARCH_MAX_ROWS = 10_000;
+
 // Reranking parameters
 export function accessBoostMaxMultiplier(): number {
   return numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5);

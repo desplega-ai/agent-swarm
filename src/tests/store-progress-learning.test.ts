@@ -8,12 +8,18 @@ import {
   getDb,
   getTaskById,
   initDb,
+  isSqliteVecAvailable,
   startTask,
 } from "../be/db";
 import { getDbClient } from "../be/db/runtime";
 import { serializeEmbedding } from "../be/embedding";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
-import { EMBEDDING_DIMENSIONS, LEARNING_TTL_DAYS, TTL_DEFAULTS } from "../be/memory/constants";
+import {
+  EMBEDDING_DIMENSIONS,
+  EXHAUSTIVE_SEARCH_MAX_ROWS,
+  LEARNING_TTL_DAYS,
+  TTL_DEFAULTS,
+} from "../be/memory/constants";
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 interface ToolResult {
@@ -416,63 +422,116 @@ describe("store-progress learning near-duplicate guard", () => {
     expect(learningRows(t.id)).toHaveLength(0);
   }, 120_000);
 
-  test("a match behind 10,000 newer rows under the same prefix is found, and only one row per prefix reaches JS", async () => {
-    // The old twin, then 10,000 newer unrelated rows under the same prefix.
-    const old = await seedLongterm("/longterm/facts/dedup/behind-newer-rows", vector(210));
-    getDb().run("UPDATE agent_memory SET updatedAt = '2020-01-01T00:00:00.000Z' WHERE id = ?", [
-      old.id,
-    ]);
-    // Inserted in one transaction: the store path would take minutes for this many rows.
+  /** `count` newer swarm rows under /longterm/, inserted in one transaction (the store path takes minutes). */
+  function insertNewerLongtermNoise(count: number, tag: string): string[] {
     const noise = new Float32Array(EMBEDDING_DIMENSIONS);
     noise[400] = 1;
     const noiseBlob = serializeEmbedding(noise);
     const now = new Date().toISOString();
-    const noiseIds = Array.from({ length: 10_000 }, () => crypto.randomUUID());
+    const ids = Array.from({ length: count }, () => crypto.randomUUID());
     const insert = getDb().prepare(
       `INSERT INTO agent_memory (id, agentId, scope, key, name, content, embedding, embeddingModel, source, createdAt, updatedAt, accessedAt)
        VALUES (?, ?, 'swarm', ?, ?, ?, ?, 'test-embedding', 'manual', ?, ?, ?)`,
     );
     getDb()
       .transaction(() => {
-        noiseIds.forEach((id, i) => {
-          const key = `/longterm/facts/newer-noise/n-${i}`;
-          insert.run(id, agentId, key, key, `newer noise ${i}`, noiseBlob, now, now, now);
+        ids.forEach((id, i) => {
+          const key = `/longterm/facts/${tag}/n-${i}`;
+          insert.run(id, agentId, key, key, `${tag} ${i}`, noiseBlob, now, now, now);
         });
       })
       .immediate();
+    return ids;
+  }
 
-    const text = "Behind newer rows\nAn old curated twin still counts as a duplicate.";
-    vectors.set(text, vector(210, 0.9));
+  /** Rows the /longterm/ dedup scan counts toward its cap. */
+  function eligibleLongtermRows(): number {
+    return getDb()
+      .query<{ n: number }, []>(
+        `SELECT COUNT(*) AS n FROM agent_memory
+         WHERE key LIKE '/longterm/%' AND scope = 'swarm' AND embedding IS NOT NULL
+           AND (expiresAt IS NULL OR expiresAt > datetime('now'))`,
+      )
+      .get()!.n;
+  }
+
+  /** Make `ids` the oldest eligible rows: older `updatedAt` than every noise row. */
+  function makeOldest(ids: string[]) {
+    getDb().run(
+      `UPDATE agent_memory SET updatedAt = '2020-01-01T00:00:00.000Z' WHERE id IN (${ids.map(() => "?").join(", ")})`,
+      ids,
+    );
+  }
+
+  /** Take `ids` out of later scans. */
+  function expire(ids: string[]) {
+    getDb().run(
+      `UPDATE agent_memory SET expiresAt = '2000-01-01T00:00:00.000Z' WHERE id IN (${ids.map(() => "?").join(", ")})`,
+      ids,
+    );
+  }
+
+  /**
+   * The oldest /longterm twin is found while the prefix holds exactly
+   * EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows, and missed (with `capped=true`)
+   * once one newer row pushes it past the cap. `sqlPath` asserts which scorer ran.
+   */
+  async function expectCapBoundary(axis: number, sqlPath: boolean) {
+    const twin = await seedLongterm(`/longterm/facts/dedup/cap-boundary-${axis}`, vector(axis));
+    makeOldest([twin.id]);
+    const noiseIds = insertNewerLongtermNoise(
+      EXHAUSTIVE_SEARCH_MAX_ROWS - eligibleLongtermRows(),
+      `cap-noise-${axis}`,
+    );
+    expect(eligibleLongtermRows()).toBe(EXHAUSTIVE_SEARCH_MAX_ROWS);
     const querySpy = spyOn(getDbClient(), "query");
+    const logSpy = spyOn(console, "log");
     try {
-      const t = await task();
-      const result = await call({ taskId: t.id, learning: text });
+      const within = `Within the cap ${axis}\nThe oldest of 10,000 eligible rows is still scored.`;
+      vectors.set(within, vector(axis, 0.9));
+      const t1 = await task();
+      const found = await call({ taskId: t1.id, learning: within });
+      expect(learningData(found)).toMatchObject({ status: "duplicate", memoryId: twin.id });
+      expect(learningData(found)?.similarity).toBeCloseTo(0.9, 2);
+      expect(learningRows(t1.id)).toHaveLength(0);
 
-      expect(learningData(result)).toMatchObject({ status: "duplicate", memoryId: old.id });
-      expect(learningData(result)?.similarity).toBeCloseTo(0.9, 2);
-      expect(learningRows(t.id)).toHaveLength(0);
-
-      // Bounded: SQLite ranks inside the query, so each prefix scan hands back
-      // at most one row and no query loads the prefix's embeddings into JS.
       const scans = querySpy.mock.calls
         .map(([sql], i) => ({ sql, result: querySpy.mock.results[i] }))
         .filter(({ sql }) => sql.includes("vec_distance_cosine(embedding"));
-      expect(scans).toHaveLength(2);
+      expect(scans).toHaveLength(sqlPath ? 2 : 0);
       for (const { sql, result: returned } of scans) {
-        expect(sql).toContain("LIMIT ?");
+        // SQLite ranks inside the query: each prefix scan hands back at most one row.
+        expect(sql).toContain("ORDER BY updatedAt DESC, id");
         expect(((await returned?.value) as unknown[]).length).toBeLessThanOrEqual(1);
       }
-      for (const returned of querySpy.mock.results) {
-        const rows = await returned.value;
-        if (Array.isArray(rows)) expect(rows.length).toBeLessThan(100);
-      }
+
+      // One newer row pushes the twin to 10,001st: the documented miss.
+      noiseIds.push(...insertNewerLongtermNoise(1, `cap-overflow-${axis}`));
+      makeOldest([twin.id]);
+      logSpy.mockClear();
+      const past = `Past the cap ${axis}\nThe 10,001st eligible row is not scored.`;
+      vectors.set(past, vector(axis, 0.9));
+      const t2 = await task();
+      const missed = await call({ taskId: t2.id, learning: past });
+      expect(learningData(missed)?.status).toBe("stored");
+      expect(learningRows(t2.id)).toHaveLength(1);
+      const capLogs = logSpy.mock.calls
+        .map((args) => String(args[0]))
+        .filter(
+          (line) => line.includes("retrieval_path=exhaustive") && line.includes("capped=true"),
+        );
+      expect(capLogs).toHaveLength(1);
+      expect(capLogs[0]).toContain(`scanned=${EXHAUSTIVE_SEARCH_MAX_ROWS}`);
     } finally {
       querySpy.mockRestore();
-      getDb().run(
-        `UPDATE agent_memory SET expiresAt = '2000-01-01T00:00:00.000Z' WHERE id IN (${[old.id, ...noiseIds].map(() => "?").join(", ")})`,
-        [old.id, ...noiseIds],
-      );
+      logSpy.mockRestore();
+      expire([twin.id, ...noiseIds]);
     }
+  }
+
+  test("with sqlite-vec, a /longterm twin is found within the 10,000-row cap and missed past it", async () => {
+    expect(isSqliteVecAvailable()).toBe(true);
+    await expectCapBoundary(210, true);
   }, 120_000);
 
   /** Run `fn` with MEMORY_MIN_SIMILARITY set to `value`, then restore it. */
@@ -544,6 +603,49 @@ describe("store-progress learning near-duplicate guard", () => {
 
     expect(learningData(replay)).toMatchObject({ status: "replayed", memoryId: seeded.memoryId });
     expect(learningRows(seeded.task.id)).toHaveLength(1);
+  });
+
+  describe("without sqlite-vec", () => {
+    const originalVecPath = process.env.SQLITE_VEC_EXTENSION_PATH;
+
+    /** A fresh in-memory DB, opened with `vecPath` as the sqlite-vec extension path. */
+    async function reopenDb(vecPath: string | undefined) {
+      closeDb();
+      if (vecPath === undefined) delete process.env.SQLITE_VEC_EXTENSION_PATH;
+      else process.env.SQLITE_VEC_EXTENSION_PATH = vecPath;
+      initDb(":memory:");
+      // The memory store singleton built memory_fts on the first DB only (same
+      // DDL as SqliteMemoryStore.ensureFtsTable).
+      getDb().run(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED, name, content, tokenize='porter unicode61')",
+      );
+      await createAgent({ id: agentId, name: "Learner", isLead: false, status: "idle" });
+    }
+
+    beforeAll(async () => {
+      await reopenDb("/nonexistent/vec.so");
+      expect(isSqliteVecAvailable()).toBe(false);
+    });
+    afterAll(() => reopenDb(originalVecPath));
+
+    test("a near duplicate is still caught, not stored", async () => {
+      const existing = await seed("Pin the worktree path\nUse the retention root.", vector(220));
+      const text = "Worktrees live under the retention root\nNever under wt-*.";
+      vectors.set(text, vector(220, 0.9));
+      const t = await task();
+      const result = await call({ taskId: t.id, learning: { text, workstream: "other" } });
+
+      expect(learningData(result)).toMatchObject({
+        status: "duplicate",
+        memoryId: existing.memoryId,
+      });
+      expect(learningData(result)?.similarity).toBeCloseTo(0.9, 2);
+      expect(learningRows(t.id)).toHaveLength(0);
+    });
+
+    test("a /longterm twin is found within the 10,000-row cap and missed past it", async () => {
+      await expectCapBoundary(230, false);
+    }, 120_000);
   });
 });
 
