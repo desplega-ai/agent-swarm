@@ -624,6 +624,18 @@ export class SqliteMemoryStore implements MemoryStore {
       keyPrefix,
     } = options;
 
+    if (options.exhaustive) {
+      console.log(`[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit}`);
+      return this.searchBruteForce(embedding, agentId, {
+        scope,
+        limit,
+        source,
+        isLead,
+        includeExpired,
+        keyPrefix,
+      });
+    }
+
     const health = this.getHealth();
     if (
       isHybridSearchEnabled() &&
@@ -1150,9 +1162,16 @@ export class SqliteMemoryStore implements MemoryStore {
         if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
       }
 
-      // Moving into /longterm makes the memory curated, so it stops expiring.
-      // Moving out restores nothing: the TTL it had is gone.
-      const clearExpiry = moving && isLongtermKey(input.newKey);
+      // A move takes the expiry of its destination when the key decides it:
+      // into /longterm (curated, never expires), into /learnings (ages out) or
+      // out of /learnings (the source's own TTL; none for manual). Any other
+      // move, and every in-place edit, keeps the expiry the row already has.
+      const resetExpiry =
+        moving &&
+        (isLongtermKey(input.newKey) || isLearningKey(row.key) !== isLearningKey(input.newKey));
+      const expiresAt = resetExpiry
+        ? computeExpiresAt(row.source as AgentMemorySource, input.newKey!)
+        : row.expiresAt;
       const now = new Date().toISOString();
       const versionIntent = moving
         ? `${input.intent} [key ${row.key ?? "(none)"} -> ${input.newKey}]`
@@ -1186,7 +1205,7 @@ export class SqliteMemoryStore implements MemoryStore {
         await tx.run(
           `UPDATE agent_memory
            SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?,
-               expiresAt = CASE WHEN ? = 1 THEN NULL ELSE expiresAt END
+               expiresAt = CASE WHEN ? = 1 THEN ? ELSE expiresAt END
            WHERE id = ?`,
           [
             targetContent,
@@ -1194,7 +1213,8 @@ export class SqliteMemoryStore implements MemoryStore {
             targetVersion,
             now,
             moving ? input.newKey! : target.key,
-            clearExpiry ? 1 : 0,
+            resetExpiry ? 1 : 0,
+            expiresAt,
             target.id,
           ],
         );
@@ -1209,7 +1229,7 @@ export class SqliteMemoryStore implements MemoryStore {
             version: nextVersion,
             updatedAt: now,
             key: moving ? input.newKey! : row.key,
-            expiresAt: clearExpiry ? null : row.expiresAt,
+            expiresAt,
           }),
           changed: true,
           previousVersion,

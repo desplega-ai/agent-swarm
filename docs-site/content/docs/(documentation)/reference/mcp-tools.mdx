@@ -1412,7 +1412,7 @@ shared visibility does not grant edit permission.
 | `newString` | string | No | Replacement string for `exact` mode; may be empty |
 | `intent` | string | Yes | Why you are editing the memory |
 | `expectedVersion` | number | No | Optional optimistic-concurrency guard |
-| `newKey` | string | No | Move the memory to this logical path on every chunk, keeping ID, rating posterior, access count and author. Alone it is a pure move (no content fields). Same allowed roots and lead-only roots as `memory-store`. Moving into `/longterm` clears the expiry on every chunk; moving out does not restore it |
+| `newKey` | string | No | Move the memory to this logical path on every chunk, keeping ID, rating posterior, access count and author. Alone it is a pure move (no content fields). Same allowed roots and lead-only roots as `memory-store`. Moving into `/longterm` clears the expiry on every chunk; moving out does not restore it. A move into `/learnings` starts a 30-day expiry; a move out of `/learnings` takes the source's own expiry (none for `manual`) |
 
 ### memory-delete
 

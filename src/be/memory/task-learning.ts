@@ -139,9 +139,9 @@ async function findReplay(
 
 /**
  * The closest swarm memory under the duplicate prefixes when its raw cosine to
- * the learning reaches the threshold. No `queryText`, so the store takes the
- * vector or brute-force path and `similarity` is raw cosine, not an FTS rank or
- * a fused score. Any failure (no embedding provider, a search error) returns
+ * the learning reaches the threshold. The search is exhaustive over each
+ * prefix, so `similarity` is raw cosine (not an FTS rank or a fused score) and
+ * no amount of closer rows outside the prefixes can hide a match. Any failure (no embedding provider, a search error) returns
  * null so the learning is stored as usual.
  */
 async function findNearDuplicate(params: {
@@ -160,6 +160,9 @@ async function findNearDuplicate(params: {
           isLead: params.isLead,
           keyPrefix,
           limit: 1,
+          // The vector index ranks the whole table before the prefix filter;
+          // past 4096 closer rows elsewhere it would hide a real duplicate.
+          exhaustive: true,
         }),
       ),
     );

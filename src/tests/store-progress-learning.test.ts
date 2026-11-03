@@ -11,7 +11,7 @@ import {
   startTask,
 } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
-import { EMBEDDING_DIMENSIONS, LEARNING_TTL_DAYS } from "../be/memory/constants";
+import { EMBEDDING_DIMENSIONS, LEARNING_TTL_DAYS, TTL_DEFAULTS } from "../be/memory/constants";
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 interface ToolResult {
@@ -383,6 +383,37 @@ describe("store-progress learning near-duplicate guard", () => {
     });
   }
 
+  test("a /longterm duplicate is found behind more than 4096 closer rows outside the prefixes", async () => {
+    const existing = await seedLongterm("/longterm/facts/dedup/behind-the-cap", vector(200));
+    const text = "Behind the KNN cap\nWhen 4096 rows are closer, still match.";
+    const query = vector(200, 0.86);
+    vectors.set(text, query);
+
+    // Each noise row is query + a private axis: cosine 0.98 to the query, so
+    // all of them outrank the 0.86 /longterm row in the vector index.
+    const store = getMemoryStore();
+    for (let i = 0; i < 4100; i++) {
+      const noise = new Float32Array(EMBEDDING_DIMENSIONS);
+      for (let d = 0; d < noise.length; d++) noise[d] = 0.98 * query[d]!;
+      noise[300 + (i % 200)] = Math.sqrt(1 - 0.98 ** 2);
+      const memory = await store.store({
+        agentId,
+        scope: "swarm",
+        source: "manual",
+        name: `noise ${i}`,
+        content: `unrelated ${i}`,
+        key: `/notes/noise/n-${i}`,
+      });
+      await store.updateEmbedding(memory.id, noise, "test-embedding");
+    }
+
+    const t = await task();
+    const result = await call({ taskId: t.id, learning: text });
+    expect(learningData(result)).toMatchObject({ status: "duplicate", memoryId: existing.id });
+    expect(learningData(result)?.similarity).toBeCloseTo(0.86, 2);
+    expect(learningRows(t.id)).toHaveLength(0);
+  }, 120_000);
+
   test("a related learning below the threshold is stored", async () => {
     await seed("Retry flaky pushes once\nThe pre-push hook is slow.", vector(20));
     const text = "Pre-push hooks take five minutes\nLet them finish.";
@@ -489,6 +520,101 @@ describe("store-progress learning expiry", () => {
       intent: "promote",
     });
     expect(expiryRow(id)?.expiresAt).toBeNull();
+  });
+
+  function expectLearningTtl(expiresAt: string | null | undefined, from: number) {
+    expect(expiresAt).not.toBeNull();
+    const days = (Date.parse(expiresAt!) - from) / DAY_MS;
+    expect(days).toBeGreaterThan(LEARNING_TTL_DAYS - 0.01);
+    expect(days).toBeLessThan(LEARNING_TTL_DAYS + 0.01);
+  }
+
+  test("a move into /learnings starts the learning TTL on every chunk; a move out ends it", async () => {
+    const store = getMemoryStore();
+    const base = { agentId, scope: "swarm" as const, source: "manual" as const, name: "doc" };
+    const chunks = [
+      await store.store({
+        ...base,
+        content: "c0",
+        key: "/notes/expiry/doc",
+        chunkIndex: 0,
+        totalChunks: 2,
+      }),
+      await store.store({
+        ...base,
+        content: "c1",
+        key: "/notes/expiry/doc",
+        chunkIndex: 1,
+        totalChunks: 2,
+      }),
+    ];
+    for (const chunk of chunks) expect(expiryRow(chunk.id)?.expiresAt).toBeNull();
+
+    const movedAt = Date.now();
+    const moved = await store.edit({
+      id: chunks[1]!.id,
+      mode: "exact",
+      newKey: "/learnings/expiry/doc",
+      intent: "demote to a learning",
+    });
+    expectLearningTtl(moved.memory.expiresAt, movedAt);
+    for (const chunk of chunks) expect(expiryRow(chunk.id)?.expiresAt).toBe(moved.memory.expiresAt);
+
+    const back = await store.edit({
+      id: chunks[0]!.id,
+      mode: "exact",
+      newKey: "/notes/expiry/doc-kept",
+      intent: "keep it after all",
+    });
+    expect(back.memory.expiresAt).toBeNull();
+    for (const chunk of chunks) expect(expiryRow(chunk.id)?.expiresAt).toBeNull();
+  });
+
+  test("a learning moved out of /learnings past its deadline survives the purge", async () => {
+    const t = await task();
+    const result = await call({ taskId: t.id, learning: "Moved out\nWhen kept, survive GC." });
+    const id = learningData(result)!.memoryId!;
+    getDb().run("UPDATE agent_memory SET expiresAt = '2000-01-01T00:00:00.000Z' WHERE id = ?", [
+      id,
+    ]);
+
+    const store = getMemoryStore();
+    await store.edit({ id, mode: "exact", newKey: "/notes/expiry/kept", intent: "keep" });
+    await store.purgeExpired();
+    expect(expiryRow(id)).toMatchObject({ expiresAt: null });
+  });
+
+  test("a move out of /learnings takes the source's own TTL; a move within keeps the deadline", async () => {
+    const store = getMemoryStore();
+    const completion = await store.store({
+      agentId,
+      scope: "swarm",
+      source: "task_completion",
+      name: "tc",
+      content: "tc",
+      key: "/learnings/expiry/tc",
+    });
+    const deadline = expiryRow(completion.id)!.expiresAt;
+
+    const renamed = await store.edit({
+      id: completion.id,
+      mode: "exact",
+      newKey: "/learnings/expiry/tc-renamed",
+      intent: "rename",
+    });
+    expect(renamed.memory.expiresAt).toBe(deadline);
+    expect(expiryRow(completion.id)?.expiresAt).toBe(deadline);
+
+    const movedAt = Date.now();
+    await store.edit({
+      id: completion.id,
+      mode: "exact",
+      newKey: "/notes/expiry/tc",
+      intent: "out",
+    });
+    const days = (Date.parse(expiryRow(completion.id)!.expiresAt!) - movedAt) / DAY_MS;
+    expect(days).toBeGreaterThan(TTL_DEFAULTS.task_completion! - 0.01);
+    expect(days).toBeLessThan(TTL_DEFAULTS.task_completion! + 0.01);
   });
 
   test("an expired learning is left out of search and removed by the purge", async () => {

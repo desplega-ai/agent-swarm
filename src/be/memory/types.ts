@@ -150,8 +150,19 @@ export interface MemorySearchOptions {
   isLead?: boolean;
   includeExpired?: boolean;
   queryText?: string;
-  /** Keep only memories whose `key` starts with this string. Applied inside each SQL arm, before top-K. */
+  /**
+   * Keep only memories whose `key` starts with this string. The vector arm
+   * applies it after the sqlite-vec KNN (capped at 4096 rows), so a prefix
+   * whose rows all rank below that cap returns nothing; pass `exhaustive`
+   * when a miss is not acceptable.
+   */
   keyPrefix?: string;
+  /**
+   * Score every eligible row's stored embedding instead of the vector index's
+   * top-K. Exact whatever the corpus size, at O(eligible rows). Ignores
+   * `queryText`.
+   */
+  exhaustive?: boolean;
 }
 
 /**

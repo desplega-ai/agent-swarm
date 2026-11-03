@@ -93,9 +93,9 @@ Memories have a time-to-live (TTL) based on their source type. Expired memories 
 | `file_index` | 30 days | File contents may change |
 | `manual` | Never expires | Explicitly stored knowledge is permanent |
 
-The key overrides the source in two cases. A memory under `/longterm/` never expires, whatever its source. A store-progress learning under `/learnings/` expires 30 days after it is written: one worth keeping is moved under `/longterm/`, which clears the expiry, and the rest ages out. An in-place edit keeps the expiry.
+The key overrides the source in two cases. A memory under `/longterm/` never expires, whatever its source. A store-progress learning under `/learnings/` expires 30 days after it is written: one worth keeping is moved under `/longterm/`, which clears the expiry, and the rest ages out. A move into `/learnings/` starts the 30-day clock, and a move out of it takes the source's own TTL (none for `manual`). An in-place edit, or a move that crosses neither boundary, keeps the expiry.
 
-Expired memories can still be retrieved by ID via `memory-get` — only search results are filtered. The `memory-delete` tool provides explicit cleanup when needed.
+Before the periodic GC runs, expired memories can still be retrieved by ID via `memory-get`; once GC deletes them, they are no longer available. The `memory-delete` tool provides explicit cleanup when needed.
 
 ## Memory Retrieval & Reranking
 
