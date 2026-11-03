@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   appSidebarStorageKey,
+  createAppSidebarRegistry,
   createAppSidebarStore,
   parseAppSidebarPreferences,
   visibleSidebarApps,
@@ -10,6 +11,35 @@ const apps = [
   { id: "b", name: "Zebra" },
   { id: "a", name: "Alpha" },
 ];
+
+describe("app sidebar registry", () => {
+  test("an abandoned render does not register its store", () => {
+    const scope = createAppSidebarRegistry();
+    const abandoned = scope("key", { getItem: () => '{"mode":"hidden"}', setItem: () => {} });
+    expect(abandoned.getSnapshot().mode).toBe("hidden");
+    const committed = scope("key");
+    const unsubscribe = committed.subscribe(() => {});
+    expect(committed.getSnapshot().mode).toBe("all");
+    expect(abandoned.getSnapshot().mode).toBe("all");
+    unsubscribe();
+  });
+
+  test("committed consumers share updates and retain memory after route remounts", () => {
+    const scope = createAppSidebarRegistry();
+    const first = scope("key");
+    const second = scope("key");
+    let notified = 0;
+    const offFirst = first.subscribe(() => notified++);
+    const offSecond = second.subscribe(() => notified++);
+    first.set({ mode: "selected", selectedIds: ["a"] });
+    expect(notified).toBe(2);
+    expect(second.getSnapshot()).toBe(first.getSnapshot());
+    offFirst();
+    offSecond();
+    expect(scope("key").getSnapshot()).toEqual({ mode: "selected", selectedIds: ["a"] });
+    expect(scope("other").getSnapshot().mode).toBe("all");
+  });
+});
 
 describe("app sidebar preferences", () => {
   test("defaults to all apps and rejects malformed stored settings", () => {

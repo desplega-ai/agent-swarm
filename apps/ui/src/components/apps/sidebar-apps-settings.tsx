@@ -1,6 +1,6 @@
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { useApps } from "@/api/hooks/use-apps";
-import { SettingsIcon } from "@/components/icons/settings";
+import { SettingsIcon, type SettingsIconHandle } from "@/components/icons/settings";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -29,6 +29,7 @@ export function SidebarAppsSettings() {
   const { preferences, setPreferences } = useAppSidebarPreferences();
   const { data, isPending, isError } = useApps({ enabled: isAdmin });
   const labelId = useId();
+  const iconRef = useRef<SettingsIconHandle>(null);
   if (!isAdmin) return null;
   const apps = visibleSidebarApps(data?.apps ?? [], { mode: "all", selectedIds: [] });
   return (
@@ -39,8 +40,10 @@ export function SidebarAppsSettings() {
           size="icon"
           aria-label="Configure apps in sidebar"
           title="Configure apps in sidebar"
+          onMouseEnter={() => iconRef.current?.startAnimation()}
+          onMouseLeave={() => iconRef.current?.stopAnimation()}
         >
-          <SettingsIcon size={16} aria-hidden />
+          <SettingsIcon ref={iconRef} size={16} aria-hidden />
         </Button>
       </SheetTrigger>
       <SheetContent>

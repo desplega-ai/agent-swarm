@@ -1,24 +1,21 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { appSidebarStorageKey, createAppSidebarStore } from "@/lib/app-sidebar-preferences";
+import { appSidebarStorageKey, createAppSidebarRegistry } from "@/lib/app-sidebar-preferences";
 import { useConfig } from "./use-config";
 
-const stores = new Map<string, ReturnType<typeof createAppSidebarStore>>();
+const scope = createAppSidebarRegistry();
 
 export function useAppSidebarPreferences() {
   const { config } = useConfig();
   const { userId } = useCurrentUser();
   const key = appSidebarStorageKey(config.apiUrl, userId);
-  let store = stores.get(key);
-  if (!store) {
+  const current = useMemo(() => {
     let storage: Storage | undefined;
     try {
       storage = window.localStorage;
     } catch {}
-    store = createAppSidebarStore(key, storage);
-    stores.set(key, store);
-  }
-  const current = store;
+    return scope(key, storage);
+  }, [key]);
   const preferences = useSyncExternalStore(
     current.subscribe,
     current.getSnapshot,

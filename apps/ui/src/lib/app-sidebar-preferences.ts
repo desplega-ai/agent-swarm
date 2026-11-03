@@ -82,3 +82,20 @@ export function createAppSidebarStore(key: string, storage?: Pick<Storage, "getI
     },
   };
 }
+
+export function createAppSidebarRegistry() {
+  const stores = new Map<string, ReturnType<typeof createAppSidebarStore>>();
+  return (key: string, storage?: Pick<Storage, "getItem" | "setItem">) => {
+    const candidate = stores.get(key) ?? createAppSidebarStore(key, storage);
+    const current = () => stores.get(key) ?? candidate;
+    return {
+      getSnapshot: () => current().getSnapshot(),
+      subscribe: (listener: () => void) => {
+        if (!stores.has(key)) stores.set(key, candidate);
+        return current().subscribe(listener);
+      },
+      set: (preferences: AppSidebarPreferences) => current().set(preferences),
+      receive: (raw: string | null) => current().receive(raw),
+    };
+  };
+}
