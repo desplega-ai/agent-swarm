@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.9] - 2026-11-03
+
+### Added
+- Improvements: agents draft product improvements for Desplega with the `submit-improvement` MCP tool or `POST /api/improvements`; only a person can approve and send one. `IMPROVEMENTS_ENABLED=false` turns it off (#2632).
+- RBAC: a built-in auditor role that grants the All users session scope (#2631).
+- Apps: Table row selection and bulk actions (#2655); column filters, loading and error states, and muted values (#2656); smart links, tooltips and cell popovers for tables, detail lists and cards (#2653).
+- UI: a one-time GitHub star nudge after the fifth dashboard prompt (#2652).
+
+### Changed
+- agent-fs pins bumped 0.18.14 -> 0.18.15 (server image, worker CLI, skill tag, `@desplega.ai/agent-fs-just-bash`).
+- Performance: independent awaits on the worker, hook and Slack hot paths now run in parallel (#2642).
+- Docker: bumped pi, ACP SDK, amp and kiro (#2636, #2649); agent-browser 0.41.1 (#2637).
+- Docs: corrected the documented Codex default model (#2626), removed the obsolete harness verification TTL setting (#2643), added the 2026-11-02 release notes (#2634) and synced the TLA+ specs (#2639).
+
+### Fixed
+- Sessions: delegated tasks are grouped under the turn that dispatched them, through a new `dispatchedByTaskId` column (#2654).
+- Onboarding: swarm setup links are redacted and credentials are saved privately (#2650).
+- Codex: OAuth key suffixes are slot-unique (#2646), sparse OAuth slot availability is preserved (#2645), and `CONTEXT_MODE_DISABLED` is honored from the session env (#2638).
+
+### Removed
+- Runner: the obsolete YOLO mode (`--yolo` flag and `YOLO` env var); failed tasks are logged and the runner keeps polling (#2648).
+
 ## [2.7.8] - 2026-11-02
 
 ### Added

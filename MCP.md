@@ -33,6 +33,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
+  - [submit-improvement](#submit-improvement)
   - [resolve-user](#resolve-user)
   - [manage-user](#manage-user)
   - [db-query](#db-query)
@@ -264,7 +265,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
+| `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded \| skipped` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
 | `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
@@ -350,15 +351,15 @@ Returns detailed information about a specific task, including output, failure re
 
 **Store task progress**
 
-Stores the progress of a specific task. Can also mark task as completed or failed, which will set the agent back to idle.
+Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | No | - | Full task UUID. Defaults to the caller-owned task in X-Source-Task-Id; required outside task context. |
 | `progress` | `string` | No | - | The progress update to store. |
-| `status` | `completed \| failed \| in_progress \| pending` | No | - | Set to 'completed' or 'failed' to finish the task. 'in_progress' and 'pending' store progress only and do not change task status. |
+| `status` | `completed \| failed \| skipped \| in_progress \| pending` | No | - | Set to 'completed' or 'failed' to finish the task. Set 'skipped' to end a task that is not yours to handle (a Slack thread message addressed to someone else, or one you have nothing to add to); it posts nothing to the thread, creates no follow-up, and needs a one-line reason in failureReason. Never skip an explicit @mention of you or work assigned to you. 'in_progress' and 'pending' store progress only and do not change task status. |
 | `output` | `string` | No | - | The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card. Keep free-text output under 120 words by default. Name the result and every artifact link, plus any IDs the human needs. Link documents instead of inlining them; omit process narration, transcripts, and restatements of the brief. Exceed the target only when requested depth, enumerated results, essential evidence, caveats, or instructions require it, or when the task's outputSchema requires longer output. When the task carries an outputSchema, output must be JSON matching it. |
-| `failureReason` | `string` | No | - | The reason for failure (used when failing). |
+| `failureReason` | `string` | No | - | The reason for failure (used when failing), or the one-line reason for a skip (required with status 'skipped'). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `citations` | `array` | No | - | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity. |
 | `learning` | `unknown` | No | - | A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. The first line of text is the title. At most ~500 tokens and 5 kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update. |
@@ -383,6 +384,16 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
+
+### submit-improvement
+
+**Draft a product improvement**
+
+Draft a short product improvement for the agent-swarm team at desplega. It is stored as a pending draft and is never sent by this tool: a person must approve it from the Improvements button in the dashboard header. Only the text you write, the install id and the approver's email are sent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | `string` | Yes | - | The product improvement for desplega, in plain words. Do not include names, repos, hosts, customer details or secrets. |
 
 ### resolve-user
 
@@ -1064,7 +1075,7 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `clonePath` | `string` | No | - | New clone path. |
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
-| `hooks` | `unknown` | No | - | Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable. |
+| `hooks` | `unknown` | No | - | Repository hook install config. Best-effort worker hook installation is enabled by default for new repos. Disable it with { enabled: false } (or null), or turn it back on with { enabled: true }. |
 | `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear. |
 
 ## Scheduling Tools
@@ -1133,7 +1144,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
-| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
+| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output. |
 | `output` | `string` | No | - | Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
