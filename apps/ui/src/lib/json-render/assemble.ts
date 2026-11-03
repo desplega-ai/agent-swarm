@@ -12,7 +12,7 @@
  *   - **node ids** — prefixed `ref:<instanceKey>:` so two instances of one
  *     element never collide in the flat `elements` map;
  *   - **interaction ids** (`props.id` of `Form` / `SearchInput` / `Select` /
- *     `Tabs`, and every `/forms/<id>` + `/ui/<id>` path pointing at them) —
+ *     `Tabs` / `Chips` / `Table`, and every `/forms/<id>` + `/ui/<id>` path pointing at them) —
  *     rewritten to `instances/<instanceKey>/<origId>`, so instance 1's input
  *     and instance 2's input hold independent state. No `pages/<p>` segment:
  *     the same instanceKey on two pages of one app shares interaction state,
@@ -71,7 +71,7 @@ export const ELEMENT_KEYS = [
 export const MAX_ELEMENT_REF_DEPTH = 5;
 
 /** Components whose `props.id` roots `/ui/<id>/…` interaction state. */
-const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips"]);
+const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips", "Table"]);
 
 /** Components whose `props.id` roots `/forms/<id>/…` interaction state. */
 const FORM_COMPONENTS = new Set(["Form"]);
@@ -96,6 +96,15 @@ const APP_SCOPED_ACTIONS = new Set(["app.mutate", "app.refresh", "app.action"]);
  * occurrence it did not put there.
  */
 export const DEFINING_APP_PARAM = "$app";
+
+/**
+ * Reserved `app.mutate` param: a state path the handler reports its result to
+ * (`{ status: "ok" }` or `{ status: "error", error }`). The handlers swallow
+ * their own failures, so a runner that must know whether a mutate worked
+ * (Table bulk actions) asks for the outcome here. Runtime-owned like `$app`:
+ * the assembler strips any occurrence app JSON authored.
+ */
+export const OUTCOME_PARAM = "$outcome";
 
 // ─── Input shapes ───────────────────────────────────────────────────────────
 // Structural, deliberately loose: `AppDetail` / `AppDefinition` from
@@ -203,7 +212,7 @@ export const REWRITE_COVERAGE: RewriteRule[] = [
   {
     field: "props",
     rewrites: ["state-paths", "interaction-ids", "prop-substitution", "action-app-binding"],
-    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form/SearchInput/Select/Tabs/Chips",
+    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions, Table.bulkActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form/SearchInput/Select/Tabs/Chips/Table",
   },
   {
     field: "children",
@@ -518,6 +527,14 @@ function rewriteActionStep(step: Record<string, unknown>, scope: Scope): void {
   } else if (params && DEFINING_APP_PARAM in params) {
     delete params[DEFINING_APP_PARAM];
     step.params = params;
+  }
+  // `$outcome` is the runtime's private channel too (a Table bulk runner asks
+  // `app.mutate` to report where it can read the result): app JSON cannot aim
+  // a handler at a state path of its choosing.
+  const authored = isPlainObject(step.params) ? step.params : undefined;
+  if (authored && OUTCOME_PARAM in authored) {
+    const { [OUTCOME_PARAM]: _dropped, ...rest } = authored;
+    step.params = rest;
   }
 
   if (action !== "app.mutate" || !scope.instanceKey) return;

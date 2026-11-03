@@ -81,13 +81,24 @@ export function isLinkColumn(column: ControlColumn): boolean {
 }
 
 /**
- * True when the cell renders its own controls: a link, a copy button or a
- * switch. A popover trigger must sit beside those, never around them, or the
+ * True when the cell renders its own controls: a link, a copy button, a
+ * switch or a checkbox. A popover trigger must sit beside those, never around them, or the
  * cell would nest one control in another and the inner one would swallow the
  * click. A templated column renders text, so only `href` / `link` count there.
  */
 export function cellHasControls(column: ControlColumn): boolean {
   if (isLinkColumn(column)) return true;
   if (column.format) return false;
-  return column.kind === "copy" || column.kind === "switch";
+  return column.kind === "copy" || column.kind === "switch" || column.kind === "checkbox";
+}
+
+/**
+ * True when the phone card gives a column a real control beside the row: an
+ * editable checkbox / switch. It follows the desktop cell rule: a templated
+ * (`format`) column and a link column render as text, so they stay card text.
+ */
+export function isPhoneControlColumn(column: ControlColumn & { onChange?: unknown }): boolean {
+  if (column.format || isLinkColumn(column)) return false;
+  if (column.kind !== "checkbox" && column.kind !== "switch") return false;
+  return Array.isArray(column.onChange) && column.onChange.length > 0;
 }

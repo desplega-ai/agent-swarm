@@ -36,6 +36,7 @@ describe("Table list layer and icons", () => {
       "progress",
       "copy",
       "switch",
+      "checkbox",
       "link",
     ];
     const issues = await issuesFor(
@@ -44,6 +45,23 @@ describe("Table list layer and icons", () => {
       }),
     );
     expect(issues).toEqual([]);
+  });
+
+  test("a checkbox column's onChange chain is validated like a switch's", async () => {
+    const issues = await issuesFor(
+      withProps("table", {
+        columns: [
+          {
+            key: "title",
+            kind: "checkbox",
+            onChange: [{ action: "app.mutate", params: { model: "nope", op: "update" } }],
+          },
+        ],
+      }),
+    );
+    expect(
+      issues.some((i) => i.path.startsWith("pages.main.elements.table.props.columns.0.onChange")),
+    ).toBe(true);
   });
 
   test("onRowClick is an action chain with $row checked against the model", async () => {
@@ -109,5 +127,95 @@ describe("Table list layer and icons", () => {
       },
     ];
     expect(await issuesFor(legacy)).toEqual([]);
+  });
+});
+
+describe("Table row selection", () => {
+  const bulkAction = (extra: Record<string, unknown> = {}) => ({
+    label: "Mark done",
+    icon: "check",
+    actions: [
+      {
+        action: "app.action",
+        params: { name: "triage", input: { ids: { $state: "/ui/orders/selected" } } },
+      },
+    ],
+    ...extra,
+  });
+
+  const idIssue = (issues: { path: string }[]) =>
+    issues.filter((i) => i.path === "pages.main.elements.table.props.id");
+
+  test("selectable with an id validates", async () => {
+    expect(await issuesFor(withProps("table", { id: "orders", selectable: true }))).toEqual([]);
+  });
+
+  test("selectable without an id is rejected at props.id", async () => {
+    const issues = await issuesFor(withProps("table", { selectable: true }));
+    expect(idIssue(issues)).toHaveLength(1);
+    expect(idIssue(issues)[0]!.message).toContain("/ui/<id>/selected");
+  });
+
+  test("bulkActions without an id is rejected, with one validates", async () => {
+    expect(
+      idIssue(await issuesFor(withProps("table", { bulkActions: [bulkAction()] }))),
+    ).toHaveLength(1);
+    expect(
+      await issuesFor(withProps("table", { id: "orders", bulkActions: [bulkAction()] })),
+    ).toEqual([]);
+  });
+
+  test("selectable: false and an empty bulkActions need no id", async () => {
+    expect(await issuesFor(withProps("table", { selectable: false, bulkActions: [] }))).toEqual([]);
+  });
+
+  test("bulkActions take the rowActions fields but not placement", async () => {
+    const withPlacement = await issuesFor(
+      withProps("table", { id: "orders", bulkActions: [bulkAction({ placement: "menu" })] }),
+    );
+    expect(withPlacement.length).toBeGreaterThan(0);
+    const full = await issuesFor(
+      withProps("table", {
+        id: "orders",
+        bulkActions: [
+          bulkAction({
+            variant: "destructive",
+            confirm: {
+              title: "Sure?",
+              description: "Applies to the selection.",
+              confirmLabel: "Go",
+            },
+          }),
+        ],
+      }),
+    );
+    expect(full).toEqual([]);
+  });
+
+  test("a bulk chain is validated like a row action chain", async () => {
+    const issues = await issuesFor(
+      withProps("table", {
+        id: "orders",
+        bulkActions: [bulkAction({ actions: [{ action: "app.nope", params: {} }] })],
+      }),
+    );
+    expect(
+      issues.some((i) =>
+        i.path.startsWith("pages.main.elements.table.props.bulkActions.0.actions"),
+      ),
+    ).toBe(true);
+  });
+
+  test("the selection path resolves only for a Table id that exists", async () => {
+    const wrongId = bulkAction({
+      actions: [
+        {
+          action: "app.action",
+          params: { name: "triage", input: { ids: { $state: "/ui/ghost/selected" } } },
+        },
+      ],
+    });
+    const issues = await issuesFor(withProps("table", { id: "orders", bulkActions: [wrongId] }));
+    expect(issues.some((i) => i.message.includes('unknown UI control "ghost"'))).toBe(true);
   });
 });
