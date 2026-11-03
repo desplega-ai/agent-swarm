@@ -11,9 +11,9 @@ import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./s
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 import {
   getSlackWorkspaceIdentity,
-  identityFromAuthTest,
   installSocketWorkspaceGate,
   isSlackEnterpriseInstall,
+  resolveSlackIdentity,
   setSlackWorkspaceIdentitySource,
 } from "./workspace-guard";
 
@@ -136,9 +136,7 @@ export async function initSlackApp(): Promise<App | null> {
   // this Slack app is never acked, stored or dispatched, so Slack redelivers it.
   const authClient = app.client;
   const enterpriseInstall = isSlackEnterpriseInstall();
-  setSlackWorkspaceIdentitySource(async () =>
-    identityFromAuthTest(await authClient.auth.test(), enterpriseInstall),
-  );
+  setSlackWorkspaceIdentitySource(() => resolveSlackIdentity(authClient, enterpriseInstall));
   installSocketWorkspaceGate(receiver.client);
 
   // Failed validation must remain retryable without requiring stopSlackApp().

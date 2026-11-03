@@ -28,7 +28,9 @@ import {
   installSocketWorkspaceGate,
   isSlackEnterpriseInstall,
   readInboundInstallations,
+  refreshSlackWorkspaceIdentity,
   resetSlackWorkspaceGuardForTests,
+  resolveSlackIdentity,
   type SlackWorkspaceIdentity,
   setSlackWorkspaceIdentitySource,
 } from "../slack/workspace-guard";
@@ -87,7 +89,52 @@ const ORG_INSTALL: SlackWorkspaceIdentity = {
   teamId: null,
   enterpriseId: "E_ORG",
   isEnterpriseInstall: true,
+  orgTeamIds: new Set(["T_GRANTED"]),
 };
+
+// The documented slash command payload (docs.slack.dev/interactivity/implementing-slash-commands):
+// team_id and enterprise_id, no is_enterprise_install.
+function documentedCommand(teamId: string, enterpriseId: string | null) {
+  return {
+    token: "verification",
+    team_id: teamId,
+    team_domain: "example",
+    ...(enterpriseId
+      ? { enterprise_id: enterpriseId, enterprise_name: "Globular Construct Inc" }
+      : {}),
+    channel_id: "C2147483705",
+    channel_name: "test",
+    user_id: "U2147483697",
+    command: "/swarm",
+    text: "status",
+    api_app_id: "A123456",
+    response_url: "https://hooks.slack.com/commands/1/2",
+    trigger_id: "1.2.3",
+  };
+}
+
+// A BlockAction (docs.slack.dev/tools/bolt-js/reference/interfaces/BlockAction):
+// is_enterprise_install is optional, and team is null for an org-wide install.
+function blockAction(
+  team: { id: string; enterprise_id?: string } | null,
+  enterpriseId: string | null,
+  flag?: boolean,
+) {
+  return {
+    type: "block_actions",
+    team,
+    enterprise: enterpriseId ? { id: enterpriseId, name: "Org" } : null,
+    user: { id: "U_HUMAN", team_id: team?.id ?? "T_GRANTED" },
+    api_app_id: "A123456",
+    token: "verification",
+    trigger_id: "1.2.3",
+    response_url: "https://hooks.slack.com/actions/1/2",
+    container: { type: "message", message_ts: "1.000001", channel_id: "C_1" },
+    channel: { id: "C_1", name: "general" },
+    actions: [{ type: "button", action_id: "follow_up_task", block_id: "b", action_ts: "1.1" }],
+    ...(flag === undefined ? {} : { is_enterprise_install: flag }),
+  };
+}
 
 function resolveIdentityFor(
   identity: SlackWorkspaceIdentity,
@@ -242,16 +289,64 @@ describe("classifyInboundOwnership", () => {
         authorizations: [authorization("T_WS", "E_ORG", false)],
       }),
     ).toEqual(FOREIGN);
-    // The flag is required.
-    expect(classify(ORG_INSTALL, { type: "block_actions", enterprise: { id: "E_ORG" } })).toEqual(
-      FOREIGN,
-    );
+    // A delivery marked as a workspace-level install is not the org install's.
+    expect(
+      classify(ORG_INSTALL, {
+        type: "block_actions",
+        enterprise: { id: "E_ORG" },
+        is_enterprise_install: false,
+      }),
+    ).toEqual(FOREIGN);
     expect(
       classify(ORG_INSTALL, {
         type: "event_callback",
         authorizations: [authorization(null, "E_OTHER", true)],
       }),
     ).toEqual(FOREIGN);
+  });
+
+  test("org install: documented payloads without is_enterprise_install, verified by grant", () => {
+    // Slash command from a granted workspace: the documented payload has no flag.
+    expect(classify(ORG_INSTALL, documentedCommand("T_GRANTED", "E_ORG"))).toEqual(OWN_RESULT);
+    // Button with the optional flag omitted, from a granted workspace or with no workspace.
+    expect(classify(ORG_INSTALL, blockAction({ id: "T_GRANTED" }, "E_ORG"))).toEqual(OWN_RESULT);
+    expect(classify(ORG_INSTALL, blockAction(null, "E_ORG"))).toEqual(OWN_RESULT);
+    // Enterprise id carried only on team.
+    expect(
+      classify(ORG_INSTALL, blockAction({ id: "T_GRANTED", enterprise_id: "E_ORG" }, null)),
+    ).toEqual(OWN_RESULT);
+    // A workspace the org install is not granted: some other installation's.
+    expect(classify(ORG_INSTALL, documentedCommand("T_NOT_GRANTED", "E_ORG"))).toEqual(FOREIGN);
+    expect(classify(ORG_INSTALL, blockAction({ id: "T_NOT_GRANTED" }, "E_ORG"))).toEqual(FOREIGN);
+    // Another enterprise, no enterprise, or an explicit workspace-level delivery.
+    expect(classify(ORG_INSTALL, documentedCommand("T_GRANTED", "E_OTHER"))).toEqual(FOREIGN);
+    expect(classify(ORG_INSTALL, documentedCommand("T_GRANTED", null))).toEqual(FOREIGN);
+    expect(classify(ORG_INSTALL, blockAction({ id: "T_GRANTED" }, "E_ORG", false))).toEqual(
+      FOREIGN,
+    );
+    // No grant list resolved: only flagged or workspace-less payloads match.
+    const noGrants = { ...ORG_INSTALL, orgTeamIds: undefined };
+    expect(classify(noGrants, documentedCommand("T_GRANTED", "E_ORG"))).toEqual(FOREIGN);
+    expect(classify(noGrants, blockAction(null, "E_ORG"))).toEqual(OWN_RESULT);
+  });
+
+  test("workspace install: flag-less payloads still need its workspace (B3 holds)", () => {
+    expect(classify(GRID_WORKSPACE, documentedCommand("T_OWN", "E_ORG"))).toEqual(OWN_RESULT);
+    expect(classify(GRID_WORKSPACE, blockAction({ id: "T_OWN" }, "E_ORG"))).toEqual(OWN_RESULT);
+    expect(classify(GRID_WORKSPACE, documentedCommand("T_SIBLING", "E_ORG"))).toEqual(FOREIGN);
+    expect(classify(GRID_WORKSPACE, blockAction(null, "E_ORG"))).toEqual(FOREIGN);
+    expect(classify(GRID_WORKSPACE, blockAction({ id: "T_SIBLING" }, "E_ORG"))).toEqual(FOREIGN);
+  });
+
+  test("a view opened from a Slack Connect channel is attributed to the installing workspace", () => {
+    const view = (installedTeam: string) => ({
+      type: "view_submission",
+      team: { id: "T_PARTNER" },
+      is_enterprise_install: false,
+      view: { id: "V_1", callback_id: "follow_up_submit", app_installed_team_id: installedTeam },
+    });
+    expect(classify(OWN, view("T_OWN"))).toEqual(OWN_RESULT);
+    expect(classify(OWN, view("T_OTHER"))).toEqual(FOREIGN);
   });
 });
 
@@ -301,6 +396,47 @@ describe("identity", () => {
     expect(calls).toBe(1);
   });
 
+  test("an org install resolves its granted workspaces through every auth.teams.list page", async () => {
+    const pages: Array<string | undefined> = [];
+    const client = {
+      auth: {
+        test: async () => ({ team_id: "T_ANY", enterprise_id: "E_ORG" }),
+        teams: {
+          list: async ({ cursor }: { cursor?: string }) => {
+            pages.push(cursor);
+            return cursor
+              ? { teams: [{ id: "T_B" }] }
+              : { teams: [{ id: "T_A" }], response_metadata: { next_cursor: "page2" } };
+          },
+        },
+      },
+    };
+    const org = await resolveSlackIdentity(client, true);
+    expect(org).toMatchObject({ teamId: null, enterpriseId: "E_ORG", isEnterpriseInstall: true });
+    expect([...(org.orgTeamIds ?? [])]).toEqual(["T_A", "T_B"]);
+    expect(pages).toEqual([undefined, "page2"]);
+    // A workspace install never calls auth.teams.list.
+    pages.length = 0;
+    expect(await resolveSlackIdentity(client, false)).toEqual({
+      teamId: "T_ANY",
+      enterpriseId: "E_ORG",
+      isEnterpriseInstall: false,
+    });
+    expect(pages).toEqual([]);
+    // A failed auth.teams.list fails the lookup, so the socket stays closed.
+    const failing = {
+      auth: {
+        ...client.auth,
+        teams: {
+          list: async () => {
+            throw new Error("not_allowed_token_type");
+          },
+        },
+      },
+    };
+    await expect(resolveSlackIdentity(failing, true)).rejects.toThrow(/not_allowed_token_type/);
+  });
+
   test("a failed lookup caches nothing and the next call retries", async () => {
     let calls = 0;
     setSlackWorkspaceIdentitySource(async () => {
@@ -338,13 +474,17 @@ function buildSwarm(getIdentity: () => SlackWorkspaceIdentity | null) {
     await ack();
     created.push(`command:${body.team_id}`);
   });
+  app.action("follow_up_task", async ({ ack, body }) => {
+    await ack();
+    created.push(`action:${body.team?.id ?? "org"}`);
+  });
   return { app, client: receiver.client, created, drain };
 }
 
 /** Emit an envelope the way SocketModeClient does; resolve with whether it was acked. */
 async function emitEnvelope(
   client: SocketClient,
-  type: "events_api" | "slash_commands",
+  type: "events_api" | "slash_commands" | "interactive",
   body: Record<string, unknown>,
 ): Promise<boolean> {
   let acked = false;
@@ -401,6 +541,88 @@ describe("socket gate: before Bolt acks", () => {
       delete (body as Record<string, unknown>).authorizations;
       expect(await emitEnvelope(swarm.client, "events_api", body)).toBe(false);
       expect(swarm.created).toEqual([]);
+    } finally {
+      swarm.drain.stop();
+    }
+  });
+});
+
+describe("socket gate: org install buttons and slash commands", () => {
+  test("flag-less command and button from a granted workspace are acked and handled", async () => {
+    await resolveIdentityFor(ORG_INSTALL);
+    const swarm = buildSwarm(getCachedSlackWorkspaceIdentity);
+    try {
+      const command = documentedCommand("T_GRANTED", "E_ORG");
+      expect(await emitEnvelope(swarm.client, "slash_commands", command)).toBe(true);
+      const button = blockAction({ id: "T_GRANTED" }, "E_ORG");
+      expect(await emitEnvelope(swarm.client, "interactive", button)).toBe(true);
+      const orgSurface = blockAction(null, "E_ORG");
+      expect(await emitEnvelope(swarm.client, "interactive", orgSurface)).toBe(true);
+      expect(swarm.created).toEqual(["command:T_GRANTED", "action:T_GRANTED", "action:org"]);
+    } finally {
+      swarm.drain.stop();
+    }
+  });
+
+  test("another installation's flag-less command and button are withheld", async () => {
+    await resolveIdentityFor(ORG_INSTALL);
+    const swarm = buildSwarm(getCachedSlackWorkspaceIdentity);
+    try {
+      for (const [type, body] of [
+        ["slash_commands", documentedCommand("T_GRANTED", "E_OTHER")],
+        ["slash_commands", documentedCommand("T_GRANTED", null)],
+        ["interactive", blockAction({ id: "T_GRANTED" }, "E_OTHER")],
+        ["interactive", blockAction({ id: "T_GRANTED" }, "E_ORG", false)],
+      ] as const) {
+        expect(await emitEnvelope(swarm.client, type, body)).toBe(false);
+      }
+      expect(swarm.created).toEqual([]);
+    } finally {
+      swarm.drain.stop();
+    }
+  });
+
+  test("a workspace install keeps rejecting a sibling's flag-less command (B3)", async () => {
+    await resolveIdentityFor(GRID_WORKSPACE);
+    const swarm = buildSwarm(getCachedSlackWorkspaceIdentity);
+    try {
+      expect(
+        await emitEnvelope(swarm.client, "slash_commands", documentedCommand("T_SIBLING", "E_ORG")),
+      ).toBe(false);
+      expect(await emitEnvelope(swarm.client, "interactive", blockAction(null, "E_ORG"))).toBe(
+        false,
+      );
+      expect(
+        await emitEnvelope(swarm.client, "slash_commands", documentedCommand("T_OWN", "E_ORG")),
+      ).toBe(true);
+      expect(swarm.created).toEqual(["command:T_OWN"]);
+    } finally {
+      swarm.drain.stop();
+    }
+  });
+
+  test("a newly granted workspace refreshes the grant list once, then passes", async () => {
+    let grants = ["T_GRANTED"];
+    let lookups = 0;
+    setSlackWorkspaceIdentitySource(async () => {
+      lookups += 1;
+      return { ...ORG_INSTALL, orgTeamIds: new Set(grants) };
+    });
+    await getSlackWorkspaceIdentity();
+    const swarm = buildSwarm(getCachedSlackWorkspaceIdentity);
+    try {
+      grants = ["T_GRANTED", "T_NEW"];
+      const command = documentedCommand("T_NEW", "E_ORG");
+      // Withheld while unknown; the miss refreshes the grant list.
+      expect(await emitEnvelope(swarm.client, "slash_commands", command)).toBe(false);
+      expect(lookups).toBe(2);
+      expect(await emitEnvelope(swarm.client, "slash_commands", command)).toBe(true);
+      expect(swarm.created).toEqual(["command:T_NEW"]);
+      // Further misses within 30 s do not call Slack again.
+      const unknown = documentedCommand("T_NOT_GRANTED", "E_ORG");
+      expect(await emitEnvelope(swarm.client, "slash_commands", unknown)).toBe(false);
+      expect(refreshSlackWorkspaceIdentity()).toBeNull();
+      expect(lookups).toBe(2);
     } finally {
       swarm.drain.stop();
     }
@@ -519,7 +741,7 @@ describe("over a shared Slack app (slack-mock)", () => {
     expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(0);
   }, 20_000);
 
-  test("two swarms on one app: every mention reaches its owner once, none is lost", async () => {
+  test("two swarms on one app: a withheld mention is redelivered, never handled by the other", async () => {
     await slack.mock.stop();
     // Short ack timeout so a withheld envelope is redelivered quickly.
     slack = {
