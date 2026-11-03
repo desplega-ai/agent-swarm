@@ -2600,32 +2600,44 @@ export async function createTaskExtended(
       // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
-      if (parent.vcsProvider && !options.vcsProvider) {
-        options.vcsProvider = parent.vcsProvider;
-      }
-      if (parent.vcsRepo && !options.vcsRepo) {
-        options.vcsRepo = parent.vcsRepo;
-      }
-      if (parent.vcsNumber != null && options.vcsNumber == null) {
-        options.vcsNumber = parent.vcsNumber;
-      }
-      if (parent.vcsEventType && !options.vcsEventType) {
-        options.vcsEventType = parent.vcsEventType;
-      }
-      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
-        options.vcsCommentId = parent.vcsCommentId;
-      }
-      if (parent.vcsAuthor && !options.vcsAuthor) {
-        options.vcsAuthor = parent.vcsAuthor;
-      }
-      if (parent.vcsUrl && !options.vcsUrl) {
-        options.vcsUrl = parent.vcsUrl;
-      }
-      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
-        options.vcsInstallationId = parent.vcsInstallationId;
-      }
-      if (parent.vcsNodeId && !options.vcsNodeId) {
-        options.vcsNodeId = parent.vcsNodeId;
+      //
+      // Inherited as an atomic unit, like Slack context above: a child that
+      // names its own vcsRepo different from the parent's (e.g. `send-task
+      // vcsRepo=...`) inherits NONE of the parent's vcs* fields. Otherwise it
+      // would pair its repo with the parent's number/URL, so PR reconciliation
+      // attaches the parent's PR as the child's deliverable and
+      // `findTaskByVcs` matches an unrelated PR with the same number.
+      const inheritParentVcs =
+        !options.vcsRepo ||
+        (!!parent.vcsRepo && options.vcsRepo.toLowerCase() === parent.vcsRepo.toLowerCase());
+      if (inheritParentVcs) {
+        if (parent.vcsProvider && !options.vcsProvider) {
+          options.vcsProvider = parent.vcsProvider;
+        }
+        if (parent.vcsRepo && !options.vcsRepo) {
+          options.vcsRepo = parent.vcsRepo;
+        }
+        if (parent.vcsNumber != null && options.vcsNumber == null) {
+          options.vcsNumber = parent.vcsNumber;
+        }
+        if (parent.vcsEventType && !options.vcsEventType) {
+          options.vcsEventType = parent.vcsEventType;
+        }
+        if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+          options.vcsCommentId = parent.vcsCommentId;
+        }
+        if (parent.vcsAuthor && !options.vcsAuthor) {
+          options.vcsAuthor = parent.vcsAuthor;
+        }
+        if (parent.vcsUrl && !options.vcsUrl) {
+          options.vcsUrl = parent.vcsUrl;
+        }
+        if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+          options.vcsInstallationId = parent.vcsInstallationId;
+        }
+        if (parent.vcsNodeId && !options.vcsNodeId) {
+          options.vcsNodeId = parent.vcsNodeId;
+        }
       }
 
       // Execution context (per-task overrides)
@@ -13874,16 +13886,34 @@ export async function sweepExpiredKv(namespace: string, now = Date.now()): Promi
 /** Delete expired entries across a namespace family (`prefix` and
  * `prefix:*`). Used by per-agent internal stores whose inactive owners may
  * never return to trigger a namespace-local sweep. */
-export async function sweepExpiredKvPrefix(prefix: string, now = Date.now()): Promise<number> {
+export async function sweepExpiredKvPrefix(
+  prefix: string,
+  now = Date.now(),
+  /** Rows per DELETE. The sweep yields the event loop between batches. */
+  batchSize = 500,
+): Promise<number> {
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [prefix, `${escaped}:%`, now],
-  );
-  return result.changes;
+  // Batched, with a macrotask yield between batches: one DELETE of every
+  // expired multi-MB overflow row blocked the event loop for seconds and
+  // starved the Slack socket ping. `now` is fixed for the whole sweep, so the
+  // batches delete the same row set as one statement. kv_entries is WITHOUT
+  // ROWID, so a batch selects the (namespace, key) primary key.
+  let removed = 0;
+  for (;;) {
+    const result = await getDbClient().run(
+      `DELETE FROM kv_entries
+          WHERE (namespace, key) IN (
+            SELECT namespace, key FROM kv_entries
+              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+                AND expires_at IS NOT NULL
+                AND expires_at <= ?
+              LIMIT ?)`,
+      [prefix, `${escaped}:%`, now, batchSize],
+    );
+    removed += result.changes;
+    if (result.changes < batchSize) return removed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 /**

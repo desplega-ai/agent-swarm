@@ -13,7 +13,11 @@
 import type { ColDef, RowClassParams, RowClickedEvent } from "ag-grid-community";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { DataGrid, type DataGridProps } from "@/components/shared/data-grid";
-import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import {
+  MobileList,
+  MobileListRow,
+  type MobileListTitleLines,
+} from "@/components/shared/mobile-list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
@@ -21,6 +25,8 @@ import { cn } from "@/lib/utils";
 
 export interface ListViewMobileRow {
   title: ReactNode;
+  /** Title line limit (see `MobileListRow`). Defaults to 2. */
+  titleLines?: MobileListTitleLines;
   status?: ReactNode;
   meta?: ReactNode[];
   leading?: ReactNode;
@@ -204,6 +210,7 @@ export function ListView<TData>({
               <MobileListRow
                 key={id}
                 title={mobile.title}
+                titleLines={mobile.titleLines}
                 status={mobile.status}
                 meta={mobile.meta}
                 leading={mobile.leading}

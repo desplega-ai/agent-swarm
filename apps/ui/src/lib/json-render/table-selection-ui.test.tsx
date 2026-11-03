@@ -190,6 +190,67 @@ test("the bulk bar shows the count, hidden rows, the actions and Clear", async (
   expect(host.textContent).not.toContain("hidden");
 });
 
+test("the bulk bar puts Clear on the count line and the actions on their own line on a phone", async () => {
+  const { host } = await mount(
+    <BulkActionBar
+      count={2}
+      hidden={0}
+      actions={[
+        { label: "Add to MQ", actions: [{ action: "app.refresh" }] },
+        { label: "Delete", actions: [{ action: "app.refresh" }] },
+      ]}
+      onRun={() => {}}
+      onClear={() => {}}
+    />,
+  );
+  const bar = host.querySelector('[data-testid="table-bulk-bar"]')!;
+  const clear = [...bar.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Clear")!;
+  // Phone: a two-column grid; Clear is pinned to row 1 beside the count, the
+  // actions wrapper spans row 2.
+  expect(bar.className).toContain("grid-cols-");
+  expect(clear.className).toContain("col-start-2");
+  expect(clear.className).toContain("row-start-1");
+  const actionsWrap = clear.parentElement!.firstElementChild!;
+  expect(actionsWrap.className).toContain("col-span-2");
+  expect(actionsWrap.className).toContain("row-start-2");
+  expect(actionsWrap.querySelectorAll("button").length).toBe(2);
+  // From md up both wrappers dissolve, so the bar keeps its one-row desktop layout.
+  expect(bar.className).toContain("md:flex");
+  expect(clear.parentElement!.className).toContain("contents");
+  expect(actionsWrap.className).toContain("md:contents");
+});
+
+test("the bulk bar renders no empty actions line when the author declares no bulk actions", async () => {
+  const { host } = await mount(
+    <BulkActionBar count={1} hidden={0} actions={[]} onRun={() => {}} onClear={() => {}} />,
+  );
+  const bar = host.querySelector('[data-testid="table-bulk-bar"]')!;
+  expect(bar.querySelectorAll(".row-start-2").length).toBe(0);
+  expect([...bar.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Clear"]);
+});
+
+test("a phone row clamps its title to two lines by default and shows all of it on request", async () => {
+  const long =
+    "feat(models): profile validity check, credential allowlist, tier overrides and more";
+  const { host } = await mount(
+    <ul>
+      <MobileListRow title={long} />
+      <MobileListRow title={long} titleLines={3} />
+      <MobileListRow title={long} titleLines={1} />
+      <MobileListRow title={long} titleLines="full" />
+    </ul>,
+  );
+  const titles = [...host.querySelectorAll("li")].map(
+    (li) => li.querySelector("span.font-medium")!,
+  );
+  expect(titles.map((t) => t.className.match(/line-clamp-\d/)?.[0] ?? null)).toEqual([
+    "line-clamp-2",
+    "line-clamp-3",
+    "line-clamp-1",
+    null,
+  ]);
+});
+
 test("a phone row's checkbox sits beside the row button, never inside it", async () => {
   const changes: string[] = [];
   const opened: string[] = [];

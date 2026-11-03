@@ -70,11 +70,26 @@ export function MobileList({
   );
 }
 
+/**
+ * How many lines a row title may take before it ends in an ellipsis. "full"
+ * shows the whole title: a phone has no hover tooltip to read a clipped one.
+ */
+export type MobileListTitleLines = 1 | 2 | 3 | "full";
+
+// Full class names, so Tailwind's scanner sees them.
+const TITLE_LINES_CLASS: Record<MobileListTitleLines, string> = {
+  1: "line-clamp-1",
+  2: "line-clamp-2",
+  3: "line-clamp-3",
+  full: "",
+};
+
 export function MobileListRow({
   to,
   onClick,
   selected,
   title,
+  titleLines = 2,
   leading,
   status,
   meta,
@@ -89,6 +104,8 @@ export function MobileListRow({
   /** Highlights the row whose detail is open. */
   selected?: boolean;
   title: ReactNode;
+  /** Title line limit. Defaults to 2; "full" never clamps. */
+  titleLines?: MobileListTitleLines;
   /** Avatar or icon before the title. */
   leading?: ReactNode;
   /** Status chip, kept on the title line so it is never pushed off-screen. */
@@ -138,7 +155,12 @@ export function MobileListRow({
       {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex min-w-0 items-start gap-2">
-          <span className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere] line-clamp-2">
+          <span
+            className={cn(
+              "min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]",
+              TITLE_LINES_CLASS[titleLines],
+            )}
+          >
             {title}
           </span>
           {status ? <span className="shrink-0">{status}</span> : null}

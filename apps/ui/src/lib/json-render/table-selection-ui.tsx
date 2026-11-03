@@ -310,7 +310,7 @@ export function BulkActionBar({
       aria-label="Selection actions"
       data-testid="table-bulk-bar"
       className={cn(
-        "sticky bottom-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-3 py-2 shadow-lg",
+        "sticky bottom-3 z-10 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-3 py-2 shadow-lg md:flex md:flex-wrap",
         className,
       )}
     >
@@ -320,20 +320,32 @@ export function BulkActionBar({
           <span className="ml-1.5 font-normal text-muted-foreground">({hidden} hidden)</span>
         ) : null}
       </span>
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {actions.map((action, index) => (
-          <Button
-            key={`${index}-${action.label}`}
-            size="sm"
-            variant={action.variant ?? "outline"}
-            disabled={busy}
-            onClick={() => onRun(index)}
-          >
-            <CatalogIcon name={action.icon} size="sm" />
-            {action.label}
-          </Button>
-        ))}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onClear}>
+      {/* Phone: a grid with the count and Clear on line one, the actions on line
+          two. From md up both wrappers dissolve into one right-aligned row. */}
+      <div className="contents md:ml-auto md:flex md:flex-wrap md:items-center md:gap-2">
+        {actions.length > 0 ? (
+          <div className="col-span-2 row-start-2 flex flex-wrap items-center gap-2 md:contents">
+            {actions.map((action, index) => (
+              <Button
+                key={`${index}-${action.label}`}
+                size="sm"
+                variant={action.variant ?? "outline"}
+                disabled={busy}
+                onClick={() => onRun(index)}
+              >
+                <CatalogIcon name={action.icon} size="sm" />
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="col-start-2 row-start-1"
+          disabled={busy}
+          onClick={onClear}
+        >
           Clear
         </Button>
       </div>

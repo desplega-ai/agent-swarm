@@ -34,6 +34,7 @@ import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows"
 import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
+import { withLoopPath } from "../be/event-loop-lag";
 import { ensure } from "../utils/business-use";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
@@ -579,7 +580,9 @@ export function startScheduler(
     .then(async () => {
       if (schedulerRun !== run) return;
       schedulerInterval = setInterval(() => {
-        void processSchedules().catch((err) => console.error("[Scheduler] Poll failed:", err));
+        void withLoopPath("scheduler.poll", () => processSchedules()).catch((err) =>
+          console.error("[Scheduler] Poll failed:", err),
+        );
       }, intervalMs);
       await processSchedules();
     })

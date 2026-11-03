@@ -30,7 +30,15 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-afterEach(() => setWidth(1024));
+const roots: { unmount(): void }[] = [];
+
+afterEach(async () => {
+  // Unmount so no scheduled React work outlives GlobalRegistrator.unregister().
+  await act(async () => {
+    for (const root of roots.splice(0)) root.unmount();
+  });
+  setWidth(1024);
+});
 
 afterAll(async () => {
   await GlobalRegistrator.unregister();
@@ -45,6 +53,7 @@ async function mountPhoneTable(
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  roots.push(root);
   await act(async () =>
     root.render(
       // useIsMobile reads the width in an effect, so the first render is the
@@ -92,4 +101,18 @@ test("the phone card renders a formatted or link checkbox/switch column as text,
   // The formatted columns keep their templated text on the card.
   expect(host.textContent).toContain("FMT-proxy88");
   expect(host.textContent).toContain("SWFMT-proxy88");
+});
+
+test("the phone card shows the whole title, no line clamp", async () => {
+  const title = "feat(models): profile validity check, credential allowlist, tier overrides";
+  const host = await mountPhoneTable(
+    [
+      { key: "name", label: "Name" },
+      { key: "state", label: "State" },
+    ],
+    [{ id: "r1", name: title, state: "open" }],
+  );
+  const span = host.querySelector("li span.font-medium")!;
+  expect(span.textContent).toBe(title);
+  expect(span.className).not.toContain("line-clamp");
 });
