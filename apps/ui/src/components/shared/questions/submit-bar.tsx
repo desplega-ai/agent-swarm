@@ -122,6 +122,7 @@ export function SubmitBar({
   error,
   onSubmit,
   onDiscard,
+  label: customLabel,
 }: {
   request: Pick<ApprovalRequest, "status" | "workflowRunId">;
   progress: AnswerProgress;
@@ -130,10 +131,12 @@ export function SubmitBar({
   error: string | null;
   onSubmit: () => void;
   onDiscard: () => void;
+  /** Replaces "Submit" / "Submit · reject" on the button and in its tooltip. */
+  label?: string;
 }) {
   const blocked = progress.blockedReason;
   const pct = progress.total ? (progress.answered / progress.total) * 100 : 0;
-  const label = progress.rejects ? "Submit · reject" : "Submit";
+  const label = customLabel ?? (progress.rejects ? "Submit · reject" : "Submit");
   return (
     <motion.div
       initial={{ y: "100%", opacity: 0 }}
@@ -205,7 +208,9 @@ export function SubmitBar({
                 </span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">{blocked ?? `Submit (${MOD}+Enter)`}</TooltipContent>
+            <TooltipContent side="top">
+              {blocked ?? `${customLabel ?? "Submit"} (${MOD}+Enter)`}
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>
