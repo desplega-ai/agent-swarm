@@ -15,7 +15,12 @@ import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
-import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
+import {
+  isSlackRenderV2Enabled,
+  processSlackRenderV2,
+  startSlackRenderV2Events,
+  stopSlackRenderV2Events,
+} from "./render-v2";
 import {
   getAgentDisplayName,
   getAgentSlackIcon,
@@ -616,10 +621,23 @@ export async function processPendingSlackRelays(now = Date.now()): Promise<void>
   }
 }
 
+export const DEFAULT_SLACK_TASK_WATCHER_INTERVAL_MS = 10_000;
+
+/**
+ * Watcher tick from SLACK_TASK_WATCHER_INTERVAL_MS (milliseconds), else 10 s.
+ * Under render v2 each tick is the full reconcile; task events render their
+ * own thread in between, so the tick is the safety net, not the cadence.
+ */
+export function slackTaskWatcherIntervalMs(): number {
+  const raw = process.env.SLACK_TASK_WATCHER_INTERVAL_MS?.trim();
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SLACK_TASK_WATCHER_INTERVAL_MS;
+}
+
 /**
  * Start watching for Slack task updates and sending responses.
  */
-export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
+export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()): Promise<void> {
   if (watcherInterval) {
     console.log("[Slack] Task watcher already running");
     return;
@@ -676,6 +694,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     );
   }
 
+  startSlackRenderV2Events();
   watcherInterval = setInterval(async () => {
     // Prevent overlapping processing cycles
     if (isProcessing || !getSlackApp()) return;
@@ -858,6 +877,7 @@ export function stopTaskWatcher(): void {
     clearInterval(watcherInterval);
     watcherInterval = null;
     isProcessing = false;
+    stopSlackRenderV2Events();
     console.log("[Slack] Task watcher stopped");
   }
 }
