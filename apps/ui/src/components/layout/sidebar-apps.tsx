@@ -36,10 +36,10 @@ export function SidebarApps() {
   const isAdmin = useIsAdmin();
   const { preferences } = useAppSidebarPreferences();
   const enabled = isAdmin && preferences.mode !== "hidden";
-  const { data, isError } = useApps({ enabled });
+  const { data } = useApps({ enabled });
   const { pathname } = useLocation();
   if (!enabled) return null;
-  const apps = isError ? [] : visibleSidebarApps(data?.apps ?? [], preferences);
+  const apps = visibleSidebarApps(data?.apps ?? [], preferences);
   const items = [
     ...apps.map((app) => ({
       label: app.name,

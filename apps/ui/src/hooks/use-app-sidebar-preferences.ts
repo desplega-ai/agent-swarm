@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { appSidebarStorageKey, createAppSidebarRegistry } from "@/lib/app-sidebar-preferences";
+import {
+  type AppSidebarPreferences,
+  appSidebarStorageKey,
+  createAppSidebarRegistry,
+} from "@/lib/app-sidebar-preferences";
 import { useConfig } from "./use-config";
 
 const scope = createAppSidebarRegistry();
 
 export function useAppSidebarPreferences() {
   const { config } = useConfig();
-  const { userId } = useCurrentUser();
+  const { userId, state } = useCurrentUser();
+  const isReady = state === "ready" && userId !== null;
   const key = appSidebarStorageKey(config.apiUrl, userId);
   const current = useMemo(() => {
     let storage: Storage | undefined;
@@ -28,5 +33,11 @@ export function useAppSidebarPreferences() {
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
   }, [key, current]);
-  return { preferences, setPreferences: current.set };
+  const setPreferences = useCallback(
+    (next: AppSidebarPreferences) => {
+      if (isReady) current.set(next);
+    },
+    [current, isReady],
+  );
+  return { preferences, setPreferences, isReady };
 }

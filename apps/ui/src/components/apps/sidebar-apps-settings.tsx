@@ -26,7 +26,7 @@ import { useIsAdmin } from "@/lib/use-can";
 
 export function SidebarAppsSettings() {
   const isAdmin = useIsAdmin();
-  const { preferences, setPreferences } = useAppSidebarPreferences();
+  const { preferences, setPreferences, isReady } = useAppSidebarPreferences();
   const { data, isPending, isError } = useApps({ enabled: isAdmin });
   const labelId = useId();
   const iconRef = useRef<SettingsIconHandle>(null);
@@ -38,6 +38,7 @@ export function SidebarAppsSettings() {
         <Button
           variant="outline"
           size="icon"
+          disabled={!isReady}
           aria-label="Configure apps in sidebar"
           title="Configure apps in sidebar"
           onMouseEnter={() => iconRef.current?.startAnimation()}
@@ -60,6 +61,7 @@ export function SidebarAppsSettings() {
           </p>
           <SettingsRow label="Show apps" htmlFor={labelId}>
             <Select
+              disabled={!isReady}
               value={preferences.mode}
               onValueChange={(mode) =>
                 setPreferences({ ...preferences, mode: mode as AppSidebarMode })
@@ -89,6 +91,7 @@ export function SidebarAppsSettings() {
                 apps.map((app) => (
                   <Label key={app.id} className="flex items-center gap-3 text-sm">
                     <Checkbox
+                      disabled={!isReady}
                       checked={preferences.selectedIds.includes(app.id)}
                       onCheckedChange={(checked) =>
                         setPreferences({
