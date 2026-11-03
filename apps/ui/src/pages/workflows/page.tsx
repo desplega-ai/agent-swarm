@@ -160,6 +160,7 @@ export default function WorkflowsPage() {
       ...(anyNeedsSetup
         ? [
             {
+              colId: "setup",
               headerName: "Setup",
               context: HIDE_WHEN_COMPACT,
               width: 190,
@@ -182,6 +183,7 @@ export default function WorkflowsPage() {
           ]
         : []),
       {
+        colId: "nodes",
         headerName: "Nodes",
         context: HIDE_WHEN_COMPACT,
         width: 100,
@@ -269,6 +271,7 @@ export default function WorkflowsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
       {
+        colId: "duration",
         headerName: "Duration",
         context: HIDE_WHEN_COMPACT,
         width: 120,

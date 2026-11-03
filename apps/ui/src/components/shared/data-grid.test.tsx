@@ -139,6 +139,29 @@ describe("summarizeGridColumns", () => {
     ]);
   });
 
+  test("counts and restores a compact column that has no colId or field", () => {
+    // Provider keys "Cost" and Schedules "Schedule" are valueGetter columns with a header only.
+    const withComputed: ColDef[] = [
+      ...cols,
+      { headerName: "Cost", width: 110, valueGetter: () => 0, context: HIDE_WHEN_COMPACT },
+    ];
+    const narrow = summarizeGridColumns(withComputed, resolveCompactColumnDefs(withComputed, 464));
+    expect(narrow.hiddenCount).toBe(2);
+    expect(narrow.entries.at(-1)).toEqual({
+      id: "header:Cost",
+      label: "Cost",
+      visible: false,
+      toggleable: true,
+    });
+
+    const restored = resolveCompactColumnDefs(withComputed, 464, {
+      show: new Set(["header:Cost"]),
+      hide: new Set(),
+    });
+    expect(restored.find((c) => c.headerName === "Cost")?.hide).toBeUndefined();
+    expect(summarizeGridColumns(withComputed, restored).hiddenCount).toBe(1);
+  });
+
   test("reports zero hidden when every column fits", () => {
     expect(summarizeGridColumns(cols, resolveCompactColumnDefs(cols, 610)).hiddenCount).toBe(0);
   });

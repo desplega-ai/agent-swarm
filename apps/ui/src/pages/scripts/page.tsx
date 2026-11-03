@@ -106,6 +106,7 @@ export default function ScriptsPage() {
         valueFormatter: (params) => (params.value != null ? `v${params.value}` : ""),
       },
       {
+        colId: "runs",
         headerName: "Runs",
         context: HIDE_WHEN_COMPACT,
         width: 90,

@@ -73,6 +73,7 @@ export function SwarmConfigSection() {
         ),
       },
       {
+        colId: "scopeId",
         headerName: "Agent / Scope ID",
         context: HIDE_WHEN_COMPACT,
         width: 160,

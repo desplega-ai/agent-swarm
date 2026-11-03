@@ -93,6 +93,7 @@ export default function AgentsPage() {
   const gridColumns = useDataGridColumns("agents");
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
+      colId: "model",
       headerName: "Model",
       context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 4 },
       width: 320,
@@ -153,6 +154,7 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: AgentStatus }) => <StatusBadge status={params.value} />,
       },
       {
+        colId: "capacity",
         headerName: "Capacity",
         context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 2 },
         width: 110,

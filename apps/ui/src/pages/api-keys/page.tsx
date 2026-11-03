@@ -507,6 +507,7 @@ export default function ApiKeysPage() {
         ),
       },
       {
+        colId: "cost",
         headerName: "Cost",
         context: HIDE_WHEN_COMPACT,
         width: 100,

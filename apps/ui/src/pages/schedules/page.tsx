@@ -455,6 +455,7 @@ export default function SchedulesPage() {
         ),
       },
       {
+        colId: "setup",
         headerName: "Setup",
         context: HIDE_WHEN_COMPACT,
         width: 190,
@@ -475,6 +476,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "schedule",
         headerName: "Schedule",
         context: HIDE_WHEN_COMPACT,
         width: 250,
@@ -521,6 +523,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "model",
         headerName: "Model",
         context: HIDE_WHEN_COMPACT,
         width: 150,

@@ -63,9 +63,16 @@ function columnWidth(col: ColDef): number {
   return Math.max(base ?? FALLBACK_COLUMN_WIDTH, col.minWidth ?? 0);
 }
 
-/** A column's stable id for menus and persistence: `colId`, else `field`. */
+/**
+ * A column's stable id for menus and persistence: `colId`, else `field`. A
+ * `HIDE_WHEN_COMPACT` column with neither falls back to its header, so it can
+ * never auto-hide without a menu entry. Give such columns a `colId` anyway:
+ * renaming the header would drop the saved choice.
+ */
 export function gridColumnId(col: ColDef): string | undefined {
-  return col.colId ?? (typeof col.field === "string" ? col.field : undefined);
+  if (col.colId) return col.colId;
+  if (typeof col.field === "string") return col.field;
+  return col.context?.hideWhenCompact && col.headerName ? `header:${col.headerName}` : undefined;
 }
 
 /** User choices from the columns menu, keyed by `gridColumnId`. */

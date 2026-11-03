@@ -2270,6 +2270,7 @@ function CredentialBindingsSection({
         ),
       },
       {
+        colId: "token",
         headerName: "Token",
         context: HIDE_WHEN_COMPACT,
         width: 100,
@@ -2281,6 +2282,7 @@ function CredentialBindingsSection({
           ),
       },
       {
+        colId: "usedBy",
         headerName: "Used By",
         context: HIDE_WHEN_COMPACT,
         width: 105,
