@@ -1,11 +1,11 @@
 /**
  * Share-preview (Open Graph / Twitter card) tags for public pages.
  *
- * `/p/:id` injects these into a public HTML page so a link unfurls with the
- * page's own title and description. The card image is rendered by the
- * dashboard (`apps/ui/api/og.ts`; the nginx image serves the generic card
- * there), so it is only linked when an app URL is configured. Non-public pages never get these tags: their title and
- * description must not reach an unauthenticated crawler.
+ * `/p/:id` injects these into a public HTML page so a link unfurl shows the
+ * page's own title, description and card. The API renders that card itself
+ * (`/p/:id/og.png`, `src/pages/page-og-card.ts`), so it needs no dashboard.
+ * Non-public pages never get these tags: their title and description must not
+ * reach an unauthenticated crawler.
  */
 
 /** Longest description sent in a tag or the card URL; the card clips it further. */
@@ -14,7 +14,7 @@ const MAX_DESCRIPTION = 200;
 export interface PageShareMeta {
   title: string;
   description: string | null;
-  /** Absolute card URL, or null when no dashboard renders one. */
+  /** Absolute card URL, or null for a text-only preview. */
   imageUrl: string | null;
 }
 
@@ -36,28 +36,17 @@ export function clipText(text: string, max: number): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, "")}…`;
 }
 
-/** The dashboard card URL for a title and description (`/api/og`, the landing card params). */
-export function pageOgImageUrl(
-  appUrl: string,
-  title: string,
-  description: string | null | undefined,
-): string {
-  const params = new URLSearchParams({ title: clipText(title, 120) });
-  const subtitle = description?.trim();
-  if (subtitle) params.set("subtitle", clipText(subtitle, 160));
-  return `${appUrl.replace(/\/+$/, "")}/api/og?${params}`;
+/** The API's own card for a page: `<apiBase>/p/<id>/og.png`. */
+export function pageOgImageUrl(apiBaseUrl: string, pageId: string): string {
+  return `${apiBaseUrl.replace(/\/+$/, "")}/p/${encodeURIComponent(pageId)}/og.png`;
 }
 
 export function buildPageShareMeta(
   page: { title: string; description?: string | null },
-  appUrl: string | null,
+  imageUrl: string | null,
 ): PageShareMeta {
   const description = page.description?.trim() ? clipText(page.description, MAX_DESCRIPTION) : null;
-  return {
-    title: page.title,
-    description,
-    imageUrl: appUrl ? pageOgImageUrl(appUrl, page.title, page.description) : null,
-  };
+  return { title: page.title, description, imageUrl };
 }
 
 /** True when the body already sets its own `og:title`; the author's tags win. */

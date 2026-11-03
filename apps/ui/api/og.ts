@@ -2,7 +2,8 @@
  * GET /api/og?title=&subtitle=[&accent=]: the 1200x630 page share card
  * (`og/page-card.ts`), the agent-swarm.dev landing card ported here so
  * a dashboard deployed with these functions renders its own previews. The
- * nginx image has no JS runtime and serves the generic card at this path.
+ * nginx image has no JS runtime: the swarm API renders the same card there
+ * (`/p/:id/og.png`, src/pages/page-og-card.ts).
  *
  * Vercel Node.js function (not Edge): the Edge bundler turns
  * `new URL(<asset>, import.meta.url)` into blob-asset imports that a root-dir

@@ -8,3 +8,15 @@ declare module "*.wasm" {
   const path: string;
   export default path;
 }
+
+// Bun imports these as their path with `with { type: "file" }` (embedded in a
+// compiled binary): the page share card's fonts and images.
+declare module "*.ttf" {
+  const path: string;
+  export default path;
+}
+
+declare module "*.png" {
+  const path: string;
+  export default path;
+}

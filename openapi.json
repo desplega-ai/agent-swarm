@@ -38250,6 +38250,82 @@
         }
       }
     },
+    "/p/{id}/og.png": {
+      "get": {
+        "summary": "Share card image (1200x630 PNG) for a public page",
+        "tags": [
+          "Pages"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The card"
+          },
+          "404": {
+            "description": "No public page with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The card renderer failed to load",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/p/{id}/share": {
+      "get": {
+        "summary": "Link-preview HTML for a public page's dashboard link (crawler view of /pages/{id})",
+        "tags": [
+          "Pages"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share tags and a link to the page"
+          },
+          "404": {
+            "description": "No public page with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/prompt-templates/resolved": {
       "get": {
         "summary": "Resolve a prompt template for a given event type and scope chain",

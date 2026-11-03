@@ -33,15 +33,20 @@ import {
   PAGE_MODE_PARAM,
   PAGE_THEME_PARAM,
 } from "../pages/page-head";
-import { buildPageShareMeta, renderPageShareMeta } from "../pages/page-og";
+import { buildPageShareMeta, pageOgImageUrl, renderPageShareMeta } from "../pages/page-og";
 import { resolvePageTheme } from "../themes/page-theme";
 import { getThemePreset } from "../themes/presets";
 import { HIVE_PAGE_TOKENS, PAGE_THEME_TOKENS } from "../themes/tokens";
 import { listenOnFreePort } from "./test-net";
 
-/** The share tags a public page gets first in its head when no app URL is set. */
-const shareTags = (title: string) =>
-  renderPageShareMeta(buildPageShareMeta({ title, description: null }, null));
+/** The API origin the suite pins, so card URLs are predictable. */
+const PUBLIC_API = "https://api.test";
+
+/** The share tags a public page gets first in its head: its title and the API's card. */
+const shareTags = (title: string, id: string) =>
+  renderPageShareMeta(
+    buildPageShareMeta({ title, description: null }, pageOgImageUrl(PUBLIC_API, id)),
+  );
 
 const TEST_DB_PATH = "./test-pages-head-v2.sqlite";
 
@@ -370,6 +375,7 @@ describe("GET /p/:id serves the head of the page's design version", () => {
 
   let origAppUrl: string | undefined;
   let origDashboardUrl: string | undefined;
+  const origPublicApi = process.env.PUBLIC_MCP_BASE_URL;
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -377,6 +383,7 @@ describe("GET /p/:id serves the head of the page's design version", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
+    process.env.PUBLIC_MCP_BASE_URL = PUBLIC_API;
     origAppUrl = process.env.APP_URL;
     origDashboardUrl = process.env.DASHBOARD_URL;
     delete process.env.APP_URL;
@@ -397,6 +404,8 @@ describe("GET /p/:id serves the head of the page's design version", () => {
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
+    if (origPublicApi === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
+    else process.env.PUBLIC_MCP_BASE_URL = origPublicApi;
     if (origAppUrl === undefined) delete process.env.APP_URL;
     else process.env.APP_URL = origAppUrl;
     if (origDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
@@ -425,28 +434,30 @@ describe("GET /p/:id serves the head of the page's design version", () => {
 
   test("a v2 body without a doctype or a <head> is served in standards mode", async () => {
     // A public page's share tags come first, then the head.
-    const head = (index: number) => `${shareTags(`standards-${index}`)}<base target="_blank">`;
-    const cases: [body: string, start: (index: number) => string, end: string][] = [
+    const head = (index: number, id: string) =>
+      `${shareTags(`standards-${index}`, id)}<base target="_blank">`;
+    const cases: [body: string, start: (head: string) => string, end: string][] = [
       // A fragment: the doctype is prepended and the head follows it.
-      ["<h1>Hi</h1>", (i) => `<!doctype html>${head(i)}`, "</script><h1>Hi</h1>"],
+      ["<h1>Hi</h1>", (h) => `<!doctype html>${h}`, "</script><h1>Hi</h1>"],
       // A doctype and no <html>: the head follows the doctype, not doubled.
-      ["\n<!DOCTYPE html>\n<p>x</p>", (i) => `\n<!DOCTYPE html>${head(i)}`, "</script>\n<p>x</p>"],
+      ["\n<!DOCTYPE html>\n<p>x</p>", (h) => `\n<!DOCTYPE html>${h}`, "</script>\n<p>x</p>"],
       // An <html> tag and no <head>: the head follows <html ...>.
       [
         '<!doctype html>\n<html lang="en"><body>x</body></html>',
-        (i) => `<!doctype html>\n<html lang="en">${head(i)}`,
+        (h) => `<!doctype html>\n<html lang="en">${h}`,
         "</script><body>x</body></html>",
       ],
       // A <head> and no doctype: the doctype is prepended, the head stays put.
       [
         "<html><head><title>T</title></head><body>x</body></html>",
-        (i) => `<!doctype html><html><head>${head(i)}`,
+        (h) => `<!doctype html><html><head>${h}`,
         "</script><title>T</title></head><body>x</body></html>",
       ],
     ];
     for (const [index, [body, start, end]] of cases.entries()) {
-      const page = await serve(await createPage(`standards-${index}`, { body }));
-      expect(page.startsWith(start(index))).toBe(true);
+      const id = await createPage(`standards-${index}`, { body });
+      const page = await serve(id);
+      expect(page.startsWith(start(head(index, id)))).toBe(true);
       expect(page.endsWith(end)).toBe(true);
     }
   });
@@ -471,7 +482,7 @@ describe("GET /p/:id serves the head of the page's design version", () => {
     ).text();
     const id = await createPage("v1-page", { designVersion: 1 });
     const page = await serve(id, `?${PAGE_THEME_PARAM}=github&${PAGE_MODE_PARAM}=dark`);
-    expect(page).toContain(`<head>${shareTags("v1-page")}${baseline}<script>`);
+    expect(page).toContain(`<head>${shareTags("v1-page", id)}${baseline}<script>`);
     expect(page).toContain("--swarm-bg: #fbfbfa");
     expect(page).not.toContain("@tailwindcss/browser");
     expect(page).not.toContain(DARK_SCRIPT);

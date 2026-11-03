@@ -195,6 +195,17 @@ export const knowledgePages: Scenario = {
           og.body === undefined,
         `share metadata is title and description only: ${JSON.stringify(og).slice(0, 200)}`,
       );
+      response = await ctx.api("GET", `/p/${pub.id}/share`, { apiKey: null });
+      expectStatus(response, [200], "public page crawler view");
+      expect(
+        response.text.includes(`<meta property="og:title" content="Public page ${ctx.nonce}">`) &&
+          response.text.includes(`/p/${pub.id}/og.png"`) &&
+          !response.text.includes(marker),
+        "the crawler view carries the page's tags and card, never its body",
+      );
+      response = await ctx.api("GET", `/p/${pub.id}/og.png`, { apiKey: null });
+      expectStatus(response, [200], "public page share card");
+      expect(response.headers.get("content-type") === "image/png", "the card is a PNG");
       response = await ctx.api("GET", `/p/${crypto.randomUUID()}`, { apiKey: null });
       expectStatus(response, [404], "serve an unknown page");
       response = await ctx.api("GET", `/p/${crypto.randomUUID()}.json`, { apiKey: null });
@@ -258,6 +269,10 @@ export const knowledgePages: Scenario = {
       expectStatus(response, [401], "an authed page as JSON without a session");
       response = await ctx.api("GET", `/p/${authed.id}/og`, { apiKey: null });
       expectStatus(response, [404], "an authed page has no share metadata");
+      for (const suffix of ["share", "og.png"]) {
+        response = await ctx.api("GET", `/p/${authed.id}/${suffix}`, { apiKey: null });
+        expectStatus(response, [404], `an authed page has no /${suffix}`);
+      }
       response = await ctx.api("POST", `/api/pages/${authed.id}/launch`);
       expectStatus(response, [204], "launch an authed page");
       const authedCookies = cookieHeader(response.headers);

@@ -1,10 +1,12 @@
 /**
  * Share previews for pages:
  *   - `/p/:id` injects Open Graph + Twitter tags into a PUBLIC html page, with
- *     the dashboard card URL only when an app URL is configured
+ *     the API's own card (`/p/:id/og.png`), no dashboard needed
  *   - a body that sets its own `og:title` keeps its tags
- *   - `/p/:id/og` returns title + description for public pages and the same
- *     404 for missing, password and authed pages
+ *   - `/p/:id/og`, `/p/:id/og.png` and `/p/:id/share` answer public pages only,
+ *     with the same 404 for missing, password and authed pages
+ *   - `/p/:id/share` is the crawler view the nginx dashboard proxies
+ *     `/pages/:id` to (`apps/ui/nginx.conf`)
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
@@ -49,15 +51,9 @@ function metaContent(html: string, key: string): string | null {
 }
 
 describe("page-og helpers", () => {
-  test("card URL carries title and subtitle as the landing /api/og params", () => {
-    const url = new URL(
-      pageOgImageUrl("https://app.example.com/", "Helmcode × Agent Swarm", "A benchmark."),
-    );
-    expect(url.origin + url.pathname).toBe("https://app.example.com/api/og");
-    expect(url.searchParams.get("title")).toBe("Helmcode × Agent Swarm");
-    expect(url.searchParams.get("subtitle")).toBe("A benchmark.");
-    expect(new URL(pageOgImageUrl("https://a.dev", "T", null)).searchParams.has("subtitle")).toBe(
-      false,
+  test("the card URL is the API's own og.png for the page", () => {
+    expect(pageOgImageUrl("https://api.example.com/", "abc-123")).toBe(
+      "https://api.example.com/p/abc-123/og.png",
     );
   });
 
@@ -68,7 +64,10 @@ describe("page-og helpers", () => {
 
   test("tags escape attribute values and pick the card type", () => {
     const html = renderPageShareMeta(
-      buildPageShareMeta({ title: `A "quoted" <b>`, description: "x & y" }, "https://a.dev"),
+      buildPageShareMeta(
+        { title: `A "quoted" <b>`, description: "x & y" },
+        "https://a.dev/p/x/og.png",
+      ),
     );
     expect(metaContent(html, "og:title")).toBe("A &quot;quoted&quot; &lt;b&gt;");
     expect(metaContent(html, "og:description")).toBe("x &amp; y");
@@ -92,6 +91,8 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
   const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
   const ORIG_APP = process.env.APP_URL;
   const ORIG_DASHBOARD = process.env.DASHBOARD_URL;
+  const ORIG_MCP = process.env.MCP_BASE_URL;
+  const ORIG_PUBLIC_MCP = process.env.PUBLIC_MCP_BASE_URL;
 
   async function createPage(body: Record<string, unknown>): Promise<string> {
     const res = await fetch(`${BASE}/api/pages`, {
@@ -109,6 +110,9 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
+    // Card URLs use PUBLIC_MCP_BASE_URL, else the request host.
+    delete process.env.MCP_BASE_URL;
+    delete process.env.PUBLIC_MCP_BASE_URL;
     initDb(TEST_DB_PATH);
     server = createTestServer();
     BASE = `http://localhost:${await listenOnFreePort(server)}`;
@@ -121,6 +125,10 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     else process.env.APP_URL = ORIG_APP;
     if (ORIG_DASHBOARD === undefined) delete process.env.DASHBOARD_URL;
     else process.env.DASHBOARD_URL = ORIG_DASHBOARD;
+    if (ORIG_MCP === undefined) delete process.env.MCP_BASE_URL;
+    else process.env.MCP_BASE_URL = ORIG_MCP;
+    if (ORIG_PUBLIC_MCP === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
+    else process.env.PUBLIC_MCP_BASE_URL = ORIG_PUBLIC_MCP;
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -128,8 +136,8 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     }
   });
 
-  test("a public html page gets its own og tags and the dashboard card", async () => {
-    process.env.APP_URL = "https://app.example.com";
+  test("a public html page gets its own og tags and the API's card", async () => {
+    delete process.env.APP_URL;
     delete process.env.DASHBOARD_URL;
     const id = await createPage({
       slug: "og-public",
@@ -142,27 +150,106 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     expect(metaContent(html, "og:title")).toBe("Helmcode × Agent Swarm: model benchmark");
     expect(metaContent(html, "og:description")).toBe("Open models on 14 tasks.");
     expect(metaContent(html, "twitter:card")).toBe("summary_large_image");
-    const image = metaContent(html, "og:image")?.replace(/&amp;/g, "&") ?? "";
-    const imageUrl = new URL(image);
-    expect(imageUrl.origin + imageUrl.pathname).toBe("https://app.example.com/api/og");
-    expect(imageUrl.searchParams.get("title")).toBe("Helmcode × Agent Swarm: model benchmark");
+    // No app URL configured: the card still comes from the API that served the page.
+    expect(metaContent(html, "og:image")).toBe(`${BASE}/p/${id}/og.png`);
     // The tags land inside <head>, before the body.
     expect(html.indexOf('property="og:title"')).toBeLessThan(html.indexOf("<body>"));
   });
 
-  test("without an app URL the tags omit the card image", async () => {
-    delete process.env.APP_URL;
-    delete process.env.DASHBOARD_URL;
-    const id = await createPage({
-      slug: "og-no-app",
-      title: "No app",
+  test("an internal MCP_BASE_URL never becomes the card origin", async () => {
+    process.env.MCP_BASE_URL = "http://agent-swarm-api:3013";
+    try {
+      const id = await createPage({
+        slug: "og-internal-base",
+        title: "Inside the cluster",
+        authMode: "public",
+        body: "<html><head></head><body>x</body></html>",
+      });
+      const html = await (await fetch(`${BASE}/p/${id}`)).text();
+      expect(metaContent(html, "og:image")).toBe(`${BASE}/p/${id}/og.png`);
+      const share = await (await fetch(`${BASE}/p/${id}/share`)).text();
+      expect(metaContent(share, "og:image")).toBe(`${BASE}/p/${id}/og.png`);
+    } finally {
+      delete process.env.MCP_BASE_URL;
+    }
+  });
+
+  test("PUBLIC_MCP_BASE_URL sets the card origin", async () => {
+    process.env.PUBLIC_MCP_BASE_URL = "https://api.example.com/";
+    try {
+      const id = await createPage({
+        slug: "og-public-base",
+        title: "Behind a proxy",
+        authMode: "public",
+        body: "<html><head></head><body>x</body></html>",
+      });
+      const html = await (await fetch(`${BASE}/p/${id}`)).text();
+      expect(metaContent(html, "og:image")).toBe(`https://api.example.com/p/${id}/og.png`);
+    } finally {
+      delete process.env.PUBLIC_MCP_BASE_URL;
+    }
+  });
+
+  test("/p/:id/og.png renders the page's own card as a PNG", async () => {
+    const first = await createPage({
+      slug: "og-png-a",
+      title: "Quarterly model benchmark",
+      description: "Open models on 14 tasks.",
       authMode: "public",
-      body: "<html><head></head><body>x</body></html>",
+      body: "<p>x</p>",
     });
-    const html = await (await fetch(`${BASE}/p/${id}`)).text();
-    expect(metaContent(html, "og:title")).toBe("No app");
-    expect(metaContent(html, "og:image")).toBeNull();
-    expect(metaContent(html, "twitter:card")).toBe("summary");
+    const second = await createPage({
+      slug: "og-png-b",
+      title: "Release notes for the swarm",
+      authMode: "public",
+      body: "<p>x</p>",
+    });
+    const res = await fetch(`${BASE}/p/${first}/og.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const png = new Uint8Array(await res.arrayBuffer());
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    // IHDR: 1200x630.
+    const view = new DataView(png.buffer, png.byteOffset);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 630]);
+
+    // The card carries the page text: another title draws another image.
+    const other = new Uint8Array(await (await fetch(`${BASE}/p/${second}/og.png`)).arrayBuffer());
+    expect(Buffer.from(other).equals(Buffer.from(png))).toBe(false);
+  }, 30_000);
+
+  test("/p/:id/share is the crawler view of the dashboard link, without a view bump", async () => {
+    process.env.APP_URL = "https://app.example.com";
+    const id = await createPage({
+      slug: "og-share",
+      title: "Shared via the dashboard",
+      description: "What the unfurl says.",
+      authMode: "public",
+      body: "<p>secret body</p>",
+    });
+    const res = await fetch(`${BASE}/p/${id}/share`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const html = await res.text();
+    expect(metaContent(html, "og:title")).toBe("Shared via the dashboard");
+    expect(metaContent(html, "og:description")).toBe("What the unfurl says.");
+    expect(metaContent(html, "og:image")).toBe(`${BASE}/p/${id}/og.png`);
+    expect(metaContent(html, "og:url")).toBe(`https://app.example.com/pages/${id}`);
+    expect(html).not.toContain("secret body");
+
+    const bare = await createPage({
+      slug: "og-share-bare",
+      title: "No description",
+      authMode: "public",
+      body: "<p>x</p>",
+    });
+    const bareHtml = await (await fetch(`${BASE}/p/${bare}/share`)).text();
+    expect(metaContent(bareHtml, "og:description")).toBe("A page shared from Agent Swarm.");
+
+    const meta = await fetch(`${BASE}/api/pages/${id}`, { headers });
+    expect(((await meta.json()) as { viewCount: number }).viewCount).toBe(0);
   });
 
   test("a body with its own og:title keeps only the author tags", async () => {
@@ -215,6 +302,7 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     });
     const before = await fetch(`${BASE}/p/${id}/og`);
     expect(before.status).toBe(200);
+    expect((await fetch(`${BASE}/p/${id}/share`)).status).toBe(200);
     // A shared cache may store neither the metadata nor the tagged HTML.
     expect(before.headers.get("cache-control")).toBe("no-store");
     const page = await fetch(`${BASE}/p/${id}`);
@@ -228,15 +316,17 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     });
     expect(update.status).toBe(200);
 
-    const after = await fetch(`${BASE}/p/${id}/og`);
-    expect(after.status).toBe(404);
-    expect(after.headers.get("cache-control")).toBe("no-store");
-    expect(await after.text()).not.toContain("Soon private");
+    for (const path of ["og", "og.png", "share"]) {
+      const after = await fetch(`${BASE}/p/${id}/${path}`);
+      expect(after.status).toBe(404);
+      expect(after.headers.get("cache-control")).toBe("no-store");
+      expect(await after.text()).not.toContain("Soon private");
+    }
     const gated = await (await fetch(`${BASE}/p/${id}`)).text();
     expect(gated).not.toContain("Soon private");
   });
 
-  test("password and authed pages expose nothing: 404 on /og, no tags on /p/:id", async () => {
+  test("password and authed pages expose nothing: 404 on /og, /og.png and /share, no tags on /p/:id", async () => {
     process.env.APP_URL = "https://app.example.com";
     const authed = await createPage({
       slug: "og-authed",
@@ -254,10 +344,12 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
       body: "<html><head></head><body>x</body></html>",
     });
     for (const id of [authed, locked, crypto.randomUUID()]) {
-      const res = await fetch(`${BASE}/p/${id}/og`);
-      expect(res.status).toBe(404);
-      const text = await res.text();
-      expect(text).not.toContain("Private");
+      for (const path of ["og", "og.png", "share"]) {
+        const res = await fetch(`${BASE}/p/${id}/${path}`);
+        expect(res.status).toBe(404);
+        const text = await res.text();
+        expect(text).not.toContain("Private");
+      }
     }
     // Unlock the password page: the served body still carries no share tags.
     const unlocked = await fetch(`${BASE}/p/${locked}?key=hunter22-hunter22`);

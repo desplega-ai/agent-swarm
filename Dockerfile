@@ -30,6 +30,11 @@ COPY packages/model-routing/ ./packages/model-routing/
 # Copy source files
 COPY src/ ./src/
 COPY templates/ ./templates/
+# Bundled into the binary by src/pages/page-og-card.ts (the page share card the API
+# renders at /p/:id/og.png): the dashboard's card module, its text helpers and assets.
+COPY apps/ui/og/ ./apps/ui/og/
+COPY apps/ui/src/lib/page-share.ts ./apps/ui/src/lib/page-share.ts
+COPY apps/ui/public/logo.png ./apps/ui/public/logo.png
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./
 COPY tsconfig.json ./

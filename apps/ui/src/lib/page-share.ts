@@ -7,6 +7,9 @@
  * swarm API (`GET /p/:id/og`, public pages only) and answers with the page's
  * own title, description and an `/api/og` card (`api/og.ts`). Any miss (no API
  * configured, a private page, a slow or failing API) serves the generic card.
+ * The nginx image gets the same result from the API instead: it proxies
+ * crawlers to `GET /p/:id/share`, which renders with `renderShareHtml` and
+ * points at the API's own card, `/p/:id/og.png`.
  *
  * Runtime-neutral on purpose: the Vercel functions import it, and so do tests.
  */
@@ -22,7 +25,7 @@ export const GENERIC_SHARE = {
 } as const;
 
 /** og:description for a public page that has no description of its own. */
-const PAGE_FALLBACK_DESCRIPTION = "A page shared from Agent Swarm.";
+export const PAGE_FALLBACK_DESCRIPTION = "A page shared from Agent Swarm.";
 
 /** Page ids are UUID-like; anything else never reaches the API. */
 const PAGE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -94,11 +97,16 @@ export function clip(text: string, max: number): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, "")}…`;
 }
 
+/** The card params for a title and description (the landing card's `?title=&subtitle=`). */
+export function pageCardParams(title: string, description: string | null): URLSearchParams {
+  const params = new URLSearchParams({ title: clip(title, 120) });
+  if (description?.trim()) params.set("subtitle", clip(description, 160));
+  return params;
+}
+
 /** The `/api/og` card URL for a title and description (same params as the landing card). */
 export function pageCardUrl(origin: string, title: string, description: string | null): string {
-  const params = new URLSearchParams({ title: clip(title, 120) });
-  if (description) params.set("subtitle", clip(description, 160));
-  return `${origin.replace(/\/+$/, "")}/api/og?${params}`;
+  return `${origin.replace(/\/+$/, "")}/api/og?${pageCardParams(title, description)}`;
 }
 
 function escapeHtml(value: string): string {

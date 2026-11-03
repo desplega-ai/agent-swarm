@@ -23,6 +23,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { PAGE_FALLBACK_DESCRIPTION, renderShareHtml } from "../../apps/ui/src/lib/page-share";
 import { getPage, incrementPageViewCount } from "../be/db";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
@@ -37,7 +38,13 @@ import {
   PAGE_MODE_PARAM,
   PAGE_THEME_PARAM,
 } from "../pages/page-head";
-import { buildPageShareMeta, declaresOpenGraph, renderPageShareMeta } from "../pages/page-og";
+import {
+  buildPageShareMeta,
+  clipText,
+  declaresOpenGraph,
+  pageOgImageUrl,
+  renderPageShareMeta,
+} from "../pages/page-og";
 import { resolvePageTheme } from "../themes/page-theme";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
@@ -122,6 +129,35 @@ const publicPageOgRoute = route({
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Share-preview metadata", schema: PublicPageOgSchema },
+    404: { description: "No public page with this id" },
+  },
+  auth: { apiKey: false },
+});
+
+const publicPageOgImageRoute = route({
+  method: "get",
+  path: "/p/{id}/og.png",
+  pattern: ["p", null, "og.png"],
+  summary: "Share card image (1200x630 PNG) for a public page",
+  tags: ["Pages"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "The card", unstructured: "PNG image bytes" },
+    404: { description: "No public page with this id" },
+    503: { description: "The card renderer failed to load" },
+  },
+  auth: { apiKey: false },
+});
+
+const publicPageShareRoute = route({
+  method: "get",
+  path: "/p/{id}/share",
+  pattern: ["p", null, "share"],
+  summary: "Link-preview HTML for a public page's dashboard link (crawler view of /pages/{id})",
+  tags: ["Pages"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Share tags and a link to the page", unstructured: "HTML document" },
     404: { description: "No public page with this id" },
   },
   auth: { apiKey: false },
@@ -519,6 +555,12 @@ export async function handlePagesPublic(
   if (pathSegments.length === 3 && pathSegments[2] === "og") {
     return handlePublicPageOg(req, res, pathSegments, queryParams);
   }
+  if (pathSegments.length === 3 && pathSegments[2] === "og.png") {
+    return handlePublicPageOgImage(req, res, pathSegments, queryParams);
+  }
+  if (pathSegments.length === 3 && pathSegments[2] === "share") {
+    return handlePublicPageShare(req, res, pathSegments, queryParams);
+  }
   if (pathSegments.length !== 2) return false;
 
   const second = pathSegments[1]!;
@@ -693,7 +735,7 @@ export async function handlePagesPublic(
   const html =
     injectBrowserSdk(page.body, {
       head: pageHead(page, queryParams, wantsPrint),
-      headFirst: (feedback ? feedbackKeyGuardScript() : "") + publicShareTags(page),
+      headFirst: (feedback ? feedbackKeyGuardScript() : "") + publicShareTags(req, page),
       standardsMode: page.designVersion !== 1,
     }) +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
@@ -713,21 +755,47 @@ export async function handlePagesPublic(
 }
 
 /**
- * The app URL that renders share cards, or null when none is configured (the
- * localhost fallback cannot serve a crawler).
+ * The public origin for card URLs: `PUBLIC_MCP_BASE_URL`, else the host this
+ * request reached. Never `MCP_BASE_URL`, which may be an internal service
+ * address a crawler cannot fetch.
  */
-function shareCardAppUrl(): string | null {
-  return getConfiguredAppUrls().length > 0 ? getAppBaseUrl() : null;
+function publicCardBase(req: IncomingMessage): string {
+  const configured = process.env.PUBLIC_MCP_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const first = (value: string | string[] | undefined) =>
+    (Array.isArray(value) ? value[0] : value)?.split(",")[0]?.trim();
+  const proto = first(req.headers["x-forwarded-proto"]) || "http";
+  const host = first(req.headers["x-forwarded-host"]) || req.headers.host || "localhost";
+  return `${proto}://${host}`;
 }
 
 /**
  * Open Graph and Twitter tags for a public HTML page, unless the body sets its
  * own. Password and authed pages get none, so a crawler never sees their title
- * or description.
+ * or description. The card is the API's own `/p/:id/og.png`.
  */
-function publicShareTags(page: Page): string {
+function publicShareTags(req: IncomingMessage, page: Page): string {
   if (page.authMode !== "public" || declaresOpenGraph(page.body)) return "";
-  return renderPageShareMeta(buildPageShareMeta(page, shareCardAppUrl()));
+  return renderPageShareMeta(
+    buildPageShareMeta(page, pageOgImageUrl(publicCardBase(req), page.id)),
+  );
+}
+
+/**
+ * A public page by id, else null. Missing, password and authed pages all read
+ * as null, so the share routes answer them with the same 404 and confirm
+ * nothing about a private page.
+ */
+async function getSharablePage(id: string): Promise<Page | null> {
+  const page = await getPage(id);
+  return page && page.authMode === "public" ? page : null;
+}
+
+/** The share routes' 404, never stored by a cache (see below). */
+function shareNotFound(res: ServerResponse): true {
+  res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify({ error: "Page not found" }));
+  return true;
 }
 
 /**
@@ -744,12 +812,8 @@ async function handlePublicPageOg(
 ): Promise<boolean> {
   const parsed = await publicPageOgRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
-  const page = await getPage(parsed.params.id);
-  if (!page || page.authMode !== "public") {
-    res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify({ error: "Page not found" }));
-    return true;
-  }
+  const page = await getSharablePage(parsed.params.id);
+  if (!page) return shareNotFound(res);
   // no-store: a page can turn private at any time, and a cached copy would keep
   // its title and description public after that.
   res.setHeader("Cache-Control", "no-store");
@@ -758,6 +822,77 @@ async function handlePublicPageOg(
     title: page.title,
     description: page.description?.trim() ? page.description : null,
   });
+  return true;
+}
+
+/**
+ * `/p/:id/og.png`: the page's share card. Public pages only (same 404 as
+ * `/p/:id/og`), no view bump, and `no-store` so a card stops being served the
+ * moment its page turns private. The renderer loads on first use.
+ */
+async function handlePublicPageOgImage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+): Promise<boolean> {
+  const parsed = await publicPageOgImageRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  const page = await getSharablePage(parsed.params.id);
+  if (!page) return shareNotFound(res);
+  let png: Uint8Array;
+  try {
+    const { renderPageOgPng } = await import("../pages/page-og-card");
+    png = await renderPageOgPng(page.title, page.description?.trim() ? page.description : null);
+  } catch (err) {
+    console.error(
+      "[pages-public] share card render failed:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+    res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "Card renderer unavailable" }));
+    return true;
+  }
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Content-Length": String(png.byteLength),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(png);
+  return true;
+}
+
+/**
+ * `/p/:id/share`: what a link-preview bot gets for the dashboard link
+ * `/pages/:id`. The dashboard's nginx image proxies crawler requests here (its
+ * Vercel deployment has `api/page-share.ts`). Public pages only, no view bump,
+ * `no-store`. The tags point at this API's card and at the dashboard link.
+ */
+async function handlePublicPageShare(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+): Promise<boolean> {
+  const parsed = await publicPageShareRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  const page = await getSharablePage(parsed.params.id);
+  if (!page) return shareNotFound(res);
+  const html = renderShareHtml({
+    title: page.title,
+    description: clipText(page.description?.trim() || PAGE_FALLBACK_DESCRIPTION, 200),
+    imageUrl: pageOgImageUrl(publicCardBase(req), page.id),
+    imageAlt: page.title,
+    url: `${getAppBaseUrl()}/pages/${encodeURIComponent(page.id)}`,
+  });
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex",
+  });
+  res.end(html);
   return true;
 }
 
