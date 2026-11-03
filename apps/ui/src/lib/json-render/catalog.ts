@@ -628,6 +628,21 @@ const tableColumnSchema = z.object({
    * the Table's `selectable` row selection: it is client state, not a write.
    */
   onChange: actionChainSchema.optional(),
+  /**
+   * The header filter menu this column gets (needs the Table's `id`): `values`
+   * is a checkbox list of the distinct values with row counts, `text` a
+   * contains-text field, `false` opts the column out. Omitted → the Table's
+   * `filterable` picks by `kind` (badge / status / enum / boolean / user /
+   * agent → `values`; text → `text`; numbers, dates and the rest → none). A
+   * `format` column only filters when this is set.
+   */
+  filter: z.union([z.enum(["values", "text"]), z.literal(false)]).optional(),
+  /**
+   * Cell values rendered as a muted dash instead of a pill or text (matched
+   * case-insensitively), e.g. `["none", "no"]` for an all-NONE column. The
+   * value stays in the data, the filter list and the hover title.
+   */
+  muted: z.array(z.string()).optional(),
 });
 
 /** Copy overrides for a row action's `AlertDialog` confirmation step. */
@@ -696,10 +711,36 @@ const tableProps = z.object({
    * failed `app.mutate`, or an `app.action` whose task fails, keeps it. Needs `id`.
    */
   bulkActions: z.array(tableBulkActionSchema).optional(),
-  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  /**
+   * Built-in column filters: a header menu on every column `kind` that has one
+   * (see `columns[].filter`), active filters as removable pills above the
+   * table. State is client state at `/ui/<id>/filters`, one entry per column:
+   * a string array for a `values` filter, a string for a `text` filter (bind
+   * `{ "$state": "/ui/<id>/filters/<column>" }`). Composes with `search` and
+   * `filters`: a row must pass all three. Needs `id`.
+   */
+  filterable: z.boolean().optional(),
+  /**
+   * State paths "Clear filters" and "Clear all" also reset, e.g. the
+   * `SearchInput` / `Select` that feed `search` / `filters`:
+   * `["/ui/prSearch/value"]`. Without it those controls keep their value.
+   */
+  clearState: z.array(z.string()).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. First load only: a skeleton while no rows have arrived. */
   loading: z.boolean().optional(),
+  /**
+   * Usually `{ "$state": "/queries/<name>/fetching" }`. True while ANY fetch is
+   * in flight, including a poll or `app.refresh` over rows already showing:
+   * a slim progress bar runs on the table and the rows stay put.
+   */
+  refreshing: z.boolean().optional(),
   /** Usually `{ "$state": "/queries/<name>/error" }`. */
   error: z.string().nullish(),
+  /**
+   * Chain run by the error callout's Retry button. Defaults to
+   * `[{ "action": "app.refresh" }]`, which re-runs every query on the page.
+   */
+  onRetry: actionChainSchema.optional(),
   emptyMessage: z.string().optional(),
   /**
    * Client-side free-text filter, applied to `data` before render.
@@ -1112,7 +1153,7 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`); also bind `refreshing` to `/queries/<name>/fetching` so a poll or `app.refresh` over loaded rows shows a slim progress bar (`loading` alone is the first-load skeleton). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
     },
     Form: {
       props: formProps,

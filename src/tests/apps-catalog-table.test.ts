@@ -19,6 +19,19 @@ async function issuesFor(input: unknown) {
   return parsed.success ? [] : parsed.issues;
 }
 
+describe("Table refreshing binding", () => {
+  test("a query-bound refreshing property validates", async () => {
+    const issues = await issuesFor(
+      withProps("table", { refreshing: { $state: "/queries/allOrders/fetching" } }),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  test("a literal refreshing boolean validates", async () => {
+    expect(await issuesFor(withProps("table", { refreshing: true }))).toEqual([]);
+  });
+});
+
 describe("Table list layer and icons", () => {
   test("the example app with row click, new column kinds and icons passes validation", async () => {
     const parsed = await parseAppDefinition(definition);
@@ -217,5 +230,87 @@ describe("Table row selection", () => {
     });
     const issues = await issuesFor(withProps("table", { id: "orders", bulkActions: [wrongId] }));
     expect(issues.some((i) => i.message.includes('unknown UI control "ghost"'))).toBe(true);
+  });
+});
+
+describe("Table column filters, muted values and states", () => {
+  const idIssue = (issues: { path: string }[]) =>
+    issues.filter((i) => i.path === "pages.main.elements.table.props.id");
+
+  test("filterable with an id validates", async () => {
+    expect(await issuesFor(withProps("table", { id: "orders", filterable: true }))).toEqual([]);
+  });
+
+  test("filterable without an id is rejected at props.id", async () => {
+    const issues = await issuesFor(withProps("table", { filterable: true }));
+    expect(idIssue(issues)).toHaveLength(1);
+    expect(idIssue(issues)[0]!.message).toContain("/ui/<id>/filters");
+  });
+
+  test("a column filter needs the id too; filter:false does not", async () => {
+    const columns = (filter: unknown) => [{ key: "title", filter }];
+    expect(
+      idIssue(await issuesFor(withProps("table", { columns: columns("values") }))),
+    ).toHaveLength(1);
+    expect(idIssue(await issuesFor(withProps("table", { columns: columns("text") })))).toHaveLength(
+      1,
+    );
+    expect(await issuesFor(withProps("table", { columns: columns(false) }))).toEqual([]);
+    expect(
+      await issuesFor(withProps("table", { id: "orders", columns: columns("values") })),
+    ).toEqual([]);
+  });
+
+  test("an unknown filter mode is rejected", async () => {
+    const issues = await issuesFor(
+      withProps("table", { id: "orders", columns: [{ key: "title", filter: "regex" }] }),
+    );
+    expect(issues.some((i) => i.path.startsWith("pages.main.elements.table.props.columns.0"))).toBe(
+      true,
+    );
+  });
+
+  test("muted takes a list of strings", async () => {
+    expect(
+      await issuesFor(withProps("table", { columns: [{ key: "title", muted: ["none", "no"] }] })),
+    ).toEqual([]);
+    const bad = await issuesFor(withProps("table", { columns: [{ key: "title", muted: "none" }] }));
+    expect(bad.length).toBeGreaterThan(0);
+  });
+
+  test("the filters slot is a readable state path of the Table's id", async () => {
+    const read = (path: string) => {
+      const copy = withProps("table", { id: "orders", filterable: true });
+      (copy.pages.main.elements as Elements).heading!.props.text = { $state: path };
+      return issuesFor(copy);
+    };
+    expect(await read("/ui/orders/filters/status")).toEqual([]);
+    const ghost = await read("/ui/ghost/filters/status");
+    expect(ghost.some((i) => i.message.includes('unknown UI control "ghost"'))).toBe(true);
+  });
+
+  test("clearState takes /ui/<id>/... paths of controls that exist", async () => {
+    expect(
+      await issuesFor(
+        withProps("table", {
+          id: "orders",
+          clearState: ["/ui/search/value", "/ui/statusFilter/value"],
+        }),
+      ),
+    ).toEqual([]);
+    const notUi = await issuesFor(withProps("table", { clearState: ["/forms/x/y"] }));
+    expect(notUi.some((i) => i.path.endsWith("props.clearState.0"))).toBe(true);
+    const ghost = await issuesFor(withProps("table", { clearState: ["/ui/ghost/value"] }));
+    expect(ghost.some((i) => i.message.includes('unknown UI control "ghost"'))).toBe(true);
+  });
+
+  test("onRetry is an action chain and is validated like one", async () => {
+    expect(await issuesFor(withProps("table", { onRetry: [{ action: "app.refresh" }] }))).toEqual(
+      [],
+    );
+    const bad = await issuesFor(withProps("table", { onRetry: [{ action: "app.nope" }] }));
+    expect(bad.some((i) => i.path.startsWith("pages.main.elements.table.props.onRetry"))).toBe(
+      true,
+    );
   });
 });
