@@ -142,10 +142,10 @@ async function findReplay(
  * the learning reaches the threshold. The search scores each prefix's stored
  * embeddings directly, so `similarity` is raw cosine (not an FTS rank or a
  * fused score) and no amount of closer rows outside the prefixes can hide a
- * match. It reads at most EXHAUSTIVE_SEARCH_MAX_ROWS rows per prefix, newest
- * first, so a learning write costs the same whatever the corpus size. Any
- * failure (no embedding provider, a search error) returns null so the learning
- * is stored as usual.
+ * match, however old. SQLite ranks inside the query and returns one row per
+ * prefix, so a learning write never loads the corpus into memory. Any failure
+ * (no embedding provider, no sqlite-vec, a search error) returns null so the
+ * learning is stored as usual.
  */
 async function findNearDuplicate(params: {
   agentId: string;
@@ -165,7 +165,6 @@ async function findNearDuplicate(params: {
           limit: 1,
           // The vector index ranks the whole table before the prefix filter;
           // past 4096 closer rows elsewhere it would hide a real duplicate.
-          // The exhaustive scan is row-capped (EXHAUSTIVE_SEARCH_MAX_ROWS).
           exhaustive: true,
           // The dedup bar, not the retrieval floor: MEMORY_MIN_SIMILARITY above
           // it would drop a real duplicate before the threshold check below.

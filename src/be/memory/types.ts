@@ -158,11 +158,12 @@ export interface MemorySearchOptions {
    */
   keyPrefix?: string;
   /**
-   * Score eligible rows' stored embeddings instead of the vector index's
-   * top-K, so rows outside `keyPrefix` can never hide a match. Bounded: it
-   * scores at most EXHAUSTIVE_SEARCH_MAX_ROWS rows, newest `updatedAt` first,
-   * reading only id and embedding, and loads full rows for the top `limit`.
-   * Ignores `queryText`.
+   * Score every eligible row's stored embedding instead of the vector index's
+   * top-K, so rows outside `keyPrefix` can never hide a match. SQLite scores
+   * and ranks inside one query (sqlite-vec `vec_distance_cosine`) and returns
+   * only the top `limit` rows: no embedding or content reaches JS, so one
+   * call's memory is fixed whatever the corpus size. Needs sqlite-vec; throws
+   * without it. Ignores `queryText`.
    */
   exhaustive?: boolean;
   /**

@@ -6,7 +6,6 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
-  EXHAUSTIVE_SEARCH_MAX_ROWS,
   isHybridSearchEnabled,
   LEARNING_TTL_DAYS,
   minSimilarity,
@@ -932,9 +931,11 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   /**
-   * Exact cosine over the newest EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows. Reads
-   * only id + embedding for the scan, then loads full rows for the top `limit`,
-   * so one call's memory and CPU stay fixed whatever the corpus size.
+   * Exact cosine over every eligible row, scored and ranked inside SQLite by
+   * sqlite-vec's `vec_distance_cosine`. Only the top `limit` rows leave the
+   * query, so no embedding or content is loaded into JS and one call's memory
+   * stays fixed whatever the corpus size. No row cap: a cap would drop older
+   * matches, which is the miss this path exists to prevent.
    */
   private async searchExhaustive(
     queryEmbedding: Float32Array,
@@ -949,11 +950,15 @@ export class SqliteMemoryStore implements MemoryStore {
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
+    if (!isSqliteVecAvailable()) {
+      throw new Error("exhaustive memory search needs the sqlite-vec extension");
+    }
     const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
     const floor = options.minSimilarity ?? minSimilarity();
+    const queryBuffer = serializeEmbedding(queryEmbedding);
 
     const conditions: string[] = ["embedding IS NOT NULL"];
-    const params: (string | number | null)[] = [];
+    const params: (Buffer | string | number | null)[] = [];
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
     this.addKeyPrefixCondition(conditions, params, keyPrefix);
     if (source) {
@@ -964,39 +969,28 @@ export class SqliteMemoryStore implements MemoryStore {
       conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
     }
 
-    const scanned = await getDbClient().query<{ id: string; embedding: Buffer }>(
-      `SELECT id, embedding FROM agent_memory
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY updatedAt DESC, id
+    // The length guard keeps a row of another dimension from raising inside
+    // vec_distance_cosine; a zero vector scores NULL and fails the floor.
+    const rows = await getDbClient().query<AgentMemoryRow & { similarity: number }>(
+      `SELECT * FROM (
+         SELECT *,
+           CASE WHEN length(embedding) = ? THEN 1 - vec_distance_cosine(embedding, ?) END
+             AS similarity
+         FROM agent_memory
+         WHERE ${conditions.join(" AND ")}
+       )
+       WHERE similarity >= ?
+       ORDER BY similarity DESC, id
        LIMIT ?`,
-      [...params, EXHAUSTIVE_SEARCH_MAX_ROWS],
+      [queryBuffer.byteLength, queryBuffer, ...params, floor, limit],
     );
     console.log(
-      `[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit} scanned=${scanned.length}${scanned.length >= EXHAUSTIVE_SEARCH_MAX_ROWS ? " capped=true" : ""}`,
+      `[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit} hits=${rows.length}`,
     );
-
-    const scored: { id: string; similarity: number }[] = [];
-    for (const row of scanned) {
-      const emb = deserializeEmbedding(row.embedding);
-      if (emb.length !== queryEmbedding.length) continue;
-      const similarity = cosineSimilarity(queryEmbedding, emb);
-      if (similarity >= floor) scored.push({ id: row.id, similarity });
-    }
-    const top = scored.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
-    if (top.length === 0) return [];
-
-    const rows = await getDbClient().query<AgentMemoryRow>(
-      `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
-      top.map((hit) => hit.id),
-    );
-    const byId = new Map(rows.map((row) => [row.id, row]));
-    const candidates: MemoryCandidate[] = [];
-    for (const hit of top) {
-      const row = byId.get(hit.id);
-      if (row)
-        candidates.push({ ...rowToCandidate(row, hit.similarity), retrievalSource: "fallback" });
-    }
-    return candidates;
+    return rows.map((row) => ({
+      ...rowToCandidate(row, row.similarity),
+      retrievalSource: "fallback" as const,
+    }));
   }
 
   private async searchBruteForce(
