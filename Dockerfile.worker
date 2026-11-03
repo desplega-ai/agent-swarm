@@ -558,8 +558,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-alpha.2
-ARG DSH_SHA512=99d729805f03d5e15057c1aedd3fec60b901c1fc3d87f2e2d2e3c8c57c9bcb55726c982b160f015352dee3416232737e85e2fb937cce32e0157bbb05abf24ee3
+ARG DSH_VERSION=0.2.2-alpha.3
+ARG DSH_SHA512=7df574e9f3a088e78824e980dc480f8fe53a6b326bb0b0028ac70b8fdb7e01f33ba7da75e1b33312b591860782f278b3053c90d9c93190f42d8f83eaa27f261b
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793682830-gad461e
-ARG AMP_SHA512_AMD64=46c23219c410ba503a5dcb9d84880e320816ebabf093af60a94253dda4fce80ae6414e75c20c3c3a6210c3b0607835e7b9183a0525819cb865524d9c14c10d9f
-ARG AMP_SHA512_ARM64=71c573312337337bc0d8bbc9b2c31bba2aa400ce61ba5c85ac1ca71316d6dc15b90c40eb12c0218d83e461b946b7263a4b1d499632b7995cd31e5bb68c7a5794
+ARG AMP_VERSION=0.0.1793707234-gc72860
+ARG AMP_SHA512_AMD64=af99dd46ac1d9f8cfa6cc2b82c8db75f00ed0d97427bfd2ede073cbd7ff8ced83885b0a86543a84160c75c148f5b25675e2c8528639ca3767614a6052e0a4d4f
+ARG AMP_SHA512_ARM64=cde732b5313f26070be720d71b2dfb97ac113aa20aca2463b816a0f36fe8dcaea44c66a33a52b8f6407e29ccb4b972aa1fa1d354714f998b8da0db38d700581d
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -592,7 +592,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.2.0
+ARG CURSOR_SDK_VERSION=1.3.0
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
