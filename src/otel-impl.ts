@@ -30,6 +30,7 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
 import type { DbRetentionSweepMetric, SpanOptions, SwarmSpan, SwarmSpanKind } from "./otel";
+import { getSlackConnectionState } from "./slack/connection-state";
 import { getNodeEnv } from "./utils/node-env";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
@@ -214,6 +215,7 @@ export async function boot(serviceRole: string, options: BootOptions = {}): Prom
 
   if (serviceRole === "api") {
     startEventLoopDelayMetrics(metrics.getMeter(METER_NAME));
+    startSlackSocketMetrics(metrics.getMeter(METER_NAME));
     // NodeSDK already registers a global LoggerProvider exporting over OTLP
     // to the same endpoint and resource as traces (OTEL_LOGS_EXPORTER
     // defaults to otlp); nothing feeds it until the bridge is installed.
@@ -238,6 +240,7 @@ export async function shutdown(): Promise<void> {
   await sdk?.shutdown();
   sdk = undefined;
   stopEventLoopDelayMetrics();
+  stopSlackSocketMetrics();
   uninstallConsoleLogBridge();
 }
 
@@ -305,6 +308,33 @@ export function startEventLoopDelayMetrics(meter: Meter): void {
 
 export function stopEventLoopDelayMetrics(): void {
   stopEventLoopDelay?.();
+}
+
+let stopSlackSocket: (() => void) | undefined;
+
+/**
+ * `agent_swarm.slack.socket_connected`: 1 while the Slack Socket Mode link is
+ * `connected`, else 0. Pairs with the `[Slack] watchdog:` log lines; a 0 that
+ * persists means the watchdog cannot bring the socket back.
+ */
+export function startSlackSocketMetrics(meter: Meter): void {
+  if (stopSlackSocket) return;
+  const gauge = meter.createObservableGauge("agent_swarm.slack.socket_connected", {
+    description: "1 while the Slack Socket Mode connection is connected, else 0",
+    unit: "1",
+  });
+  const collect = (observer: { observe: (value: number) => void }) => {
+    observer.observe(getSlackConnectionState() === "connected" ? 1 : 0);
+  };
+  gauge.addCallback(collect);
+  stopSlackSocket = () => {
+    gauge.removeCallback(collect);
+    stopSlackSocket = undefined;
+  };
+}
+
+export function stopSlackSocketMetrics(): void {
+  stopSlackSocket?.();
 }
 
 const CONSOLE_LOG_BODY_MAX_CHARS = 16_384;
