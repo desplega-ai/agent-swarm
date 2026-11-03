@@ -21,8 +21,9 @@ export interface SlackSocketFence {
  * `start()` awaits `apps.connections.open` (with up to 100 web-client retries)
  * before it builds the websocket, and it resets `shuttingDown` when it begins.
  * So `disconnect()` cannot stop a start that is already waiting for its URL.
- * The fence checks the retired flag before and after each URL request, and
- * `start()` then fails before it builds a websocket. A start that fails that
+ * The fence checks the retired flag before and after each URL request (also
+ * when the request fails), and `start()` then fails before it builds a
+ * websocket. A start that fails that
  * way resolves quietly: the library calls it from a reconnect with no catch.
  */
 export function fenceSocketModeClient(client: SocketModeClient): SlackSocketFence {
@@ -36,7 +37,14 @@ export function fenceSocketModeClient(client: SocketModeClient): SlackSocketFenc
 
   Reflect.set(client, "retrieveWSSURL", async function (this: SocketModeClient) {
     if (retired) throw new SlackSocketClientRetiredError();
-    const url: unknown = await retrieveWSSURL.call(this);
+    let url: unknown;
+    try {
+      url = await retrieveWSSURL.call(this);
+    } catch (error) {
+      // A retired client's failure is no longer news, and its reconnect caller has no catch.
+      if (retired) throw new SlackSocketClientRetiredError();
+      throw error;
+    }
     if (retired) throw new SlackSocketClientRetiredError();
     return url;
   });
