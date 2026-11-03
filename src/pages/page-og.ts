@@ -3,8 +3,8 @@
  *
  * `/p/:id` injects these into a public HTML page so a link unfurls with the
  * page's own title and description. The card image is rendered by the
- * dashboard (`apps/ui/api/og.ts`), so it is only linked when an app URL is
- * configured. Non-public pages never get these tags: their title and
+ * dashboard (`apps/ui/api/og.ts`; the nginx image serves the generic card
+ * there), so it is only linked when an app URL is configured. Non-public pages never get these tags: their title and
  * description must not reach an unauthenticated crawler.
  */
 

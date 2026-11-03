@@ -96,7 +96,7 @@ Or run the published image. It serves the same build with nginx on port 8080 as 
 docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 8080:8080 ghcr.io/desplega-ai/agent-swarm-ui:<version>
 ```
 
-Use the same `<version>` as your API image. The image takes no runtime configuration: `VITE_*` values are compiled in at build time, so enter the API URL and key in the connection panel.
+Use the same `<version>` as your API image. The image takes no runtime configuration: `VITE_*` values are compiled in at build time, so enter the API URL and key in the connection panel. Link previews from this image use the generic dashboard card: `/pages/:id` links unfurl with the generic tags, and public `/p/:id` links on the API unfurl with the page's own title and description over the generic card. Per-page cards need the Vercel functions in `apps/ui/api/`.
 
 <Callout type="warn" title="Keep Pages off the dashboard origin">
   The dashboard keeps connection keys in browser storage, and Pages (`/p/*`, `/@swarm/*`) run agent-authored scripts. Never serve Pages from the dashboard's origin, or a page script can read those keys.

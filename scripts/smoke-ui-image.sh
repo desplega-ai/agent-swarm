@@ -51,6 +51,12 @@ check "asset cache" "$(header cache-control "$base$asset")" "public, max-age=315
 check "asset gzip" "$(header content-encoding -H 'Accept-Encoding: gzip' "$base$asset")" "gzip"
 check "asset vary" "$(header vary -H 'Accept-Encoding: gzip' "$base$asset")" "Accept-Encoding"
 
+check "/api/og status" "$(status "$base/api/og?title=Hello&subtitle=World")" "200"
+check "/api/og serves the generic card image" "$(ctype "$base/api/og?title=Hello&subtitle=World")" "image/png"
+crawler="Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)"
+check "crawler on /pages/:id status" "$(status -A "$crawler" "$base/pages/abc123")" "200"
+check "crawler on /pages/:id gets the generic card" "$(curl -s -A "$crawler" "$base/pages/abc123" | grep -o 'og:image" content="[^"]*/og-image.png"' | head -1 | sed 's/.*\///; s/"$//')" "og-image.png"
+
 check "missing asset" "$(status "$base/assets/missing-$$.js")" "404"
 check "missing asset not cached" "$(header cache-control "$base/assets/missing-$$.js")" ""
 check "source map denied" "$(status "$base/assets/index.js.map")" "404"

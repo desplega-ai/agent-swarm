@@ -750,7 +750,9 @@ async function handlePublicPageOg(
     res.end(JSON.stringify({ error: "Page not found" }));
     return true;
   }
-  res.setHeader("Cache-Control", "public, max-age=300");
+  // no-store: a page can turn private at any time, and a cached copy would keep
+  // its title and description public after that.
+  res.setHeader("Cache-Control", "no-store");
   publicPageOgRoute.respond(res, 200, {
     id: page.id,
     title: page.title,

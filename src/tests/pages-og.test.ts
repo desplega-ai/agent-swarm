@@ -188,7 +188,7 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
     });
     const res = await fetch(`${BASE}/p/${pub}/og`);
     expect(res.status).toBe(200);
-    expect(res.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ id: pub, title: "Shared", description: "Desc" });
 
     const noDesc = await createPage({
@@ -202,6 +202,38 @@ describe("GET /p/:id share tags and /p/:id/og", () => {
       title: "Bare",
       description: null,
     });
+  });
+
+  test("a page made private stops answering at once, and no response was storable", async () => {
+    process.env.APP_URL = "https://app.example.com";
+    const id = await createPage({
+      slug: "og-goes-private",
+      title: "Soon private title",
+      description: "Soon private description",
+      authMode: "public",
+      body: "<html><head></head><body>x</body></html>",
+    });
+    const before = await fetch(`${BASE}/p/${id}/og`);
+    expect(before.status).toBe(200);
+    // A shared cache may store neither the metadata nor the tagged HTML.
+    expect(before.headers.get("cache-control")).toBe("no-store");
+    const page = await fetch(`${BASE}/p/${id}`);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(metaContent(await page.text(), "og:title")).toBe("Soon private title");
+
+    const update = await fetch(`${BASE}/api/pages/${id}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ authMode: "authed" }),
+    });
+    expect(update.status).toBe(200);
+
+    const after = await fetch(`${BASE}/p/${id}/og`);
+    expect(after.status).toBe(404);
+    expect(after.headers.get("cache-control")).toBe("no-store");
+    expect(await after.text()).not.toContain("Soon private");
+    const gated = await (await fetch(`${BASE}/p/${id}`)).text();
+    expect(gated).not.toContain("Soon private");
   });
 
   test("password and authed pages expose nothing: 404 on /og, no tags on /p/:id", async () => {

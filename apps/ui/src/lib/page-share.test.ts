@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { GET as ogHandler } from "../../api/og";
+import pageShareHandler from "../../api/page-share";
 import vercelConfig from "../../vercel.json";
 import {
   buildPageShareHtml,
@@ -224,5 +225,133 @@ describe("vercel.json crawler rewrite", () => {
       ),
     ).toBe(false);
     expect(isPageId(PAGE_ID)).toBe(true);
+  });
+});
+
+// ─── Shared caches in front of the deployment ──────────────────────────────
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+const CRAWLER_UA = "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)";
+
+/** A vercel.json `source` as a RegExp (named params become plain groups). */
+function sourceRe(source: string): RegExp {
+  return new RegExp(`^${source.replace(/:\w+\(/g, "(")}$`);
+}
+
+/**
+ * The deployment as vercel.json routes it: crawlers on `/pages/:id` reach
+ * `api/page-share`, everything else gets the SPA with Vercel's static default
+ * Cache-Control. Header rules from vercel.json apply on top.
+ */
+async function deployment(path: string, ua: string): Promise<Response> {
+  const bot = (vercelConfig.rewrites as { source: string; has?: { value: string }[] }[]).find(
+    (r) => r.has,
+  )!;
+  const match = sourceRe(bot.source).exec(path);
+  const res =
+    match && new RegExp(`^${bot.has![0]!.value}$`).test(ua)
+      ? await pageShareHandler(
+          new Request(`https://app.example.com/api/page-share?id=${match[1]}`, {
+            headers: { "user-agent": ua },
+          }),
+        )
+      : new Response("<!doctype html><title>spa</title>", {
+          headers: {
+            "Content-Type": "text/html",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+          },
+        });
+  const headers = new Headers(res.headers);
+  for (const rule of vercelConfig.headers) {
+    if (!sourceRe(rule.source).test(path)) continue;
+    for (const h of rule.headers) headers.set(h.key, h.value);
+  }
+  return new Response(await res.text(), { status: res.status, headers });
+}
+
+/**
+ * A worst-case shared cache (RFC 9111 subset): stores whatever it may store
+ * and serves it without revalidating, keyed on the URL plus the Vary headers.
+ */
+function sharedCache() {
+  const store = new Map<
+    string,
+    { ua: string | null; status: number; headers: Headers; body: string }
+  >();
+  return async (path: string, ua: string): Promise<{ body: string; headers: Headers }> => {
+    const hit = store.get(path);
+    if (hit && (hit.ua === null || hit.ua === ua)) return { body: hit.body, headers: hit.headers };
+    const res = await deployment(path, ua);
+    const body = await res.text();
+    const cc = res.headers.get("cache-control") ?? "";
+    const vary = (res.headers.get("vary") ?? "").toLowerCase();
+    if (!/\b(no-store|private)\b/.test(cc)) {
+      store.set(path, {
+        ua: vary.includes("user-agent") ? ua : null,
+        status: res.status,
+        headers: res.headers,
+        body,
+      });
+    }
+    return { body, headers: res.headers };
+  };
+}
+
+describe("shared caches never mix crawler and browser views, or keep a private page", () => {
+  let api: ReturnType<typeof Bun.serve>;
+  let pagePublic = true;
+  const ORIG_SWARM = process.env.SWARM_API_URL;
+
+  beforeAll(() => {
+    api = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (pagePublic && new URL(req.url).pathname === `/p/${PAGE_ID}/og`) {
+          return Response.json({ id: PAGE_ID, title: "Shared page title", description: null });
+        }
+        return Response.json({ error: "Page not found" }, { status: 404 });
+      },
+    });
+    process.env.SWARM_API_URL = `http://127.0.0.1:${api.port}`;
+  });
+
+  afterAll(() => {
+    api.stop(true);
+    if (ORIG_SWARM === undefined) delete process.env.SWARM_API_URL;
+    else process.env.SWARM_API_URL = ORIG_SWARM;
+  });
+
+  const path = `/pages/${PAGE_ID}`;
+  const isCrawlerView = (body: string) => body.includes('property="og:title"');
+
+  test("crawler first, then browser", async () => {
+    pagePublic = true;
+    const fetchVia = sharedCache();
+    const crawler = await fetchVia(path, CRAWLER_UA);
+    expect(meta(crawler.body, "og:title")).toBe("Shared page title");
+    expect(isCrawlerView((await fetchVia(path, BROWSER_UA)).body)).toBe(false);
+    expect(crawler.headers.get("cache-control")).toBe("private, no-store");
+    expect(crawler.headers.get("vary")).toBe("User-Agent");
+  });
+
+  test("browser first, then crawler", async () => {
+    pagePublic = true;
+    const fetchVia = sharedCache();
+    const browser = await fetchVia(path, BROWSER_UA);
+    expect(isCrawlerView(browser.body)).toBe(false);
+    const crawler = await fetchVia(path, CRAWLER_UA);
+    expect(meta(crawler.body, "og:title")).toBe("Shared page title");
+    expect(browser.headers.get("vary")).toBe("User-Agent");
+  });
+
+  test("a page made private drops its title from the next unfurl", async () => {
+    pagePublic = true;
+    const fetchVia = sharedCache();
+    expect(meta((await fetchVia(path, CRAWLER_UA)).body, "og:title")).toBe("Shared page title");
+    pagePublic = false;
+    const after = await fetchVia(path, CRAWLER_UA);
+    expect(after.body).not.toContain("Shared page title");
+    expect(meta(after.body, "og:title")).toBe("Agent Swarm Dashboard");
   });
 });
