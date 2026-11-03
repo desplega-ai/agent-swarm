@@ -164,15 +164,15 @@ Returns detailed information about a specific task, including output, failure re
 
 ### store-progress
 
-Store task progress, or mark a task as completed or failed.
+Store task progress, or mark a task as completed, failed, or skipped. Use `skipped` only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention or work assigned to you.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `taskId` | uuid | Yes | Task ID |
 | `progress` | string | No | Progress update |
-| `status` | string | No | Set to `completed` or `failed` |
+| `status` | string | No | `completed` or `failed` finish the task. `skipped` ends a task that is not yours to handle: it posts nothing to the thread, creates no follow-up, and needs a one-line reason in `failureReason`. `in_progress` and `pending` store progress only |
 | `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
-| `failureReason` | string | No | Reason (for failure) |
+| `failureReason` | string | No | Reason for failure, or the one-line reason for a skip (required with `skipped`) |
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. Agent-fs pointers are verified before task state changes using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
 | `citations` | array | No | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each in `output` with `[citation:N]`, or set `general: true` for a source that backs the whole answer. Kinds: `task`, `memory`, `github`, `slack`, `agent-fs`, `page`, `script-run`, `url`. The first completing call is refused (the task stays in progress) if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; after one refusal, completion proceeds and those markers are dropped. At most 50 per call/task. |
 | `learning` | string \| object | No | A lesson worth keeping: a gotcha, a dead end, a pattern that worked. Stored as a swarm memory at `/learnings/<workstream>/<slug>`, tagged `learning` and tied to the task. Pass a string, or `{text, tags?, workstream?}` with at most 5 kebab-case tags; `workstream` defaults to the task's repo name, else `general`. The first line is the title. Send it on or before the completing call. A learning that repeats an existing swarm memory under `/learnings/` or `/longterm/workstreams/` (raw cosine 0.80 or higher) is not stored: the result has status `duplicate` with that memory's id, and the existing memory gets a positive rating. A failed write is reported in the result and never blocks the progress update. |
@@ -191,6 +191,14 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|-------------|
 | `taskId` | uuid | Yes | Task ID |
 | `reason` | string | No | Cancellation reason |
+
+### submit-improvement
+
+Draft a short product improvement for the agent-swarm team at desplega. The tool stores it as a pending draft and never sends it: a person must approve it from the Improvements button in the dashboard header. Only the text, the install id and the approver's email are sent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | Yes | The improvement, in plain words. Do not include names, repos, hosts, customer details or secrets. |
 
 ### steer-task
 
@@ -622,7 +630,7 @@ Complete the current task now and wake up later to continue it. Use it when the 
 
 Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call and receives a `deferred` tag. A one-off schedule targets you, and its child task carries the deferred task as `parentTaskId` so the wake-up run receives the prior context. Use this tool instead of creating a continuation schedule by hand.
 
-- **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`, or use `taskIds: ["<first-id>", "<second-id>"]` instead of `taskId`. `mode` defaults to `all` (every member must match); use `mode: "any"` for the first match. Events are `task.completed`, `task.failed`, or `settled` (completed, failed, or cancelled). Cancellation does not match either named event. IDs must be unique, exist, be nonterminal, and differ from the task being deferred. Any invalid or already-terminal member rejects the entire call without completing the task or creating a schedule. One `delayMs` or `runAt` deadline is still required for the whole set; events and the deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its `followUpConfig` sets `onCompleted`/`onFailed`; an `all`-mode member that settles while others are pending still does.
+- **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`, or use `taskIds: ["<first-id>", "<second-id>"]` instead of `taskId`. `mode` defaults to `all` (every member must match); use `mode: "any"` for the first match. Events are `task.completed`, `task.failed`, or `settled` (completed, failed, cancelled, or skipped). Cancellation does not match either named event. IDs must be unique, exist, be nonterminal, and differ from the task being deferred. Any invalid or already-terminal member rejects the entire call without completing the task or creating a schedule. One `delayMs` or `runAt` deadline is still required for the whole set; events and the deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its `followUpConfig` sets `onCompleted`/`onFailed`; an `all`-mode member that settles while others are pending still does.
 - **Structured output:** if the task has an `outputSchema`, pass `output` as a JSON string matching it. The tool stores that string verbatim as terminal output and puts the summary and deferral details in the task log. Missing or invalid output is rejected before creating a schedule. Without a schema, terminal output says when the agent will check back, or names the agents it is waiting on and the latest wake-up time; `output` is ignored. The time uses the requester's stored timezone, falling back to a labeled UTC time when none is set. Full summary, checks, and schedule details remain in the task log.
 
 See [deferring until another task finishes](/docs/concepts/scheduling#deferring-until-another-task-finishes) for an example.
@@ -1488,4 +1496,4 @@ Update a repo's configuration including guidelines. Only the lead can change `al
 | `clonePath` | string | No | New clone path |
 | `defaultBranch` | string | No | New default branch |
 | `autoClone` | boolean | No | Whether to auto-clone |
-| `hooks` | object \| null | No | Hook install config; set `{ enabled: true }` to opt into best-effort worker git-hook installation |
+| `hooks` | object \| null | No | Hook install config. Best-effort worker git-hook installation is on by default for new repos; disable it with `{ enabled: false }` (or `null`), or turn it back on with `{ enabled: true }` |
