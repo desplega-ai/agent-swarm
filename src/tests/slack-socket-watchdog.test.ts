@@ -450,6 +450,54 @@ describe("socket watchdog against a live Slack mock", () => {
       expect(old.websocket?.isActive() ?? false).toBe(false);
     });
   }, 30_000);
+
+  test("a stalled restart gives up the lock in bounded time and leaves no socket", async () => {
+    const options = {
+      tickMs: 20,
+      downAfterMs: 50,
+      backoffBaseMs: 100,
+      backoffMaxMs: 200,
+      restartTimeoutMs: 300,
+    };
+    await withLiveSlack(options, async (slack) => {
+      const errors: string[] = [];
+      const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      });
+      // New clients never get a socket URL until the gate opens: every restart stalls.
+      const gate = gateSocketUrls();
+      try {
+        setSlackConnectionState("disconnected");
+        expect(
+          await pollUntil(() => errors.some((line) => line.includes("abandoned it")), 5_000, 10),
+        ).toBe(true);
+
+        // A config reload waiting on the lock gets it within one restart bound.
+        const waitStarted = Date.now();
+        await runSlackLifecycleExclusive(async () => {});
+        expect(Date.now() - waitStarted).toBeLessThan(2_000);
+
+        // The stalled clients now get their URLs. None of them opens a socket.
+        const opened = slack.mock.apiCalls("apps.connections.open").length;
+        gate.restore();
+        gate.release();
+        expect(
+          await pollUntil(
+            () => getSlackConnectionState() === "connected" && slack.mock.connectionCount === 1,
+            10_000,
+            20,
+          ),
+        ).toBe(true);
+        await Bun.sleep(500);
+        expect(slack.mock.apiCalls("apps.connections.open").length).toBeGreaterThan(opened + 1);
+        expect(slack.mock.connectionCount).toBe(1);
+      } finally {
+        gate.restore();
+        gate.release();
+        errorSpy.mockRestore();
+      }
+    });
+  }, 30_000);
 });
 
 type LiveSlack = Awaited<ReturnType<typeof startSlackMock>>;

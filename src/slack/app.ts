@@ -24,6 +24,9 @@ let inboundDrain: ReturnType<typeof installSocketAckRecovery> | null = null;
 // Retires the current client at teardown, so a reconnect it still has in
 // flight cannot open a socket next to the replacement.
 let socketFence: SlackSocketFence | null = null;
+// Bumped at each teardown. A start that sees a new generation was abandoned
+// by the watchdog (or overtaken by a stop) and must not touch shared state.
+let lifecycleGeneration = 0;
 // Last sign of life on the current socket: Slack's hello or any envelope.
 let lastSocketActivityAt: number | null = null;
 
@@ -67,6 +70,12 @@ export interface SlackSocketWatchdogOptions {
   backoffBaseMs: number;
   /** Cap on the delay between restarts. */
   backoffMaxMs: number;
+  /**
+   * Bound on one restart (teardown + start) under the lifecycle lock. A
+   * restart still running then is abandoned, so a config reload or a shutdown
+   * waiting on the lock gets it.
+   */
+  restartTimeoutMs: number;
 }
 
 export const SLACK_SOCKET_WATCHDOG_DEFAULTS: SlackSocketWatchdogOptions = {
@@ -75,6 +84,7 @@ export const SLACK_SOCKET_WATCHDOG_DEFAULTS: SlackSocketWatchdogOptions = {
   staleActivityMs: 10 * 60_000,
   backoffBaseMs: 30_000,
   backoffMaxMs: 5 * 60_000,
+  restartTimeoutMs: 2 * 60_000,
 };
 
 export interface SlackSocketWatchdogDeps {
@@ -173,9 +183,11 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 let watchdogOptions: SlackSocketWatchdogOptions = SLACK_SOCKET_WATCHDOG_DEFAULTS;
 
 /**
- * Rebuild the Slack app under the lifecycle lock. No timeout: a start that
- * hangs is the web client retrying apps.connections.open, which is progress,
- * and abandoning it would leave a second live socket behind.
+ * Rebuild the Slack app under the lifecycle lock, bounded by
+ * `restartTimeoutMs`. The web client can retry apps.connections.open for many
+ * minutes, and every config reload waits on the lock meanwhile. A restart
+ * that runs out of time is abandoned: its client is retired first, so it can
+ * never open a socket later, and the watchdog tries again after its backoff.
  */
 async function restartSlackAppForWatchdog(owner: ReturnType<typeof setInterval>): Promise<void> {
   await runSlackLifecycleExclusive(async () => {
@@ -185,8 +197,28 @@ async function restartSlackAppForWatchdog(owner: ReturnType<typeof setInterval>)
     if (watchdogTimer !== owner) return;
     // A config reload that won the lock may have just brought the socket back.
     if (getSlackConnectionState() === "connected" && isLiveSocketActive()) return;
-    await teardownSlackApp();
-    await startSlackApp();
+    let abandoned = false;
+    const restart = (async () => {
+      await teardownSlackApp();
+      // A teardown that outlived the timeout must not start an app outside the lock.
+      if (!abandoned) await startSlackApp();
+    })();
+    const timeoutMs = watchdogOptions.restartTimeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+    });
+    try {
+      const outcome = await Promise.race([restart.then(() => false as const), timedOut]);
+      if (!outcome) return;
+    } finally {
+      clearTimeout(timer);
+    }
+    abandoned = true;
+    // The abandoned restart settles later, if ever; its error is no longer news.
+    void restart.catch(() => {});
+    abandonSlackApp();
+    throw new Error(`restart did not finish within ${seconds(timeoutMs)}s; abandoned it`);
   });
 }
 
@@ -352,11 +384,13 @@ export async function initSlackApp(): Promise<App | null> {
 }
 
 export async function startSlackApp(): Promise<boolean> {
+  const generation = lifecycleGeneration;
   if (!app) {
     await initSlackApp();
   }
 
-  if (app) {
+  const current = app;
+  if (current && generation === lifecycleGeneration) {
     // Arm before app.start(): a start that throws is retried by the watchdog.
     startSocketWatchdog();
     // Establish the durable cutoff before Socket Mode can deliver new asks.
@@ -365,7 +399,10 @@ export async function startSlackApp(): Promise<boolean> {
     // Receipts stored before the last restart: interrupted ones turn uncertain,
     // pending ones are processed once the app can dispatch them.
     await recoverSlackInboundAfterRestart();
-    await app.start();
+    if (generation !== lifecycleGeneration) return false;
+    await current.start();
+    // Abandoned while it waited: the app was already detached and retired.
+    if (generation !== lifecycleGeneration) return false;
     console.log("[Slack] Bot connected via Socket Mode");
     void inboundDrain?.wake();
     await emitBuiltInIntegrationConnectedOnce("slack");
@@ -398,21 +435,41 @@ export async function stopSlackAppUnderLifecycleLock(): Promise<void> {
 
 /** Stop the app but keep the watchdog armed; the watchdog restart uses this. */
 async function teardownSlackApp(): Promise<void> {
+  const stopping = detachSlackApp();
+  if (stopping) {
+    await stopping.stop();
+    console.log("[Slack] Bot disconnected");
+  }
+}
+
+/**
+ * Drop a restart that ran out of time, without waiting: app.stop() can block
+ * on the stalled client too. The retired client opens no socket, and the
+ * detached stop closes any socket it already has.
+ */
+function abandonSlackApp(): void {
+  const stalled = detachSlackApp();
+  void stalled?.stop().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Slack] watchdog: stopping the abandoned app failed: ${scrubSecrets(message)}`);
+  });
+}
+
+/** Clear the module state synchronously and return the app to stop. */
+function detachSlackApp(): App | null {
   // Retire the client first: app.stop() cannot cancel a start that is still
   // waiting for apps.connections.open.
   socketFence?.retire();
   socketFence = null;
+  lifecycleGeneration += 1;
   stopTaskWatcher();
   inboundDrain?.stop();
   inboundDrain = null;
-
-  if (app) {
-    await app.stop();
-    app = null;
-    console.log("[Slack] Bot disconnected");
-  }
+  const detached = app;
+  app = null;
   receiver = null;
   lastSocketActivityAt = null;
   setSlackConnectionState("disconnected");
   initialized = false;
+  return detached;
 }
