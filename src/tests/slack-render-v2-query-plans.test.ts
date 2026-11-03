@@ -254,6 +254,16 @@ function closedAt(id: string): string | null {
   );
 }
 
+/** Tree ids in the sweep's candidate set (idx_slack_messages_open_trees). */
+function openTreeIds(): string[] {
+  return getDb()
+    .query<{ id: string }, []>(
+      "SELECT id FROM slack_messages WHERE kind = 'tree' AND closed_at IS NULL",
+    )
+    .all()
+    .map((row) => row.id);
+}
+
 describe("slack render-v2 tree closed_at", () => {
   let leadId: string;
 
@@ -276,9 +286,16 @@ describe("slack render-v2 tree closed_at", () => {
 
   test("a settled thread closes and drops out of the sweep", async () => {
     const { tree } = await settledThread("SETTLED", leadId);
+    // Before close: the tree is open, so the sweep's partial index still
+    // visits it. The sweep returns nothing only because the needs-render
+    // predicate finds no work in a settled thread.
+    expect(openTreeIds()).toContain(tree.id);
     expect(await getSlackTreeMessages()).toEqual([]);
     expect(await closeSlackTreeIfSettled(tree.id)).toBe(true);
+    // After close: the tree leaves the open-tree index the sweep scans.
     expect(closedAt(tree.id)).not.toBeNull();
+    expect(openTreeIds()).not.toContain(tree.id);
+    expect(await getSlackTreeMessages()).toEqual([]);
     // Closing twice is a no-op.
     expect(await closeSlackTreeIfSettled(tree.id)).toBe(false);
   });
