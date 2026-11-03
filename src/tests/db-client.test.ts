@@ -464,7 +464,7 @@ describe("db-client slow statement warning", () => {
   });
 
   test("scrubs a secret that straddles the SQL cutoff and a secret in the path", async () => {
-    const secret = "slowsqlSECRET0123456789abcdef";
+    const secret = "slowsqlSECRET0123456789abcdef"; // gitleaks:allow (synthetic test fixture)
     registerVolatileSecret(secret, "SLOW_SQL_TEST_SECRET");
     // "/* " plus 186 chars puts the secret at char 189, across the 200-char cut.
     const sql = `/* ${"p".repeat(185)} ${secret} */ WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c WHERE ? IS NOT NULL`;

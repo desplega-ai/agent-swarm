@@ -65,7 +65,7 @@ describe("safeRequestUrlForLog", () => {
 });
 
 describe("loopPathForRequest", () => {
-  const TOKEN = "credential_token_value_123";
+  const TOKEN = "credential_token_value_123"; // gitleaks:allow (synthetic test fixture)
   const cases: Array<[string, string]> = [
     [`/invite/${TOKEN}`, "http GET invite/[REDACTED]"],
     [`/invite/${TOKEN}/extra?x=1`, "http GET invite/[REDACTED]/extra"],

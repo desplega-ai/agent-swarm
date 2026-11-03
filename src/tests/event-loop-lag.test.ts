@@ -159,7 +159,7 @@ describe("formatStallLine", () => {
   });
 
   describe("secret scrubbing", () => {
-    const SECRET = "lagsecretVALUE0123456789abcdef";
+    const SECRET = "lagsecretVALUE0123456789abcdef"; // gitleaks:allow (synthetic test fixture)
 
     beforeEach(() => registerVolatileSecret(SECRET, "LAG_TEST_SECRET"));
     afterEach(() => clearVolatileSecretsForTesting());
