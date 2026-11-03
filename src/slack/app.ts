@@ -1,6 +1,7 @@
 import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
 import { getNodeEnv } from "../utils/node-env";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration } from "./config";
 import {
   getSlackConnectionState,
@@ -145,7 +146,9 @@ export function createSlackSocketWatchdog(
     try {
       await deps.restart();
     } catch (error) {
-      console.error("[Slack] watchdog: restart failed:", error);
+      // The error can carry request config or a token; scrub before it leaves.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Slack] watchdog: restart failed: ${scrubSecrets(message)}`);
     } finally {
       restarting = false;
     }

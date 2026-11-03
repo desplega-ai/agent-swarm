@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ErrorCode } from "@slack/web-api";
 import { pollUntil } from "../../scripts/e2e/http";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
@@ -198,6 +198,33 @@ describe("socket watchdog state machine", () => {
     await run(h, watchdog, 90 * SEC);
     expect(h.restarts).toBe(2);
   });
+});
+
+test("a failed restart logs a scrubbed message, never the raw token", async () => {
+  // Built at runtime so secret scanners do not flag a literal in the repo.
+  const token = ["xoxb", "1234567890", "1234567890123", "AbCdEfGhIjKlMnOpQrStUvWx"].join("-");
+  const h = harness();
+  h.deps.restart = async () => {
+    throw new Error(`An API error occurred: invalid_auth (token ${token})`);
+  };
+  const watchdog = createSlackSocketWatchdog(h.deps);
+  const logged: string[] = [];
+  const spy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  });
+  try {
+    h.set({ state: "connecting" });
+    await run(h, watchdog, 60 * SEC);
+  } finally {
+    spy.mockRestore();
+  }
+  const failure = logged.find((line) => line.startsWith("[Slack] watchdog: restart failed:"));
+  expect(failure).toBeDefined();
+  expect(failure).toContain("invalid_auth");
+  expect(failure).not.toContain(token);
+  expect(failure).toContain("[REDACTED:");
+  // The transition line is unchanged.
+  expect(h.lines).toEqual(["[Slack] watchdog: socket down for 60s, restarting (attempt 1)"]);
 });
 
 describe("socket watchdog against a live Slack mock", () => {
