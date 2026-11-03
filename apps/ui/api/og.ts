@@ -3,43 +3,41 @@
  * (`src/lib/page-og-card.ts`), the agent-swarm.dev landing card ported here so
  * a self-hosted dashboard renders its own previews.
  *
- * Vercel Edge Function. Fonts and images are bundled through literal
- * `new URL(..., import.meta.url)` references. A missing asset degrades the
- * card (default font, no mascot) instead of failing the share preview.
+ * Vercel Node.js function (not Edge): the Edge bundler turns
+ * `new URL(<asset>, import.meta.url)` into blob-asset imports that a root-dir
+ * (monorepo) deployment rejects, so the assets are read from disk instead and
+ * shipped through `functions.includeFiles` in vercel.json. A missing asset
+ * degrades the card (default font, no mascot) instead of failing the preview.
  */
+// Node ESM runs this file unbundled, so relative imports carry `.js`.
+import { readFile } from "node:fs/promises";
 import { ImageResponse } from "@vercel/og";
-import { MONO, pageOgCard, SANS } from "../src/lib/page-og-card";
-import { OG_SIZE, parseOgParams } from "../src/lib/page-share";
-
-export const config = { runtime: "edge" };
+import { MONO, pageOgCard, SANS } from "../src/lib/page-og-card.js";
+import { OG_SIZE, parseOgParams } from "../src/lib/page-share.js";
 
 type Font = { name: string; data: ArrayBuffer; weight: 400 | 500; style: "normal" };
 
-// `url` is a thunk: a runtime that cannot resolve `import.meta.url` (such as
-// `vercel dev`) throws from `new URL`, and that must cost the asset, not the card.
-const load = (url: () => URL): Promise<ArrayBuffer | null> => {
+// `path` is relative to this file, so the URL is built inside the try: a
+// runtime without a file `import.meta.url` costs the asset, not the card.
+async function load(path: string): Promise<ArrayBuffer | null> {
   try {
-    return fetch(url())
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .catch(() => null);
+    const bytes = await readFile(new URL(path, import.meta.url));
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   } catch {
-    return Promise.resolve(null);
+    return null;
   }
-};
+}
 
-// Literal URLs only: the bundler resolves each `new URL(<literal>, import.meta.url)`.
 const assets = Promise.all([
-  load(() => new URL("../og/fonts/space-grotesk-400.ttf", import.meta.url)),
-  load(() => new URL("../og/fonts/space-grotesk-500.ttf", import.meta.url)),
-  load(() => new URL("../og/fonts/space-mono-400.ttf", import.meta.url)),
-  load(() => new URL("../public/logo.png", import.meta.url)),
-  load(() => new URL("../og/mascot-lead.png", import.meta.url)),
+  load("../og/fonts/space-grotesk-400.ttf"),
+  load("../og/fonts/space-grotesk-500.ttf"),
+  load("../og/fonts/space-mono-400.ttf"),
+  load("../public/logo.png"),
+  load("../og/mascot-lead.png"),
 ]);
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
-  }
+/** Vercel routes only the exported methods here; others get its 405. */
+export async function GET(request: Request): Promise<Response> {
   const input = parseOgParams(new URL(request.url).searchParams);
   const [g400, g500, m400, logo, mascot] = await assets;
   const fonts: Font[] = [];

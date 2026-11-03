@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ignoreCommand": "sh ../../scripts/vercel-ignore.sh apps/ui packages/model-catalog src/utils/task-citations.ts src/utils/dsh-usage.ts src/be/modelsdev-cache.json src/themes",
+  "functions": {
+    "api/og.ts": {
+      "includeFiles": "{og/fonts/space-grotesk-400.ttf,og/fonts/space-grotesk-500.ttf,og/fonts/space-mono-400.ttf,og/mascot-lead.png,public/logo.png}"
+    }
+  },
   "rewrites": [
     {
       "source": "/pages/:id([A-Za-z0-9_-]+)",

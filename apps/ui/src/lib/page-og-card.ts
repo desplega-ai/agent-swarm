@@ -7,7 +7,7 @@
  * Built as plain Satori element objects instead of JSX, so the Vercel function
  * compiles without a JSX setup. Satori reads only inline styles and sRGB hex.
  */
-import { OG_SIZE, type OgCardInput } from "./page-share";
+import { OG_SIZE, type OgCardInput } from "./page-share.js"; // .js: api/og.ts runs unbundled on Node ESM
 
 export const SANS = "Space Grotesk";
 export const MONO = "Space Mono";

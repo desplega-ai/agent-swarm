@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import ogHandler from "../../api/og";
+import { GET as ogHandler } from "../../api/og";
 import vercelConfig from "../../vercel.json";
 import {
   buildPageShareHtml,
@@ -160,6 +160,31 @@ describe("card text", () => {
     expect(png.getUint32(0)).toBe(0x89504e47);
     expect([png.getUint32(16), png.getUint32(20)]).toEqual([1200, 630]);
   }, 30_000);
+});
+
+describe("vercel.json og function", () => {
+  // api/og.ts runs unbundled on Node ESM: a missing includeFiles asset or an
+  // extensionless relative import only fails once deployed.
+  test("ships every asset it reads", async () => {
+    const glob = vercelConfig.functions["api/og.ts"].includeFiles;
+    const files = glob.replace(/^\{|\}$/g, "").split(",");
+    const source = await Bun.file(new URL("../../api/og.ts", import.meta.url)).text();
+    const read = [...source.matchAll(/load\("\.\.\/([^"]+)"\)/g)].map((m) => m[1]);
+    expect(read.length).toBeGreaterThan(0);
+    expect(files.sort()).toEqual(read.sort());
+    for (const file of files) {
+      expect(await Bun.file(new URL(`../../${file}`, import.meta.url)).exists()).toBe(true);
+    }
+  });
+
+  test("imports relative modules with explicit .js extensions", async () => {
+    for (const file of ["../../api/og.ts", "./page-og-card.ts", "./page-share.ts"]) {
+      const source = await Bun.file(new URL(file, import.meta.url)).text();
+      for (const [, spec] of source.matchAll(/from "(\.{1,2}\/[^"]+)"/g)) {
+        expect(spec).toEndWith(".js");
+      }
+    }
+  });
 });
 
 describe("vercel.json crawler rewrite", () => {
