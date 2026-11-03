@@ -68,7 +68,6 @@ services:
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/coder
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 

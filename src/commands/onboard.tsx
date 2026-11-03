@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config.ts";
 import { getApiKey } from "../utils/api-key.ts";
+import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
   CONTAINER_ENGINE_LABELS,
   composeCommandText,
@@ -13,7 +14,11 @@ import {
   isContainerEnginePreference,
   resolveContainerEnginePreference,
 } from "./onboard/container-engine.ts";
-import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
+import {
+  buildOnboardDashboardUrl,
+  maskDashboardUrlApiKey,
+  SETUP_URL_PATH,
+} from "./onboard/dashboard-url.ts";
 import {
   parseMaxConcurrentTasks,
   resolveNonInteractiveProvider,
@@ -131,7 +136,7 @@ export function Onboard({
     (log: string, isDryRunAction = false) => {
       const prefix = isDryRunAction && dryRun ? "[DRY-RUN] Would: " : "";
       const id = nextLogId.current++;
-      setState((s) => ({ ...s, logs: [...s.logs, { id, text: `${prefix}${log}` }] }));
+      setState((s) => ({ ...s, logs: [...s.logs, { id, text: scrubSecrets(`${prefix}${log}`) }] }));
     },
     [dryRun],
   );
@@ -288,7 +293,7 @@ export function Onboard({
   if (state.step === "error") {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">Onboard failed: {state.error}</Text>
+        <Text color="red">Onboard failed: {scrubSecrets(state.error)}</Text>
       </Box>
     );
   }
@@ -331,9 +336,17 @@ export function Onboard({
             <Text>
               API: <Text color="cyan">{apiUrl}</Text>
             </Text>
-            <Text>
-              Dashboard: <Text color="cyan">{dashUrl}</Text>
-            </Text>
+            {process.env.AGENT_SWARM_INSTALLER !== "1" && (
+              <>
+                <Text>
+                  Dashboard:{" "}
+                  <Text color="cyan">{scrubSecrets(maskDashboardUrlApiKey(dashUrl))}</Text>
+                </Text>
+                {!dryRun && (
+                  <Text dimColor>Full link (contains API key): cat {SETUP_URL_PATH}</Text>
+                )}
+              </>
+            )}
             {agentCount > 0 && <Text>Agents: {agentCount} configured</Text>}
             <Text dimColor>Files: docker-compose.yml, .env, .agent-swarm/config.json</Text>
           </Box>

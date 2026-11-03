@@ -265,6 +265,9 @@
     "parentTaskId": {
       "exempt": "identifier"
     },
+    "dispatchedByTaskId": {
+      "exempt": "identifier"
+    },
     "claudeSessionId": {
       "exempt": "identifier"
     },

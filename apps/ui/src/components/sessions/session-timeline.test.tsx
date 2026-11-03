@@ -8,6 +8,7 @@ import type { AgentTask } from "../../api/types";
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/task-activity", () => require("../../lib/task-activity"));
 mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
+mock.module("@/lib/dispatch-parent", () => require("../../lib/dispatch-parent"));
 mock.module("@/lib/auto-review", () => require("../../lib/auto-review"));
 mock.module("@/api/hooks/use-agents", () => ({
   useAgent: (id: string) => ({ data: id ? { id, name: "Lead" } : undefined }),

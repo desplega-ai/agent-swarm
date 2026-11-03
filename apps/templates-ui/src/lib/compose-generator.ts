@@ -146,7 +146,6 @@ export function generateCompose(config: ComposeConfig): string {
     lines.push(`      - AGENT_ROLE=${svc.agentRole}`);
     lines.push(`      - TEMPLATE_ID=${svc.templateId}`);
     lines.push("      - MCP_BASE_URL=http://api:3013");
-    lines.push("      - YOLO=true");
     lines.push("      - SWARM_URL=${SWARM_URL:-localhost}");
     lines.push(
       `      - MAX_CONCURRENT_TASKS=${svc.isLead ? DEFAULT_MAX_CONCURRENT_TASKS.lead : DEFAULT_MAX_CONCURRENT_TASKS.worker}`,

@@ -124,7 +124,6 @@ Shared by all three:
 | `API_KEY` | `${{api.API_KEY}}` | Linked from the api service; leave as is. |
 | `MCP_BASE_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:3013` | Private address of the api service. Leave as is. |
 | `SWARM_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:3013` | Private address of the api service. Leave as is. |
-| `YOLO` | `true` | Lets the agent run tools without asking. Leave as is. |
 | `HARNESS_PROVIDER` | `claude` | Agent harness: claude, codex or pi. Add its credential on /setup. |
 | `AGENT_FS_API_URL` | `http://${{agent-fs.RAILWAY_PRIVATE_DOMAIN}}:7433` | Private address of the agent-fs service. Leave as is. |
 | `APP_URL` | `https://app.agent-swarm.dev` | Dashboard that setup and file links open. Leave as is. |

@@ -20725,7 +20725,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner` */
+                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -28549,6 +28549,7 @@ export interface components {
             mentionChannelId?: string;
             dir?: string;
             parentTaskId?: string;
+            dispatchedByTaskId?: string;
             claudeSessionId?: string;
             model?: string;
             /** @enum {string} */

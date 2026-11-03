@@ -326,7 +326,6 @@ export function generateCompose(state: OnboardState): string {
     lines.push(`      - AGENT_ROLE=${agentRole}`);
     lines.push(`      - TEMPLATE_ID=${svc.entry.template}`);
     lines.push("      - MCP_BASE_URL=http://swarm-api:3013");
-    lines.push("      - YOLO=true");
     lines.push("      - SWARM_URL=http://swarm-api:3013");
 
     const maxConcurrentTasks =

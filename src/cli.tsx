@@ -33,7 +33,6 @@ interface ParsedArgs {
   dryRun: boolean;
   restore: boolean;
   yes: boolean;
-  yolo: boolean;
   systemPrompt: string;
   systemPromptFile: string;
   additionalArgs: string[];
@@ -56,7 +55,6 @@ function parseArgs(args: string[]): ParsedArgs {
   let dryRun = false;
   let restore = false;
   let yes = false;
-  let yolo = false;
   let systemPrompt = "";
   let systemPromptFile = "";
   let additionalArgs: string[] = [];
@@ -93,8 +91,6 @@ function parseArgs(args: string[]): ParsedArgs {
       restore = true;
     } else if (arg === "-y" || arg === "--yes") {
       yes = true;
-    } else if (arg === "--yolo") {
-      yolo = true;
     } else if (arg === "--system-prompt") {
       systemPrompt = mainArgs[i + 1] || systemPrompt;
       i++;
@@ -145,7 +141,6 @@ function parseArgs(args: string[]): ParsedArgs {
     dryRun,
     restore,
     yes,
-    yolo,
     systemPrompt,
     systemPromptFile,
     additionalArgs,
@@ -255,7 +250,6 @@ const COMMAND_HELP: Record<
     description: "Run Claude in headless loop mode as a worker agent.",
     options: [
       "  -m, --msg <prompt>          Custom prompt (default: /agent-swarm:start-worker)",
-      "  --yolo                      Continue on errors instead of stopping",
       "  --system-prompt <text>      Custom system prompt (appended to Claude)",
       "  --system-prompt-file <path> Read system prompt from file",
       "  -- <args...>                Additional arguments to pass to Claude CLI",
@@ -263,7 +257,6 @@ const COMMAND_HELP: Record<
     ].join("\n"),
     examples: [
       `  ${binName} worker`,
-      `  ${binName} worker --yolo`,
       `  ${binName} worker -m "Custom prompt"`,
       `  ${binName} worker --system-prompt "You are a Python specialist"`,
     ].join("\n"),
@@ -273,13 +266,12 @@ const COMMAND_HELP: Record<
     description: "Run Claude as lead agent in headless loop mode.\nSame options as worker.",
     options: [
       "  -m, --msg <prompt>          Custom prompt",
-      "  --yolo                      Continue on errors instead of stopping",
       "  --system-prompt <text>      Custom system prompt",
       "  --system-prompt-file <path> Read system prompt from file",
       "  -- <args...>                Additional arguments to pass to Claude CLI",
       "  -h, --help                  Show this help",
     ].join("\n"),
-    examples: [`  ${binName} lead`, `  ${binName} lead --yolo`].join("\n"),
+    examples: [`  ${binName} lead`].join("\n"),
   },
   docs: {
     usage: `${binName} docs [--open]`,
@@ -563,19 +555,12 @@ function ClaudeRunner({ msg, headless, additionalArgs }: ClaudeRunnerProps) {
 
 interface RunnerProps {
   prompt: string;
-  yolo: boolean;
   systemPrompt: string;
   systemPromptFile: string;
   additionalArgs: string[];
 }
 
-function WorkerRunner({
-  prompt,
-  yolo,
-  systemPrompt,
-  systemPromptFile,
-  additionalArgs,
-}: RunnerProps) {
+function WorkerRunner({ prompt, systemPrompt, systemPromptFile, additionalArgs }: RunnerProps) {
   const { exit } = useApp();
 
   useEffect(() => {
@@ -586,7 +571,6 @@ function WorkerRunner({
       .then(({ runWorker }) =>
         runWorker({
           prompt: prompt || undefined,
-          yolo,
           systemPrompt: systemPrompt || undefined,
           systemPromptFile: systemPromptFile || undefined,
           additionalArgs,
@@ -598,12 +582,12 @@ function WorkerRunner({
         exit(err);
       });
     // Note: runWorker runs indefinitely, so we don't call exit() on success
-  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
+  }, [prompt, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
   return null;
 }
 
-function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalArgs }: RunnerProps) {
+function LeadRunner({ prompt, systemPrompt, systemPromptFile, additionalArgs }: RunnerProps) {
   const { exit } = useApp();
 
   useEffect(() => {
@@ -614,7 +598,6 @@ function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalAr
       .then(({ runLead }) =>
         runLead({
           prompt: prompt || undefined,
-          yolo,
           systemPrompt: systemPrompt || undefined,
           systemPromptFile: systemPromptFile || undefined,
           additionalArgs,
@@ -626,7 +609,7 @@ function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalAr
         exit(err);
       });
     // Note: runLead runs indefinitely, so we don't call exit() on success
-  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
+  }, [prompt, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
   return null;
 }
@@ -693,7 +676,6 @@ function App({ args }: { args: ParsedArgs }) {
     dryRun,
     restore,
     yes,
-    yolo,
     systemPrompt,
     systemPromptFile,
     additionalArgs,
@@ -730,7 +712,6 @@ function App({ args }: { args: ParsedArgs }) {
       return (
         <WorkerRunner
           prompt={msg}
-          yolo={yolo}
           systemPrompt={systemPrompt}
           systemPromptFile={systemPromptFile}
           additionalArgs={additionalArgs}
@@ -740,7 +721,6 @@ function App({ args }: { args: ParsedArgs }) {
       return (
         <LeadRunner
           prompt={msg}
-          yolo={yolo}
           systemPrompt={systemPrompt}
           systemPromptFile={systemPromptFile}
           additionalArgs={additionalArgs}

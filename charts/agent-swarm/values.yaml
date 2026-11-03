@@ -193,8 +193,6 @@ poolDefaults:
   # `pools.<name>.harnessProvider`. One of: claude, codex, opencode, pi,
   # claude-managed, devin.
   harnessProvider: claude
-  # -- Continue on errors inside the harness. Maps to YOLO env var.
-  yolo: true
   terminationGracePeriodSeconds: 120
   # -- Pod replacement strategy during rolling updates. Pool pods are
   # interchangeable (any worker can pick up a paused task on resume) so
@@ -305,7 +303,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.18.14
+    tag: 0.18.15
   port: 7433
   # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
   # the bucket configured below. `local` stores objects on the agent-fs PVC
