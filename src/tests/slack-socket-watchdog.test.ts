@@ -3,6 +3,7 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { ErrorCode } from "@slack/web-api";
 import { pollUntil } from "../../scripts/e2e/http";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
+import * as db from "../be/db";
 import { closeDb, initDb } from "../be/db";
 import {
   _getSlackSocketClientForTests,
@@ -23,6 +24,7 @@ import {
 } from "../slack/connection-state";
 import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import { fenceSocketModeClient } from "../slack/socket-fence";
+import { _isTaskWatcherRunning } from "../slack/watcher";
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -532,6 +534,54 @@ describe("socket watchdog against a live Slack mock", () => {
       } finally {
         gate.restore();
         gate.release();
+        errorSpy.mockRestore();
+      }
+    });
+  }, 30_000);
+
+  test("a start abandoned during watcher hydration installs no watcher timer after shutdown", async () => {
+    const options = {
+      tickMs: 20,
+      downAfterMs: 50,
+      backoffBaseMs: 100,
+      backoffMaxMs: 200,
+      restartTimeoutMs: 500,
+    };
+    await withLiveSlack(options, async () => {
+      expect(_isTaskWatcherRunning()).toBe(true);
+      const errors: string[] = [];
+      const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      });
+      // Every later watcher start waits at the gate in its hydration query.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let hydrations = 0;
+      const realHydrate = db.getInProgressSlackTasks;
+      const hydrateSpy = spyOn(db, "getInProgressSlackTasks").mockImplementation(async () => {
+        hydrations += 1;
+        await gate;
+        return realHydrate();
+      });
+      try {
+        setSlackConnectionState("disconnected");
+        // A watchdog restart reaches hydration, then runs out of time.
+        expect(await pollUntil(() => hydrations > 0, 5_000, 10)).toBe(true);
+        expect(
+          await pollUntil(() => errors.some((line) => line.includes("abandoned it")), 5_000, 10),
+        ).toBe(true);
+        await stopSlackApp();
+        expect(_isTaskWatcherRunning()).toBe(false);
+
+        // The abandoned starts finish hydrating after shutdown.
+        release();
+        await Bun.sleep(100);
+        expect(_isTaskWatcherRunning()).toBe(false);
+      } finally {
+        release();
+        hydrateSpy.mockRestore();
         errorSpy.mockRestore();
       }
     });
