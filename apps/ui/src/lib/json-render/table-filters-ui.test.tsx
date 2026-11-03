@@ -251,6 +251,9 @@ test("the phone button counts active filters and opens a section per column", as
     "CI on head",
     "Title",
   ]);
+  // Capped at the room beside the trigger, or a mid-screen button pushes the top off-screen.
+  expect(content.className).toContain("var(--radix-popover-content-available-height)");
+  expect(content.className).toContain("overflow-y-auto");
 });
 
 test("the store only notifies when the snapshot really changed", () => {
