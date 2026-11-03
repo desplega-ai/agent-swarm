@@ -301,11 +301,11 @@ async function captureSql(run: () => Promise<unknown>): Promise<string> {
 async function timeIt(
   name: string,
   run: () => Promise<unknown[]>,
-  params: unknown[] = [],
+  params: import("bun:sqlite").SQLQueryBindings[] = [],
 ): Promise<{ name: string; rows: number; medianMs: number; p95Ms: number; plan: string }> {
   const sql = await captureSql(run);
   const plan = getDb()
-    .query<{ detail: string }, any[]>(`EXPLAIN QUERY PLAN ${sql}`)
+    .query<{ detail: string }, import("bun:sqlite").SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${sql}`)
     .all(...params)
     .map((row) => row.detail)
     .join("\n");
