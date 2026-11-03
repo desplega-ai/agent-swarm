@@ -137,7 +137,6 @@ function workerEnv(
     AGENT_SWARM_API_KEY: apiKey,
     HARNESS_PROVIDER: provider,
     AGENT_ROLE: "worker",
-    YOLO: "true",
     MODEL_OVERRIDE: model,
     MAX_CONCURRENT_TASKS: "1",
     SLACK_DISABLE: "true",
@@ -334,8 +333,8 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
  */
 function workerCommand(homeDir: string): string[] {
   const command = process.env.E2E_WORKER_BINARY
-    ? [process.env.E2E_WORKER_BINARY, "worker", "--yolo"]
-    : ["bun", "run", "src/cli.tsx", "worker", "--yolo"];
+    ? [process.env.E2E_WORKER_BINARY, "worker"]
+    : ["bun", "run", "src/cli.tsx", "worker"];
   return process.getuid?.() === 0 && Bun.which("gosu")
     ? ["gosu", "worker", "env", `HOME=${homeDir}`, ...command]
     : command;

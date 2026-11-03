@@ -57,6 +57,12 @@ Codex access depends on account, client, and sign-in method. GPT-5.5 retires fro
 ChatGPT-authenticated Codex on October 14, 2026, but its API availability is
 unchanged. Keep API and ChatGPT lifecycle decisions separate.
 
+## Task failures
+
+A non-zero task exit is written to the session's `errors.jsonl` and logged to
+stderr. The worker or lead stays running and continues polling for work. A task
+failure does not require a restart or a special runner mode to accept the next task.
+
 ## Worker exit limit
 
 `SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed assigned or resumed task executions.
@@ -463,7 +469,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1793606440-g4c7784`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1793682830-gad461e`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.

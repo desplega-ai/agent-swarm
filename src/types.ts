@@ -803,6 +803,9 @@ export const AgentTaskSchema = z
     // Session attachment (optional). z.string(), not z.uuid(): accepted
     // verbatim from the create-task body (see dependsOn note above).
     parentTaskId: z.string().optional(),
+    // The task whose session called send-task to create this one. Unlike
+    // parentTaskId (context continuity), this is where the dispatch happened.
+    dispatchedByTaskId: z.string().optional(),
     claudeSessionId: z.string().optional(),
 
     // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
@@ -963,6 +966,8 @@ export const CreateTaskOptionsSchema = z.object({
   workflowRunId: z.string().optional(),
   workflowRunStepId: z.string().optional(),
   sourceTaskId: z.string().optional(),
+  /** Persisted as `dispatchedByTaskId`: the caller's task when send-task created this one. */
+  dispatchedByTaskId: z.string().optional(),
   /**
    * Optional JSON Schema the agent's final output must conform to.
    *

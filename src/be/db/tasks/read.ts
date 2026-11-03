@@ -87,6 +87,7 @@ export type AgentTaskRow = {
   mentionChannelId: string | null;
   dir: string | null;
   parentTaskId: string | null;
+  dispatchedByTaskId?: string | null;
   claudeSessionId: string | null;
   model: string | null;
   modelTier: string | null;
@@ -345,6 +346,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     mentionChannelId: row.mentionChannelId ?? undefined,
     dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
+    dispatchedByTaskId: row.dispatchedByTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
@@ -715,6 +717,26 @@ export async function getTasksByAgentId(
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
     [agentId, ...(readable?.params ?? [])],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
+ * Tasks that one of `taskIds` dispatched (send-task) and that are not in
+ * `taskIds`. A continuation keeps parentTaskId on an earlier task, so the
+ * task that sent it does not reach it by the parentTaskId walk.
+ */
+export async function getTasksDispatchedFrom(taskIds: string[]): Promise<AgentTask[]> {
+  if (taskIds.length === 0) return [];
+  const ids = JSON.stringify(taskIds);
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.*,
+       (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
+     FROM agent_tasks t
+     WHERE t.dispatchedByTaskId IN (SELECT value FROM json_each(?))
+       AND t.id NOT IN (SELECT value FROM json_each(?))
+     ORDER BY t.createdAt, t.rowid`,
+    [ids, ids],
   );
   return rows.map(rowToAgentTask);
 }

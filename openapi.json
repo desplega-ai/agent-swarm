@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.8",
+    "version": "2.7.9",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -342,6 +342,9 @@
             "minLength": 1
           },
           "parentTaskId": {
+            "type": "string"
+          },
+          "dispatchedByTaskId": {
             "type": "string"
           },
           "claudeSessionId": {
@@ -52714,7 +52717,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
+            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read.",
             "content": {
               "application/json": {
                 "schema": {

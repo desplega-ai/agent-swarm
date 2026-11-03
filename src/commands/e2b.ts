@@ -428,7 +428,6 @@ export async function loadRuntimeEnv(
     // --agent-role flag, keeping start-worker byte-identical to before.
     runtime.AGENT_ROLE = spec.agentRole ?? value(flags, "agent-role", "worker");
     runtime.HARNESS_PROVIDER = value(flags, "provider", runtime.HARNESS_PROVIDER || "claude");
-    runtime.WORKER_YOLO = value(flags, "worker-yolo", "false");
     runtime.WORKER_LOG_DIR = value(flags, "worker-log-dir", "/logs");
     runtime.LEAD_LOG_DIR = value(flags, "lead-log-dir", "/logs");
     runtime.HOME = value(flags, "home", runtime.HOME || "/home/worker");

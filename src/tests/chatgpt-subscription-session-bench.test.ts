@@ -135,7 +135,7 @@ function startSession(
   adapter: Parameters<typeof spawnProviderProcess>[0],
   kind: "new" | "resumed",
 ) {
-  return spawnProviderProcess(adapter, startOpts(kind), logDir, true);
+  return spawnProviderProcess(adapter, startOpts(kind), logDir);
 }
 
 describe("ChatGPT subscription slot bench", () => {

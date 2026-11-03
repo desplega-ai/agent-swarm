@@ -530,6 +530,9 @@ export async function sendTaskHandler(
     requestedByUserId,
     source: "mcp",
     sourceTaskId,
+    // Where this dispatch happened. parentTaskId can point at an earlier task
+    // for context continuity; the dashboard groups delegations by this.
+    dispatchedByTaskId: sourceTaskId,
     taskType,
     tags,
     priority,
