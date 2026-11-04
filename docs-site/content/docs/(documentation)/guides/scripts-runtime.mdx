@@ -144,8 +144,12 @@ The `ScriptContext` passed to your `default` export carries:
 - `ctx.logger` — Console-compatible logger; same destination as the global
   `console`.
 
-Most SDK results are wrapper objects; read `response.data ?? response` before
-narrowing the payload. Prefer registered connections for authenticated calls:
+Most SDK results are wrapper objects `{ success, status, data }`; read
+`response.data ?? response` before narrowing the payload. `success` is false
+when the HTTP call failed, and also when a tool reached through the generic MCP
+bridge refused the call (HTTP 200 with `data.success === false`); a refusal
+also copies `data.message` to `message`. Failures
+resolve; they do not throw, except for `script_search` and `script_run`. Prefer registered connections for authenticated calls:
 credentials are attached server-side and do not enter script source or args.
 
 Stored scripts are not automatically re-typechecked when an app definition or
