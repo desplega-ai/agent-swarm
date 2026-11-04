@@ -695,6 +695,70 @@ describe("getBasePrompt: slack section", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 6b. Use cases (lead contract) and the use-case channel thread
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: use cases and the channel thread", () => {
+  const USE_CASE = "A use case is work that repeats or continues";
+  const THREAD_HEADER = "## Use-case channel thread";
+  const lead = { ...minimalArgs, role: "lead" };
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+  test("the lead gets the use-case paragraph once, linked to APP_URL", async () => {
+    process.env.APP_URL = "https://app.example.test";
+    const result = await getBasePrompt(lead);
+    expect(count(result, USE_CASE)).toBe(1);
+    expect(count(result, "/sessions?view=")).toBe(1);
+    expect(result).toContain("https://app.example.test/sessions?view=<key>");
+  });
+
+  test("without APP_URL the link uses the default app URL", async () => {
+    const result = await getBasePrompt(lead);
+    expect(result).toContain("https://app.agent-swarm.dev/sessions?view=<key>");
+  });
+
+  test("a worker gets no use-case paragraph", async () => {
+    enableSlack();
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).not.toContain(USE_CASE);
+    expect(result).not.toContain(THREAD_HEADER);
+  });
+
+  test("the thread offer renders once for a lead with Slack configured", async () => {
+    enableSlack();
+    const result = await getBasePrompt(lead);
+    expect(count(result, THREAD_HEADER)).toBe(1);
+  });
+
+  test("no thread offer without Slack or a Chat SDK adapter", async () => {
+    expect(await getBasePrompt(lead)).not.toContain(THREAD_HEADER);
+    expect(await getBasePrompt({ ...lead, serverCapabilities: ["core", "pages"] })).not.toContain(
+      THREAD_HEADER,
+    );
+  });
+
+  test("the thread offer renders once for a lead with the chat-sdk capability", async () => {
+    const result = await getBasePrompt({ ...lead, serverCapabilities: ["core", "chat-sdk"] });
+    expect(count(result, THREAD_HEADER)).toBe(1);
+  });
+
+  test("Slack and Chat SDK together still render one offer", async () => {
+    enableSlack();
+    const result = await getBasePrompt({
+      ...lead,
+      serverCapabilities: ["core", "slack", "chat-sdk"],
+    });
+    expect(count(result, THREAD_HEADER)).toBe(1);
+  });
+
+  test("a scripts-only lead gets no thread offer", async () => {
+    enableSlack();
+    const result = await getBasePrompt({ ...lead, scriptsOnly: true });
+    expect(result).not.toContain(THREAD_HEADER);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 7. Messaging is deprecated and gone from every variant
 // ---------------------------------------------------------------------------
 
@@ -1171,15 +1235,16 @@ describe("getBasePrompt: size budget", () => {
   });
 
   // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
-  // while the skill list is still unknown, and the missing-tool pointer (~150 chars).
-  test("a fresh claude lead stays under 6,250 characters", async () => {
+  // while the skill list is still unknown, the missing-tool pointer (~150 chars),
+  // and the use-case paragraph (~790 chars).
+  test("a fresh claude lead stays under 7,100 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(6_250);
+    expect(result.length).toBeLessThan(7_100);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

@@ -46,6 +46,16 @@ Files attached to your task already come with download commands in the task mess
 
 A task without `requestedByUserId` came from a Slack user the swarm does not know. Register them with `manage-user`, using the Slack user ID and display name from the task metadata, then continue. When you learn a requester's stable preferences (language, tone, verbosity), the lead stores them in the user's `comms` field with `manage-user`.
 
+## Use-case thread (lead)
+
+A use case (a schedule and its runs under one key, see the `scheduling` skill) can post a summary of each run to one Slack thread.
+
+1. In the planning session, after the first run, read `kv-get { namespace: "usecase:<key>", key: "thread" }`. A stored value means that you offered before: do not offer again.
+2. Offer once: "Do you want a summary of each run in a Slack channel? Tell me the channel."
+3. On no: `kv-set { namespace: "usecase:<key>", key: "thread", value: { declined: true } }`.
+4. On yes: `slack-start-thread { channelId, message }` with a one-line title, for example "Competitor watch: one summary per run". Then `kv-set { namespace: "usecase:<key>", key: "thread", value: { adapter: "slack", channelId, threadTs: "<ts from slack-start-thread>" } }`.
+5. When you finish or review a run of the use case (the run itself, or the follow-up of a worker's run): `kv-get` the thread. When it has a `threadTs`, `slack-post { channelId, threadTs, message }` with the run summary and the link to its result file.
+
 ## Lead standing orders
 
 When your heartbeat runbook says so, check for unaddressed requests older than one hour: `slack-list-channels`, then `slack-read` per channel, then create a task for each open request.

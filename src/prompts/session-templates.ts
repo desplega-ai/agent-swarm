@@ -103,9 +103,37 @@ Worker completion/failure triggers a follow-up, or only wakes your deferred wait
 
 For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 
+A use case is work that repeats or continues, for example a report twice a week. Plan it as one use case with one asset key:
+- When the task prompt names a use case, use its key. Else agree a short slug with the requester. The key is \`shared/<slug>/\`, or \`personal/<user>/<slug>/\` for private work.
+- Give that \`key\` to \`create-schedule\` and \`create-page\`. The results go under the same path (see Outputs).
+- End the planning reply with this line: "This use case lives in Sessions → <slug>: {{appUrl}}/sessions?view=<key>".
+- In a use-case session, a request for one time only is a normal task in the key. A request that changes the future runs is an \`update-schedule\` call with the new \`taskTemplate\`. After that call, show the old and the new template as a \`diff\` block in your reply, and ask the requester to confirm it.
+
 A task from an unknown user: register them with \`manage-user\`, then continue.
 A task needs a tool that is not connected (GitHub, Linear, Jira, Gmail, ...): say so and link \`APP_URL\` + \`/integrations/tools\`. Do not work around it.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
+`,
+  variables: [
+    {
+      name: "appUrl",
+      description: "Dashboard origin from getAppUrl() (APP_URL, else the default app URL)",
+    },
+  ],
+  category: "system",
+});
+
+// Lead-only, appended by base-prompt when Slack or a Chat SDK adapter is
+// connected. All posting tools (slack-start-thread, slack-post, chat-post) are
+// lead-only, so workers never get this rule. The skills hold the steps.
+registerTemplate({
+  eventType: "system.agent.lead.channel_thread",
+  header: "",
+  defaultBody: `
+## Use-case channel thread
+
+In the planning session, after the first run of a use case, offer once to post a summary of each run to a channel thread. Before you offer, read \`kv-get\` with namespace \`usecase:<key>\` and key \`thread\`. A stored value means that you offered before. Do not offer again.
+When you finish or review a run of a use case that has a stored thread, post the run summary in that thread.
+The \`slack-interaction\` skill (Slack) and the \`chat-sdk\` skill (Telegram, Discord, Teams) give the steps.
 `,
   variables: [],
   category: "system",
@@ -662,6 +690,19 @@ If it fits the conversation, offer it once, at the end of your reply, with the l
     { name: "href", description: "Dashboard link that opens the setup page for the item" },
     { name: "kind", description: "Checklist item kind: channel, tool, use_case or custom" },
   ],
+  category: "task_lifecycle",
+});
+
+// Lead only: the task's key is a use-case group (the same rule create-schedule
+// and create-page use to inherit it). The system prompt never carries a key.
+registerTemplate({
+  eventType: "task.use_case",
+  header: "",
+  defaultBody: `
+## Use case
+This task is in the use case with key \`{{key}}\`. \`create-schedule\` and \`create-page\` use this key when you give no \`key\`. Its schedules: \`list-schedules\` with this key.
+`,
+  variables: [{ name: "key", description: "The task's asset key, a use-case group key" }],
   category: "task_lifecycle",
 });
 

@@ -6,7 +6,7 @@
  *   A-D, F, G  composite session template (role + persona, contract, workspace,
  *              memory, communication, secrets) from session-templates.ts
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
- *   H          deployment-gated notes: slack, steering
+ *   H          deployment-gated notes: slack, use-case channel thread (lead), steering
  *   I          tools and skills (harness tool discovery, skills, MCP server names)
  *   J          agent notes: CLAUDE.md, only when edited
  *
@@ -22,7 +22,7 @@
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName } from "../types";
-import { agentFsFileLinkQuery, resolveAgentFsLinkBase } from "../utils/constants";
+import { agentFsFileLinkQuery, getAppUrl, resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -215,6 +215,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     role,
     agentId,
     persona,
+    // Deployment-level, so the lead's use-case link keeps the prompt cache-stable.
+    appUrl: getAppUrl(),
   };
 
   // Composite choice by traits, then role.
@@ -265,6 +267,17 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
+  }
+
+  // Use-case channel thread (lead only: every posting tool is lead-only).
+  if (
+    hasMcp &&
+    role === "lead" &&
+    !scriptsOnlyMode &&
+    (slackPromptToolsEnabled || serverHasCapability("chat-sdk", false))
+  ) {
+    const threadResult = await resolveTemplateAsync("system.agent.lead.channel_thread", {});
+    prompt += threadResult.text;
   }
 
   if (
