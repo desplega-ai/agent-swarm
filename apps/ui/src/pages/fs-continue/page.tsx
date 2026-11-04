@@ -1,7 +1,7 @@
 import { AlertCircle, FolderOpen, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, FsContinueError } from "@/api/client";
+import { api, FsApiError } from "@/api/client";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +25,7 @@ function returnHost(raw: string | null): string | null {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof FsContinueError && ERRORS[error.status]) return ERRORS[error.status];
+  if (error instanceof FsApiError && ERRORS[error.status]) return ERRORS[error.status];
   return error instanceof Error ? error.message : String(error);
 }
 

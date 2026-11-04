@@ -16,11 +16,19 @@ import {
 } from "react";
 import { useMatch } from "react-router-dom";
 import { useStatusContext } from "@/app/status-context";
+import {
+  autoConnectRunKey,
+  settledOutcome,
+  subscribeSettled,
+} from "@/components/comb/auto-connect-attempts";
+import type { AutoConnectOutcome } from "@/components/comb/connect-flow";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { type AgentFsLive, type LiveState, useAgentFsLive } from "@/hooks/use-agent-fs-live";
 import { useConfig } from "@/hooks/use-config";
 import { AgentFsClient, type AgentFsError } from "@/lib/agent-fs/client";
 import {
   type AgentFsCredential,
+  type CredentialOwner,
   clearCredential,
   credentialSnapshot,
   subscribeCredential,
@@ -53,6 +61,8 @@ export interface AgentFsContextValue extends AgentFsLive {
   maxUploadBytes: number | null;
   /** Why the state is `invalid-key` or `unreachable`. */
   error: AgentFsError | null;
+  /** This page load's settled automatic connect outcome. Null while none has settled. */
+  autoConnect: AutoConnectOutcome | null;
   /** Save a verified credential and switch to it. */
   connect: (credential: AgentFsCredential) => void;
   /** Forget the credential and every cached agent-fs query. */
@@ -121,17 +131,29 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const comb = status?.agent_fs?.comb;
   const endpoint = combEndpoint(comb);
 
+  // The credential belongs to the dashboard user: switching users never reuses
+  // another user's key. A tab with no user keeps the legacy (user-less) key.
+  const currentUser = useCurrentUser();
+  const ownerId = currentUser.userId;
+  const ownerEmail = currentUser.user?.email ?? null;
+  const owner = useMemo<CredentialOwner | null>(
+    () => (ownerId ? { userId: ownerId, email: ownerEmail } : null),
+    [ownerId, ownerEmail],
+  );
+
   // Read during render, so a hard load never flashes `needs-connect`.
   const subscribe = useCallback(
     (onChange: () => void) =>
-      endpoint ? subscribeCredential(apiUrl, endpoint, onChange) : () => {},
-    [apiUrl, endpoint],
+      endpoint ? subscribeCredential(apiUrl, endpoint, owner, onChange) : () => {},
+    [apiUrl, endpoint, owner],
   );
   const getSnapshot = useMemo(
-    () => (endpoint ? credentialSnapshot(apiUrl, endpoint) : () => null),
-    [apiUrl, endpoint],
+    () => (endpoint ? credentialSnapshot(apiUrl, endpoint, owner) : () => null),
+    [apiUrl, endpoint, owner],
   );
   const saved = useSyncExternalStore(subscribe, getSnapshot);
+  const runKey = autoConnectRunKey(apiUrl, endpoint, ownerId);
+  const autoConnect = useSyncExternalStore(subscribeSettled, () => settledOutcome(runKey));
 
   const apiKey = saved?.apiKey;
   const client = useMemo(
@@ -171,22 +193,23 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       // Drop results cached under an older key for the same user (a reset key
       // would otherwise keep its 401).
       queryClient.removeQueries({ queryKey: ["agent-fs", endpoint] });
-      writeCredential(apiUrl, endpoint, next);
+      writeCredential(apiUrl, endpoint, owner, next);
     },
-    [apiUrl, endpoint, queryClient],
+    [apiUrl, endpoint, owner, queryClient],
   );
 
   const disconnect = useCallback(() => {
-    if (endpoint) clearCredential(apiUrl, endpoint);
+    if (endpoint) clearCredential(apiUrl, endpoint, owner);
     queryClient.removeQueries({ queryKey: ["agent-fs"] });
-  }, [apiUrl, endpoint, queryClient]);
+  }, [apiUrl, endpoint, owner, queryClient]);
 
   const refetchMe = meQuery.refetch;
   const retry = useCallback(() => {
     void refetchMe();
   }, [refetchMe]);
 
-  const statusPending = status === undefined && statusLoading;
+  // While the dashboard user is unknown, the credential to read is unknown too.
+  const statusPending = (status === undefined && statusLoading) || currentUser.state === "pending";
   const hasCredential = saved !== null;
   const me = meQuery.data;
   const meError = meQuery.error;
@@ -221,6 +244,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       features,
       maxUploadBytes,
       error,
+      autoConnect,
       connect,
       disconnect,
       retry,
@@ -241,6 +265,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       features,
       maxUploadBytes,
       error,
+      autoConnect,
       connect,
       disconnect,
       retry,

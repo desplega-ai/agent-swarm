@@ -1,7 +1,11 @@
 import { AlertCircle, ExternalLink, LogIn } from "lucide-react";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Link } from "react-router-dom";
-import { useConfigs, useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
+import {
+  useConfigs,
+  useDeleteConfigsBatch,
+  useUpsertConfigsBatch,
+} from "@/api/hooks/use-config-api";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { CodexAccountsList } from "@/components/onboarding/codex-accounts-list";
@@ -133,12 +137,14 @@ function PoolField({ provider, field }: { provider: AiProvider; field: AiProvide
 /**
  * Plain global config values (a region, an ID, a base URL, a static secret),
  * saved together with one Save. A stored secret never comes back: its input
- * stays empty and says it is saved, and an empty input keeps it.
+ * stays empty and says it is saved, and an empty input keeps it. A text value
+ * shows in its input, so clearing it and saving removes the stored value.
  */
 function ConfigFields({ fields }: { fields: AiProviderField[] }) {
   const baseId = useId();
   const { data: configs } = useConfigs({ scope: "global" });
   const upsert = useUpsertConfigsBatch();
+  const remove = useDeleteConfigsBatch();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const stored = (key: string) => configs?.find((c) => c.key === key && c.scope === "global");
@@ -152,21 +158,35 @@ function ConfigFields({ fields }: { fields: AiProviderField[] }) {
     if (field.kind === "text" && current?.value === value) return [];
     return [{ key: field.key, value, isSecret: field.kind === "secret" }];
   });
+  // A text field emptied while a value is stored: delete the stored value.
+  const cleared = fields.flatMap((field) =>
+    field.kind === "text" && drafts[field.key]?.trim() === "" && stored(field.key)
+      ? [field.key]
+      : [],
+  );
+  const pending = upsert.isPending || remove.isPending;
+  const dirty = changes.length > 0 || cleared.length > 0;
 
-  function save() {
-    if (changes.length === 0 || upsert.isPending) return;
+  async function save() {
+    if (!dirty || pending) return;
     setResult(null);
-    upsert.mutate(changes, {
-      onSuccess: (res) => {
-        if (res.failureCount === 0) {
-          setDrafts({});
-          setResult({ ok: true, text: "Saved. Workers use it on their next task." });
-        } else {
-          setResult({ ok: false, text: res.errors[0]?.message ?? "Could not save." });
-        }
-      },
-      onError: (err) => setResult({ ok: false, text: err.message }),
-    });
+    try {
+      const results = [
+        ...(changes.length > 0 ? [await upsert.mutateAsync(changes)] : []),
+        ...(cleared.length > 0
+          ? [await remove.mutateAsync({ configs: configs ?? [], keys: cleared })]
+          : []),
+      ];
+      const failed = results.find((res) => res.failureCount > 0);
+      if (failed) {
+        setResult({ ok: false, text: failed.errors[0]?.message ?? "Could not save." });
+        return;
+      }
+      setDrafts({});
+      setResult({ ok: true, text: "Saved. Workers use it on their next task." });
+    } catch (err) {
+      setResult({ ok: false, text: err instanceof Error ? err.message : "Could not save." });
+    }
   }
 
   return (
@@ -207,8 +227,8 @@ function ConfigFields({ fields }: { fields: AiProviderField[] }) {
         );
       })}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={save} disabled={changes.length === 0 || upsert.isPending}>
-          {upsert.isPending ? (
+        <Button type="button" onClick={() => void save()} disabled={!dirty || pending}>
+          {pending ? (
             <>
               <Spinner className="size-4" />
               Saving…

@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -68,22 +69,69 @@ const DOT_LABEL: Record<KeyHealth, string> = {
   failing: "Failing",
 };
 
-/** One usage window: "5 h", a short bar and the percent. 75% and up reads as a warning. */
-function Meter({ label, value }: { label: string; value: number }) {
+/** A provider reset time (unix seconds) as a clock time, with the date when not today. */
+function resetTime(resetsAt: number | undefined): string | null {
+  return resetsAt ? backAt(new Date(resetsAt * 1000).toISOString()) : null;
+}
+
+/** "fable" as "Fable". */
+function modelName(model: string): string {
+  return model.charAt(0).toUpperCase() + model.slice(1);
+}
+
+/**
+ * One usage window: "5 h", a short bar, the percent, and when the window
+ * resets. 75% and up reads as a warning.
+ */
+function Meter({
+  label,
+  value,
+  resetsAt,
+}: {
+  label: string;
+  value: number;
+  resetsAt: number | undefined;
+}) {
   const high = value >= 75;
+  const reset = resetTime(resetsAt);
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      {label}
-      <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-muted">
-        <span
-          className={cn(
-            "block h-full rounded-full",
-            high ? "bg-status-warning" : "bg-foreground/50",
-          )}
-          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-        />
+    <span className="inline-flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        {label}
+        <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+          <span
+            className={cn(
+              "block h-full rounded-full",
+              high ? "bg-status-warning" : "bg-foreground/50",
+            )}
+            style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+          />
+        </span>
+        <span className={cn("w-8 font-mono", high && "text-status-warning-strong")}>{value}%</span>
       </span>
-      <span className={cn("w-8 font-mono", high && "text-status-warning-strong")}>{value}%</span>
+      {reset ? <span>Resets {reset}</span> : null}
+    </span>
+  );
+}
+
+/** A badge per model whose weekly window the provider closed ("Fable limit, resets 14:00"). */
+function ModelLimitBadges({ status }: { status: ProviderKey["status"] }) {
+  const active = (status?.modelLimits ?? []).filter((limit) => limit.active);
+  if (active.length === 0) return null;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {active.map((limit) => (
+        <Badge
+          key={limit.window}
+          variant="outline"
+          className="h-5 gap-1.5 border-status-warning-strong/30 px-1.5 py-0 text-[11px] font-medium"
+        >
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-warning" />
+          <span className="text-status-warning-strong">
+            {modelName(limit.model)} limit, resets {resetTime(limit.resetsAt) ?? "soon"}
+          </span>
+        </Badge>
+      ))}
     </span>
   );
 }
@@ -217,6 +265,7 @@ export function PoolKeyRow({
             ) : null}
           </span>
           <KeySubLine k={k} />
+          <ModelLimitBadges status={status} />
           {/* Phone: the plan and today's amount, under the key. */}
           <span className="text-xs text-muted-foreground md:hidden">
             {subscription && planLabel ? `${planLabel} · ` : ""}today{" "}
@@ -237,8 +286,20 @@ export function PoolKeyRow({
         )}
       </div>
       <div className="hidden flex-wrap gap-x-3 gap-y-1 md:flex">
-        {k.window5h !== null ? <Meter label="5 h" value={k.window5h} /> : null}
-        {k.window7d !== null ? <Meter label="7 d" value={k.window7d} /> : null}
+        {k.window5h !== null ? (
+          <Meter
+            label="5 h"
+            value={k.window5h}
+            resetsAt={status?.rateLimitWindows?.five_hour?.resetsAt}
+          />
+        ) : null}
+        {k.window7d !== null ? (
+          <Meter
+            label="7 d"
+            value={k.window7d}
+            resetsAt={status?.rateLimitWindows?.seven_day?.resetsAt}
+          />
+        ) : null}
       </div>
       <span className="hidden text-right font-mono text-xs md:block">
         {formatCost(k.costToday, { placeholder: "$0" })}

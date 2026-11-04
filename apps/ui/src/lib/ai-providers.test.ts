@@ -10,6 +10,7 @@ import {
   LIST_POOL_VARS,
   matchAiProviders,
   rollUpHealth,
+  unhealthyCredentialCount,
 } from "./ai-providers";
 
 /**
@@ -187,6 +188,34 @@ describe("status roll-up", () => {
     expect(codex).toMatchObject({ health: "ok", keys: [{ label: "taras@acme.dev" }] });
     expect(healthLabel(deepseek!)).toBe("Failing");
     expect(deepseek?.reason).toBe("Key ending 4f1cc: HTTP 401");
+  });
+
+  test("the dot counts ChatGPT accounts that need a new sign-in, once each", () => {
+    const account = (slot: number, suffix: string | null, s: "ok" | "needs_login") => ({
+      slot,
+      configKey: `codex_oauth_${slot}`,
+      legacy: false,
+      suffix,
+      plan: null,
+      email: null,
+      status: s,
+    });
+    expect(unhealthyCredentialCount([], [account(0, "aa111", "ok")])).toBe(0);
+    expect(unhealthyCredentialCount(undefined, [account(0, "aa111", "needs_login")])).toBe(1);
+    // A rejected status row for the same account does not count it twice.
+    const rejected = status("CODEX_OAUTH", "aa111", { lastValidationFailedAt: "2026-11-04" });
+    expect(unhealthyCredentialCount([rejected], [account(0, "aa111", "needs_login")])).toBe(1);
+  });
+
+  test("a provider without a pool gets a row once its config keys are all set", () => {
+    const base = { pools: {}, codexAccounts: [], statuses: [], usageToday: [], usage7d: [] };
+    expect(buildProviderRows(base)).toEqual([]);
+    const rows = buildProviderRows({
+      ...base,
+      presence: { AWS_REGION: true, MANAGED_AGENT_ID: true, MANAGED_ENVIRONMENT_ID: false },
+    });
+    expect(rows.map((r) => r.provider.id)).toEqual(["bedrock"]);
+    expect(rows[0]).toMatchObject({ keys: [], configOnly: true, health: "ok", reason: null });
   });
 
   test("a ChatGPT account that needs a new sign-in fails its provider", () => {

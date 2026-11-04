@@ -51,9 +51,8 @@ mock.module("@/api/hooks/use-chat-sdk", () => ({
 
 const { default: ChannelsPage } = await import("./channels-page");
 const { TooltipProvider } = await import("../../components/ui/tooltip");
-const { adapterChannelState, matchChannels, slackChannelState, CHANNEL_DEFS } = await import(
-  "../../lib/channel-cards"
-);
+const { adapterChannelState, chatSdkPageChannel, matchChannels, slackChannelState, CHANNEL_DEFS } =
+  await import("../../lib/channel-cards");
 
 function adapter(
   name: ChatSdkAdapterStatus["name"],
@@ -222,5 +221,19 @@ describe("ChannelsPage", () => {
     const html = render("/integrations/channels?search=disc");
     expect(cards(html).map(([id]) => id)).toEqual(["discord"]);
     expect(html).not.toContain("More channels");
+  });
+});
+
+describe("chatSdkPageChannel (the breadcrumb of a channel page)", () => {
+  test("names the channel of a Chat SDK adapter page", () => {
+    expect(chatSdkPageChannel("/integrations/chat-sdk", "?adapter=telegram")?.name).toBe(
+      "Telegram",
+    );
+    expect(chatSdkPageChannel("/integrations/chat-sdk/", "?adapter=teams")?.name).toBe(
+      "Microsoft Teams",
+    );
+    expect(chatSdkPageChannel("/integrations/chat-sdk", "")).toBeUndefined();
+    expect(chatSdkPageChannel("/integrations/chat-sdk", "?adapter=nope")).toBeUndefined();
+    expect(chatSdkPageChannel("/integrations/slack", "?adapter=telegram")).toBeUndefined();
   });
 });

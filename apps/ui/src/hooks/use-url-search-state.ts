@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type QueryParamValue = boolean | number | string | null | undefined;
@@ -103,4 +103,61 @@ export function useUrlSearchState() {
   );
 
   return { searchParams, setParam, setParams };
+}
+
+/** How long a text input waits after the last key before it writes the URL. */
+export const URL_INPUT_DELAY_MS = 150;
+
+/**
+ * A text input bound to one search param. The input reads local state, so
+ * every key lands even when keys arrive faster than renders: the router
+ * updates the URL in a transition, and an input that reads the URL directly
+ * gets its old value back between two fast keys ("telegram" became "tegram").
+ * The URL is written once typing pauses (`delayMs`). A change of the param
+ * from elsewhere (a tab switch that resets it, back and forward) replaces the
+ * local value.
+ */
+export function useUrlSearchInput(
+  key: string,
+  options: SetQueryParamOptions & { delayMs?: number } = {},
+): [string, (value: string) => void] {
+  const { searchParams, setParam } = useUrlSearchState();
+  const { delayMs = URL_INPUT_DELAY_MS, ...paramOptions } = options;
+  const urlValue = readStringParam(searchParams, key, paramOptions.defaultValue);
+  const [value, setValue] = useState(urlValue);
+  // The last value this input wrote (or read) from the URL.
+  const synced = useRef(urlValue);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestOptions = useRef(paramOptions);
+  latestOptions.current = paramOptions;
+
+  useEffect(() => {
+    if (urlValue === synced.current) return;
+    synced.current = urlValue;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setValue(urlValue);
+  }, [urlValue]);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const change = useCallback(
+    (next: string) => {
+      setValue(next);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        synced.current = next;
+        setParam(key, next, latestOptions.current);
+      }, delayMs);
+    },
+    [key, delayMs, setParam],
+  );
+
+  return [value, change];
 }

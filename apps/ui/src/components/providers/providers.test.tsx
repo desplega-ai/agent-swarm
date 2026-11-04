@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "b
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ReactNode, useLayoutEffect } from "react";
+import type { ApiKeyStatus } from "../../api/types";
 
 // A DOM for the click tests; removed after this file so other files keep
 // their server-render environment.
@@ -255,6 +256,48 @@ describe("ProviderSetupPanel: add a pool key", () => {
   });
 });
 
+describe("ProviderSetupPanel: plain config fields", () => {
+  const bedrock = findAiProvider("bedrock")!;
+  const row = (key: string, value: string) => ({
+    id: `cfg-${key}`,
+    scope: "global",
+    scopeId: null,
+    key,
+    value,
+    isSecret: false,
+    envPath: null,
+    description: null,
+    createdAt: "2026-11-04T00:00:00.000Z",
+    lastUpdatedAt: "2026-11-04T00:00:00.000Z",
+    encrypted: false,
+    exportToEnv: true,
+  });
+
+  test("clearing a stored text value and saving deletes it", async () => {
+    routes["GET /api/config"] = () =>
+      json({
+        configs: [row("AWS_REGION", "us-east-1"), row("MODEL_OVERRIDE", "amazon-bedrock/x")],
+      });
+    routes["DELETE /api/config/cfg-MODEL_OVERRIDE"] = () => json({ success: true });
+    const view = await mount(<ProviderSetupPanel provider={bedrock} onOpenChange={() => {}} />);
+    await settle();
+    const inputs = Array.from(document.body.querySelectorAll<HTMLInputElement>("input"));
+    const model = inputs.find((i) => i.value === "amazon-bedrock/x")!;
+    expect(button("Save").disabled).toBe(true);
+    await typeInto(model, "");
+    expect(button("Save").disabled).toBe(false);
+    await click(button("Save"));
+    await settle();
+
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual([
+      "/api/config/cfg-MODEL_OVERRIDE",
+    ]);
+    expect(calls.some((c) => c.method === "PUT" || c.method === "POST")).toBe(false);
+    expect(text()).toContain("Saved. Workers use it on their next task.");
+    await view.cleanup();
+  });
+});
+
 describe("ProviderSetupPanel: Codex device sign-in", () => {
   const codex = findAiProvider("codex")!;
   const start = {
@@ -375,9 +418,48 @@ function providerKey(keyType: string, index: number, suffix: string | null, labe
     window7d: null,
     costToday: 0,
     cost7d: 0,
-    status: null,
+    status: null as ApiKeyStatus | null,
   };
 }
+
+describe("PoolKeyRow: usage limits", () => {
+  test("shows the window reset times and the active per-model limits", async () => {
+    const resetsAt = Math.floor(new Date("2026-11-09T09:30:00Z").getTime() / 1000);
+    const status = {
+      keyType: "CLAUDE_CODE_OAUTH_TOKEN",
+      keySuffix: "a91f2",
+      scope: "global",
+      scopeId: null,
+      rateLimitWindows: {
+        five_hour: { status: "allowed", utilization: 0.62, resetsAt, lastSeenAt: "" },
+        seven_day: { status: "allowed", utilization: 0.41, lastSeenAt: "" },
+      },
+      modelLimits: [
+        { model: "fable", window: "seven_day_fable", resetsAt, resetsAtIso: "", active: true },
+        { model: "opus", window: "seven_day_opus", resetsAt, resetsAtIso: "", active: false },
+      ],
+    } as unknown as ApiKeyStatus;
+    const view = await mount(
+      <ul>
+        <PoolKeyRow
+          provider={findAiProvider("claude")!}
+          poolKey={{
+            ...providerKey("CLAUDE_CODE_OAUTH_TOKEN", 0, "a91f2", "team-max"),
+            window5h: 62,
+            window7d: 41,
+            status,
+          }}
+          readOnly={false}
+        />
+      </ul>,
+    );
+    expect(text()).toContain("Fable limit, resets");
+    expect(text()).not.toContain("Opus limit");
+    // Only the 5 h window reports a reset time.
+    expect(text().match(/Resets /g)?.length).toBe(1);
+    await view.cleanup();
+  });
+});
 
 describe("PoolKeyRow: Remove", () => {
   test("a pool key confirms, then deletes that pool member", async () => {

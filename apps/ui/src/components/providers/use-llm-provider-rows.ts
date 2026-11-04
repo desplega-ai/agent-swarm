@@ -10,9 +10,9 @@ import type { PoolKeysResponse } from "@/api/types";
 import {
   AI_PROVIDERS,
   buildProviderRows,
-  isUnhealthyKey,
   LIST_POOL_VARS,
   type ProviderRow,
+  unhealthyCredentialCount,
 } from "@/lib/ai-providers";
 
 /** The pool vars plus the keys that mark a provider without its own pool as set up. */
@@ -44,7 +44,7 @@ export interface LlmProviderRows {
   loading: boolean;
   /** Env presence of the pool vars and `configuredBy` keys. */
   presence: Record<string, boolean>;
-  /** Keys rate limited or rejected, by the sidebar dot's rule. */
+  /** Keys rate limited or rejected, and accounts to sign in again: the sidebar dot's rule. */
   unhealthyKeys: number;
 }
 
@@ -86,6 +86,7 @@ export function useLlmProviderRows(): LlmProviderRows {
         statuses: statuses.data,
         usageToday: usageToday.data?.byCredential,
         usage7d: usage7d.data?.byCredential,
+        presence,
       }),
     [
       poolQueries.pools,
@@ -101,6 +102,6 @@ export function useLlmProviderRows(): LlmProviderRows {
     rows,
     loading: presenceQuery.isLoading || codex.isLoading || poolQueries.loading,
     presence,
-    unhealthyKeys: (statuses.data ?? []).filter(isUnhealthyKey).length,
+    unhealthyKeys: unhealthyCredentialCount(statuses.data, codex.data),
   };
 }

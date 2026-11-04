@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { chatSdkPageChannel } from "@/lib/channel-cards";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { shortId } from "@/lib/short-id";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
@@ -286,6 +287,7 @@ export function Breadcrumbs() {
   // A task's title is the page's own heading (often long, and editable
   // there), so its crumb is the short id instead.
   const taskCrumb = parent === "tasks" && detailId ? `#${shortId(detailId)}` : undefined;
+  const adapterChannel = chatSdkPageChannel(location.pathname, location.search);
 
   const crumbs = segments
     .map((segment, index) => {
@@ -303,6 +305,7 @@ export function Breadcrumbs() {
       if (index === 3 && appPageTitle) {
         label = appPageTitle.trim();
       }
+      if (index === 1 && adapterChannel) label = adapterChannel.name;
       if (index === 2 && metricId && segment === metricId && metricMeta?.title) {
         label = metricMeta.title.trim();
       }

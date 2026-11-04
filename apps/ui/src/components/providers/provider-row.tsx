@@ -35,7 +35,8 @@ function rotateNote(row: ProviderRow): string {
  * One configured provider: logo, name, the harnesses that use it, the type
  * tag, how many keys, the rolled-up status (worst key wins, with the reason
  * under the chip), and the API value of today's and the week's runs. A click
- * expands the keys.
+ * expands the keys. A provider set up with plain config fields has no keys:
+ * its click opens the setup panel.
  */
 export function ProviderListRow({
   row,
@@ -51,16 +52,18 @@ export function ProviderListRow({
 }) {
   const { provider, keys, health } = row;
   const regionId = useId();
-  const count = countLabel(keys.length, provider.noun);
+  const configOnly = row.configOnly === true;
+  const count = configOnly ? "Config" : countLabel(keys.length, provider.noun);
   const addLabel = provider.id === "codex" ? "Sign in another account" : `Add ${provider.noun}`;
 
   return (
     <li className="border-b border-border-subtle last:border-b-0">
       <button
         type="button"
-        aria-expanded={open}
-        aria-controls={regionId}
-        onClick={onToggle}
+        aria-expanded={configOnly ? undefined : open}
+        aria-controls={configOnly ? undefined : regionId}
+        aria-haspopup={configOnly ? "dialog" : undefined}
+        onClick={configOnly ? onAdd : onToggle}
         className={cn(
           PROVIDER_GRID,
           "flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring",
@@ -85,7 +88,9 @@ export function ProviderListRow({
         </span>
         <span className="hidden text-sm md:block">{count}</span>
         <span className="flex min-w-0 shrink-0 flex-col items-end gap-1 md:items-start">
-          <KeyStatusPill tone={TONE[health]}>{healthLabel(row)}</KeyStatusPill>
+          <KeyStatusPill tone={TONE[health]}>
+            {configOnly ? "Set up" : healthLabel(row)}
+          </KeyStatusPill>
           {row.reason ? (
             <span
               className={cn("hidden max-w-full truncate text-xs md:block", REASON_TONE[health])}
@@ -106,7 +111,7 @@ export function ProviderListRow({
             aria-hidden
             className={cn(
               "size-4 transition-transform duration-150 ease-snappy",
-              open && "rotate-90",
+              open && !configOnly && "rotate-90",
             )}
           />
         </span>
@@ -117,7 +122,7 @@ export function ProviderListRow({
           {row.reason}
         </p>
       ) : null}
-      <AnimatedReveal open={open}>
+      <AnimatedReveal open={open && !configOnly}>
         <section
           id={regionId}
           aria-label={`${provider.name} ${provider.noun}s`}

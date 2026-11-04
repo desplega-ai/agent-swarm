@@ -3,6 +3,7 @@ import type { ForwardRefExoticComponent, MouseEvent, ReactNode, RefAttributes } 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useApiKeyStatuses } from "@/api/hooks/use-api-keys";
+import { useCodexAccounts } from "@/api/hooks/use-codex-accounts";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useMetrics } from "@/api/hooks/use-metrics";
@@ -48,7 +49,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useNeedsYou } from "@/hooks/use-needs-you";
 import { navRequirementMet } from "@/lib/agent-fs/state";
-import { isUnhealthyKey } from "@/lib/ai-providers";
+import { unhealthyCredentialCount } from "@/lib/ai-providers";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
@@ -669,6 +670,7 @@ export function AppSidebar() {
   const runtimePools = useRuntimePoolsGate();
   // The AI providers dot: any pooled key rate-limited or rejected.
   const { data: apiKeys } = useApiKeyStatuses(undefined, { enabled: countsEnabled && isAdmin });
+  const { data: codexAccounts } = useCodexAccounts({ enabled: countsEnabled && isAdmin });
   // The Home badge: the Needs-you count of Home (same reads, same caches).
   const needsYou = useNeedsYou({ enabled: countsEnabled });
 
@@ -688,7 +690,7 @@ export function AppSidebar() {
       badges["/"] = formatCompactNumber(needsYou.count);
     }
     // The same rule as the LLMs tab dot on Connect › AI providers.
-    const failingKeys = (apiKeys ?? []).filter(isUnhealthyKey).length;
+    const failingKeys = unhealthyCredentialCount(apiKeys, codexAccounts);
     if (failingKeys > 0) {
       badges["/integrations/ai"] = (
         <span

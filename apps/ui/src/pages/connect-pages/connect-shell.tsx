@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { useUrlSearchInput } from "@/hooks/use-url-search-state";
 import {
   getPresenceKeys,
   INTEGRATIONS,
@@ -62,8 +62,7 @@ export function ConnectSearch({
   placeholder: string;
   className?: string;
 }) {
-  const { searchParams, setParam } = useUrlSearchState();
-  const search = readStringParam(searchParams, "search");
+  const [search, setSearch] = useUrlSearchInput("search");
   return (
     <div className={cn("relative w-full md:w-64", className)}>
       <Search
@@ -75,7 +74,7 @@ export function ConnectSearch({
         placeholder={placeholder}
         aria-label={placeholder}
         value={search}
-        onChange={(event) => setParam("search", event.target.value)}
+        onChange={(event) => setSearch(event.target.value)}
         className="pl-9"
       />
     </div>

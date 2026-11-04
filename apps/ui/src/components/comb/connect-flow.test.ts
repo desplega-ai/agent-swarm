@@ -127,7 +127,7 @@ describe("connect flow", () => {
   });
 });
 
-/** A swarm API error as `FsKeyApiError` throws it. */
+/** A swarm API error as `FsApiError` throws it. */
 function apiError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }

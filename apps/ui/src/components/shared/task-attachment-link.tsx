@@ -2,6 +2,7 @@
 import type { MouseEvent } from "react";
 import type { AgentFsState } from "../../lib/agent-fs/state";
 import { encodedPathToCombPath, isCombNavigable } from "../../lib/comb/links";
+import type { AutoConnectOutcome } from "../comb/connect-flow";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 
 const DEFAULT_AGENT_FS_LIVE_URL = "https://live.agent-fs.dev";
@@ -88,6 +89,8 @@ export interface AgentFsLinkContext {
   orgId: string | null;
   driveId: string | null;
   liveUrl: string | null;
+  /** This page load's settled automatic connect outcome (`isCombNavigable`). */
+  autoConnect?: AutoConnectOutcome | null;
 }
 
 /**
@@ -108,7 +111,7 @@ export function agentFsAttachmentLinks(
     defaultDriveId: combOn ? agentFs?.driveId : null,
   });
   if (!file) return { href: null, combTo: null };
-  const navigable = agentFs !== null && isCombNavigable(agentFs.state);
+  const navigable = agentFs !== null && isCombNavigable(agentFs.state, agentFs.autoConnect);
   return {
     href: liveFileUrl(file, agentFs?.liveUrl),
     combTo: navigable ? encodedPathToCombPath(file) : null,

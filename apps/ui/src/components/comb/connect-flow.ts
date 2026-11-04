@@ -39,7 +39,7 @@ function inviteMessage(email: string): string {
   return `Ask a swarm admin to invite ${email} to the drive.`;
 }
 
-/** The HTTP status of a swarm API error (`FsKeyApiError`), or null. */
+/** The HTTP status of a swarm API error (`FsApiError`), or null. */
 function apiStatus(err: unknown): number | null {
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status === "number" ? status : null;
