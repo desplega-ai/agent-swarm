@@ -858,9 +858,8 @@ httpServer
     // restart — which is what the Configuration page's "Restart required"
     // badge promises for HEARTBEAT_DISABLE / HEARTBEAT_INTERVAL_MS.
     if (!isEnvFlagEnabled("HEARTBEAT_DISABLE", false)) {
-      const { startHeartbeat } = await import("../heartbeat");
-      const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
-      startHeartbeat(heartbeatMs);
+      const { parseHeartbeatIntervalMs, startHeartbeat } = await import("../heartbeat");
+      startHeartbeat(parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS));
     }
 
     startPoolRouting();
