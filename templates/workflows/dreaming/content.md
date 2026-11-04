@@ -7,7 +7,7 @@ How a night runs:
 - `gather` (script) reads the last day of tasks, agent profiles, skills, memory and workflow changes. It also resolves who runs each step: the `leadAgentId` input, or the swarm's lead when empty. Empty `coderAgentId` and `writerAgentId` leave those tasks in the pool for any worker. `memtax-distill` always runs on the lead: its bullets become `/longterm` text that the lead writes.
 - Every active agent writes a short self-report. The lead synthesizes them into approved actions.
 - Lanes apply the approved actions: identity and memory ops (`apply`), profile trims (`trim-*`), the lead's heartbeat (`hb-*`), skills, script specs (`scriptify`), and the long-term memory taxonomy (`memtax-*`). Every write is capped, guarded, and logged to KV namespace `dreaming-v2` with its pre-image, so `dreaming-rollback` can undo a run.
-- `learnings-*` triages each learning once before its 30-day TTL: promote (fold into a `/longterm` doc through the memtax distill and write path), keep, or drop. It reads learnings after a KV cursor (`dreaming-v2` `learnings:cursor`) plus older ones another agent reused since the last run, in bounded batches. `memtax-create-apply` deletes the drops and commits the cursor, live runs only, so a skipped or failed night loses nothing.
+- `learnings-*` triages each learning once before its 30-day TTL: promote (fold into a `/longterm` doc through the memtax distill and write path), keep, or drop. It reads learnings after a KV cursor in the lead's own namespace (`task:agent:<lead>` `dreaming-v2:learnings:cursor`, which only the lead can write) plus older ones another agent reused since the last run, in bounded batches. `memtax-create-apply` deletes the drops, queues the drops and promotions it could not finish in the same namespace for the next live night, and commits the cursor, live runs only, so a skipped or failed night loses nothing.
 - `verify` checks each claim against the real writes. `learn` scores earlier changes. `publish` writes the report, and `slack` posts a short receipt.
 
 Writes that need Lead authority (`apply`, `trim-apply`, `hb-apply`, `memtax-create-apply`) run as agent-tasks on the lead. Each one runs its script with `fromRun: true` and returns a pointer with the result's sha256. The next node returns the stored result only when its hash matches that pointer, as the engine recorded it, so a forged `dreaming-v2` KV entry is refused.
@@ -1848,7 +1848,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
           "dryRun": "{{dryRun}}",
           "generatedAt": "{{gen}}",
           "budget": "{{bud}}",
-          "memtax": "{{input.memtax}}"
+          "memtax": "{{input.memtax}}",
+          "leadAgentId": "{{lead}}"
         }
       },
       "next": "learnings-gate",
@@ -1856,7 +1857,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
         "runId": "run.id",
         "dryRun": "gather.result.dryRun",
         "gen": "gather.result.generatedAt",
-        "bud": "gather.result.budget"
+        "bud": "gather.result.budget",
+        "lead": "gather.result.leadAgentId"
       }
     },
     {
@@ -2010,7 +2012,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
           "memtax": "{{input.memtax}}",
           "classifyPlan": "{{cp}}",
           "classify": "{{c}}",
-          "learnings": "{{lt}}"
+          "learnings": "{{lt}}",
+          "leadAgentId": "{{lead}}"
         }
       },
       "next": "memtax-distill-gate",
@@ -2022,7 +2025,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
         "w": "gather.result.v3Writes",
         "gen": "gather.result.generatedAt",
         "bud": "gather.result.budget",
-        "lt": "learnings-report.result"
+        "lt": "learnings-report.result",
+        "lead": "gather.result.leadAgentId"
       }
     },
     {

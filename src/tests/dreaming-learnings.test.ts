@@ -31,6 +31,8 @@ let deleted: string[];
 const kvKey = (namespace: string, key: string) =>
   namespace === "dreaming-v2" ? key : `${namespace}/${key}`;
 const PENDING = "task:agent:lead-1/dreaming-v2:learnings:pending-drops";
+const PROMOS = "task:agent:lead-1/dreaming-v2:learnings:pending-promotions";
+const CURSOR = "task:agent:lead-1/dreaming-v2:learnings:cursor";
 const ctx = () => ({
   swarm: {
     async db_query({ sql, params }: { sql: string; params?: unknown[] }) {
@@ -139,7 +141,13 @@ describe("learnings-plan", () => {
     longterm("lt2", "/longterm/facts/infra/x", "retired");
     longterm("lt3", "agent written", "agent doc", undefined, "/longterm/workstreams/active/boxd");
     const out: any = await dreamingLearnings(
-      { mode: "plan", runId: "r1", dryRun: false, generatedAt: "2026-11-04T03:30:00.000Z" },
+      {
+        mode: "plan",
+        runId: "r1",
+        dryRun: false,
+        leadAgentId: "lead-1",
+        generatedAt: "2026-11-04T03:30:00.000Z",
+      },
       ctx() as any,
     );
     expect(out.errors).toEqual([]);
@@ -166,6 +174,7 @@ describe("learnings-plan", () => {
       {
         mode: "plan",
         runId: "r1",
+        leadAgentId: "lead-1",
         batchSize: 5,
         maxBatches: 2,
         generatedAt: "2026-11-04T03:30:00.000Z",
@@ -183,7 +192,7 @@ describe("learnings-plan", () => {
     learning(3, "2026-10-27T02:00:00.000Z"); // rated from another agent's task, but already cited by /longterm -> not reuse
     learning(4, "2026-10-27T03:00:00.000Z"); // reused before `at` only -> not reuse
     learning(5, "2026-10-28T00:00:00.000Z"); // new
-    kv.set("learnings:cursor", {
+    kv.set(CURSOR, {
       createdAt: "2026-10-27T03:00:00.000Z",
       id: uuid(4),
       at: "2026-11-03T03:30:00.000Z",
@@ -203,7 +212,7 @@ describe("learnings-plan", () => {
       `type: entity\n\n## Sources\n- ${uuid(3)}: learning 3`,
     );
     const out: any = await dreamingLearnings(
-      { mode: "plan", runId: "r2", generatedAt: "2026-11-04T03:30:00.000Z" },
+      { mode: "plan", runId: "r2", leadAgentId: "lead-1", generatedAt: "2026-11-04T03:30:00.000Z" },
       ctx() as any,
     );
     expect(out.errors).toEqual([]);
@@ -700,11 +709,12 @@ describe("memtax-create with the learnings triage", () => {
     expect(kv.get(`memtax-create:pre:r1:${uuid(1)}`)).toMatchObject({
       rows: [{ id: uuid(1), key: "/learnings/agent-swarm/learning-1" }],
     });
-    expect(kv.get("learnings:cursor")).toMatchObject({
+    expect(kv.get(CURSOR)).toMatchObject({
       id: uuid(1),
       at: "2026-11-04T03:30:00.000Z",
       runId: "r1",
     });
+    expect(kv.has("learnings:cursor")).toBe(false); // never the shared, worker-writable namespace
     expect(out.markdown).toContain("Learnings triage (applied)");
     expect(out.counts.written).toBe(0); // drops are not /longterm writes
   });
@@ -746,7 +756,7 @@ describe("memtax-create with the learnings triage", () => {
     expect((kv.get(PENDING) as any).drops.map((d: any) => d.id).sort()).toEqual(
       [uuid(3), uuid(4)].sort(),
     );
-    expect(kv.has("learnings:cursor")).toBe(true);
+    expect(kv.has(CURSOR)).toBe(true);
 
     // Night 2 has no triage of its own: the carried drops are retried and deleted.
     const night2: any = await dreamingMemtaxCreate(
@@ -858,7 +868,7 @@ describe("memtax-create with the learnings triage", () => {
       ctx() as any,
     );
     expect(deleted).toEqual([]);
-    expect(kv.has("learnings:cursor")).toBe(false);
+    expect(kv.has(CURSOR)).toBe(false);
     expect(dry.learnings.cursor).toBe("not committed (dry run)");
     expect(off.learnings.cursor).toBe("not committed (v3Writes off)");
     expect(dry.learnings.dropsDeleted).toBe(0);
@@ -878,7 +888,347 @@ describe("memtax-create with the learnings triage", () => {
       },
       ctx() as any,
     );
-    expect(kv.has("learnings:cursor")).toBe(false);
+    expect(kv.has(CURSOR)).toBe(false);
     expect(out.learnings.cursor).toContain("not committed: a distill job failed");
+  });
+});
+
+describe("cursor and reuse watermark (Lead namespace, no lost reuse signal)", () => {
+  const night = (generatedAt: string, extra: Record<string, unknown> = {}) =>
+    dreamingLearnings(
+      { mode: "plan", runId: "r", leadAgentId: "lead-1", generatedAt, ...extra },
+      ctx() as any,
+    ) as Promise<any>;
+
+  test("a cursor forged in the shared dreaming-v2 namespace is ignored; only the Lead's is read", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(2, "2026-10-28T00:00:00.000Z");
+    const future = {
+      createdAt: "2099-01-01T00:00:00.000Z",
+      id: "zzz",
+      at: "2099-01-01T00:00:00.000Z",
+    };
+    // Any worker can write these: dreaming-v2 has no write restriction.
+    kv.set("learnings:cursor", future);
+    kv.set("dreaming-v2:learnings:cursor", future);
+    const out = await night("2026-11-04T03:30:00.000Z");
+    expect(out.batches[0].docs.map((d: any) => d.id)).toEqual([uuid(1), uuid(2)]);
+    // The Lead-namespace cursor is honored.
+    kv.set(CURSOR, { createdAt: "2026-10-27T00:00:00.000Z", id: uuid(1), at: "" });
+    const out2 = await night("2026-11-04T03:30:00.000Z");
+    expect(out2.batches[0].docs.map((d: any) => d.id)).toEqual([uuid(2)]);
+  });
+
+  test("no leadAgentId or a failed cursor read skips instead of reading from the start", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    const noLead: any = await dreamingLearnings(
+      { mode: "plan", runId: "r", generatedAt: "2026-11-04T03:30:00.000Z" },
+      ctx() as any,
+    );
+    expect(noLead.batches).toEqual([]);
+    expect(noLead.skipReason).toContain("no leadAgentId");
+    const c: any = ctx();
+    c.swarm.kv_getOrNull = async () => {
+      throw new Error("kv down");
+    };
+    const failed: any = await dreamingLearnings(
+      { mode: "plan", runId: "r", leadAgentId: "lead-1", generatedAt: "2026-11-04T03:30:00.000Z" },
+      c,
+    );
+    expect(failed.batches).toEqual([]);
+    expect(failed.skipReason).toBe("cursor read failed");
+  });
+
+  test("reuse over the cap stays eligible: the watermark moves only to the last reuse row read", async () => {
+    for (let i = 1; i <= 6; i++) learning(i, `2026-10-2${i}T00:00:00.000Z`);
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t-b', 'agent-b')");
+    for (let i = 1; i <= 6; i++)
+      db.run(
+        "INSERT INTO memory_retrieval (id, taskId, agentId, memoryId, retrievedAt, intent) VALUES (?, 't-b', 'agent-b', ?, ?, 'context')",
+        [`r${i}`, uuid(i), `2026-11-03T1${i}:00:00.000Z`],
+      );
+    kv.set(CURSOR, {
+      createdAt: "2026-10-30T00:00:00.000Z",
+      id: uuid(99),
+      at: "2026-11-03T03:30:00.000Z",
+    });
+    const caps = { batchSize: 5, maxBatches: 0, reuseBatches: 1 };
+    const n1 = await night("2026-11-04T03:30:00.000Z", caps);
+    expect(n1.batches.map((b: any) => b.docs.map((d: any) => d.id))).toEqual([
+      [uuid(1), uuid(2), uuid(3), uuid(4), uuid(5)],
+    ]);
+    expect(n1.cursor.to).toMatchObject({ at: "2026-11-03T15:00:00.000Z", atId: uuid(5) });
+    // Lane B commits that cursor; the next night reads the sixth reused learning.
+    kv.set(CURSOR, n1.cursor.to);
+    const n2 = await night("2026-11-05T03:30:00.000Z", caps);
+    expect(n2.batches.map((b: any) => b.docs.map((d: any) => d.id))).toEqual([[uuid(6)]]);
+    expect(n2.cursor.to).toMatchObject({ at: "2026-11-05T03:30:00.000Z", atId: "" });
+  });
+
+  test("a night over the soft budget reads no reuse and holds the reuse watermark", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(2, "2026-10-29T00:00:00.000Z");
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t-b', 'agent-b')");
+    db.run(
+      "INSERT INTO memory_retrieval (id, taskId, agentId, memoryId, retrievedAt, intent) VALUES ('r1', 't-b', 'agent-b', ?, '2026-11-03T10:00:00.000Z', 'context')",
+      [uuid(1)],
+    );
+    const from = {
+      createdAt: "2026-10-28T00:00:00.000Z",
+      id: uuid(99),
+      at: "2026-11-03T03:30:00.000Z",
+      atId: "",
+    };
+    kv.set(CURSOR, from);
+    const out = await night("2026-11-04T03:30:00.000Z", { budget: { overBudget: true } });
+    expect(out.batches.map((b: any) => b.kind)).toEqual(["new"]);
+    expect(out.cursor.to).toMatchObject({ id: uuid(2), at: from.at, atId: "" });
+  });
+});
+
+describe("lane B keeps pending drops, promotions and the cursor on failures", () => {
+  const lead = "lead-1";
+  const live = {
+    mode: "apply",
+    runId: "r1",
+    dryRun: false,
+    v3Writes: "on",
+    leadAgentId: lead,
+  } as const;
+  const cursorTo = {
+    createdAt: "2026-10-27T00:00:00.000Z",
+    id: uuid(1),
+    at: "2026-11-04T03:30:00.000Z",
+  };
+  const drop = (n: number) => ({
+    id: uuid(n),
+    name: `learning ${n}`,
+    contentHash: `hash-${n}`,
+    dropWhy: "noise",
+    reason: "status echo",
+  });
+  const planWith = (learnings: Record<string, unknown>) => ({
+    entities: [],
+    clusters: [],
+    memberNames: {},
+    learnings: { drops: [], promotedIds: [], cursor: { to: cursorTo }, counts: {}, ...learnings },
+  });
+  beforeEach(() => {
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t-lead', ?)", [lead]);
+  });
+
+  test("a failed pending-drop read deletes nothing, keeps the old queue and holds the cursor", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    kv.set(PENDING, { drops: [drop(7)] });
+    const c: any = ctx();
+    const get = c.swarm.kv_getOrNull;
+    c.swarm.kv_getOrNull = async (x: { namespace: string; key: string }) => {
+      if (x.key.endsWith("pending-drops")) throw new Error("kv down");
+      return get(x);
+    };
+    const out: any = await dreamingMemtaxCreate(
+      { ...live, plan: planWith({ drops: [drop(1)] }) },
+      c,
+    );
+    expect(deleted).toEqual([]);
+    expect(kv.get(PENDING)).toEqual({ drops: [drop(7)] });
+    expect(kv.has(CURSOR)).toBe(false);
+    expect(out.learnings.cursor).toContain("not committed");
+  });
+
+  test("a failed pending-drop write holds the cursor", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(2, "2026-10-27T01:00:00.000Z");
+    const c: any = ctx();
+    const set = c.swarm.kv_set;
+    c.swarm.kv_set = async (x: { namespace: string; key: string; value: unknown }) => {
+      if (x.key.endsWith("pending-drops")) throw new Error("kv down");
+      return set(x);
+    };
+    const out: any = await dreamingMemtaxCreate(
+      { ...live, maxLearningDrops: 1, plan: planWith({ drops: [drop(1), drop(2)] }) },
+      c,
+    );
+    expect(deleted).toEqual([uuid(1)]);
+    expect(kv.has(CURSOR)).toBe(false);
+    expect(out.learnings.cursor).toContain("pending-drop queue");
+  });
+
+  test("a failed pre-drop query is retried next night, not treated as a missing row", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    const c: any = ctx();
+    const query = c.swarm.db_query;
+    c.swarm.db_query = async (x: { sql: string; params?: unknown[] }) => {
+      if (x.sql.includes("SELECT id, name, key, tags, content")) throw new Error("db busy");
+      return query(x);
+    };
+    const out: any = await dreamingMemtaxCreate(
+      { ...live, plan: planWith({ drops: [drop(1)] }) },
+      c,
+    );
+    expect(deleted).toEqual([]);
+    expect(out.learnings.dropsSkipped).toBe(0);
+    expect((kv.get(PENDING) as any).drops).toEqual([{ ...drop(1), tries: 1 }]);
+  });
+
+  test("25 promoted subjects: the one over the 24-cluster cap is carried, untried, and distilled next night", async () => {
+    const ids = Array.from({ length: 25 }, (_, i) => uuid(i + 1));
+    for (let i = 0; i < ids.length; i++)
+      learning(i + 1, `2026-10-27T00:00:${String(i).padStart(2, "0")}.000Z`);
+    const rows = ids.map((id, i) => ({
+      id,
+      path: `/longterm/workstreams/active/w-${i + 1}`,
+      kind: "workstream",
+      action: `merge-into:/longterm/workstreams/active/w-${i + 1}`,
+      reason: "effort",
+    }));
+    const plan: any = await dreamingMemtaxCreate(
+      {
+        mode: "plan",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        learnings: {
+          classifications: rows,
+          docs: ids.map((id, i) => ({
+            id,
+            name: `learning ${i + 1}`,
+            created: "2026-10-27",
+            text: `Effort ${i + 1} is underway`,
+          })),
+          promotedIds: ids,
+          drops: [],
+          cursor: { to: cursorTo },
+          counts: { read: 25, promoted: 25 },
+        },
+      },
+      ctx() as any,
+    );
+    expect(plan.clusters).toHaveLength(24);
+    expect(plan.learnings.deferredPromotionIds).toHaveLength(1);
+    const over = plan.learnings.deferredPromotionIds[0];
+    // Night 1: no distill output (nothing written). The cursor moves, so the queue is what keeps all 25.
+    const n1: any = await dreamingMemtaxCreate({ ...live, plan }, ctx() as any);
+    expect(kv.has(CURSOR)).toBe(true);
+    const q1 = (kv.get(PROMOS) as any).promotions;
+    expect(q1).toHaveLength(25);
+    expect(q1.find((r: any) => r.id === over).tries).toBe(0);
+    expect(q1.filter((r: any) => r.tries === 1)).toHaveLength(24);
+    expect(n1.learnings.promotionsPending).toBe(25);
+    // Night 2 has no triage of its own: the carried promotions come back as clusters, the untried one first.
+    const plan2: any = await dreamingMemtaxCreate(
+      {
+        mode: "plan",
+        runId: "r2",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        learnings: { counts: { read: 0 } },
+      },
+      ctx() as any,
+    );
+    expect(plan2.learnings.carriedPromotions).toBe(25);
+    expect(plan2.clusters).toHaveLength(24);
+    expect(plan2.clusters.flatMap((c: any) => c.memberIds)).toContain(over);
+    expect(plan2.memberNames[over]).toMatch(/^learning /);
+  });
+
+  test("a promotion whose /longterm write failed stays queued; a verified one leaves the queue", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(2, "2026-10-27T01:00:00.000Z");
+    const promo = (n: number) => ({
+      id: uuid(n),
+      path: `/longterm/workstreams/active/w-${n}`,
+      kind: "workstream",
+      action: `merge-into:/longterm/workstreams/active/w-${n}`,
+      entitySlugs: [],
+      reason: "effort",
+      tries: 0,
+    });
+    const plan = {
+      ...planWith({
+        promotions: [promo(1), promo(2)],
+        promotedIds: [uuid(1), uuid(2)],
+        promotionsRead: "ok",
+      }),
+      clusters: [
+        { clusterId: "c1", path: "/longterm/workstreams/active/w-1", memberIds: [uuid(1)] },
+        { clusterId: "c2", path: "/longterm/workstreams/active/w-2", memberIds: [uuid(2)] },
+      ],
+    };
+    const c: any = ctx();
+    c.swarm.memory_store = async (x: { name: string; content: string }) => {
+      if (x.name.endsWith("w-2")) return { data: { success: false, message: "refused" } };
+      const h = new Bun.CryptoHasher("sha256").update(x.content).digest("hex");
+      db.run(
+        "INSERT INTO agent_memory (id, name, content, contentHash, createdAt) VALUES ('new-1', ?, ?, ?, '2026-11-04T00:00:00.000Z')",
+        [x.name, x.content, h],
+      );
+      return { data: { success: true } };
+    };
+    const bullet = (n: number) => ({
+      claim: `Effort ${n} ships in November`,
+      stated: "2026-10-27",
+      src: [uuid(n)],
+    });
+    const out: any = await dreamingMemtaxCreate(
+      {
+        ...live,
+        plan,
+        distill: {
+          results: [
+            {
+              itemKey: "j1",
+              status: "completed",
+              output: {
+                taskId: "t-lead",
+                taskOutput: JSON.stringify({
+                  clusters: [
+                    { clusterId: "c1", aliases: [], bullets: [bullet(1)] },
+                    { clusterId: "c2", aliases: [], bullets: [bullet(2)] },
+                  ],
+                }),
+              },
+            },
+          ],
+        },
+      },
+      c,
+    );
+    expect(out.writes.filter((w: any) => w.status === "verified").map((w: any) => w.name)).toEqual([
+      "/longterm/workstreams/active/w-1",
+    ]);
+    expect((kv.get(PROMOS) as any).promotions).toEqual([{ ...promo(2), tries: 1 }]);
+    expect(kv.has(CURSOR)).toBe(true);
+  });
+
+  test("a failed pending-promotion read at plan time holds the cursor and leaves the queue as it was", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    kv.set(PROMOS, {
+      promotions: [{ id: uuid(5), path: "/longterm/workstreams/active/w-5", tries: 2 }],
+    });
+    const c: any = ctx();
+    const get = c.swarm.kv_getOrNull;
+    c.swarm.kv_getOrNull = async (x: { namespace: string; key: string }) => {
+      if (x.key.endsWith("pending-promotions")) throw new Error("kv down");
+      return get(x);
+    };
+    const plan: any = await dreamingMemtaxCreate(
+      {
+        mode: "plan",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        learnings: { counts: { read: 1 }, cursor: { to: cursorTo } },
+      },
+      c,
+    );
+    expect(plan.learnings.promotionsRead).toBe("failed");
+    const out: any = await dreamingMemtaxCreate({ ...live, plan }, ctx() as any);
+    expect(kv.has(CURSOR)).toBe(false);
+    expect(out.learnings.cursor).toContain("pending-promotion queue");
+    expect((kv.get(PROMOS) as any).promotions).toHaveLength(1);
   });
 });

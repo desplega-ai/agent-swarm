@@ -4,9 +4,10 @@ import { z } from "zod";
 // dreaming learnings triage. Learnings (/learnings/* rows a store-progress `learning` writes) expire 30 days after
 // they are written, so each night decides every new one's fate once: promote (fold into a /longterm subject doc),
 // keep (leave it to its TTL; how-to goes to the skill lanes), or drop (delete it tonight).
-//   plan     -> read-only. Learnings written after the KV cursor (learnings:cursor), oldest first, in bounded batches,
-//               plus older learnings another agent retrieved or rated since the last committed run (reuse happens days
-//               after the write). First run: no cursor, so it starts at the oldest live learning and backfills.
+//   plan     -> read-only. Learnings written after the cursor (Lead namespace, dreaming-v2:learnings:cursor), oldest
+//               first, in bounded batches, plus older learnings another agent retrieved or rated since the last committed
+//               run (reuse happens days after the write). First run: no cursor, so it starts at the oldest live learning
+//               and backfills.
 //   report   -> validates the triage output, counts per decision, and emits B1-shaped rows for lane B: promotions go
 //               through dreaming-memtax-create (distill + the one /longterm writer), how-to rows through its skill
 //               routing, drops through its Lead write step. No writes here, in any mode.
@@ -34,8 +35,10 @@ export const argsSchema = z.object({
   sampleSize: z.number().int().min(0).max(40).default(10),
 });
 
-const NS = "dreaming-v2";
-export const CURSOR_KEY = "learnings:cursor";
+// The cursor decides which learnings are never triaged, so it lives in the Lead's own agent namespace: any agent can
+// write dreaming-v2, but only the Lead can write task:agent:<leadId> (reads stay open). Only lane B apply writes it.
+export const CURSOR_KEY = "dreaming-v2:learnings:cursor";
+export const cursorNs = (leadId: string) => `task:agent:${leadId}`;
 const HEADING = "## Learnings triage";
 export const DECISIONS = ["promote", "keep", "drop"] as const;
 export const DROP_WHY = ["noise", "superseded", "contradicted"] as const;
@@ -181,9 +184,11 @@ export function normalizeDecision(c: any, docs: Map<string, TriageDoc>): { ok: t
   return { ok: true, row: keepRow(null, pathRoot(target) === "/howto" ? target : inbox) };
 }
 
-// Advance only past "new" batches that completed, in order: a failed batch is re-read the next night. The reuse window
-// (`at`) moves only when every reuse batch completed, so a failed reuse batch loses no reuse signal either.
-export function nextCursor(planned: Array<{ batchId: string; kind: string; docs?: Array<{ id: string; createdAt?: string }> }>, okBatchIds: Set<string>, from: { createdAt: string; id: string; at: string }, at: string): { createdAt: string; id: string; at: string } {
+// Advance only past "new" batches that completed, in order: a failed batch is re-read the next night. The reuse
+// watermark (`at`, `atId`) moves to the plan's `reuseTo` only when every reuse batch completed, so a failed reuse batch
+// loses no reuse signal either.
+export type Cursor = { createdAt: string; id: string; at: string; atId: string };
+export function nextCursor(planned: Array<{ batchId: string; kind: string; docs?: Array<{ id: string; createdAt?: string }> }>, okBatchIds: Set<string>, from: Cursor, reuseTo: { at: string; atId: string }): Cursor {
   let to: { createdAt: string; id: string } = { createdAt: from.createdAt, id: from.id };
   for (const b of planned.filter((x) => x.kind === "new")) {
     if (!okBatchIds.has(b.batchId)) break;
@@ -191,7 +196,17 @@ export function nextCursor(planned: Array<{ batchId: string; kind: string; docs?
     if (last?.createdAt) to = { createdAt: String(last.createdAt), id: String(last.id) };
   }
   const reuseOk = planned.filter((x) => x.kind === "reuse").every((b) => okBatchIds.has(b.batchId));
-  return { ...to, at: reuseOk ? at : from.at };
+  return { ...to, ...(reuseOk ? { at: reuseTo.at, atId: reuseTo.atId } : { at: from.at, atId: from.atId }) };
+}
+// Where the reuse watermark may move after tonight. Reuse rows are read in (first reuse event, id) order from the
+// watermark, so a capped read moves it only to the last row read and the overflow is read tomorrow. A night that read
+// no reuse (budget, disabled, or a failed query) holds it. Before the first committed run there is nothing to compare.
+export function reuseWatermark(o: { from: Cursor; at: string; reuseRan: boolean; reuseFailed: boolean; reuseCap: number; rows: Array<{ id: string; firstReuse: string }> }): { at: string; atId: string } {
+  if (!o.from.at || !o.from.createdAt) return { at: o.at, atId: "" };
+  if (!o.reuseRan || o.reuseFailed) return { at: o.from.at, atId: o.from.atId };
+  const last = o.rows[o.rows.length - 1];
+  if (o.rows.length >= o.reuseCap && last) return { at: last.firstReuse, atId: last.id };
+  return { at: o.at, atId: "" };
 }
 
 const esc = (s: string, n: number) => String(s ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").slice(0, n);
@@ -253,11 +268,21 @@ export default async function (args: unknown, ctx: ScriptContext) {
     // Over the soft cap: new learnings only (the TTL deadline is on them), no reuse re-reads.
     const reuseBatches = budget?.overBudget ? 0 : a.reuseBatches;
     const caps = { batchSize: a.batchSize, maxBatches: a.maxBatches, reuseBatches, previewChars: a.previewChars, overBudget: !!budget?.overBudget };
-    if (skipReason) return { ok: true, mode: "plan", dryRun: dry, runId, at, skipReason, batches: [], catalog: "", caps, counts: {}, cursor: null, errors };
-
-    const entry: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key: CURSOR_KEY }).catch(() => null);
+    const leadId = String(a.leadAgentId ?? "").trim();
+    if (!skipReason && !leadId) skipReason = "no leadAgentId: the cursor lives in the Lead's namespace";
+    let entry: any = null;
+    if (!skipReason) {
+      try {
+        entry = await ctx.swarm.kv_getOrNull({ namespace: cursorNs(leadId), key: CURSOR_KEY });
+      } catch (e: any) {
+        // Reading from the start instead would move a committed cursor backwards.
+        errors.push(`cursor read: ${String(e?.message ?? e).slice(0, 200)}`);
+        skipReason = "cursor read failed";
+      }
+    }
+    if (skipReason) return { ok: !errors.length, mode: "plan", dryRun: dry, runId, at, skipReason, batches: [], catalog: "", caps, counts: {}, cursor: null, errors };
     const c = parse(entry?.value) ?? {};
-    const from = { createdAt: String(c.createdAt ?? ""), id: String(c.id ?? ""), at: String(c.at ?? "") };
+    const from: Cursor = { createdAt: String(c.createdAt ?? ""), id: String(c.id ?? ""), at: String(c.at ?? ""), atId: String(c.atId ?? "") };
     const live = `m.chunkIndex = 0 AND m.key GLOB '/learnings/*' AND (m.expiresAt IS NULL OR m.expiresAt > ?)`;
     const after = `(m.createdAt > ? OR (m.createdAt = ? AND m.id > ?))`;
     const counts = (await q("counts", `SELECT COUNT(*) total, SUM(CASE WHEN ${after} THEN 1 ELSE 0 END) pending FROM agent_memory m WHERE ${live}`, [from.createdAt, from.createdAt, from.id, at]))[0] ?? {};
@@ -273,17 +298,23 @@ export default async function (args: unknown, ctx: ScriptContext) {
       ? await q("new", `SELECT ${cols(from.at ? reuseExpr : "0")} FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt > ?3 OR (m.createdAt = ?3 AND m.id > ?4)) ORDER BY m.createdAt, m.id LIMIT ?5`, [from.at || at, at, from.createdAt, from.id, newCap])
       : [];
     // Reuse rows are learnings already triaged (at or before the cursor) and not yet carried by a /longterm doc (its
-    // Sources list the id). Only after a committed run: the first run has nothing to compare against.
-    const reuse =
-      reuseCap && from.at && from.createdAt
-        ? await q(
-            "reuse",
-            `SELECT * FROM (SELECT ${cols(reuseExpr)} FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt < ?3 OR (m.createdAt = ?3 AND m.id <= ?4))
+    // Sources list the id). Only after a committed run: the first run has nothing to compare against. Read in (first
+    // reuse event since the watermark, id) order past the watermark (at, atId), so rows over the cap stay eligible.
+    const firstReuseExpr = `min(
+        coalesce((SELECT MIN(r.retrievedAt) FROM memory_retrieval r WHERE r.memoryId = m.id AND r.retrievedAt >= ?1 AND r.agentId <> coalesce(m.agentId, '') AND r.taskId IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store'), '~'),
+        coalesce((SELECT MIN(g.createdAt) FROM memory_rating g JOIN agent_tasks t ON t.id = g.taskId WHERE g.memoryId = m.id AND g.createdAt >= ?1 AND t.agentId <> coalesce(m.agentId, '')), '~'))`;
+    const reuseRan = !!(reuseCap && from.at && from.createdAt);
+    const reuseErrors = errors.length;
+    const reuse = reuseRan
+      ? await q(
+          "reuse",
+          `SELECT * FROM (SELECT ${cols(reuseExpr)}, ${firstReuseExpr} AS firstReuse FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt < ?3 OR (m.createdAt = ?3 AND m.id <= ?4))
                AND NOT EXISTS (SELECT 1 FROM agent_memory l WHERE l.chunkIndex = 0 AND (l.name GLOB '/longterm/*' OR coalesce(l.key, '') GLOB '/longterm/*') AND instr(l.content, m.id) > 0)) x
-             WHERE x.reuse > 0 ORDER BY x.reuse DESC, x.createdAt, x.id LIMIT ?5`,
-            [from.at, at, from.createdAt, from.id, reuseCap],
-          )
-        : [];
+             WHERE x.firstReuse <> '~' AND (x.firstReuse > ?1 OR (x.firstReuse = ?1 AND x.id > ?6)) ORDER BY x.firstReuse, x.id LIMIT ?5`,
+          [from.at, at, from.createdAt, from.id, reuseCap, from.atId],
+        )
+      : [];
+    const reuseTo = reuseWatermark({ from, at, reuseRan, reuseFailed: errors.length > reuseErrors, reuseCap, rows: reuse.map((r) => ({ id: String(r.id), firstReuse: String(r.firstReuse) })) });
     const doc = (r: any, src: "new" | "reuse") => {
       const alpha = Number(r.alpha ?? 1);
       const beta = Number(r.beta ?? 1);
@@ -315,7 +346,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
       catalog: catalogList.join("\n") || "(none yet)",
       caps,
       counts: { total: Number(counts.total ?? 0), pending, planned, newPlanned: fresh.length, reusePlanned: planned - fresh.length, left: Math.max(0, pending - fresh.length), catalog: catalogList.length },
-      cursor: { from, to: last ? { createdAt: String(last.createdAt), id: String(last.id), at } : { createdAt: from.createdAt, id: from.id, at } },
+      cursor: { from, reuseTo, to: last ? { createdAt: String(last.createdAt), id: String(last.id), ...reuseTo } : { createdAt: from.createdAt, id: from.id, ...reuseTo } },
       errors,
     };
   }
@@ -396,8 +427,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
       return { id: r.id, name: d.name ?? "", key: d.key ?? "", created: d.created ?? "", text: d.text ?? "" };
     });
     const drops = dropped.map((r) => ({ id: r.id, name: String(meta.get(r.id)?.name ?? ""), key: String(meta.get(r.id)?.key ?? ""), contentHash: String(meta.get(r.id)?.contentHash ?? ""), dropWhy: r.dropWhy, byId: r.byId, reason: r.reason }));
-    const from = pl?.cursor?.from ?? { createdAt: "", id: "", at: "" };
-    const cursor = { from, to: nextCursor(planned, okBatchIds, from, String(pl.at ?? "")) };
+    const f: any = pl?.cursor?.from ?? {};
+    const from: Cursor = { createdAt: String(f.createdAt ?? ""), id: String(f.id ?? ""), at: String(f.at ?? ""), atId: String(f.atId ?? "") };
+    const rt: any = pl?.cursor?.reuseTo;
+    const reuseTo = rt && typeof rt.at === "string" ? { at: rt.at, atId: String(rt.atId ?? "") } : !from.at ? { at: String(pl.at ?? ""), atId: "" } : { at: from.at, atId: from.atId };
+    const cursor = { from, to: nextCursor(planned, okBatchIds, from, reuseTo) };
     // Measured cost of the triage tasks; session_costs usually lands after this node, so fall back to the 7-day mean.
     const taskIds = parsed.map((x) => x.taskId).filter(Boolean) as string[];
     let cost: { usd: number | null; basis: string } = { usd: null, basis: "no tasks" };
@@ -489,18 +523,24 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const neg = parseTriage({ results: [{ itemKey: "b1", status: "completed", output: { taskId: "t1", taskOutput: "[FAILED: negative control] x" } }, { itemKey: "b2", status: "failed" }, { itemKey: "b3", status: "completed", output: { taskId: "t3", taskOutput: "not json" } }, { itemKey: "b4", status: "completed", output: { taskId: "t4", taskOutput: '{"batchId":"b4","decisions":[]}' } }] });
     t("neg: failed, garbage and [FAILED] batches never parse as completed", neg[0]?.status === "failed" && neg[1]?.status === "failed" && neg[2]?.status === "unparseable" && neg[3]?.status === "completed", neg);
     t("neg: empty/undefined aggregate -> []", parseTriage("").length === 0 && parseTriage(undefined).length === 0);
-    const from = { createdAt: "2026-10-27T00:00:00.000Z", id: "a", at: "2026-11-03T03:30:00.000Z" };
+    const from = { createdAt: "2026-10-27T00:00:00.000Z", id: "a", at: "2026-11-03T03:30:00.000Z", atId: "" };
+    const tonight = { at: "2026-11-04T03:30:00.000Z", atId: "" };
     const pb = [
       { batchId: "n1", kind: "new", docs: [{ id: "x1", createdAt: "2026-10-27T01:00:00.000Z" }] },
       { batchId: "n2", kind: "new", docs: [{ id: "x2", createdAt: "2026-10-27T02:00:00.000Z" }] },
       { batchId: "r1", kind: "reuse", docs: [{ id: "y1", createdAt: "2026-10-01T00:00:00.000Z" }] },
     ];
-    const c1 = nextCursor(pb, new Set(["n1", "n2", "r1"]), from, "2026-11-04T03:30:00.000Z");
-    const c2 = nextCursor(pb, new Set(["n2", "r1"]), from, "2026-11-04T03:30:00.000Z");
-    const c3 = nextCursor(pb, new Set(["n1", "n2"]), from, "2026-11-04T03:30:00.000Z");
+    const c1 = nextCursor(pb, new Set(["n1", "n2", "r1"]), from, tonight);
+    const c2 = nextCursor(pb, new Set(["n2", "r1"]), from, tonight);
+    const c3 = nextCursor(pb, new Set(["n1", "n2"]), from, tonight);
     t("cursor: all batches done -> last new doc and tonight's reuse window", c1.id === "x2" && c1.at === "2026-11-04T03:30:00.000Z", c1);
     t("cursor: first new batch failed -> no move (nothing skipped)", c2.id === "a" && c2.createdAt === from.createdAt, c2);
     t("cursor: a reuse batch failed -> reuse window stays", c3.id === "x2" && c3.at === from.at, c3);
+    const wm = (o: Partial<Parameters<typeof reuseWatermark>[0]>) => reuseWatermark({ from, at: tonight.at, reuseRan: true, reuseFailed: false, reuseCap: 2, rows: [], ...o });
+    const capped = wm({ rows: [{ id: "y1", firstReuse: "2026-11-03T05:00:00.000Z" }, { id: "y2", firstReuse: "2026-11-03T06:00:00.000Z" }] });
+    t("reuse watermark: a capped read moves only to the last row read (overflow stays eligible)", capped.at === "2026-11-03T06:00:00.000Z" && capped.atId === "y2", capped);
+    t("reuse watermark: an uncapped read moves to tonight", wm({ rows: [{ id: "y1", firstReuse: "2026-11-03T05:00:00.000Z" }] }).at === tonight.at);
+    t("reuse watermark: no reuse read (budget) or a failed query holds it", wm({ reuseRan: false }).at === from.at && wm({ reuseFailed: true }).at === from.at);
     const md = renderSection({ read: 2, planned: 2, newRead: 2, reuseRead: 0, batches: 1, okBatches: 1, failedBatches: [], promoted: 1, kept: 0, keptHowto: 0, dropped: 1, dropWhy: { noise: 1 }, guards: {}, invalid: {}, missing: 0, left: 10, cursor: { from: "", to: "2026-10-27" }, cost: { usd: null, basis: "pending" }, samples: [], names: {} });
     t("render: counts line", md.startsWith(HEADING) && md.includes("1 promoted, 0 kept, 1 dropped") && md.includes("noise 1"), md);
     t("render: skipped section", renderSection({ skipReason: "x", read: 0, planned: 0, newRead: 0, reuseRead: 0, batches: 0, okBatches: 0, failedBatches: [], promoted: 0, kept: 0, keptHowto: 0, dropped: 0, dropWhy: {}, guards: {}, invalid: {}, missing: 0, left: null, cursor: null, cost: { usd: null, basis: "" }, samples: [], names: {} }).includes("Skipped: x"));

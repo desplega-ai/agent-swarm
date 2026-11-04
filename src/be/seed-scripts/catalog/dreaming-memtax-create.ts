@@ -74,12 +74,15 @@ export const argsSchema = z.object({
 });
 
 const NS = "dreaming-v2";
-const LEARNINGS_CURSOR_KEY = "learnings:cursor"; // dreaming-learnings CURSOR_KEY: plan reads it, only this apply writes it
 // Drops a live night could not delete (cap, write budget, a failed delete), retried first on the next live night.
 // They drive Lead deletes, so they live in the Lead's own agent namespace: any agent can write dreaming-v2, but only
 // the Lead can write task:agent:<leadId>.
 export const LEARNINGS_PENDING_KEY = "dreaming-v2:learnings:pending-drops";
 export const pendingDropsNs = (leadId: string) => `task:agent:${leadId}`;
+// Same namespace for the triage cursor (dreaming-learnings CURSOR_KEY: its plan reads it, only this apply writes it) and
+// for promotions a live night could not write (cluster cap, budget, a failed or refused write), re-fed to the next plan.
+export const LEARNINGS_CURSOR_KEY = "dreaming-v2:learnings:cursor";
+export const LEARNINGS_PENDING_PROMOTIONS_KEY = "dreaming-v2:learnings:pending-promotions";
 const LEARNINGS_PENDING_MAX = 600;
 const LEARNINGS_PENDING_TRIES = 5;
 const MAX_DOC = 1950;
@@ -715,6 +718,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       return [];
     }
   };
+  // For reads whose failure must not look like "no rows" (a missing row is a final answer, a failed read is not).
+  const qStrict = async (sql: string, params: unknown[] = []): Promise<any[]> => rows(await ctx.swarm.db_query({ sql, params }));
   try {
     if (a.mode === "plan") return await plan();
     if (a.mode === "apply") return await apply();
@@ -778,9 +783,42 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     // Learnings triage (dreaming-learnings report): its rows join B1's, validated by the same rules. A promotion is
     // distilled even as a singleton: the triage already decided it belongs in that subject doc.
     const lt: any = parse(a.learnings) ?? {};
-    const ltRows: any[] = Array.isArray(lt.classifications) ? lt.classifications : [];
+    const ltRows: any[] = Array.isArray(lt.classifications) ? [...lt.classifications] : [];
     for (const d of Array.isArray(lt.docs) ? lt.docs : []) if (d?.id && !meta.has(String(d.id))) meta.set(String(d.id), { ...d, fromLearning: true });
     const promotedIds = new Set<string>((Array.isArray(lt.promotedIds) ? lt.promotedIds : []).map(String));
+    // Promotions an earlier live night decided but did not write (cluster cap, budget, a failed or refused write) come
+    // back from the Lead's queue and join tonight's rows, oldest first, with their learning re-read from the db. A
+    // carried row whose learning is gone (TTL, deleted) leaves the queue. Tonight's own decision for a learning wins.
+    const promoRows = new Map<string, any>();
+    for (const r of ltRows) if (r && promotedIds.has(String(r.id))) promoRows.set(String(r.id), { id: String(r.id), path: r.path, kind: r.kind, action: r.action, entitySlugs: r.entitySlugs ?? [], reason: r.reason ?? "", tries: 0 });
+    const leadId = String(a.leadAgentId ?? "").trim();
+    let promotionsRead = leadId ? "ok" : "no leadAgentId";
+    let carriedPromotions = 0;
+    if (leadId) {
+      try {
+        const v: any = (await ctx.swarm.kv_getOrNull({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_PROMOTIONS_KEY }))?.value;
+        const carried: any[] = (Array.isArray(v?.promotions) ? v.promotions : []).filter((r: any) => r && typeof r.id === "string" && !promoRows.has(r.id) && !ltRows.some((x) => String(x?.id) === r.id));
+        if (carried.length) {
+          const cids = carried.map((r) => r.id);
+          const found = new Map((await qStrict(`SELECT id, name, key, createdAt, substr(content, 1, 1200) text FROM agent_memory WHERE id IN (${cids.map(() => "?").join(",")}) AND chunkIndex = 0 AND coalesce(key, '') GLOB '/learnings/*' AND (expiresAt IS NULL OR expiresAt > ?)`, [...cids, new Date().toISOString()])).map((r) => [String(r.id), r]));
+          for (const r of carried) {
+            const d = found.get(r.id);
+            if (!d) continue;
+            meta.set(r.id, { id: r.id, name: String(d.name ?? ""), key: String(d.key ?? ""), created: String(d.createdAt ?? "").slice(0, 10), text: String(d.text ?? ""), fromLearning: true });
+            const row = { id: r.id, path: String(r.path ?? ""), kind: String(r.kind ?? ""), action: String(r.action ?? ""), entitySlugs: Array.isArray(r.entitySlugs) ? r.entitySlugs : [], reason: String(r.reason ?? ""), tries: Number(r.tries ?? 0) || 0, carried: true };
+            promoRows.set(r.id, row);
+            ltRows.unshift({ ...row, decision: "promote" });
+            promotedIds.add(r.id);
+            carriedPromotions++;
+          }
+        }
+      } catch (e: any) {
+        // The queue cannot be rewritten without its old contents: apply keeps it and holds the cursor.
+        promotionsRead = "failed";
+        errors.push(`learnings pending promotions read: ${String(e?.message ?? e).slice(0, 200)}`);
+      }
+    }
+    const carriedIds = new Set([...promoRows.values()].filter((r) => r.carried).map((r) => r.id));
     const ids = new Set(meta.keys());
     const groups = new Map<string, any[]>();
     const howtoGroups = new Map<string, any[]>();
@@ -825,16 +863,17 @@ async function runScript(args: unknown, ctx: ScriptContext) {
             clusterStats.selfMember++;
             continue;
           }
-          groups.set(target, [...(groups.get(target) ?? []), { id: r.id, reason: r.reason, promoted: promotedIds.has(r.id) }]);
+          groups.set(target, [...(groups.get(target) ?? []), { id: r.id, reason: r.reason, promoted: promotedIds.has(r.id), carried: carriedIds.has(r.id), tries: Number(promoRows.get(r.id)?.tries ?? 0) }]);
         }
       }
     }
     const entityPaths = new Set(entities.filter((e) => !noCreate(e.path)).map((e) => e.path));
     const allClusters = [...groups.entries()]
-      .map(([path, ms]) => ({ path, root: pathRoot(path)!, members: ms, attach: entityPaths.has(path) || byName.has(path), promoted: ms.filter((m: any) => m.promoted).length }))
+      .map(([path, ms]) => ({ path, root: pathRoot(path)!, members: ms, attach: entityPaths.has(path) || byName.has(path), promoted: ms.filter((m: any) => m.promoted).length, carried: ms.some((m: any) => m.carried), tries: Math.min(...ms.filter((m: any) => m.carried).map((m: any) => m.tries), 99) }))
       .filter((c) => c.members.length >= 2 || c.attach || c.promoted > 0)
-      // Promotions first: the TTL deletes an undistilled learning, a B1 doc only waits a night.
-      .sort((x, y) => Number(y.promoted > 0) - Number(x.promoted > 0) || y.members.length - x.members.length || (x.path < y.path ? -1 : 1));
+      // Promotions first (carried ones before tonight's, fewest attempts first so a capped one is not starved): the TTL
+      // deletes an undistilled learning, a B1 doc only waits.
+      .sort((x, y) => Number(y.carried) - Number(x.carried) || x.tries - y.tries || Number(y.promoted > 0) - Number(x.promoted > 0) || y.members.length - x.members.length || (x.path < y.path ? -1 : 1));
     // Skill routing: how-to clusters leave lane B before distill, so they never reach /longterm or use a cluster slot.
     const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE isEnabled = 1 ORDER BY name`)) as SkillRow[];
     const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND isScratch = 0 ORDER BY name`)) as SkillRow[];
@@ -861,6 +900,9 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const singletons = [...groups.values()].filter((ms) => ms.length === 1).length - clusters.filter((c) => c.members.length === 1).length;
     const distillOn = !overCap && a.maxClusters > 0;
     const picked = distillOn ? clusters.slice(0, a.maxClusters) : [];
+    // Promotions in a memory cluster the cap or the budget left out were never attempted: apply carries them untouched.
+    const pickedIds = new Set(picked.flatMap((c) => c.members.map((m: any) => String(m.id))));
+    const deferredPromotionIds = [...promoRows.keys()].filter((id) => !pickedIds.has(id) && clusters.some((c) => c.members.some((m: any) => m.id === id)));
     const jobs: any[] = [];
     for (let i = 0; i < picked.length; i += a.clustersPerJob) {
       const slice = picked.slice(i, i + a.clustersPerJob);
@@ -915,7 +957,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       scriptCatalog: scriptRows.length,
       clusterStats: { ...clusterStats, singletonsLeftForB2: singletons, overCap, routedToSkills: skillRoutes.length, learningRows: ltRows.length, promotedClusters: picked.filter((c) => c.promoted > 0).length, promotedOverCap: clusters.slice(picked.length).reduce((n, c) => n + c.promoted, 0) },
       // Carried to apply: the drops it deletes and the cursor it commits on a live run.
-      learnings: lt.counts || ltRows.length || Array.isArray(lt.drops) ? { drops: Array.isArray(lt.drops) ? lt.drops : [], cursor: lt.cursor ?? null, counts: lt.counts ?? null, promotedIds: [...promotedIds], skipReason: lt.skipReason ?? null } : null,
+      learnings:
+        lt.counts || ltRows.length || Array.isArray(lt.drops) || carriedPromotions || promotionsRead === "failed"
+          ? { drops: Array.isArray(lt.drops) ? lt.drops : [], cursor: lt.cursor ?? null, counts: lt.counts ?? null, promotedIds: [...promotedIds], promotions: [...promoRows.values()], deferredPromotionIds, carriedPromotions, promotionsRead, skipReason: lt.skipReason ?? null }
+          : null,
       jobs,
       tidy,
       memberNames: Object.fromEntries([...meta.entries()].map(([id, d]) => [id, String(d.name ?? "").slice(0, 120)])),
@@ -1166,6 +1211,11 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     let dropsLeft = allDrops.length - learningDrops.length;
     let dropsCarried = 0;
     let dropsPending: number | null = null;
+    let dropsQueueOk = true;
+    let promotionsQueueOk = true;
+    let promotionsPending: number | null = null;
+    const promotions: any[] = Array.isArray(ltPlan?.promotions) ? ltPlan.promotions.filter((r: any) => r && typeof r.id === "string") : [];
+    const carriedRead = String(ltPlan?.promotionsRead ?? (promotions.length ? "ok" : "none"));
     let cursorState = !ltPlan ? "none (no triage tonight)" : runDry ? "not committed (dry run)" : "not committed (v3Writes off)";
     // Writes (live only).
     const writes: any[] = [];
@@ -1243,64 +1293,100 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // Re-checked live: still a /learnings row, one chunk, unchanged since the triage read it. A drop the cap or the
       // budget leaves, or whose delete fails, is carried to the next live night in learnings:pending-drops: the cursor
       // moves past the row either way, so the carry is what retries the decision. Earlier carried drops go first.
+      // The queue is rewritten whole, so a failed read deletes nothing and writes nothing tonight: the old queue stays
+      // and the cursor holds, so tonight's drops are re-triaged instead of lost.
       let carried: any[] = [];
       try {
-        const v: any = leadId ? (await ctx.swarm.kv_getOrNull({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY }))?.value : null;
+        if (!leadId) throw new Error("no leadAgentId: the pending-drop queue lives in the Lead's namespace");
+        const v: any = (await ctx.swarm.kv_getOrNull({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY }))?.value;
         carried = Array.isArray(v?.drops) ? v.drops.filter((d: any) => d && typeof d.id === "string") : [];
       } catch (e: any) {
+        dropsQueueOk = false;
         errors.push(`learnings pending drops read: ${String(e?.message ?? e).slice(0, 200)}`);
       }
-      const merged = new Map<string, any>();
-      for (const d of [...carried, ...allDrops]) if (!merged.has(d.id)) merged.set(d.id, d);
-      const queue = [...merged.values()];
-      dropsCarried = carried.length;
-      learningDrops = queue.slice(0, a.maxLearningDrops);
-      dropsLeft = queue.length - learningDrops.length;
-      const pending: any[] = queue.slice(learningDrops.length);
-      const retry = (dr: any) => {
-        const tries = Number(dr.tries ?? 0) + 1;
-        if (tries < LEARNINGS_PENDING_TRIES) pending.push({ ...dr, tries });
-      };
-      for (const [i, dr] of learningDrops.entries()) {
-        if (Date.now() - t0 > (a.writeBudgetMs ?? 90000)) {
-          dropsLeft += learningDrops.length - i;
-          pending.push(...learningDrops.slice(i));
-          errors.push(`write budget reached; ${learningDrops.length - i} learning drops carried to the next night`);
-          break;
-        }
-        const actionId = `LT${i + 1}`;
-        try {
-          const cur = await q("pre-drop", `SELECT id, name, key, tags, content, contentHash, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [dr.id]);
-          if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || !dr.contentHash || cur[0].contentHash !== dr.contentHash || Number(cur[0].totalChunks) !== 1) {
-            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, no content hash, or changed since triage" });
-            continue;
+      if (dropsQueueOk) {
+        const merged = new Map<string, any>();
+        for (const d of [...carried, ...allDrops]) if (!merged.has(d.id)) merged.set(d.id, d);
+        const queue = [...merged.values()];
+        dropsCarried = carried.length;
+        learningDrops = queue.slice(0, a.maxLearningDrops);
+        dropsLeft = queue.length - learningDrops.length;
+        const pending: any[] = queue.slice(learningDrops.length);
+        const retry = (dr: any) => {
+          const tries = Number(dr.tries ?? 0) + 1;
+          if (tries < LEARNINGS_PENDING_TRIES) pending.push({ ...dr, tries });
+        };
+        for (const [i, dr] of learningDrops.entries()) {
+          if (Date.now() - t0 > (a.writeBudgetMs ?? 90000)) {
+            dropsLeft += learningDrops.length - i;
+            pending.push(...learningDrops.slice(i));
+            errors.push(`write budget reached; ${learningDrops.length - i} learning drops carried to the next night`);
+            break;
           }
-          const preimageKey = `memtax-create:pre:${runId}:${dr.id}`;
-          await ctx.swarm.kv_set({ namespace: NS, key: preimageKey, value: { rows: [{ id: dr.id, name: cur[0].name, key: cur[0].key, tags: cur[0].tags, content: cur[0].content }], sha256: cur[0].contentHash, at: new Date().toISOString() } as any });
-          const res: any = await ctx.swarm.memory_delete({ id: dr.id });
-          if (res?.data?.success === false) {
-            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200), preimageKey });
+          const actionId = `LT${i + 1}`;
+          try {
+            // A failed read throws (retried), so only a row that is really gone or changed is skipped for good.
+            const cur = await qStrict(`SELECT id, name, key, tags, content, contentHash, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [dr.id]);
+            if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || !dr.contentHash || cur[0].contentHash !== dr.contentHash || Number(cur[0].totalChunks) !== 1) {
+              writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, no content hash, or changed since triage" });
+              continue;
+            }
+            const preimageKey = `memtax-create:pre:${runId}:${dr.id}`;
+            await ctx.swarm.kv_set({ namespace: NS, key: preimageKey, value: { rows: [{ id: dr.id, name: cur[0].name, key: cur[0].key, tags: cur[0].tags, content: cur[0].content }], sha256: cur[0].contentHash, at: new Date().toISOString() } as any });
+            const res: any = await ctx.swarm.memory_delete({ id: dr.id });
+            if (res?.data?.success === false) {
+              writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200), preimageKey });
+              retry(dr);
+              continue;
+            }
+            const back = await q("post-drop", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [dr.id]);
+            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: String(cur[0].name ?? ""), key: cur[0].key, beforeSha: cur[0].contentHash, afterSha: null, preimageKey, why: `${dr.dropWhy}: ${String(dr.reason ?? "").slice(0, 120)}`, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
+            ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: String(cur[0].name ?? ""), memoryIds: [dr.id] }, preimageKey });
+            if (Number(back[0]?.n) !== 0) retry(dr);
+          } catch (e: any) {
+            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(e?.message ?? e).slice(0, 200) });
             retry(dr);
-            continue;
           }
-          const back = await q("post-drop", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [dr.id]);
-          writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: String(cur[0].name ?? ""), key: cur[0].key, beforeSha: cur[0].contentHash, afterSha: null, preimageKey, why: `${dr.dropWhy}: ${String(dr.reason ?? "").slice(0, 120)}`, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
-          ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: String(cur[0].name ?? ""), memoryIds: [dr.id] }, preimageKey });
-          if (Number(back[0]?.n) !== 0) retry(dr);
+        }
+        // A skipped drop (gone, multi-chunk, or edited since triage, so the decision no longer matches the row) is final.
+        // The carry list is bounded; a row whose delete failed LEARNINGS_PENDING_TRIES nights in a row is left to its TTL.
+        try {
+          const keep = pending.slice(0, LEARNINGS_PENDING_MAX);
+          await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
+          dropsPending = keep.length;
         } catch (e: any) {
-          writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(e?.message ?? e).slice(0, 200) });
-          retry(dr);
+          dropsQueueOk = false;
+          errors.push(`learnings pending drops write: ${String(e?.message ?? e).slice(0, 200)}`);
         }
       }
-      // A skipped drop (gone, multi-chunk, or edited since triage, so the decision no longer matches the row) is final.
-      // The carry list is bounded; a row whose delete failed LEARNINGS_PENDING_TRIES nights in a row is left to its TTL.
-      try {
-        const keep = pending.slice(0, LEARNINGS_PENDING_MAX);
-        if (!leadId) throw new Error("no leadAgentId: undeleted drops are left to their TTL");
-        await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
-        dropsPending = keep.length;
-      } catch (e: any) {
-        errors.push(`learnings pending drops write: ${String(e?.message ?? e).slice(0, 200)}`);
+      // Promotions: one counts as written once a verified /longterm write cites it. The rest are carried in the Lead's
+      // queue to the next live night's plan. A promotion the plan attempted (picked for distill, or refused, rejected
+      // or routed on the way) gets a try; one the cluster cap or the budget left out keeps its count. After
+      // LEARNINGS_PENDING_TRIES attempts it is left to its TTL. A failed read at plan time means the queue is not
+      // rewritten tonight, and the cursor holds.
+      if (promotions.length || carriedRead === "failed") {
+        if (carriedRead !== "ok") {
+          promotionsQueueOk = false;
+          if (carriedRead !== "failed") errors.push(`learnings pending promotions: ${carriedRead}`);
+        } else {
+          const verified = new Set(writes.filter((w) => w.status === "verified" && w.kind !== "learning").map((w) => w.name));
+          const written = new Set(planned.filter((x) => verified.has(x.name)).flatMap((x) => x.sources));
+          const deferred = new Set<string>((Array.isArray(ltPlan?.deferredPromotionIds) ? ltPlan.deferredPromotionIds : []).map(String));
+          const next: any[] = [];
+          for (const r of promotions) {
+            if (written.has(r.id)) continue;
+            const tries = (Number(r.tries ?? 0) || 0) + (deferred.has(r.id) ? 0 : 1);
+            if (tries < LEARNINGS_PENDING_TRIES) next.push({ id: r.id, path: r.path, kind: r.kind, action: r.action, entitySlugs: r.entitySlugs ?? [], reason: String(r.reason ?? "").slice(0, 300), tries });
+          }
+          try {
+            const keep = next.slice(0, LEARNINGS_PENDING_MAX);
+            await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_PROMOTIONS_KEY, value: { promotions: keep, runId, at: new Date().toISOString() } as any });
+            promotionsPending = keep.length;
+          } catch (e: any) {
+            promotionsQueueOk = false;
+            errors.push(`learnings pending promotions write: ${String(e?.message ?? e).slice(0, 200)}`);
+          }
+        }
       }
       // Write log for rollback + ledger items for the next night's dreaming-verify survival check. verify already
       // wrote ledger:<runId> earlier in this run (verify -> learn -> memtax), so this read-append-write has no racer.
@@ -1318,17 +1404,19 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         errors.push(`log: ${String(e?.message ?? e).slice(0, 200)}`);
       }
       // Commit the triage cursor only now, after the writes: a skipped or failed night re-reads the same learnings.
-      // A failed distill job may have held a promotion, so it holds the cursor too (re-triage is cheap and idempotent).
+      // A failed distill job may have held a promotion, and a queue that could not be read or written would lose the
+      // drops and promotions it carries, so each holds the cursor too (re-triage is cheap and idempotent).
       const to = ltPlan?.cursor?.to;
-      if (to && failedJobs.length === 0) {
+      const hold = !to ? null : !leadId ? "no leadAgentId" : failedJobs.length ? "a distill job failed" : !dropsQueueOk ? "the pending-drop queue could not be read or written" : !promotionsQueueOk ? "the pending-promotion queue could not be read or written" : null;
+      if (to && !hold) {
         try {
-          await ctx.swarm.kv_set({ namespace: NS, key: LEARNINGS_CURSOR_KEY, value: { createdAt: String(to.createdAt ?? ""), id: String(to.id ?? ""), at: String(to.at ?? ""), runId, committedAt: new Date().toISOString() } as any });
+          await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_CURSOR_KEY, value: { createdAt: String(to.createdAt ?? ""), id: String(to.id ?? ""), at: String(to.at ?? ""), atId: String(to.atId ?? ""), runId, committedAt: new Date().toISOString() } as any });
           cursorState = `committed to ${String(to.createdAt ?? "").slice(0, 19) || "start"}`;
         } catch (e: any) {
           errors.push(`learnings cursor: ${String(e?.message ?? e).slice(0, 200)}`);
           cursorState = "commit failed; tomorrow re-reads the same learnings";
         }
-      } else cursorState = to ? "not committed: a distill job failed, tomorrow re-reads the same learnings" : "none (no triage tonight)";
+      } else cursorState = hold ? `not committed: ${hold}, tomorrow re-reads the same learnings` : "none (no triage tonight)";
     }
     // Handoff to the next night's synthesize (it runs before lane B). Not a memory write, so it does not wait on
     // v3Writes; dry runs write nothing. Fixed key :latest so synthesize reads it by exact name.
@@ -1410,6 +1498,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           dropsLeft,
           dropsCarried,
           dropsPending,
+          promotionsCarried: Number(ltPlan?.carriedPromotions ?? 0),
+          promotionsPending,
           cursor: cursorState,
         }
       : null;
@@ -1436,7 +1526,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       L.push(
         `**Learnings triage (applied)**: ${learnings.read} read, ${learnings.promoted} promoted, ${learnings.kept} kept, ${learnings.dropped} dropped · ` +
           (live ? `${learnings.promotedWritten} promoted learnings cited by verified /longterm writes · ${learnings.dropsDeleted} of ${learnings.dropsPlanned} drops deleted` : `${learnings.promotedPlanned} promoted learnings cited by planned /longterm writes · ${learnings.dropsPlanned} drops would be deleted`) +
-          `${learnings.dropsCarried ? ` (${learnings.dropsCarried} carried from earlier nights)` : ""}${learnings.dropsLeft ? `, ${learnings.dropsLeft} over the cap ${a.maxLearningDrops} or the write budget` : ""}${learnings.dropsPending != null ? `, ${learnings.dropsPending} carried to the next live night` : ""} · cursor ${learnings.cursor}.`,
+          `${learnings.dropsCarried ? ` (${learnings.dropsCarried} carried from earlier nights)` : ""}${learnings.dropsLeft ? `, ${learnings.dropsLeft} over the cap ${a.maxLearningDrops} or the write budget` : ""}${learnings.dropsPending != null ? `, ${learnings.dropsPending} carried to the next live night` : ""} · promotions: ${learnings.promotionsCarried} carried in${learnings.promotionsPending != null ? `, ${learnings.promotionsPending} carried to the next live night` : ""} · cursor ${learnings.cursor}.`,
       );
     }
     const nd = (x: any) => `\`${x.from}\` -> \`${x.to ?? x.twin}\` (${x.why}, cos ${x.cos})`;
