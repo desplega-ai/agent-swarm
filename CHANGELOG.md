@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.10] - 2026-11-04
+
+### Added
+- Resume: the resume preamble flags the tool call that never got an answer (#2680).
+- Sessions: resource sessions are grouped by kind and show their names (#2688).
+- Apps: a `SchemaForm` component (#2593).
+- UI: a columns menu on grids that auto-hide columns (#2687); the GitHub star nudge also shows for existing tasks (#2681).
+- Extensions: the comms-adherence-gate self-test judges operator fixtures (#2659).
+
+### Changed
+- agent-fs pins bumped 0.18.15 -> 0.18.16 (server image, worker CLI, skill tag, `@desplega.ai/agent-fs-just-bash`).
+- Performance: the API logs the request path and slowest SQL statements of an event-loop stall (threshold `EVENT_LOOP_STALL_WARN_MS`, default 1000 ms) and batches retention DELETEs (#2667); KV sweep batches are capped (#2685); unhandled GitHub webhook events are acked before the body is read (#2679); Slack render-v2 reconciles cost less and threads render on task events (#2668).
+- Docker: bumped dsh, amp and cursor (#2689).
+- Docs: lead access to agent-scoped memories (#2665) and a link to the self-hosted team platform guide from Deployment (#2674).
+
+### Fixed
+- Slack: a socket watchdog restarts a dead Socket Mode socket (#2666); a top-level 1:1 DM counts as addressed to the bot (#2683).
+- Chat SDK: Slack commands and inbound text (#2690).
+- Scripts: `structuredClone` is available in QuickJS (#2694).
+- Tasks: child tasks inherit the parent's VCS identity as a unit (#2669).
+- UI: table filter popovers fit the viewport (#2676), phone lists show full titles and the bulk bar fits on two lines (#2664), and the Slack Connect card says its button emails the invite (#2684).
+- CI: the gitleaks self-test AWS key id always matches the rule (#2663); the db-client busy-gate test asserts by probe count (#2675).
+
 ## [2.7.9] - 2026-11-03
 
 ### Added

@@ -646,6 +646,7 @@ OpenTelemetry traces and OTLP metrics are disabled unless `OTEL_EXPORTER_OTLP_EN
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
 | `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
 | `OTEL_EXPORT_API_LOGS` | OFF | When set to `1`/`true` on the API, also exports its console output as OTLP log records to the same endpoint as traces, scrubbed of secrets. Read at startup. |
+| `EVENT_LOOP_STALL_WARN_MS` | `1000` | Event-loop stall threshold in milliseconds. When a probe tick lags past it, the API logs the stalled request path and the slowest SQL statements recorded during the stall (scrubbed, params never logged). Read on every tick, so a config reload applies without a restart. |
 
 ## Business-Use Instrumentation
 
