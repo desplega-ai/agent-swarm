@@ -823,6 +823,7 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 | Template `system.agent.scripts_only_mode` | Code-mode instructions | `scriptsOnly` |
 | Template `system.agent.outputs` or `...outputs.no_agent_fs` | `## Outputs` | MCP + `pages` capability; agent-fs variant when `AGENT_FS_API_URL` is set on a local environment |
 | Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
+| Template `system.agent.lead.channel_thread` | `## Use-case channel thread` | Lead only, not scripts-only, Slack prompt tools enabled (same gate as `## Slack`) or the `chat-sdk` capability |
 | Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
 | Template `system.agent.tools_skills` (skills + MCP server lines interpolated) | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
 | `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider claude/codex/opencode/pi, content differs from the generated default. Claude excludes both `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` from its memory load via `claudeMdExcludes`, so this is its only copy; the hook still writes `~/.claude/CLAUDE.md` as the file the agent edits |
@@ -834,6 +835,7 @@ Per-task context is appended to the **task prompt** (the first user turn), after
 |---|---|---|
 | Template `system.agent.scripts_only_mode.slack` | `## Slack (scripts-only)` | Worker, scripts-only, Slack-originated task |
 | Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
+| `task.use_case` | `## Use case` | Lead only. The task `key` is a use-case group key (not a namespace root, a `task:`/resource leaf, or a source key such as `shared/slack/...`), the same rule `create-schedule` and `create-page` use to inherit it |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
 | `task.checklist.nudge` | `## Setup suggestion` | Lead only. The poll trigger carries `checklistNudge`: a human-sourced task (`ui`, `slack`, `chat`, `comb`) with a known requester who has an open, never-nudged checklist item. Sent once per item |
 | cwd warning | `Note: The task requested working directory ...` | Task `dir` does not exist |

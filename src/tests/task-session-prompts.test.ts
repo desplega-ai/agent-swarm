@@ -3,6 +3,7 @@ import {
   buildChecklistNudgePrompt,
   buildRequesterProfilePrompt,
   buildTaskSessionPrompts,
+  buildUseCasePrompt,
   type TaskSessionContext,
 } from "../commands/runner";
 import { type BasePromptArgs, getTaskContextPrompt } from "../prompts/base-prompt";
@@ -171,5 +172,42 @@ describe("buildTaskSessionPrompts", () => {
 
   test("no nudge renders nothing", async () => {
     expect(await buildChecklistNudgePrompt(undefined)).toBe("");
+  });
+
+  test("a lead task in a use-case group carries the key once, in the task prompt only", async () => {
+    const lead = agentArgs("claude", { role: "lead" });
+    const inGroup = await build(
+      lead,
+      { ...sessionA, taskKey: "shared/competitor-watch/" },
+      "/work-on-task aaa",
+    );
+    const inInbox = await build(
+      lead,
+      { ...sessionA, taskKey: "shared/task:aaa/" },
+      "/work-on-task aaa",
+    );
+
+    expect(inGroup.systemPrompt).toBe(inInbox.systemPrompt);
+    expect(inGroup.systemPrompt).not.toContain("shared/competitor-watch/");
+    expect(inGroup.systemPrompt).not.toContain("## Use case\n");
+    expect(inGroup.prompt.split("## Use case\n").length - 1).toBe(1);
+    expect(inGroup.prompt).toContain(
+      "This task is in the use case with key `shared/competitor-watch/`.",
+    );
+    expect(inInbox.prompt).not.toContain("## Use case\n");
+    // The use-case paragraph and its link base stay in the system prompt, once.
+    expect(inGroup.systemPrompt.split("A use case is work that repeats").length - 1).toBe(1);
+    expect(inGroup.prompt).not.toContain("A use case is work that repeats");
+  });
+
+  test("the use-case note needs a lead and a user group key", async () => {
+    expect(await buildUseCasePrompt("lead", "shared/acme/")).toContain("`shared/acme/`");
+    expect(await buildUseCasePrompt("lead", "personal/u1/acme/")).toContain("`personal/u1/acme/`");
+    expect(await buildUseCasePrompt("worker", "shared/acme/")).toBe("");
+    expect(await buildUseCasePrompt("lead", undefined)).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/task:abc/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/schedule:abc/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/slack/C123/thread:1.2/")).toBe("");
   });
 });

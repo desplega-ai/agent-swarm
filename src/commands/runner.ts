@@ -3,6 +3,8 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { isGroupKey } from "../assets/key.ts";
+import { sourceOfKey } from "../assets/source-key.ts";
 import {
   type Attributes,
   initOtel,
@@ -2484,6 +2486,8 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     output?: string;
     status?: string;
     contextKey?: string;
+    /** Asset key; the lead's use-case note reads it. */
+    key?: string;
     requestedBy?: Trigger["requestedBy"];
     /** The profile claim applied, and its pooled-key allowlist read again at fetch. */
     resolvedProfile?: string;
@@ -2524,6 +2528,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         finishedAt?: string;
         output?: string;
         status?: string;
+        key?: string;
         requestedBy?: Trigger["requestedBy"];
         resolvedProfile?: string;
         credentialAllowlist?: Record<string, string[]>;
@@ -3477,6 +3482,16 @@ export async function buildChecklistNudgePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
+/**
+ * The lead's use-case note: the task's key when it is a use-case group (the
+ * rule `create-schedule` and `create-page` use to inherit it). Task prompt only.
+ */
+export async function buildUseCasePrompt(role: string, key: string | undefined): Promise<string> {
+  if (role !== "lead" || !key || !isGroupKey(key) || sourceOfKey(key)) return "";
+  const result = await resolveTemplateAsync("task.use_case", { key });
+  return result.skipped ? "" : result.text.trim();
+}
+
 export async function buildRequesterProfilePrompt(
   requestedBy: RequesterProfile | undefined,
 ): Promise<string> {
@@ -3522,6 +3537,8 @@ export function missingTaskDirWarning(
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
   checklistNudge?: ChecklistNudge;
+  /** The task's asset key; the lead gets a use-case note when it is a group key. */
+  taskKey?: string;
   /** Set when the task's `dir` does not exist and the session falls back. */
   cwdWarning?: string;
 };
@@ -3531,7 +3548,7 @@ export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArg
  * agent (profile, harness, deployment), so it is byte-identical across that
  * agent's sessions and the provider reads it from cache instead of re-writing
  * it. Everything that varies per task (repository block, scripts-only Slack
- * note, requester profile, checklist nudge, cwd warning) is appended to the task prompt.
+ * note, use-case key, requester profile, checklist nudge, cwd warning) is appended to the task prompt.
  */
 export async function buildTaskSessionPrompts(input: {
   basePromptArgs: BasePromptArgs;
@@ -3551,6 +3568,7 @@ export async function buildTaskSessionPrompts(input: {
       repoContext: context.repoContext,
       slackContext: context.slackContext,
     }),
+    await buildUseCasePrompt(basePromptArgs.role, context.taskKey),
     await buildRequesterProfilePrompt(context.requestedBy),
     await buildChecklistNudgePrompt(context.checklistNudge),
     context.cwdWarning?.trim(),
@@ -7078,6 +7096,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 }
               : undefined,
             requestedBy: task.requestedBy,
+            taskKey: task.key,
             cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
           },
         });
@@ -7661,6 +7680,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
             checklistNudge: trigger.checklistNudge,
+            taskKey: (trigger.task as { key?: string } | undefined)?.key,
             cwdWarning,
           },
         });
