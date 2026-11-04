@@ -3,7 +3,8 @@ import { AlertTriangle, ChevronRight, File, Folder, FolderOpen } from "lucide-re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMemoryKeys } from "@/api/hooks/use-memory";
 import type { MemoryKeySummary } from "@/api/types";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatTokens } from "@/lib/format-tokens";
@@ -67,6 +68,7 @@ export function LongtermView({
   const incomplete = rows.filter((r) => !r.complete).length;
   const tokens = rows.reduce((sum, r) => sum + r.estTokens, 0);
 
+  const gridColumns = useDataGridColumns("memory-longterm");
   const columnDefs = useMemo<ColDef<MemoryKeySummary>[]>(
     () => [
       {
@@ -221,10 +223,14 @@ export function LongtermView({
               {error instanceof Error ? error.message : "Could not load keys"}
             </span>
           )}
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
         </div>
         <DataGrid
           rowData={rows}
           columnDefs={columnDefs}
+          columns={gridColumns}
           loading={isLoading}
           emptyMessage="No memories under this folder"
           onRowClicked={onRowClicked}

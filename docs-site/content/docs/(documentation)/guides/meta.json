@@ -38,6 +38,7 @@
     "provider-auth",
     "x402-payments",
     "multi-runtime-agents",
-    "runtime-pools"
+    "runtime-pools",
+    "boxd-runtime-provider"
   ]
 }

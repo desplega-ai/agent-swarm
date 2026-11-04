@@ -17,7 +17,8 @@ import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } 
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import {
   AlertDialog,
@@ -213,6 +214,7 @@ export default function MemoryPage() {
 
   const isSemantic = data?.mode === "semantic";
 
+  const gridColumns = useDataGridColumns("memory-search");
   const columnDefs = useMemo<ColDef<MemoryEntry>[]>(() => {
     const cols: ColDef<MemoryEntry>[] = [];
 
@@ -503,12 +505,14 @@ export default function MemoryPage() {
                   {error instanceof Error ? error.message : "Search failed"}
                 </span>
               )}
+              <DataGridColumnsMenu state={gridColumns} />
             </div>
           </div>
 
           <DataGrid
             rowData={results}
             columnDefs={columnDefs}
+            columns={gridColumns}
             loading={isLoading || pageStale}
             emptyMessage={
               submitted.query ? "No matches for this query" : "No memories — try a different filter"

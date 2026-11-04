@@ -8,7 +8,9 @@ mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/select", () => require("../ui/select"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
-const { HIDE_WHEN_COMPACT, resolveCompactColumnDefs } = await import("./data-grid");
+const { HIDE_WHEN_COMPACT, resolveCompactColumnDefs, summarizeGridColumns } = await import(
+  "./data-grid"
+);
 
 const cols: ColDef[] = [
   { field: "name", flex: 1, minWidth: 200 },
@@ -83,5 +85,84 @@ describe("resolveCompactColumnDefs", () => {
 
   test("ignores an unmeasured (0px) grid", () => {
     expect(resolveCompactColumnDefs(cols, 0)).toBe(cols);
+  });
+});
+
+describe("column overrides", () => {
+  const overrides = (show: string[], hide: string[] = []) => ({
+    show: new Set(show),
+    hide: new Set(hide),
+  });
+
+  test("a force-shown column survives a narrow grid", () => {
+    const defs = resolveCompactColumnDefs(cols, 300, overrides(["updated"]));
+    expect(hiddenFields(defs)).toEqual(["type", "model"]);
+    expect(defs.find((c) => c.field === "updated")?.hide).toBeUndefined();
+  });
+
+  test("forcing a column never evicts another; the grid scrolls instead", () => {
+    expect(hiddenFields(resolveCompactColumnDefs(cols, 464))).toEqual(["updated"]);
+    expect(hiddenFields(resolveCompactColumnDefs(cols, 464, overrides(["updated"])))).toEqual([]);
+  });
+
+  test("a user-hidden column stays hidden on a wide grid and frees its width", () => {
+    expect(hiddenFields(resolveCompactColumnDefs(cols, 610, overrides([], ["type"])))).toEqual([
+      "type",
+    ]);
+    // At 500 "updated" would auto-hide, but without "type" the rest fit.
+    expect(hiddenFields(resolveCompactColumnDefs(cols, 500))).toEqual(["updated"]);
+    expect(hiddenFields(resolveCompactColumnDefs(cols, 500, overrides([], ["type"])))).toEqual([
+      "type",
+    ]);
+  });
+
+  test("overrides never touch unmarked columns", () => {
+    const defs = resolveCompactColumnDefs(cols, 610, overrides([], ["name"]));
+    expect(defs).toBe(cols);
+  });
+});
+
+describe("summarizeGridColumns", () => {
+  test("counts the columns hidden to fit and lists them unchecked", () => {
+    const withHelpers: ColDef[] = [
+      ...cols,
+      { colId: "actions", headerName: "", width: 60 },
+      { field: "secret", hide: true, context: HIDE_WHEN_COMPACT },
+    ];
+    const summary = summarizeGridColumns(withHelpers, resolveCompactColumnDefs(withHelpers, 460));
+    expect(summary.hiddenCount).toBe(2);
+    expect(summary.entries).toEqual([
+      { id: "name", label: "name", visible: true, toggleable: false },
+      { id: "type", label: "type", visible: true, toggleable: true },
+      { id: "model", label: "model", visible: false, toggleable: true },
+      { id: "updated", label: "updated", visible: false, toggleable: true },
+    ]);
+  });
+
+  test("counts and restores a compact column that has no colId or field", () => {
+    // Provider keys "Cost" and Schedules "Schedule" are valueGetter columns with a header only.
+    const withComputed: ColDef[] = [
+      ...cols,
+      { headerName: "Cost", width: 110, valueGetter: () => 0, context: HIDE_WHEN_COMPACT },
+    ];
+    const narrow = summarizeGridColumns(withComputed, resolveCompactColumnDefs(withComputed, 464));
+    expect(narrow.hiddenCount).toBe(2);
+    expect(narrow.entries.at(-1)).toEqual({
+      id: "header:Cost",
+      label: "Cost",
+      visible: false,
+      toggleable: true,
+    });
+
+    const restored = resolveCompactColumnDefs(withComputed, 464, {
+      show: new Set(["header:Cost"]),
+      hide: new Set(),
+    });
+    expect(restored.find((c) => c.headerName === "Cost")?.hide).toBeUndefined();
+    expect(summarizeGridColumns(withComputed, restored).hiddenCount).toBe(1);
+  });
+
+  test("reports zero hidden when every column fits", () => {
+    expect(summarizeGridColumns(cols, resolveCompactColumnDefs(cols, 610)).hiddenCount).toBe(0);
   });
 });

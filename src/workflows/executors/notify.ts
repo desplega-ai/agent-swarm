@@ -1,7 +1,44 @@
+import type { App } from "@slack/bolt";
 import { z } from "zod";
+import { isSlackConfigured } from "../../slack/config";
 import type { ExecutorMeta } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { BaseExecutor, type ExecutorResult } from "./base";
+
+// ─── Slack readiness wait ───────────────────────────────────
+
+/**
+ * How long a Slack notify waits for a configured but not yet initialized
+ * client. Kept under the default 30s node watchdog (`DEFAULT_NODE_TIMEOUT_MS`)
+ * so the step fails with this executor's error rather than a bare timeout.
+ */
+const slackReadyWait = { timeoutMs: 25_000, pollMs: 250 };
+
+/** Test seam: shrink the readiness wait. */
+export function _setNotifySlackReadyWaitForTests(opts: {
+  timeoutMs?: number;
+  pollMs?: number;
+}): void {
+  if (opts.timeoutMs !== undefined) slackReadyWait.timeoutMs = opts.timeoutMs;
+  if (opts.pollMs !== undefined) slackReadyWait.pollMs = opts.pollMs;
+}
+
+/** Poll for the Slack client until it exists, the wait runs out, or `signal` aborts. */
+async function waitForSlackApp(
+  getApp: () => App | null,
+  signal: AbortSignal | undefined,
+): Promise<App | null> {
+  const deadline = Date.now() + slackReadyWait.timeoutMs;
+  while (Date.now() < deadline && !signal?.aborted) {
+    await Bun.sleep(Math.min(slackReadyWait.pollMs, Math.max(0, deadline - Date.now())));
+    // The deadline may have fired during the sleep. Posting now would land
+    // after the engine marked the step failed, and a retry would post again.
+    if (signal?.aborted) return null;
+    const app = getApp();
+    if (app) return app;
+  }
+  return null;
+}
 
 // ─── Schemas ────────────────────────────────────────────────
 
@@ -31,7 +68,7 @@ export class NotifyExecutor extends BaseExecutor<
   protected async execute(
     config: z.infer<typeof NotifyConfigSchema>,
     context: Readonly<Record<string, unknown>>,
-    _meta: ExecutorMeta,
+    meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof NotifyOutputSchema>>> {
     // Scrub once: the message reaches Slack, the swarm channel, a log line and
     // the step output.
@@ -62,12 +99,31 @@ export class NotifyExecutor extends BaseExecutor<
       }
       case "slack": {
         const { getSlackApp } = await import("../../slack/app");
-        const app = getSlackApp();
+        let app = getSlackApp();
         if (!app) {
-          return {
-            status: "success",
-            output: { sent: false, message },
-          };
+          // No Slack on this install: nothing to post to, so not a failure.
+          if (!isSlackConfigured()) {
+            return {
+              status: "success",
+              output: { sent: false, message },
+            };
+          }
+          // Slack is configured but its client is not up: the server is still
+          // booting, shutting down, or reloading integrations. Reporting
+          // success here would drop the message and hide it.
+          app = await waitForSlackApp(getSlackApp, meta.signal);
+          if (meta.signal?.aborted) {
+            return {
+              status: "failed",
+              error: "Step deadline reached while waiting for the Slack client; message not sent",
+            };
+          }
+          if (!app) {
+            return {
+              status: "failed",
+              error: `Slack is configured but its client was not ready within ${slackReadyWait.timeoutMs}ms; message not sent`,
+            };
+          }
         }
         try {
           const result = await app.client.chat.postMessage({

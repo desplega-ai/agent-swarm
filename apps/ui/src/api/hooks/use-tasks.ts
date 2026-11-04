@@ -8,7 +8,6 @@ import {
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useAllUsersScopeChanges, useWithinAllUsersScope } from "../../lib/all-users-scope";
-import { notePromptSent } from "../../lib/github-star-nudge-toast";
 import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
@@ -392,7 +391,6 @@ export function useCreateTask() {
     onSuccess: (task, _input, context) => {
       replaceTaskInLists(queryClient, context.optimisticId, task);
       queryClient.setQueryData(["task", task.id], task);
-      notePromptSent();
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -529,7 +527,6 @@ export function useSteerTask() {
       toast.error(err.message || "Failed to steer task");
     },
     onSuccess: (result, { id }) => {
-      notePromptSent();
       if (result.outcome === "promoted") {
         // The message became a follow-up task, the chain/list views changed.
         queryClient.invalidateQueries({ queryKey: ["tasks"] });

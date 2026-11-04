@@ -154,6 +154,8 @@ describe("Health & Core", () => {
     expect(status).toBe(200);
     expect(body.status).toBe("ok");
     expect(body.version).toBeDefined();
+    // Unauthenticated: no integration state, Slack included.
+    expect(Object.keys(body).sort()).toEqual(["status", "version"]);
   });
 
   test("OPTIONS returns 204 (CORS preflight)", async () => {

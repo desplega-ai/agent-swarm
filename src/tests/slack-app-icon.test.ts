@@ -25,7 +25,11 @@ const server = Bun.serve({
 });
 const slackApiUrl = `http://localhost:${server.port}/api/`;
 let token: string | null = null;
+// Spread the real module so a later file in the same process still finds
+// every export (bun keeps module mocks for the whole process).
+const realSlackApp = await import("../slack/app");
 mock.module("../slack/app", () => ({
+  ...realSlackApp,
   getSlackApp: () => (token ? { client: { token, slackApiUrl } } : null),
 }));
 const { getSlackAppIconUrl } = await import("../slack/app-icon");

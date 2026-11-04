@@ -13,7 +13,6 @@ import type { SessionDetailResponse } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { TruncatedTitle } from "../truncated-title";
 import { focusQuietly, useQuietTooltip } from "./quiet-focus";
@@ -93,11 +92,9 @@ export function useSaveTitle(detail: SessionDetailResponse) {
     const next = typed?.trim();
     if (next === undefined || next === (detail.root.title ?? "")) return;
     void updateTitle.mutateAsync({ id: detail.root.id, title: next || null }).then(
-      () => toast("Renamed", { position: SESSIONS_TOAST_POSITION }),
+      () => toast("Renamed"),
       (error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't rename the session", {
-          position: SESSIONS_TOAST_POSITION,
-        }),
+        toast.error(error instanceof Error ? error.message : "Couldn't rename the session"),
     );
   };
 }

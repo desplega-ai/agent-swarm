@@ -339,6 +339,7 @@ value:getLatestPageBySlug
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestStepForNode
 value:getLatestTaskByContextKey
+value:getLatestTaskByContextKeyPrefix
 value:getLeadAgent
 value:getLiveAgentCounts
 value:getLogsByAgentId

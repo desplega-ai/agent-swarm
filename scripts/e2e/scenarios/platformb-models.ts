@@ -81,6 +81,32 @@ async function profileNamed(ctx: ScenarioContext, name: string): Promise<Record<
   return asRecord(response.json);
 }
 
+const PROFILE_CHECK_STATES = ["pass", "warn", "fail", "unverified"];
+
+/** A profile check result: one primary profile whose rows each carry a known state. */
+function expectProfileCheckShape(
+  result: Record<string, unknown>,
+  agentId: string,
+  profile: string,
+  label: string,
+): void {
+  expect(result.agentId === agentId, `${label}: agentId is ${JSON.stringify(result.agentId)}`);
+  expect(typeof result.ok === "boolean", `${label}: ok is not a boolean`);
+  const profiles = asRecords(result, "profiles");
+  const primary = profiles[0];
+  expect(primary?.name === profile, `${label}: the primary profile is not ${profile}`);
+  const checks = asRecords(primary, "checks");
+  expect(checks.length > 0, `${label}: the primary profile has no check rows`);
+  expect(
+    checks.every(
+      (row) => typeof row.check === "string" && PROFILE_CHECK_STATES.includes(String(row.state)),
+    ),
+    `${label}: a check row has no name or an unknown state`,
+  );
+  const failed = checks.some((row) => row.state === "fail");
+  expect(primary?.ok === !failed, `${label}: primary ok disagrees with its fail rows`);
+}
+
 /**
  * Model profiles, the model catalog (read, tiers, overlay, harness support, refresh) and the
  * append-only price book, over HTTP and over the two lead-only catalog tools.
@@ -341,6 +367,26 @@ export const platformbModels: Scenario = {
       expect(
         String(asRecord(response.json).error).includes("shipped tier profile"),
         "Seed deletion error does not say it is a tier profile",
+      );
+      // The read-only profile check the runtime PATCH below also runs.
+      response = await ctx.api(
+        "GET",
+        `/api/agents/${workerId}/profile-check?profile=${encodeURIComponent(profileName)}`,
+      );
+      expectStatus(response, [200], "check the profile against the worker");
+      expectProfileCheckShape(asRecord(response.json), workerId, profileName, "HTTP profile check");
+      expectStatus(
+        await ctx.api("GET", `/api/agents/${workerId}/profile-check?profile=no-such-${ctx.nonce}`),
+        [404],
+        "check an unknown profile",
+      );
+      expectStatus(
+        await ctx.api(
+          "GET",
+          `/api/agents/${crypto.randomUUID()}/profile-check?profile=${encodeURIComponent(profileName)}`,
+        ),
+        [404],
+        "check a profile against an unknown agent",
       );
       response = await ctx.api("PATCH", `/api/agents/${workerId}/runtime`, {
         body: { harness_provider: "claude", profile: profileName },
@@ -614,6 +660,35 @@ export const platformbModels: Scenario = {
           toolProfiles.every((entry) => entry.harness === "codex") &&
           toolProfiles.some((entry) => entry.name === "codex-regular"),
         "list-model-profiles disagrees with GET /api/model-profiles?harness=codex",
+      );
+      const checked = expectToolOk(
+        await callTool(workerConn, "check-model-profile", {
+          agentId: workerId,
+          profile: "claude-regular",
+        }),
+        "check-model-profile",
+      );
+      expectProfileCheckShape(
+        asRecord(checked.data.result),
+        workerId,
+        "claude-regular",
+        "check-model-profile",
+      );
+      expectToolError(
+        await callTool(workerConn, "check-model-profile", {
+          agentId: workerId,
+          profile: `no-such-${ctx.nonce}`,
+        }),
+        "Unknown model profile",
+        "check-model-profile on an unknown profile",
+      );
+      expectToolError(
+        await callTool(workerConn, "check-model-profile", {
+          agentId: crypto.randomUUID(),
+          profile: "claude-regular",
+        }),
+        "not found",
+        "check-model-profile on an unknown agent",
       );
       expectToolError(
         await callTool(workerConn, "model-catalog-refresh", {}),

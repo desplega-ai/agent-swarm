@@ -261,7 +261,8 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  * task already reviews the result, so a follow-up would duplicate it. An
  * `all` wait with siblings still pending wakes nobody, so the follow-up stays.
  * A `followUpConfig.onCompleted` / `onFailed` instruction for this status also
- * keeps the follow-up, because the wake-up task does not carry that text.
+ * keeps the follow-up, because the wake-up task does not carry that text. A
+ * rejected `chainedTaskId` keeps it for the same reason.
  *
  * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
  * verifier's would-skip decision after commit; the follow-up is never skipped.
@@ -271,6 +272,13 @@ export async function createWorkerTaskFollowUp(args: {
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
+  /**
+   * `store-progress` `chainedTaskId`: a live child task the completing agent
+   * created to carry this result forward. Honoured only on `completed`.
+   */
+  chainedTaskId?: string;
+  /** Agent that made the completing call; defaults to the task's assignee. */
+  completingAgentId?: string;
 }): Promise<AgentTask | null> {
   const { task, status, output, failureReason } = args;
 
@@ -293,6 +301,37 @@ export async function createWorkerTaskFollowUp(args: {
       });
     } catch {}
     return null;
+  }
+
+  // Failures always wake the Lead, so only a completion can hand off to a child.
+  let chainRejection: (ChainedTaskCheck & { ok: false }) | null = null;
+  if (status === "completed" && args.chainedTaskId) {
+    const chain = await checkChainedTask(
+      task,
+      args.chainedTaskId,
+      args.completingAgentId ?? task.agentId ?? "",
+    );
+    if (chain.ok) {
+      try {
+        await createLogEntry({
+          eventType: "task_follow_up_suppressed",
+          taskId: task.id,
+          agentId: leadAgent.id,
+          metadata: {
+            reason: "chained_task_live",
+            status,
+            chainedTaskId: chain.child.id,
+            chainedTaskStatus: chain.child.status,
+            ...(task.followUpConfig?.onCompleted ? { droppedOnCompleted: true } : {}),
+          },
+        });
+      } catch {}
+      console.log(
+        `[worker-follow-up] Skipped follow-up for completed task ${task.id.slice(0, 8)}: work continues in chained task ${chain.child.id.slice(0, 8)} (${chain.child.status})`,
+      );
+      return null;
+    }
+    chainRejection = chain;
   }
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
@@ -323,6 +362,12 @@ export async function createWorkerTaskFollowUp(args: {
       task_id: task.id,
     });
     followUpDescription = completedResult.text;
+    if (chainRejection) {
+      followUpDescription += resolveTemplate("task.worker.chain_rejected", {
+        chained_task_id: chainRejection.chainedTaskId,
+        reason: chainRejection.reason,
+      }).text;
+    }
   } else {
     const reason = failureReason || "(no reason given)";
     const failedResult = resolveTemplate("task.worker.failed", {
@@ -374,8 +419,12 @@ export async function createWorkerTaskFollowUp(args: {
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
   const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
 
+  // Like `instructions`, a rejected chainedTaskId keeps the follow-up: the
+  // wake-up task does not carry the rejected id or the reason.
   const wake =
-    followUpAgentId && !instructions ? await findDeferredWakeFor(task.id, followUpAgentId) : null;
+    followUpAgentId && !instructions && !chainRejection
+      ? await findDeferredWakeFor(task.id, followUpAgentId)
+      : null;
   if (wake) {
     try {
       await createLogEntry({
@@ -433,6 +482,57 @@ export async function createWorkerTaskFollowUp(args: {
     }
   }
   return followUp;
+}
+
+/**
+ * Child statuses that mean the chained work is still going to run. `reviewing`
+ * is the accept/reject step of an offer, and a `paused` task keeps its agent
+ * and resumes when that worker restarts.
+ */
+const LIVE_CHAINED_TASK_STATUSES: ReadonlySet<AgentTask["status"]> = new Set([
+  "offered",
+  "reviewing",
+  "pending",
+  "in_progress",
+  "paused",
+]);
+
+type ChainedTaskCheck =
+  | { ok: true; child: AgentTask }
+  | { ok: false; chainedTaskId: string; reason: string };
+
+/**
+ * Whether `chainedTaskId` may stand in for the Lead follow-up of `task`: it
+ * must be a live direct child of `task`, created by the completing agent.
+ */
+async function checkChainedTask(
+  task: AgentTask,
+  chainedTaskId: string,
+  completingAgentId: string,
+): Promise<ChainedTaskCheck> {
+  const reject = (reason: string): ChainedTaskCheck => ({ ok: false, chainedTaskId, reason });
+  let child: AgentTask | null;
+  try {
+    child = await getTaskById(chainedTaskId);
+  } catch (err) {
+    // Fail open: a broken lookup must never drop the follow-up.
+    return reject(`lookup failed (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (!child) return reject("no task has this id");
+  if (child.parentTaskId !== task.id) {
+    return reject(
+      child.parentTaskId
+        ? `its parentTaskId is ${child.parentTaskId}, not this task`
+        : "it has no parentTaskId",
+    );
+  }
+  if (!completingAgentId || child.creatorAgentId !== completingAgentId) {
+    return reject("it was not created by the agent that completed this task");
+  }
+  if (!LIVE_CHAINED_TASK_STATUSES.has(child.status)) {
+    return reject(`it is ${child.status}, not live`);
+  }
+  return { ok: true, child };
 }
 
 /** Hop cap for `deferredWorkChatContextKey`; a defer/resume chain is short. */

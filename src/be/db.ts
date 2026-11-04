@@ -217,6 +217,7 @@ import {
   threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -367,6 +368,7 @@ export {
   getLatestLeadTaskInThread,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
+  getLatestTaskByContextKeyPrefix,
   getMostRecentTaskInThread,
   getPendingChatRelayTasks,
   getPendingSlackRelayTasks,
@@ -596,6 +598,8 @@ export interface SlackMessageRecord {
   deliveryAbandonedAt?: string;
   /** Last Slack verdict for the card, "<code>: <messages>", 500 chars max. */
   deliveryLastError?: string;
+  /** Tree rows only: set once the thread has no render work left. */
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -628,6 +632,7 @@ type SlackMessageRow = {
   delivery_attempts: number;
   delivery_abandoned_at: string | null;
   delivery_last_error: string | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -650,6 +655,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     deliveryAttempts: row.delivery_attempts,
     deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
     deliveryLastError: row.delivery_last_error ?? undefined,
+    closedAt: row.closed_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -872,15 +878,20 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * CROSS JOIN and `+wake.taskType` pin the join order to the small chain. Without
  * them the planner drives the outer join from every terminal task (~1s at 150k tasks).
+ * The anchor drives from the partial index idx_agent_tasks_deferred (tasks
+ * that ever deferred), not from every outcome card: `deferral_resolved_at IS
+ * NULL` stays true forever on cards of tasks that never deferred.
+ * `+child.taskType` does the same for the NOT EXISTS: without it the planner
+ * walks every deferred-type task through idx_agent_tasks_list_filter per row.
  */
 export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
   const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
     `WITH RECURSIVE chain(card_id, task_id) AS (
-         SELECT card.id, deferred.id FROM slack_messages card
-         JOIN agent_tasks deferred ON deferred.id = card.task_id
-         WHERE card.kind = 'outcome' AND deferred.deferredAt IS NOT NULL
+         SELECT card.id, deferred.id FROM agent_tasks deferred
+         CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+         WHERE deferred.deferredAt IS NOT NULL
            AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
            AND card.ts NOT LIKE 'pending:%'
          UNION
@@ -898,7 +909,7 @@ export async function getResolvableDeferralOutcomes(
          AND card.ts NOT LIKE 'pending:%'
          AND NOT EXISTS (
            SELECT 1 FROM agent_tasks child
-           WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
+           WHERE child.parentTaskId = wake.id AND +child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
          AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
@@ -968,57 +979,26 @@ export async function abandonSlackOutcomeDelivery(
   return row ? rowToSlackMessage(row) : null;
 }
 
-export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
+/**
+ * Trees with pending render work. Reads only open trees (closed_at IS NULL,
+ * idx_slack_messages_open_trees): a settled thread is closed after its render
+ * pass and reopened by migration 278's triggers on any task or outcome write
+ * in the thread. `thread` scopes the sweep to one thread (event-driven render).
+ */
+export async function getSlackTreeMessages(
+  options: { thread?: { channelId: string; threadTs: string } } = {},
+): Promise<SlackMessageRecord[]> {
+  const thread = options.thread;
   const rows = await getDbClient().query<SlackMessageRow>(
     `SELECT tree.*
        FROM slack_messages tree
        JOIN slack_render_v2_state state ON state.id = 1
        WHERE tree.kind = 'tree'
-       AND (
-         (tree.ts LIKE 'pending:%' AND tree.created_at >= state.activated_at)
-         OR EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.source = 'slack'
-           AND task.createdAt >= state.activated_at
-           AND task.status IN ('completed', 'failed', 'cancelled')
-           AND NOT EXISTS (
-             SELECT 1 FROM slack_messages outcome
-             WHERE outcome.kind = 'outcome'
-             AND outcome.task_id = task.id
-             AND (outcome.finalized_at IS NOT NULL OR outcome.delivery_abandoned_at IS NOT NULL)
-           )
-         )
-         OR
-         EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
-         )
-         OR EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND task.lastUpdatedAt > tree.updated_at
-         )
-         OR EXISTS (
-           SELECT 1 FROM slack_messages outcome
-           JOIN agent_tasks task ON task.id = outcome.task_id
-           WHERE outcome.kind = 'outcome'
-           AND outcome.channel_id = tree.channel_id
-           AND outcome.thread_ts = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND (
-             (outcome.finalized_at IS NULL AND outcome.delivery_abandoned_at IS NULL)
-             OR outcome.updated_at > tree.updated_at
-           )
-         )
-       )
+       AND tree.closed_at IS NULL
+       ${thread ? "AND tree.channel_id = ? AND tree.thread_ts = ?" : ""}
+       AND ${SLACK_TREE_NEEDS_RENDER_SQL}
        ORDER BY tree.created_at ASC`,
+    thread ? [thread.channelId, thread.threadTs] : [],
   );
   return rows.map(rowToSlackMessage);
 }
@@ -6046,6 +6026,7 @@ type ScheduledTaskRow = {
   lastErrorMessage: string | null;
   model: string | null;
   modelTier: string | null;
+  profile: string | null;
   scheduleType: string;
   targetType: string;
   workflowId: string | null;
@@ -6098,6 +6079,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    profile: row.profile ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
     targetType: row.targetType as "agent-task" | "workflow" | "script",
     workflowId: row.workflowId ?? undefined,
@@ -6259,6 +6241,7 @@ export interface CreateScheduledTaskData {
   timezone?: string;
   model?: string;
   modelTier?: ModelTier;
+  profile?: string;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string;
@@ -6279,11 +6262,11 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
-        timezone, model, modelTier, scheduleType,
+        timezone, model, modelTier, profile, scheduleType,
         targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -6305,6 +6288,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.timezone ?? "UTC",
       data.model ?? null,
       data.modelTier ?? null,
+      data.profile ?? null,
       data.scheduleType ?? "recurring",
       data.targetType ?? "agent-task",
       data.workflowId ?? null,
@@ -6344,6 +6328,7 @@ export interface UpdateScheduledTaskData {
   lastErrorMessage?: string | null;
   model?: string | null;
   modelTier?: ModelTier | null;
+  profile?: string | null;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string | null;
@@ -6439,6 +6424,10 @@ export async function updateScheduledTask(
   if (data.modelTier !== undefined) {
     updates.push("modelTier = ?");
     params.push(data.modelTier);
+  }
+  if (data.profile !== undefined) {
+    updates.push("profile = ?");
+    params.push(data.profile);
   }
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
@@ -13907,16 +13896,35 @@ export async function sweepExpiredKv(namespace: string, now = Date.now()): Promi
 /** Delete expired entries across a namespace family (`prefix` and
  * `prefix:*`). Used by per-agent internal stores whose inactive owners may
  * never return to trigger a namespace-local sweep. */
-export async function sweepExpiredKvPrefix(prefix: string, now = Date.now()): Promise<number> {
+export async function sweepExpiredKvPrefix(
+  prefix: string,
+  now = Date.now(),
+  /** Rows per DELETE, capped at 50 for multi-MB values. Yields between batches. */
+  batchSize = 50,
+): Promise<number> {
+  batchSize = Math.max(1, Math.min(batchSize, 50));
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [prefix, `${escaped}:%`, now],
-  );
-  return result.changes;
+  // Batched, with a macrotask yield between batches: one DELETE of every
+  // expired multi-MB overflow row blocked the event loop for seconds and
+  // starved the Slack socket ping. `now` is fixed for the whole sweep, so the
+  // batches delete the same row set as one statement. kv_entries is WITHOUT
+  // ROWID, so a batch selects the (namespace, key) primary key.
+  let removed = 0;
+  for (;;) {
+    const result = await getDbClient().run(
+      `DELETE FROM kv_entries
+          WHERE (namespace, key) IN (
+            SELECT namespace, key FROM kv_entries
+              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+                AND expires_at IS NOT NULL
+                AND expires_at <= ?
+              LIMIT ?)`,
+      [prefix, `${escaped}:%`, now, batchSize],
+    );
+    removed += result.changes;
+    if (result.changes < batchSize) return removed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 /**

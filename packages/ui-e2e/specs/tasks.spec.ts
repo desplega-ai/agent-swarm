@@ -75,3 +75,81 @@ for (const width of [900, 1200]) {
     }
   });
 }
+
+test("Claude SDK enables Interrupt and sends steer through the real API @local", async ({
+  page,
+  seed,
+  api,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const taskId = seed!.tasks.inProgress;
+  const task = await api.get<{
+    claudeSessionId?: string;
+    provider?: string;
+    providerMeta?: Record<string, unknown>;
+  }>(`/api/tasks/${taskId}`);
+  const sessionId = task.claudeSessionId ?? crypto.randomUUID();
+  try {
+    await api.put("/api/config", {
+      scope: "global",
+      key: "STEERING_ENABLED",
+      value: "true",
+      isSecret: false,
+    });
+    await api.post("/api/config/reload", {});
+    await api.put(`/api/tasks/${taskId}/session`, {
+      claudeSessionId: sessionId,
+      provider: "claude",
+      providerMeta: { transport: "cli" },
+    });
+    await page.goto(`/tasks/${taskId}`);
+    const interrupt = page
+      .getByRole("radio", { name: "Interrupt", exact: true })
+      .filter({ visible: true });
+    await expect(interrupt).toHaveAttribute("aria-disabled", "true");
+    await api.put(`/api/tasks/${taskId}/session`, {
+      claudeSessionId: sessionId,
+      provider: "claude",
+      providerMeta: { transport: "sdk" },
+    });
+    await page.reload();
+    await expect(interrupt).not.toHaveAttribute("aria-disabled", "true");
+    await interrupt.click();
+    const message = `SDK redirect ${crypto.randomUUID()}`;
+    await page
+      .getByPlaceholder("Steer the task…", { exact: true })
+      .filter({ visible: true })
+      .fill(message);
+    const response = page.waitForResponse(
+      (r) => r.url().endsWith(`/api/tasks/${taskId}/steer`) && r.request().method() === "POST",
+    );
+    await page
+      .getByRole("button", { name: "Steer", exact: true })
+      .filter({ visible: true })
+      .click();
+    const sent = await response;
+    expect(sent.ok()).toBeTruthy();
+    expect(await sent.json()).toMatchObject({ outcome: "steered", effectiveMode: "steer" });
+    const history = await api.get<{
+      messages: Array<{ body: string; mode: string; status: string }>;
+    }>(`/api/tasks/${taskId}/steering-messages`);
+    expect(history.messages).toContainEqual(
+      expect.objectContaining({ body: message, mode: "steer", status: "pending" }),
+    );
+    await clean.assertClean();
+  } finally {
+    await api.put(`/api/tasks/${taskId}/session`, {
+      claudeSessionId: sessionId,
+      provider: task.provider ?? "claude",
+      providerMeta: task.providerMeta ?? {},
+    });
+    await api.put("/api/config", {
+      scope: "global",
+      key: "STEERING_ENABLED",
+      value: "false",
+      isSecret: false,
+    });
+    await api.post("/api/config/reload", {});
+  }
+});

@@ -86,6 +86,7 @@ import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
+  CredentialAllowlistError,
   type CredentialSelection,
   ModelWindowExhaustedError,
   normalizeProviderKeyAliases,
@@ -914,6 +915,14 @@ export async function fetchResolvedEnv(
      * unset so an exhausted default model never blocks configuration loading.
      */
     enforceModelCapacity?: boolean;
+    /**
+     * The claimed profile's pooled-key allowlist (trigger `credentialAllowlist`).
+     * Forwarded to `resolveCredentialPools`, which throws
+     * `CredentialAllowlistError` when it matches no key.
+     */
+    credentialAllowlist?: Record<string, string[]>;
+    /** The profile that carries `credentialAllowlist`, for the error message. */
+    resolvedProfile?: string;
   },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
@@ -1083,6 +1092,8 @@ export async function fetchResolvedEnv(
     model: effectiveModel,
     localBlocks: sessionContext?.localBlocks,
     enforceModelCapacity: sessionContext?.enforceModelCapacity,
+    allowedKeySuffixes: sessionContext?.credentialAllowlist,
+    allowlistProfile: sessionContext?.resolvedProfile,
   });
 
   return { env, credentialEnv, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
@@ -2474,6 +2485,9 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     status?: string;
     contextKey?: string;
     requestedBy?: Trigger["requestedBy"];
+    /** The profile claim applied, and its pooled-key allowlist read again at fetch. */
+    resolvedProfile?: string;
+    credentialAllowlist?: Record<string, string[]>;
   }>
 > {
   const headers: Record<string, string> = {
@@ -2511,6 +2525,8 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         output?: string;
         status?: string;
         requestedBy?: Trigger["requestedBy"];
+        resolvedProfile?: string;
+        credentialAllowlist?: Record<string, string[]>;
       }>;
     };
     return data.tasks || [];
@@ -4339,6 +4355,9 @@ export async function spawnProviderProcess(
     localBlocks?: Map<string, number>;
     /** Prompt part sizes from buildTaskSessionPrompts, posted as the session's manifest. */
     compositionParts?: RequestCompositionPartInput[];
+    /** Claim-time profile (task.resolvedProfile) and its pooled-key allowlist. */
+    resolvedProfile?: string;
+    credentialAllowlist?: Record<string, string[]>;
   },
   logDir: string,
 ): Promise<RunningTask> {
@@ -4373,10 +4392,15 @@ export async function spawnProviderProcess(
         modelTier: opts.modelTier,
         localBlocks: opts.localBlocks,
         enforceModelCapacity: true,
+        credentialAllowlist: opts.credentialAllowlist,
+        resolvedProfile: opts.resolvedProfile,
       },
     ));
   } catch (err) {
-    if (err instanceof ModelWindowExhaustedError && realTaskId) {
+    if (
+      (err instanceof ModelWindowExhaustedError || err instanceof CredentialAllowlistError) &&
+      realTaskId
+    ) {
       const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
       await ensureTaskFinished(
@@ -7179,6 +7203,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: (task as { contextKey?: string }).contextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: resumeSession.parts,
+              resolvedProfile: task.resolvedProfile,
+              credentialAllowlist: task.credentialAllowlist,
             },
             logDir,
           );
@@ -7805,6 +7831,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: taskContextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: taskSession.parts,
+              resolvedProfile: (trigger.task as { resolvedProfile?: string } | undefined)
+                ?.resolvedProfile,
+              credentialAllowlist: (
+                trigger.task as { credentialAllowlist?: Record<string, string[]> } | undefined
+              )?.credentialAllowlist,
             },
             logDir,
           );

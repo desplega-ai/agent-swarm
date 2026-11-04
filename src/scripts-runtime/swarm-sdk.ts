@@ -493,7 +493,24 @@ async function callBridgeApi(
           : `api failed with ${res.status}`;
       throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
     }
-    return scrubObject({ success: res.ok, status: res.status, data });
+    // The bridge answers 200 with the tool's structuredContent, whose registrar
+    // envelope always carries `success: ok` (data cannot override it). A tool
+    // refusal (toolErr) is therefore HTTP 200 with `data.success === false`;
+    // fold it into the outer flag so scripts gating on `.success` see it, and
+    // mirror the refusal text so helpers that read the first failing layer's
+    // `message` keep the tool's reason.
+    const envelope =
+      data !== null && typeof data === "object"
+        ? (data as { success?: unknown; message?: unknown })
+        : undefined;
+    const toolRefused = envelope?.success === false;
+    const refusalMessage = toolRefused ? envelope?.message : undefined;
+    return scrubObject({
+      success: res.ok && !toolRefused,
+      status: res.status,
+      data,
+      ...(typeof refusalMessage === "string" ? { message: refusalMessage } : {}),
+    });
   }
 
   const res = await fetch(`${baseUrl}${request.path}`, {

@@ -41,7 +41,7 @@ const { TooltipProvider } = await import("../../../components/ui/tooltip");
 
 const progress = { answered: 0, total: 1, rejects: false, blockedReason: null };
 
-function render(status: "pending" | "cancelled"): string {
+function render(status: "pending" | "cancelled", label?: string): string {
   return renderToStaticMarkup(
     <TooltipProvider>
       <SubmitBar
@@ -52,6 +52,7 @@ function render(status: "pending" | "cancelled"): string {
         error={null}
         onSubmit={() => {}}
         onDiscard={() => {}}
+        label={label}
       />
     </TooltipProvider>,
   );
@@ -119,5 +120,22 @@ describe("SubmitBar Discard", () => {
       "The request becomes cancelled. The agent gets no answer.",
       "This request gates workflow run run-1. Discard cancels that run too.",
     ]);
+  });
+});
+
+describe("SubmitBar label", () => {
+  test("the button reads Submit by default", () => {
+    expect(render("cancelled")).toContain("Submit");
+  });
+
+  test("a label replaces Submit", () => {
+    const html = render("cancelled", "Send me the invite");
+    expect(html).toContain("Send me the invite");
+    expect(html).not.toContain("Submit<");
+  });
+
+  test("a long label wraps under the progress text; the default row does not wrap", () => {
+    expect(render("cancelled", "Send me the invite")).toContain("flex-wrap");
+    expect(render("cancelled")).not.toContain("flex-wrap");
   });
 });

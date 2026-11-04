@@ -221,6 +221,13 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
                 submissionCount: 0,
               }),
             },
+            {
+              // The GitHub star nudge is a persistent toast once the seed has 5+ tasks.
+              // It sits at the bottom of the viewport and covers the phone composer's
+              // Start session button. "1" is what its close button stores.
+              name: `swarm:v1:${swarm.apiUrl}:github-star-nudge:${swarm.manifest.user.id}:done`,
+              value: "1",
+            },
           ]
         : []),
     ];

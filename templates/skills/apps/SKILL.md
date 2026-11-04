@@ -137,6 +137,8 @@ An optional top-level `"theme"` sets the preset the dashboard applies to the app
 
 Viewers can override the preset per app from the app's settings drawer; the override rides the reserved `$theme` key of the user-config values (accepted on every app, even without a declared `userConfig` schema, and never visible at `/user/...`). A present override always beats the definition's `theme` — even an unrecognized one, which degrades to the dashboard theme — so treat `theme` as the app's default styling, not a guarantee.
 
+An optional top-level `"icon"` sets the app's icon on the dashboard Apps page, in the same shape as agent avatars: `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The server validates shape only; the dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name, so omitting `icon` is always safe.
+
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
 When a schema patch reports stale page/query bindings, repair them in that same patch. Page elements are atomic: replace the complete `pages.<page>.elements.<id>` declaration, removing any reference to a hidden or deleted column, instead of sending only the changed nested prop. This is also the repair move for older apps whose stored page already references an undeclared column; full-definition validation otherwise blocks every patch.
@@ -521,6 +523,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
+| `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
@@ -570,6 +573,12 @@ Tree details:
 - `nodes` is a doc-shaped value: `{ root: string | string[], elements: { <key>: { type, children?: string[] } } }`, the json-render flat element map. Usually bind it to a json column: `{ "$state": "/queries/<name>/data/0/<column>" }`. A malformed or absent value renders an empty state; a `children` key missing from `elements` shows as `key — ?`. Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.
 - Each row shows `key — type`. Clicking a row writes its key to `/ui/<id>/value`, and the row bound to that path renders selected; read the selection with `{ "$state": "/ui/<id>/value" }`. The Tree never writes `null`: when the selected key leaves the doc (a refetch, an edit) the stored key stays and no row renders selected. Selection and collapse are keyed by node key, so a key reachable through two parents selects and collapses in both places.
 - Rows scroll inside `maxHeight` (default `480px`). Set `fill: true` inside a `fill` Stack or Split pane to grow to that height instead and scroll within it (ignores `maxHeight`).
+
+SchemaForm details:
+
+- `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
+- Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
+- Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
 
 Form details:
 

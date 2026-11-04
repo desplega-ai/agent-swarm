@@ -14,6 +14,7 @@ import { table } from "../stdlib/table";
 import { SwarmConfig } from "../swarm-config";
 import { bundleForQuickJS, USER_SCRIPT_FILE } from "./quickjs-bundle";
 import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
+import { SANDBOX_STRUCTURED_CLONE } from "./quickjs-structured-clone";
 import { SANDBOX_WEB_SHIMS } from "./quickjs-web-shims";
 import type { SourceMapReader } from "./sourcemap";
 import type {
@@ -661,6 +662,7 @@ async function evaluateJob(
     const ok =
       evaluate(init, "swarm-init.js") &&
       evaluate(SANDBOX_WEB_SHIMS, "swarm-web-shims.js") &&
+      evaluate(SANDBOX_STRUCTURED_CLONE, "swarm-structured-clone.js") &&
       evaluate(SANDBOX_PRELUDE, "swarm-prelude.js") &&
       evaluate(bundle.code, BUNDLE_FILE) &&
       evaluate(SANDBOX_EPILOGUE, "swarm-epilogue.js");

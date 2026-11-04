@@ -17,6 +17,7 @@ import {
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
@@ -152,6 +153,7 @@ import { handleUsers } from "./users";
 import {
   getPathSegments,
   httpServerSemconvAttributes,
+  loopPathForRequest,
   parseQueryParams,
   redactShareTokenInPath,
   safeRequestUrlForLog,
@@ -226,7 +228,8 @@ function startApiGcInterval() {
   }
 
   const interval = setInterval(() => {
-    void sweepRooms().catch((error) =>
+    // The rooms sweep is the DB work of this tick; name it for the stall line.
+    void withLoopPath("http.gc-interval", () => sweepRooms()).catch((error) =>
       console.error("[rooms] Sweep failed:", scrubSecrets(String(error))),
     );
     const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
@@ -457,11 +460,10 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    if (span) {
-      await withSpanContext(span, handleRequest);
-    } else {
-      await handleRequest();
-    }
+    // Name the entry point for the event-loop stall line.
+    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
+      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    );
   });
 });
 
@@ -567,6 +569,7 @@ async function shutdown() {
     clearInterval(globalState.__apiGcInterval);
     delete globalState.__apiGcInterval;
   }
+  stopEventLoopLagProbe();
 
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
@@ -626,6 +629,7 @@ if (!globalState.__runId) {
 }
 
 startApiGcInterval();
+startEventLoopLagProbe();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
