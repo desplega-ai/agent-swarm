@@ -118,6 +118,12 @@ function resolveIcon(iconKey: string): LucideIcon {
   return ICON_MAP[iconKey] ?? Plug;
 }
 
+/** Integrations whose overview is a tab of Connect › AI providers. */
+const AI_TAB_OF: Record<string, string> = {
+  memory: "?tab=embeddings",
+  transcription: "?tab=transcription",
+};
+
 export default function IntegrationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const def = useMemo(() => INTEGRATIONS.find((i) => i.id === id), [id]);
@@ -375,7 +381,9 @@ function IntegrationDetailInner({
       {/* Header */}
       <div className="flex flex-col gap-2">
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
-          <Link to={connectPagePath(def.category)}>← All {connectPageTitle(def.category)}</Link>
+          <Link to={`${connectPagePath(def.category)}${AI_TAB_OF[def.id] ?? ""}`}>
+            ← All {connectPageTitle(def.category)}
+          </Link>
         </Button>
         <PageHeader
           title={
