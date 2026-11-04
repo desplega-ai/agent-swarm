@@ -2,9 +2,10 @@
  * Open/closed state for the contextual session panel, shared by the header
  * toggle and the panel itself. Persisted per deployment; `Mod+I` toggles it.
  *
- * The same right column shows a link preview (`components/link-preview`),
- * one at a time: opening a preview closes the session panel, and opening the
- * session panel closes the preview. A preview closes on route change.
+ * It also holds the link preview (`components/link-preview`), which the task
+ * and session pages show inside their own body. The two show one at a time:
+ * opening a preview closes the session panel, and opening the session panel
+ * closes the preview. A preview closes on route change.
  */
 
 import {

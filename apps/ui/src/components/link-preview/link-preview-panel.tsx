@@ -1,10 +1,8 @@
 /**
  * The link preview panel: an agent-fs file or a swarm Page opened from a link
- * in task or session content (see `link-preview-state.tsx`). It takes the
- * column of the "Session about this page" panel, one at a time, and behaves
- * the same way: docked
- * on the right from `xl` up, pushing the page aside, and a sheet over the
- * page below that. Preview only: no editing, comments, or folder navigation.
+ * in task or session content (see `link-preview-state.tsx`). The page places
+ * it inline in its own body (`link-preview-dock.tsx`), or it opens as a sheet
+ * over the page. Preview only: no editing, comments, or folder navigation.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -16,22 +14,17 @@ import { usePage } from "@/api/hooks/use-pages";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
-import { useContextPanel } from "@/components/context-panel/context-panel-state";
-import { useMediaQuery } from "@/components/context-panel/context-session-panel";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
-import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import { formatBytes } from "@/lib/format-bytes";
 import { type LinkPreviewTarget, linkPreviewOpenHref } from "@/lib/link-preview";
 import { formatRelative } from "@/lib/relative-time";
 
-const DOCK_QUERY = "(min-width: 1280px)";
-const WIDE_QUERY = "(min-width: 1440px)";
 const PAGE_ID_RE = /^[a-f0-9]{32}$/i;
 
 // The page route module carries the frame and auth plumbing; load it on first use.
@@ -39,34 +32,31 @@ const PagePreviewBody = lazy(() =>
   import("@/pages/pages/[id]/page").then((m) => ({ default: m.PagePreviewBody })),
 );
 
-export function LinkPreviewPanel() {
-  const { preview: target, closePreview: close } = useContextPanel();
-  const canDock = useMediaQuery(DOCK_QUERY);
-  const isWide = useMediaQuery(WIDE_QUERY);
-  const docked = !!target && canDock;
-  useCollapseNavWhile(docked && !isWide);
+/** The panel for one target: the header, then the file or page body. */
+export function LinkPreviewContent({
+  target,
+  onClose,
+}: {
+  target: LinkPreviewTarget;
+  onClose: () => void;
+}) {
+  return target.kind === "file" ? (
+    <FilePreview key={target.route} target={target} onClose={onClose} />
+  ) : (
+    <PagePreview key={`${target.id}${target.query}`} target={target} onClose={onClose} />
+  );
+}
 
-  if (!target) return null;
-
-  const panel =
-    target.kind === "file" ? (
-      <FilePreview key={target.route} target={target} onClose={close} />
-    ) : (
-      <PagePreview key={`${target.id}${target.query}`} target={target} onClose={close} />
-    );
-
-  if (canDock) {
-    return (
-      <aside
-        aria-label="Link preview"
-        className="flex h-svh w-[380px] shrink-0 flex-col border-l border-border 2xl:w-[420px]"
-      >
-        {panel}
-      </aside>
-    );
-  }
+/** The preview as a sheet over the page, where the page has no room for it inline. */
+export function LinkPreviewSheet({
+  target,
+  onClose,
+}: {
+  target: LinkPreviewTarget;
+  onClose: () => void;
+}) {
   return (
-    <Sheet open onOpenChange={(open) => (open ? undefined : close())}>
+    <Sheet open onOpenChange={(open) => (open ? undefined : onClose())}>
       <SheetContent
         side="right"
         showCloseButton={false}
@@ -77,7 +67,7 @@ export function LinkPreviewPanel() {
         <SheetDescription className="sr-only">
           A preview of the linked file or page.
         </SheetDescription>
-        {panel}
+        <LinkPreviewContent target={target} onClose={onClose} />
       </SheetContent>
     </Sheet>
   );
@@ -103,25 +93,28 @@ function PreviewFrame({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const subtitle = [detail, meta].filter(Boolean).join(" · ");
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-testid="link-preview-panel">
-      <div className="flex items-start gap-2 border-b border-border px-3 py-2">
-        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+      {/* One header row, as T3 Code's diff panel: icon, title, open, close.
+          The path and size go on one muted line under it; the icon names the kind. */}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <span
+          role="img"
+          aria-label={kind}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+        >
           {icon}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-            {kind}
-          </p>
           <p className="truncate text-sm font-medium text-foreground" title={title}>
             {title}
           </p>
-          {detail ? (
-            <p className="truncate font-mono text-xs text-muted-foreground" title={detail}>
-              {detail}
+          {subtitle ? (
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={subtitle}>
+              {subtitle}
             </p>
           ) : null}
-          {meta ? <p className="text-xs text-muted-foreground">{meta}</p> : null}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -150,6 +143,16 @@ function PreviewFrame({
       </div>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
     </div>
+  );
+}
+
+/** A loading body, announced as T3 Code's diff panel does. */
+function Loading({ children }: { children: ReactNode }) {
+  return (
+    // <output> carries the implicit `status` role.
+    <output aria-live="polite" aria-label="Loading preview" className="block">
+      {children}
+    </output>
   );
 }
 
@@ -195,7 +198,11 @@ function FilePreview({
   } else if (stat.data) {
     body = <FileViewer file={target.file} stat={stat.data} />;
   } else {
-    body = <ViewerSkeleton />;
+    body = (
+      <Loading>
+        <ViewerSkeleton />
+      </Loading>
+    );
   }
 
   return (
@@ -242,10 +249,20 @@ function PagePreview({
   if (bySlug && resolved.isError) {
     body = <Unavailable title="Page not found">No page has the slug {target.id}.</Unavailable>;
   } else if (!pageId) {
-    body = <Skeleton className="m-3 h-40" />;
+    body = (
+      <Loading>
+        <Skeleton className="m-3 h-40" />
+      </Loading>
+    );
   } else {
     body = (
-      <Suspense fallback={<Skeleton className="m-3 h-40" />}>
+      <Suspense
+        fallback={
+          <Loading>
+            <Skeleton className="m-3 h-40" />
+          </Loading>
+        }
+      >
         <PagePreviewBody
           id={pageId}
           frameQuery={target.query}

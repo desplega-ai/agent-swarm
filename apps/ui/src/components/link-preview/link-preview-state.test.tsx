@@ -60,6 +60,11 @@ mock.module("@/hooks/use-local-toggle", () => ({
   useLocalToggle: (_key: string, initial: boolean) => useState(initial),
 }));
 mock.module("@/components/comb/file-icon", () => ({ FileKindIcon: () => null }));
+// The scope renders the preview sheet; its body (fetches, frames) is out of scope here.
+mock.module("./link-preview-panel", () => ({
+  LinkPreviewSheet: () => <div data-testid="preview-sheet" />,
+  LinkPreviewContent: () => null,
+}));
 mock.module("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => children,
   TooltipTrigger: ({ children }: { children: ReactNode }) => children,
