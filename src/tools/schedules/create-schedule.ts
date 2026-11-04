@@ -3,6 +3,7 @@ import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId, resolveTaskGroupKey } from "@/be/audit-user";
+import { fileCallerSessionIntoGroup } from "@/be/caller-session-group";
 import {
   createScheduledTask,
   extensionAgentAssignmentError,
@@ -33,7 +34,7 @@ import {
 
 export const createScheduleInputSchema = z.object({
   key: AssetKeySchema.optional().describe(
-    "Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/.",
+    "Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key, so the planning session, the schedule and its runs share one key.",
   ),
   name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),
   taskTemplate: z
@@ -178,6 +179,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         yourAgentId: z.string().optional(),
         schedule: z.looseObject(scheduleDataShape).optional(),
         modelTierDeprecated: modelTierDeprecatedOutputSchema.optional(),
+        movedSessionRootId: z.string().optional(),
       }),
     },
     async (
@@ -359,17 +361,29 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           createdBy,
         });
 
+        const movedSessionRootId =
+          key !== undefined && assetKey
+            ? await fileCallerSessionIntoGroup({
+                sourceTaskId: requestInfo.sourceTaskId,
+                agentId: requestInfo.agentId,
+                key: assetKey,
+                changedBy: createdBy,
+              })
+            : null;
+
         const scheduleDesc = isOneTime
           ? `one-time at ${schedule.nextRunAt}`
           : cronExpression || `every ${intervalMs}ms`;
         const modelTierDeprecated = modelTierDeprecation(modelTier, targetHarness);
+        const movedNote = movedSessionRootId ? `. This session moved into ${assetKey}.` : "";
         return toolOk(
-          `Created schedule "${name}" (${scheduleDesc}). Next run: ${schedule.nextRunAt || "disabled"}`,
+          `Created schedule "${name}" (${scheduleDesc}). Next run: ${schedule.nextRunAt || "disabled"}${movedNote}`,
           {
             data: {
               yourAgentId: requestInfo.agentId,
               schedule,
               ...(modelTierDeprecated ? { modelTierDeprecated } : {}),
+              ...(movedSessionRootId ? { movedSessionRootId } : {}),
             },
           },
         );

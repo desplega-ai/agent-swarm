@@ -23,6 +23,8 @@ let runs: Mutation[] = [];
 let toasts: string[] = [];
 let started: { key?: string; task?: string }[] = [];
 let startOptions: { key?: string; buildTask?: (typed: string) => string }[] = [];
+let recentSessions: { root: { id: string } }[] = [];
+let client: QueryClient;
 
 mock.module("sonner", () => ({
   toast: {
@@ -45,7 +47,7 @@ mock.module("@/api/hooks/use-agents", () => ({
 mock.module("@/api/hooks/use-sessions", () => ({
   sessionsQueryOptions: (_userId: string | null, options: Record<string, unknown>) => ({
     queryKey: ["test-sessions", options],
-    queryFn: async () => ({ sessions: [], total: 0 }),
+    queryFn: async () => ({ sessions: recentSessions, total: recentSessions.length }),
   }),
 }));
 mock.module("@/api/hooks/use-agent-fs", () => ({
@@ -135,7 +137,7 @@ async function mount(node: ReactNode) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () =>
     root.render(
       <QueryClientProvider client={client}>
@@ -181,6 +183,7 @@ beforeEach(() => {
   toasts = [];
   started = [];
   startOptions = [];
+  recentSessions = [];
 });
 
 afterEach(async () => {
@@ -316,5 +319,24 @@ describe("FilePreview", () => {
     );
     expect(open?.getAttribute("href")).toBe("/file/~/o1/d1/shared/po-qa/report.md");
     expect(container.textContent).toContain("Researcher wrote it");
+  });
+
+  test("the source lookups run once and never join the app-wide poll", async () => {
+    recentSessions = [{ root: { id: "t1" } }, { root: { id: "t2" } }];
+    const file = { orgId: "o1", driveId: "d1", path: "/shared/po-qa/report.md" };
+    await mount(<FilePreview groupKey="shared/po-qa/" file={file} now={NOW} onOpen={() => {}} />);
+    const lookups = () =>
+      client
+        .getQueryCache()
+        .getAll()
+        .filter((query) => query.queryKey[0] === "task");
+    for (let i = 0; i < 20 && lookups().length < 2; i++) {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    }
+    const queries = client.getQueryCache().getAll();
+    expect(lookups().map((query) => query.queryKey[1])).toEqual(["t1", "t2"]);
+    for (const query of queries) {
+      expect(query.observers.map((observer) => observer.options.refetchInterval)).toEqual([false]);
+    }
   });
 });

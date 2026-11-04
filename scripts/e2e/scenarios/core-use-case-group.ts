@@ -1,6 +1,6 @@
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { asUser, createAssignedTask, createUser, expectToolOk } from "./core-helpers";
+import { asUser, createAssignedTask, createUser, expectToolOk, readTask } from "./core-helpers";
 
 export const coreUseCaseGroup: Scenario = {
   name: "core-use-case-group",
@@ -8,10 +8,34 @@ export const coreUseCaseGroup: Scenario = {
   async run(ctx) {
     const owner = await createUser(ctx, "use-case-owner");
     const groupKey = `shared/use-case-${ctx.nonce}/`;
+    // A planning session started in the Inbox: its key is the default `shared/task:<id>/`.
+    const planKey = `shared/use-case-plan-${ctx.nonce}/`;
+    const planText = `Plan a use case ${ctx.nonce}`;
     let scheduleId = "";
+    let planScheduleId = "";
+    let movedRootId: unknown;
     const agent = await ctx.startAgent({
       name: `use-case-worker-${ctx.nonce}`,
       async onTask({ taskId, task }) {
+        if (task.task === planText) {
+          const connection = await ctx.connectMcp(agent.agentId, {
+            headers: { "X-Source-Task-Id": taskId },
+          });
+          try {
+            const result = await expectToolOk(connection, "create-schedule", {
+              key: planKey,
+              name: `use-case-plan-schedule-${ctx.nonce}`,
+              taskTemplate: `Planned research ${ctx.nonce}`,
+              intervalMs: 86_400_000,
+              targetAgentId: agent.agentId,
+            });
+            planScheduleId = String(asRecord(result.data.schedule).id);
+            movedRootId = result.data.movedSessionRootId;
+            return { status: "completed", output: "Filed the planning session" };
+          } finally {
+            await connection.close();
+          }
+        }
         if (task.key !== groupKey) return { status: "ignore" };
         const connection = await ctx.connectMcp(agent.agentId, {
           headers: { "X-Source-Task-Id": taskId },
@@ -42,6 +66,23 @@ export const coreUseCaseGroup: Scenario = {
       expect(
         outcome.status === "completed" && scheduleId.length > 0,
         "The agent did not create the schedule",
+      );
+      const planTaskId = await createAssignedTask(ctx, agent.agentId, planText, {
+        requestedByUserId: owner,
+      });
+      expect(
+        (await readTask(ctx, planTaskId)).key === `shared/task:${planTaskId}/`,
+        "The planning task did not start with its default key",
+      );
+      const planned = await agent.waitForTask(planTaskId);
+      expect(
+        planned.status === "completed" && planScheduleId.length > 0,
+        "The agent did not create the planned schedule",
+      );
+      expect(movedRootId === planTaskId, "create-schedule did not report the moved session");
+      expect(
+        (await readTask(ctx, planTaskId)).key === planKey,
+        "The planning session did not move into the schedule's group",
       );
       await agent.stop();
       const run = await ctx.api("POST", `/api/schedules/${scheduleId}/run`);
@@ -90,6 +131,13 @@ export const coreUseCaseGroup: Scenario = {
           await ctx.api("DELETE", `/api/schedules/${scheduleId}`),
           [200],
           "delete the use case schedule",
+        );
+      }
+      if (planScheduleId) {
+        expectStatus(
+          await ctx.api("DELETE", `/api/schedules/${planScheduleId}`),
+          [200],
+          "delete the planned schedule",
         );
       }
     }

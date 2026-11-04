@@ -42,6 +42,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { useSessionsFilter } from "@/lib/sessions-show";
@@ -79,16 +80,6 @@ import { useTreeCursor } from "./use-tree-cursor";
 import { useTreeFolds } from "./use-tree-folds";
 import { useTreeMoves } from "./use-tree-moves";
 import { useTreeRows } from "./use-tree-rows";
-
-/** The clock rows read their times from. It ticks once a minute, with no animation. */
-export function useMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
-}
 
 /** Registers the Cmd+K commands. Its own component, so palette typing renders only it. */
 function SessionsCommands(props: Parameters<typeof useSessionsCommands>[0]) {

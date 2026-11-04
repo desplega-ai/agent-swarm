@@ -683,12 +683,19 @@ registerTemplate({
   defaultBody: `
 ## Setup suggestion
 The requester has not finished setting up the swarm. Open item: {{label}}.
-If it fits the conversation, offer it once, at the end of your reply, with the link {{href}}. If it does not fit, leave it out. Do not repeat the offer, and do not raise it again if they decline.
+If it fits the conversation, offer it once, at the end of your reply{{link_clause}}. If it does not fit, leave it out. Do not repeat the offer, and do not raise it again if they decline.
 `,
   variables: [
     { name: "label", description: "Checklist item label, e.g. Connect a chat channel" },
-    { name: "href", description: "Dashboard link that opens the setup page for the item" },
-    { name: "kind", description: "Checklist item kind: channel, tool, use_case or custom" },
+    {
+      name: "href",
+      description:
+        "Dashboard link that opens the setup page for the item. Empty when APP_URL is not set",
+    },
+    {
+      name: "link_clause",
+      description: '", with the link <href>" when there is a link, or empty string',
+    },
   ],
   category: "task_lifecycle",
 });

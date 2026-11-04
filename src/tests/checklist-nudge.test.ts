@@ -157,17 +157,17 @@ test("a worker gets no nudge for a human task", async () => {
   expect((await pollTask("ui", userId, workerId)).checklistNudge).toBeUndefined();
 });
 
-test("a member gets only their use case, once, with a relative root for a null href", async () => {
+test("a member gets only their use case, once, with no link without APP_URL", async () => {
   await detachRole(userId, "admin");
   await attachRole(userId, "requester");
   // Reads never store the defaults: a write does.
   const actor = { id: userId, userId, canEditSwarm: false };
   await mutateChecklist(actor, { action: "restore", id: `user:${userId}:use_case` });
   await getDbClient().run("UPDATE checklist_items SET href = NULL WHERE userId = ?", [userId]);
-  expect((await pollTask()).checklistNudge).toMatchObject({
-    itemId: `user:${userId}:use_case`,
-    href: "/",
-  });
+  const nudge = (await pollTask()).checklistNudge;
+  expect(nudge).toMatchObject({ itemId: `user:${userId}:use_case` });
+  // A relative link would be dead in a Slack or Telegram reply.
+  expect(nudge && "href" in nudge).toBe(false);
   expect((await pollTask()).checklistNudge).toBeUndefined();
   expect((await listChecklist(userId))[0]?.nudgedAt).toBeNull();
 });

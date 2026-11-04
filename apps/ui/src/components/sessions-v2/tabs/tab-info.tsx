@@ -69,10 +69,10 @@ const ACTIVITY_WORDS: Record<Exclude<Activity, null>, string> = {
   failed: "Failed",
 };
 
-/** The accessible name of a tab: its read state, its activity, then its title. */
-export function tabLabel(info: TabInfo): string {
+/** The accessible name of a tab: its read state, its activity, its title, then "Pinned" when pinned. */
+export function tabLabel(info: TabInfo, pinned = false): string {
   const words = [info.unread && "Unread", info.activity && ACTIVITY_WORDS[info.activity]];
-  return [...words.filter(Boolean), info.title].join(". ");
+  return [...words.filter(Boolean), info.title, pinned && "Pinned"].filter(Boolean).join(". ");
 }
 
 /**

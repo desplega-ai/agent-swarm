@@ -126,7 +126,13 @@ const PollTaskAssignedTriggerSchema = z.object({
   }),
   requestedBy: TaskRequestedBySchema.optional(),
   checklistNudge: z
-    .object({ itemId: z.string(), kind: z.string(), label: z.string(), href: z.string() })
+    .object({
+      itemId: z.string(),
+      kind: z.string(),
+      label: z.string(),
+      // Absent without APP_URL: a relative link is dead in Slack or Telegram.
+      href: z.string().optional(),
+    })
     .optional(),
 });
 
@@ -229,12 +235,11 @@ async function buildChecklistNudge(task: AgentTask, agent: Agent) {
       if (!item) return undefined;
       await markNudged(item.id, task.id, userId);
       const appUrl = await resolveAppUrl();
-      const href = item.href ?? "/";
       return {
         itemId: item.id,
         kind: item.kind,
         label: item.label,
-        href: `${appUrl ?? ""}${href}`,
+        ...(appUrl && { href: `${appUrl}${item.href ?? "/"}` }),
       };
     });
   } catch (error) {

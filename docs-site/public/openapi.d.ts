@@ -3924,7 +3924,7 @@ export interface paths {
         };
         /**
          * List approval requests with optional filters
-         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.
          */
         get: {
             parameters: {
@@ -4078,6 +4078,8 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                                 questionCount: number;
+                                /** @description Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed). */
+                                viewerCanRespond?: boolean;
                             }[];
                         };
                     };
@@ -17476,7 +17478,7 @@ export interface paths {
                                     itemId: string;
                                     kind: string;
                                     label: string;
-                                    href: string;
+                                    href?: string;
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */

@@ -239,17 +239,17 @@ With `change-stream`, the header shows **Live**. Agent edits, new files, and new
 
 With Comb on, agent-fs links in the dashboard open in Comb while you are connected. This covers task attachments, citations, attachment links in prompts, and links inside Comb files. Session logs and task outputs keep the link safety prompt and open agent-fs.
 
-When `APP_URL` (or the deprecated `DASHBOARD_URL`) is set, file links open in the dashboard by default: Slack attachment links, the lead's follow-up prompts, and the links that agents give people point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links also need Comb on. Without `APP_URL`, they keep the agent-fs live app link.
+When `APP_URL` (or the deprecated `DASHBOARD_URL`) is set, file links open in the dashboard by default: Slack attachment links, the lead's follow-up prompts, and the links that agents give people point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links also need Comb on. Without `APP_URL`, or with `COMB_ENABLED=false`, they keep the agent-fs live app link.
 
 `AGENT_FS_LINK_TARGET` overrides this default for task attachment links and for the file links that agents give people:
 
 | Value | Effect |
 | --- | --- |
-| unset | The default above: `dashboard` when `APP_URL` is set, else `live`. |
-| `dashboard` | Links point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links need Comb on and an explicit `APP_URL`; otherwise they use the live app. |
+| unset | The default above: `dashboard` when `APP_URL` is set and `COMB_ENABLED` is not `false`, else `live`. |
+| `dashboard` | Links point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links need Comb on and an explicit `APP_URL`, and agent links need `COMB_ENABLED` not `false`; otherwise they use the live app. |
 | `live` | Links point at the agent-fs live app (`AGENT_FS_LIVE_URL`, default `https://live.agent-fs.dev`). |
 
-The agent prompt uses the worker's own `APP_URL`. A saved `APP_URL` or `AGENT_FS_LINK_TARGET` (Settings, Configuration) reaches running workers at their next poll. The deployment env stays the fallback.
+The agent prompt uses the worker's own `APP_URL`. A saved `APP_URL`, `AGENT_FS_LINK_TARGET` or `COMB_ENABLED` (Settings, Configuration) reaches running workers at their next poll. A `COMB_ENABLED=false` set only in the API's deployment env does not reach workers. The deployment env stays the fallback.
 
 When `AGENT_FS_PUBLIC_URL` is set, a link to the live app carries `?apiUrl=<AGENT_FS_PUBLIC_URL>`, so a browser with no agent-fs key knows which agent-fs to sign in to. Dashboard links never carry it.
 

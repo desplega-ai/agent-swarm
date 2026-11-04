@@ -5,7 +5,13 @@ import type {
   CredentialMissingAgent,
   SessionListItem,
 } from "../api/types";
-import { failuresNotListed, needsYouCount, needsYouItems } from "./needs-you";
+import {
+  failuresNotListed,
+  NEEDS_YOU_BADGE_POLL_MS,
+  needsYouBadgePoll,
+  needsYouCount,
+  needsYouItems,
+} from "./needs-you";
 
 function session(id: string, extra: Partial<SessionListItem> = {}): SessionListItem {
   return {
@@ -30,6 +36,22 @@ const blocked = {
 } as CredentialMissingAgent;
 
 describe("needsYouItems", () => {
+  test("an approval the viewer cannot answer is not listed or counted", () => {
+    const items = needsYouItems({
+      approvals: [
+        { ...approval("mine", "root-1"), viewerCanRespond: true },
+        { ...approval("theirs", "root-2"), viewerCanRespond: false },
+        approval("older-server"),
+      ],
+      sessions: [session("root-1"), session("root-2")],
+      credentials: [],
+    });
+    expect(items.approvals.map((a) => a.id)).toEqual(["mine", "older-server"]);
+    // root-2 needs you only for the approval the viewer cannot answer.
+    expect(items.sessions).toEqual([]);
+    expect(needsYouCount(items)).toBe(2);
+  });
+
   test("a session whose root raised a listed approval shows once, under approvals", () => {
     const items = needsYouItems({
       approvals: [approval("ap1", "root-1")],
@@ -85,4 +107,12 @@ describe("needsYouItems", () => {
 test("failuresNotListed drops failures already listed as sessions", () => {
   const tasks = [{ id: "root-1" }, { id: "t-2" }] as AgentTask[];
   expect(failuresNotListed(tasks, [session("root-1")]).map((t) => t.id)).toEqual(["t-2"]);
+});
+
+describe("needsYouBadgePoll", () => {
+  test("the badge keeps the reads' own poll on Home and slows down elsewhere", () => {
+    expect(needsYouBadgePoll("/")).toBeUndefined();
+    expect(needsYouBadgePoll("/sessions")).toBe(NEEDS_YOU_BADGE_POLL_MS);
+    expect(NEEDS_YOU_BADGE_POLL_MS).toBe(30_000);
+  });
 });

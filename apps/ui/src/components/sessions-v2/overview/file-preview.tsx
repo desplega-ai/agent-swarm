@@ -32,14 +32,21 @@ const trimSlash = (path: string) => path.replace(/^\/+/, "");
  */
 function useFileSession(groupKey: string, file: DrivePath) {
   const { userId } = useCurrentUser();
-  const recent = useQuery(
-    sessionsQueryOptions(userId ?? null, { scope: "tree", groupKey, limit: ATTACHMENT_LOOKBACK }),
-  ).data?.sessions;
+  // One-off lookups: they skip the app-wide 10 s poll.
+  const recent = useQuery({
+    ...sessionsQueryOptions(userId ?? null, {
+      scope: "tree",
+      groupKey,
+      limit: ATTACHMENT_LOOKBACK,
+    }),
+    refetchInterval: false,
+  }).data?.sessions;
   const lookups = useQueries({
     queries: (recent ?? []).map((session) => ({
       queryKey: ["task", session.root.id, "fs-files"],
       queryFn: () => api.fetchTaskFiles(session.root.id),
       staleTime: 60_000,
+      refetchInterval: false as const,
     })),
   });
   const wanted = trimSlash(file.path);

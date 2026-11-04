@@ -2827,7 +2827,11 @@ export type ApprovalRequestSummary = Omit<
   | "approvals"
   | "resolutionReason"
   | "notificationChannels"
-> & { questionCount: number };
+> & {
+  questionCount: number;
+  /** Pending rows only: the viewer may answer (server rule of the respond route). */
+  viewerCanRespond?: boolean;
+};
 
 export interface ApprovalRequestSummariesResponse {
   approvalRequests: ApprovalRequestSummary[];

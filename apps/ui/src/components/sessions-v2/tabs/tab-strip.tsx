@@ -95,7 +95,7 @@ function TabItem({
           tabIndex={selected ? 0 : -1}
           aria-selected={selected}
           aria-controls={selected ? panelId : undefined}
-          aria-label={tabLabel(info)}
+          aria-label={tabLabel(info, pinned)}
           aria-keyshortcuts={pinned ? undefined : "Delete Backspace"}
           data-selected={selected ? "" : undefined}
           data-pane-active={paneActive ? "" : undefined}
