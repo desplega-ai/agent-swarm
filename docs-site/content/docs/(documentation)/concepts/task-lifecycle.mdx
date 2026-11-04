@@ -180,7 +180,7 @@ The engine accepts the handoff only when the child:
 
 When it is accepted, no lead follow-up is created and nothing is posted for one. The completing task gets a `task_follow_up_suppressed` log entry with reason `chained_task_live` and the child's id, so the task tree and audits still show the handoff. The creator's `followUpConfig.onCompleted` text is not delivered; the entry records `droppedOnCompleted: true` when it existed.
 
-When any check fails, the normal follow-up is created and names the rejected id and the reason. The completion itself never fails because of `chainedTaskId`. The field is ignored for `failed`, `cancelled` and `skipped`: a failure always wakes the lead. `followUpConfig.disabled` still wins: a disabled follow-up stays disabled.
+When any check fails, the normal follow-up is created and names the rejected id and the reason. It is created even when the completion wakes a `defer-task` wait for the lead, because the wake-up task does not carry the rejection. The completion itself never fails because of `chainedTaskId`. The field is ignored for `failed`, `cancelled` and `skipped`: a failure always wakes the lead. `followUpConfig.disabled` still wins: a disabled follow-up stays disabled.
 
 ### Terminal result consistency
 

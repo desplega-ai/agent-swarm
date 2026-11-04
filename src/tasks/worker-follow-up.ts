@@ -261,7 +261,8 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  * task already reviews the result, so a follow-up would duplicate it. An
  * `all` wait with siblings still pending wakes nobody, so the follow-up stays.
  * A `followUpConfig.onCompleted` / `onFailed` instruction for this status also
- * keeps the follow-up, because the wake-up task does not carry that text.
+ * keeps the follow-up, because the wake-up task does not carry that text. A
+ * rejected `chainedTaskId` keeps it for the same reason.
  *
  * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
  * verifier's would-skip decision after commit; the follow-up is never skipped.
@@ -418,8 +419,12 @@ export async function createWorkerTaskFollowUp(args: {
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
   const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
 
+  // Like `instructions`, a rejected chainedTaskId keeps the follow-up: the
+  // wake-up task does not carry the rejected id or the reason.
   const wake =
-    followUpAgentId && !instructions ? await findDeferredWakeFor(task.id, followUpAgentId) : null;
+    followUpAgentId && !instructions && !chainRejection
+      ? await findDeferredWakeFor(task.id, followUpAgentId)
+      : null;
   if (wake) {
     try {
       await createLogEntry({
