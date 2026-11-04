@@ -97,10 +97,14 @@ import {
 } from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
+import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useVersionedAppReferences } from "@/hooks/use-versioned-app-references";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import {
   type ActionHandlerMap,
   createSwarmActionHandlers,
@@ -486,11 +490,18 @@ export interface AppSurfaceProps {
  * in place, so in-flight task watchers are disposed with the old app.
  */
 export function AppSurface({
-  app,
+  app: latestApp,
   mode = "default",
   pageName,
   navigate: navigateProp,
 }: AppSurfaceProps) {
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const appRevision = useMemo(
+    () => JSON.stringify([latestApp.name, latestApp.description, latestApp.definition]),
+    [latestApp],
+  );
+  const appVersion = useVersionedValue(latestApp.id, latestApp, appRevision, autoReload);
+  const app = appVersion.value ?? latestApp;
   const definition = app.definition;
   const routerNavigate = useNavigate();
   const navigate = navigateProp ?? routerNavigate;
@@ -548,7 +559,12 @@ export function AppSurface({
     }
     resolvedAppsRef.current = { signature: definitionSignature, map };
   }
-  const resolvedApps = resolvedAppsRef.current.map;
+  const referenceVersions = useVersionedAppReferences(
+    resolvedAppsRef.current.map,
+    targetAppIds,
+    autoReload && appVersion.canAutoReload,
+  );
+  const resolvedApps = referenceVersions.value;
   // A target whose definition request is still in flight gets a neutral
   // "Loading…" card from the assembler instead of an "app unavailable" error.
   // `useQueries` keeps result order, so the index lines up with the id list.
@@ -1157,11 +1173,24 @@ export function AppSurface({
   if (mode === "chromeless") {
     return (
       <div
-        ref={scrollRef}
+        ref={(node) => {
+          scrollRef.current = node;
+          appVersion.scopeRef.current = node;
+        }}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
       >
+        {(appVersion.pending || referenceVersions.pending) && (
+          <VersionUpdateNotice
+            onApply={() => {
+              appVersion.apply();
+              referenceVersions.apply();
+            }}
+          />
+        )}
         {surface}
       </div>
     );
@@ -1171,6 +1200,9 @@ export function AppSurface({
   if (mode === "full") {
     return (
       <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
@@ -1188,6 +1220,14 @@ export function AppSurface({
             </Link>
           </Button>
         </div>
+        {(appVersion.pending || referenceVersions.pending) && (
+          <VersionUpdateNotice
+            onApply={() => {
+              appVersion.apply();
+              referenceVersions.apply();
+            }}
+          />
+        )}
         <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
           {surface}
         </div>
@@ -1196,7 +1236,13 @@ export function AppSurface({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4" data-testid="app-runtime">
+    <div
+      ref={appVersion.scopeRef}
+      onInputCapture={appVersion.markInteraction}
+      onClickCapture={appVersion.markInteraction}
+      className="flex flex-col flex-1 min-h-0 gap-4"
+      data-testid="app-runtime"
+    >
       {/* The header (title, open-full/chromeless actions) stays fixed; ONLY
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
@@ -1208,6 +1254,14 @@ export function AppSurface({
         description={app.description ?? undefined}
         action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
       />
+      {(appVersion.pending || referenceVersions.pending) && (
+        <VersionUpdateNotice
+          onApply={() => {
+            appVersion.apply();
+            referenceVersions.apply();
+          }}
+        />
+      )}
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}
