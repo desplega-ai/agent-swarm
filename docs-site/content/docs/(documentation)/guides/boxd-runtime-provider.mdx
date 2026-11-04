@@ -1,0 +1,133 @@
+---
+title: boxd runtime provider
+description: Run each pool worker on its own isolated boxd machine, and start it from a snapshot in about 3 seconds
+---
+
+Agent Swarm can run each pool worker on its own [boxd](https://boxd.sh) machine. The boxd runtime provider creates one isolated machine per runtime and starts the pool's worker image in that machine's own Docker daemon. The image is the same one a Docker pool runs.
+
+The provider is part of [Agent Swarm](https://agent-swarm.dev) runtime pools. It is available in v2.7.4 and later.
+
+<Callout type="info">
+  boxd documents the integration from its side too:
+  [Agent Swarm on boxd](https://docs.boxd.sh/use-cases/oss-integrations/agent-swarm).
+</Callout>
+
+## What it does
+
+- **One machine per worker.** Every runtime gets a new machine named `swarm-rt-<runtime-id>`. The machine is created isolated, so worker code has no metadata endpoint, no `boxd` CLI, and no access to your other machines.
+- **Docker inside the machine.** The worker container runs in the machine's Docker daemon. Pool `env`, `slotsPerRuntime`, and lifecycle settings apply as they do for a Docker pool.
+- **Fast starts from a snapshot.** A fresh machine pulls the worker image on every provision. With the slim worker image, that took about 40 seconds. A snapshot that already holds the image gave a worker in about 3 seconds.
+- **Scale down to no machines.** `minRuntimes: 0` lets a pool scale down to zero. A `per-task` runtime ends with its task. An `idle` runtime ends after `idleMinutes`, and stays up when `idleMinutes` is unset. The router wakes a sleeping agent when a task waits longer than the wake grace.
+
+## When to use it
+
+- The swarm API runs on a host that cannot start containers, such as a managed platform.
+- You want each worker fully separated from the others, with its own Docker daemon.
+- You want workers that start from a prepared snapshot instead of a cold image pull.
+
+A Docker pool needs less setup when all workers share one Docker host. See [runtime pools](/docs/guides/runtime-pools) to compare the providers.
+
+## What you need first
+
+| Requirement | Detail |
+| --- | --- |
+| Agent Swarm v2.7.4 or later | The provider first ships in this version. |
+| A boxd account and API key | Create one with `boxd auth keys create agent-swarm --org <your-org>`. Machines are created and billed in the key's organization. |
+| A public HTTPS API URL | The machine connects back to the API over the internet, so the URL must use HTTPS and be reachable from outside your network. Set it as `RUNTIME_WORKER_API_URL` in step 1. |
+| A worker image | Use the same image as a Docker pool, for example `ghcr.io/desplega-ai/agent-swarm-worker:slim`. |
+| Runtime pools turned on | Set `RUNTIME_POOLS_ENABLED=true` and keep `MULTI_RUNTIME_ENABLED=true`. |
+
+## Configure a pool
+
+1. Add the settings to the API environment and restart the API:
+
+```bash
+RUNTIME_POOLS_ENABLED=true
+MULTI_RUNTIME_ENABLED=true
+RUNTIME_WORKER_API_URL=https://swarm.example.com
+BOXD_API_KEY=bxd_...
+```
+
+`RUNTIME_WORKER_API_URL` is the public HTTPS origin of your API, the address the machines use to reach it. If it is unset, the API falls back to `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`, which defaults to `http://localhost:3013`. The controller stays offline until the URL is HTTPS.
+
+On restart, the API seeds a `builtin-boxd` controller and copies the key into that controller's encrypted configuration. An organization key selects its own organization. For a personal key, also set `BOXD_ORG` in the controller configuration.
+
+2. Set the two variables the `curl` commands on this page use, then confirm that the controller is online:
+
+```bash
+export API=https://swarm.example.com          # your API origin
+export AGENT_SWARM_API_KEY=...                # your swarm API key
+curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  "$API/api/runtime-controllers" | jq '.controllers[] | {id, kind, status}'
+```
+
+3. Create a pool on that controller:
+
+```bash
+POOL=$(curl -s -X POST "$API/api/runtime-pools" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coders","kind":"boxd","placements":["builtin-boxd"],"image":"ghcr.io/desplega-ai/agent-swarm-worker:slim","delivery":"push","lifecycle":"per-task","slotsPerRuntime":1,"maxRuntimes":3,"minRuntimes":0,"resources":{"cpu":2,"memoryMb":8192}}' \
+  | jq -r '.pool.id')
+```
+
+4. Create an agent in the pool:
+
+```bash
+curl -s -X POST "$API/api/runtime-pools/$POOL/agents" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coder-1","maxTasks":3}' | jq -r '.agent.id'
+```
+
+The new agent starts offline. Its first runtime is provisioned when a task arrives, or kept warm by `minRuntimes`.
+
+The dashboard runs the same steps under **Settings → Runtime pools**. Use an agent's page to bind an agent that already exists.
+
+`minRuntimes` is the warm floor: the number of machines a bound agent keeps ready. Set it to `0` to let the agent sleep when no work remains. After `RUNTIME_WAKE_GRACE_SEC`, which defaults to 15 seconds, the router can assign a task to a sleeping agent, and the supervisor then provisions a machine. Set `minRuntimes` to `1` or more to keep a machine ready between tasks, so a new task skips the wake grace and the provision.
+
+`resources` selects the smallest machine size that covers the request: 1 vCPU and 4 GiB, 2 and 8, 4 and 16, or 8 and 32. Without `resources`, boxd applies the organization's default size.
+
+## Start workers from a snapshot
+
+Save a snapshot of a machine that already holds the worker image, then point the controller at it:
+
+```bash
+boxd machine new swarm-base --isolated
+boxd machine exec swarm-base -- docker pull ghcr.io/desplega-ai/agent-swarm-worker:slim
+boxd snapshots save swarm-base swarm-worker-slim
+boxd machine remove swarm-base --confirm
+```
+
+Set `BOXD_SNAPSHOT=swarm-worker-slim` in the controller configuration. Every new runtime restores that snapshot, which skips the image pull. A machine restored from a snapshot keeps the size it was saved at, so pool `resources` no longer applies. Docker keeps its copy of the image, so refresh the snapshot after a worker image upgrade. Otherwise new machines start the older image.
+
+## Check that a worker started
+
+A runtime instance moves from `provisioning` to `active` when the worker registers with the API.
+
+```bash
+curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  "$API/api/runtime-pools/$POOL/runtimes" \
+  | jq '.runtimes[] | {id, agentId, status, reportedSlots, lastSeenAt, provisionError}'
+```
+
+Read the result as follows:
+
+| Field | Meaning |
+| --- | --- |
+| `status: "provisioning"` | The machine is being created, or the worker container is starting. |
+| `status: "active"` | The worker registered and reports its slots. Its machine now runs the worker container. |
+| `provisionError` | The reason the last provision attempt failed. Empty after a successful provision. |
+
+You can also check the same runtime instances in the dashboard under **Settings → Runtime pools**, on the pool page. The machines themselves appear in `boxd machine list` with the name `swarm-rt-<runtime-id>`.
+
+A running machine does not prove a running worker. When boxd reports the machine as running, the provider also reads the worker container, so `exited` and `failed` come from the container, not from the machine.
+
+## Limits
+
+- **Maximum size is 8 vCPU and 32 GiB.** A larger `resources` request fails with an error.
+- **Machines have no lease.** A machine runs until the supervisor terminates it. Keep the API running, or set `BOXD_DELETE_AFTER_SEC` in the controller configuration as a deadline. boxd deletes the machine at that deadline in any state.
+- **No persistent cache.** boxd pools reject the pool `cache` setting that Docker pools support.
+- **No idle pause.** The provider can suspend a machine, but the supervisor does not pause boxd runtimes in this release.
+- **Provision timeouts.** `BOXD_START_TIMEOUT_SEC` bounds `docker run`, image pull included, and defaults to 600 seconds. `BOXD_STATUS_TIMEOUT_SEC` defaults to 15 and `BOXD_TEARDOWN_TIMEOUT_SEC` to 30.
+- **A failed provision deletes its machine.** If the worker container does not start, or the delete deadline cannot be set, the provider deletes the machine and reports the original error.
+
+See [Configuration](/docs/ui/configuration#runtime-pools) for the environment settings, and [runtime pools](/docs/guides/runtime-pools) for pools, controllers, and push delivery.
