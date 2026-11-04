@@ -208,9 +208,9 @@ for (const authMode of ["authed", "password"] as const) {
         data: { body: "<h1>Second version</h1>" },
       });
       expect(update.status()).toBe(200);
-      await expect(page.getByText("A new version is available.")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText("A newer version is available")).toBeVisible({ timeout: 20_000 });
       await expect(frame.getByRole("heading", { name: "First version" })).toBeVisible();
-      await page.getByRole("button", { name: "Load new version" }).click();
+      await page.getByRole("button", { name: "Load latest" }).click();
       await expect(frame.getByRole("heading", { name: "Second version" })).toBeVisible();
       await expect(page.getByLabel("Password")).toHaveCount(0);
     } finally {

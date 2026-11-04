@@ -9,8 +9,20 @@ const { createRoot } = await import("react-dom/client");
 const { createPortal } = await import("react-dom");
 const { useVersionedValue } = await import("./use-versioned-value");
 
-function Probe({ id, revision, auto }: { id: string; revision: string; auto: boolean }) {
-  const state = useVersionedValue(id, revision, revision, auto);
+function Probe({
+  id,
+  revision,
+  auto,
+  draft,
+  onAutoApply,
+}: {
+  id: string;
+  revision: string;
+  auto: boolean;
+  draft?: boolean;
+  onAutoApply?: () => void;
+}) {
+  const state = useVersionedValue(id, revision, revision, auto, { draft, onAutoApply });
   return (
     <div
       ref={state.scopeRef}
@@ -19,6 +31,7 @@ function Probe({ id, revision, auto }: { id: string; revision: string; auto: boo
     >
       <span data-testid="value">{state.value}</span>
       <span data-testid="pending">{String(state.pending)}</span>
+      <span data-testid="editing">{String(state.editing)}</span>
       <input aria-label="Draft" />
       <iframe title="Preview" />
       {createPortal(<input aria-label="Portal draft" />, document.body)}
@@ -121,6 +134,57 @@ describe("versioned value", () => {
     await render("v2");
     expect(container.querySelector('[data-testid="pending"]')?.textContent).toBe("true");
     link.remove();
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("reports automatic applies and holds them for drafts", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let applied = 0;
+    const render = (revision: string, draft = false) =>
+      act(async () =>
+        root.render(
+          <Probe
+            id="one"
+            revision={revision}
+            auto
+            draft={draft}
+            onAutoApply={() => {
+              applied += 1;
+            }}
+          />,
+        ),
+      );
+    const text = (id: string) => container.querySelector(`[data-testid="${id}"]`)?.textContent;
+    await render("v1");
+    expect(applied).toBe(0);
+    await render("v2");
+    expect(text("value")).toBe("v2");
+    expect(applied).toBe(1);
+    await render("v3", true);
+    expect(text("value")).toBe("v2");
+    expect(text("editing")).toBe("true");
+    expect(text("pending")).toBe("true");
+    await render("v3", false);
+    expect(text("value")).toBe("v3");
+    expect(applied).toBe(2);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("a focused field counts as editing until focus leaves", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Probe id="one" revision="v1" auto={false} />));
+    const editing = () => container.querySelector('[data-testid="editing"]')?.textContent;
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Draft"]');
+    await act(async () => input?.focus());
+    expect(editing()).toBe("true");
+    await act(async () => input?.blur());
+    expect(editing()).toBe("false");
     await act(async () => root.unmount());
     container.remove();
   });

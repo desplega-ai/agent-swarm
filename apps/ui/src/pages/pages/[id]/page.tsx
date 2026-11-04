@@ -46,6 +46,7 @@ import {
   useState,
 } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -53,7 +54,10 @@ import { usePage } from "@/api/hooks/use-pages";
 import type { PageListItem, PageMetadata } from "@/api/types";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { FavoriteButton } from "@/components/shared/favorite-button";
-import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -508,7 +512,22 @@ export default function ArtifactPage() {
   const { data: pageRow } = usePage(pageId);
   const [autoReload] = useLocalToggle("entity-auto-reload", false);
   const pageRevision = useMemo(() => pageRow && pageContentRevision(pageRow), [pageRow]);
-  const pageVersion = useVersionedValue(pageId, pageRow, pageRevision, autoReload);
+  // Set when auto reload applied the displayed revision, read by the frame reload.
+  const autoAppliedRef = useRef(false);
+  const pageVersion = useVersionedValue(pageId, pageRow, pageRevision, autoReload, {
+    onAutoApply: () => {
+      autoAppliedRef.current = true;
+    },
+  });
+  useVersionUpdateToast({
+    entityKey: `page:${pageId}`,
+    latestRevision: pageRevision,
+    pending: pageVersion.pending,
+    editing: pageVersion.editing,
+    autoReload,
+    canAutoReload: pageVersion.canAutoReload,
+    onLoad: pageVersion.apply,
+  });
   const displayedRevision = useMemo(
     () => pageVersion.value && pageContentRevision(pageVersion.value),
     [pageVersion.value],
@@ -536,17 +555,45 @@ export default function ArtifactPage() {
     retry: false,
   });
 
-  const reloadFrame = useCallback(async () => {
-    const result = await refetchMetadata();
-    if (!result.isError) setFrameRevision((version) => version + 1);
-  }, [refetchMetadata]);
+  const [reloadError, setReloadError] = useState<{ pageId: string; auto: boolean } | null>(null);
+  const reloadFrame = useCallback(
+    async (auto: boolean) => {
+      setReloadError(null);
+      const result = await refetchMetadata();
+      if (result.isError || !result.data) {
+        if (pageId) setReloadError({ pageId, auto });
+        return;
+      }
+      setFrameRevision((version) => version + 1);
+      if (auto) showVersionUpdatedToast(result.data.version);
+    },
+    [refetchMetadata, pageId],
+  );
+  const reloadFrameRef = useRef(reloadFrame);
+  reloadFrameRef.current = reloadFrame;
+  // The error toast closes when the viewer leaves the page or retries.
+  useEffect(() => {
+    if (!reloadError || reloadError.pageId !== pageId) return;
+    const id = toast.error("Could not load the latest version", {
+      duration: Number.POSITIVE_INFINITY,
+      action: {
+        label: "Try again",
+        onClick: () => void reloadFrameRef.current(reloadError.auto),
+      },
+    });
+    return () => {
+      toast.dismiss(id);
+    };
+  }, [reloadError, pageId]);
   const lastRevision = useRef<{ id: string; revision: string } | null>(null);
   useEffect(() => {
     if (!pageId || !displayedRevision) return;
     const previous = lastRevision.current;
     lastRevision.current = { id: pageId, revision: displayedRevision };
     if (previous?.id === pageId && previous.revision !== displayedRevision) {
-      void reloadFrame();
+      const auto = autoAppliedRef.current;
+      autoAppliedRef.current = false;
+      void reloadFrame(auto);
     }
   }, [pageId, displayedRevision, reloadFrame]);
 
@@ -655,19 +702,6 @@ export default function ArtifactPage() {
             </Link>
           </Button>
         </div>
-        {error && data && (
-          <AlertCallout
-            tone="error"
-            action={
-              <Button size="sm" variant="outline" onClick={() => void reloadFrame()}>
-                Retry
-              </Button>
-            }
-          >
-            Could not load the new page version.
-          </AlertCallout>
-        )}
-        {pageVersion.pending && <VersionUpdateNotice onApply={pageVersion.apply} />}
         <div className="flex-1 min-h-0 overflow-auto p-4">{body}</div>
         <FeedbackConfirmDialog bridge={feedbackBridge} />
       </div>

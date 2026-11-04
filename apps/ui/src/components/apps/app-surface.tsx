@@ -97,7 +97,10 @@ import {
 } from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
-import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -500,7 +503,9 @@ export function AppSurface({
     () => JSON.stringify([latestApp.name, latestApp.description, latestApp.definition]),
     [latestApp],
   );
-  const appVersion = useVersionedValue(latestApp.id, latestApp, appRevision, autoReload);
+  const appVersion = useVersionedValue(latestApp.id, latestApp, appRevision, autoReload, {
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
   const app = appVersion.value ?? latestApp;
   const definition = app.definition;
   const routerNavigate = useNavigate();
@@ -565,6 +570,23 @@ export function AppSurface({
     autoReload && appVersion.canAutoReload,
   );
   const resolvedApps = referenceVersions.value;
+  const latestReferences = resolvedAppsRef.current.map;
+  const referencesRevision = useMemo(
+    () => JSON.stringify([...latestReferences].map(([id, ref]) => [id, ref.definition])),
+    [latestReferences],
+  );
+  useVersionUpdateToast({
+    entityKey: `app:${latestApp.id}`,
+    latestRevision: `${appRevision}|${referencesRevision}`,
+    pending: appVersion.pending || referenceVersions.pending,
+    editing: appVersion.editing,
+    autoReload,
+    canAutoReload: appVersion.canAutoReload,
+    onLoad: () => {
+      appVersion.apply();
+      referenceVersions.apply();
+    },
+  });
   // A target whose definition request is still in flight gets a neutral
   // "Loading…" card from the assembler instead of an "app unavailable" error.
   // `useQueries` keeps result order, so the index lines up with the id list.
@@ -1183,14 +1205,6 @@ export function AppSurface({
         data-testid="app-runtime"
         data-theme={appThemeAttr}
       >
-        {(appVersion.pending || referenceVersions.pending) && (
-          <VersionUpdateNotice
-            onApply={() => {
-              appVersion.apply();
-              referenceVersions.apply();
-            }}
-          />
-        )}
         {surface}
       </div>
     );
@@ -1220,14 +1234,6 @@ export function AppSurface({
             </Link>
           </Button>
         </div>
-        {(appVersion.pending || referenceVersions.pending) && (
-          <VersionUpdateNotice
-            onApply={() => {
-              appVersion.apply();
-              referenceVersions.apply();
-            }}
-          />
-        )}
         <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
           {surface}
         </div>
@@ -1254,14 +1260,6 @@ export function AppSurface({
         description={app.description ?? undefined}
         action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
       />
-      {(appVersion.pending || referenceVersions.pending) && (
-        <VersionUpdateNotice
-          onApply={() => {
-            appVersion.apply();
-            referenceVersions.apply();
-          }}
-        />
-      )}
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}

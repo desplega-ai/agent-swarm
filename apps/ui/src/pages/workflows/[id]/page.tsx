@@ -51,7 +51,10 @@ import { FavoriteButton } from "@/components/shared/favorite-button";
 import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -117,7 +120,20 @@ export default function WorkflowDetailPage() {
       latestWorkflow.requiredParams,
       latestWorkflow.requires,
     ]);
-  const workflowVersion = useVersionedValue(id, latestWorkflow, workflowRevision, autoReload);
+  const [paramsDraft, setParamsDraft] = useState(false);
+  const workflowVersion = useVersionedValue(id, latestWorkflow, workflowRevision, autoReload, {
+    draft: paramsDraft,
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
+  useVersionUpdateToast({
+    entityKey: `workflow:${id}`,
+    latestRevision: workflowRevision,
+    pending: workflowVersion.pending,
+    editing: workflowVersion.editing,
+    autoReload,
+    canAutoReload: workflowVersion.canAutoReload,
+    onLoad: workflowVersion.apply,
+  });
   const workflow =
     latestWorkflow && workflowVersion.value
       ? {
@@ -261,7 +277,6 @@ export default function WorkflowDetailPage() {
 
   return (
     <div ref={workflowVersion.scopeRef} className="flex flex-col flex-1 min-h-0 gap-4">
-      {workflowVersion.pending && <VersionUpdateNotice onApply={workflowVersion.apply} />}
       {/* Header */}
       <div className="shrink-0 space-y-3">
         <button
@@ -430,7 +445,12 @@ export default function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="setup" className="flex flex-col flex-1 min-h-0">
-          <WorkflowSetupPanel key={workflow.id} workflow={workflow} focusParam={focusedParam} />
+          <WorkflowSetupPanel
+            key={workflow.id}
+            workflow={workflow}
+            focusParam={focusedParam}
+            onDraftChange={setParamsDraft}
+          />
         </TabsContent>
 
         {/* Triggers tab */}
@@ -526,6 +546,7 @@ export default function WorkflowDetailPage() {
 function WorkflowSetupPanel({
   workflow,
   focusParam,
+  onDraftChange,
 }: {
   workflow: {
     id: string;
@@ -533,6 +554,7 @@ function WorkflowSetupPanel({
     params?: Record<string, unknown>;
   };
   focusParam?: string;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const updateWorkflow = useUpdateWorkflow();
   const [params, setParams] = useState<Record<string, unknown>>(workflow.params ?? {});
@@ -541,6 +563,12 @@ function WorkflowSetupPanel({
   const paramsRef = useRef(params);
   paramsRef.current = params;
   const paramsChangedRemotely = dirty && baseParams !== JSON.stringify(workflow.params ?? {});
+
+  // A parameter draft holds new workflow versions until it is saved or reset.
+  useEffect(() => {
+    onDraftChange?.(dirty);
+    return () => onDraftChange?.(false);
+  }, [dirty, onDraftChange]);
 
   useEffect(() => {
     if (!dirty) {
