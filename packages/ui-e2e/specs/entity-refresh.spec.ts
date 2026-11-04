@@ -97,3 +97,39 @@ test("automatic reload applies app and workflow updates", async ({ page, api, se
     expect(response.status()).toBe(204);
   }
 });
+
+test("workflow parameter drafts are protected from external changes", async ({
+  page,
+  api,
+  seed,
+  swarm,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const workflow = await api.post<{ id: string }>("/api/workflows", {
+    name: "e2e parameter conflict",
+    definition: {
+      nodes: [{ id: "step", type: "script", config: { runtime: "bash", script: "echo ok" } }],
+    },
+    requiredParams: ["target"],
+    params: { target: "initial" },
+  });
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByRole("tab", { name: "Setup" }).click();
+    const input = page.getByLabel("target");
+    await input.fill("local draft");
+    await api.put(`/api/workflows/${workflow.id}`, { params: { target: "remote change" } });
+    await expect(
+      page.getByText("The saved parameters changed while you were editing.", { exact: false }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(input).toHaveValue("local draft");
+    await expect(page.getByRole("button", { name: "Save parameters" })).toBeDisabled();
+    await page.getByRole("button", { name: "Load saved parameters" }).click();
+    await expect(input).toHaveValue("remote change");
+  } finally {
+    const response = await page.request.delete(`${swarm.apiUrl}/api/workflows/${workflow.id}`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}` },
+    });
+    expect(response.status()).toBe(204);
+  }
+});

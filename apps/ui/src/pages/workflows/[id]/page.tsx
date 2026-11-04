@@ -52,6 +52,7 @@ import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -536,11 +537,16 @@ function WorkflowSetupPanel({
   const updateWorkflow = useUpdateWorkflow();
   const [params, setParams] = useState<Record<string, unknown>>(workflow.params ?? {});
   const [dirty, setDirty] = useState(false);
+  const [baseParams, setBaseParams] = useState(() => JSON.stringify(workflow.params ?? {}));
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  const paramsChangedRemotely = dirty && baseParams !== JSON.stringify(workflow.params ?? {});
 
   useEffect(() => {
-    if (!dirty) setParams(workflow.params ?? {});
+    if (!dirty) {
+      setParams(workflow.params ?? {});
+      setBaseParams(JSON.stringify(workflow.params ?? {}));
+    }
   }, [workflow.params, dirty]);
 
   return (
@@ -552,6 +558,18 @@ function WorkflowSetupPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {paramsChangedRemotely && (
+          <AlertCallout
+            tone="warning"
+            action={
+              <Button size="sm" variant="outline" onClick={() => setDirty(false)}>
+                Load saved parameters
+              </Button>
+            }
+          >
+            The saved parameters changed while you were editing. Load them before saving.
+          </AlertCallout>
+        )}
         <AutomationParamsFields
           requiredParams={workflow.requiredParams}
           params={params}
@@ -565,7 +583,7 @@ function WorkflowSetupPanel({
           <Button
             type="button"
             size="sm"
-            disabled={updateWorkflow.isPending}
+            disabled={updateWorkflow.isPending || paramsChangedRemotely}
             onClick={() =>
               updateWorkflow.mutate(
                 { id: workflow.id, data: { params } },
