@@ -1309,32 +1309,80 @@ export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
-// Discriminated union so future avatar types (emoji, image, ...) can be added
-// with zero migrations — just a new zod branch + a UI renderer branch. Server
-// validates shape only; the UI owns the curated icon catalog and deterministic
-// fallback, so an unrecognized/hand-set icon name can never break rendering.
-export const AgentAvatarSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("lucide"),
-    icon: z
+// An https image link, shared by Slack icons and media icons so the rules
+// can't drift: https only, at most 2048 characters, no embedded credentials.
+export const HttpsImageUrlSchema = z
+  .url({ protocol: /^https$/, error: "Must be an https:// URL" })
+  .max(2048)
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return !parsed.username && !parsed.password;
+    } catch {
+      return false;
+    }
+  }, "URL must be valid and contain no credentials");
+
+// Server validates shape only; the UI owns the curated icon catalog and
+// deterministic fallback, so an unrecognized/hand-set icon name can never
+// break rendering.
+export const LucideIconSchema = z.object({
+  type: z.literal("lucide"),
+  icon: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .max(64),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+});
+
+export const UrlIconSchema = z.object({
+  type: z.literal("url"),
+  url: HttpsImageUrlSchema,
+});
+
+// Same addressing as the agent-fs task attachment ref: an absolute path, plus
+// both `orgId` and `driveId` for a specific drive, or neither for the swarm
+// drive. A single ID is never mixed with the swarm defaults.
+export const AgentFsIconSchema = z
+  .object({
+    type: z.literal("agent-fs"),
+    path: z
       .string()
-      .regex(/^[a-z0-9-]+$/)
-      .max(64),
-    color: z
-      .string()
-      .regex(/^#[0-9a-fA-F]{6}$/)
-      .optional(),
-  }),
+      .min(2)
+      .max(1024)
+      .refine((value) => value.startsWith("/"), "Path must be absolute (start with /)")
+      .refine((value) => !value.split("/").includes(".."), 'Path must not contain ".." segments'),
+    orgId: z.string().min(1).optional(),
+    driveId: z.string().min(1).optional(),
+  })
+  .refine(
+    (value) => (value.orgId === undefined) === (value.driveId === undefined),
+    "Pass both orgId and driveId, or neither for the swarm drive",
+  );
+
+// Discriminated union so future icon types can be added with zero migrations:
+// a new zod branch plus a UI renderer branch. Images that can't load fall back
+// to a lucide glyph in the dashboard.
+export const MediaIconSchema = z.discriminatedUnion("type", [
+  LucideIconSchema,
+  UrlIconSchema,
+  AgentFsIconSchema,
 ]);
+export type MediaIcon = z.infer<typeof MediaIconSchema>;
+
+// Agent avatars stay lucide-only for now.
+export const AgentAvatarSchema = z.discriminatedUnion("type", [LucideIconSchema]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
 /**
- * Apps reuse the same avatar shape as agents (lucide icon + optional hex
- * color) for their dashboard tile icon. A distinct export name keeps app call
- * sites self-documenting.
+ * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https
+ * image link, or an image in agent-fs.
  */
-export const AppIconSchema = AgentAvatarSchema;
-export type AppIcon = AgentAvatar;
+export const AppIconSchema = MediaIconSchema;
+export type AppIcon = MediaIcon;
 
 // Separate from `avatar` so an agent can keep its lucide disc and still post
 // to Slack with its own emoji or image.
@@ -1349,17 +1397,7 @@ export const AgentSlackIconSchema = z
     }),
     z.object({
       type: z.literal("url"),
-      url: z
-        .url({ protocol: /^https$/ })
-        .max(2048)
-        .refine((value) => {
-          try {
-            const parsed = new URL(value);
-            return !parsed.username && !parsed.password;
-          } catch {
-            return false;
-          }
-        }, "URL must be valid and contain no credentials"),
+      url: HttpsImageUrlSchema,
     }),
     // No icon override: Slack shows the app's own avatar.
     z.object({ type: z.literal("app") }),

@@ -469,10 +469,16 @@ export const AppDefinitionSchema = z
     defaultPage: AppNameSchema,
     theme: AppThemeIdSchema.optional(),
     /**
-     * Icon shown for the app on the dashboard Apps page (lucide icon name +
-     * optional hex color). The server validates shape only; the dashboard owns
-     * the curated icon catalog and falls back to a generic icon when the name
-     * is unknown (`AVATAR_ICON_CATALOG` in `apps/ui/src/lib/agent-icon.ts`).
+     * Icon shown for the app on the dashboard Apps page. One of:
+     * - `{type:"lucide", icon, color?}`: a lucide icon name + optional hex color.
+     *   The dashboard owns the curated icon catalog and falls back to a generic
+     *   icon when the name is unknown (`AVATAR_ICON_CATALOG` in
+     *   `apps/ui/src/lib/agent-icon.ts`).
+     * - `{type:"url", url}`: an https image link (no credentials, max 2048).
+     * - `{type:"agent-fs", path, orgId?, driveId?}`: an image in agent-fs. Omit
+     *   both IDs for the swarm drive, or pass both for another drive.
+     * The server validates shape only; the dashboard shows the glyph fallback
+     * when an image cannot load. A merge patch replaces `icon` whole.
      */
     icon: AppIconSchema.optional(),
   })
@@ -1177,19 +1183,22 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
       delete result[key];
       continue;
     }
-    defineMergePatchValue(
-      result,
-      key,
-      entriesAreAtomic &&
+    // A top-level `icon` is replaced whole so switching its `type` never
+    // leaves keys from the previous variant behind.
+    const replaceWhole =
+      (path.length === 0 && key === "icon") ||
+      (entriesAreAtomic &&
         !(
           path.length === 1 &&
           path[0] === "elements" &&
           isMergePatchObject(value) &&
           Object.keys(value).length === 1 &&
           isMergePatchObject(value.elements)
-        )
-        ? value
-        : applyMergePatch(result[key], value, [...path, key]),
+        ));
+    defineMergePatchValue(
+      result,
+      key,
+      replaceWhole ? value : applyMergePatch(result[key], value, [...path, key]),
     );
   }
   return result;

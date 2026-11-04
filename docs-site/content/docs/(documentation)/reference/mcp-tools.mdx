@@ -877,7 +877,7 @@ Get an app by ID, including its models, queries, actions, reusable elements, pag
 
 ### app-upsert
 
-Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. An optional top-level `icon` (`{ type: "lucide", icon: "<kebab-case lucide name>", color?: "#RRGGBB" }`) sets the app's icon on the dashboard Apps page; omit it, or use an unrecognized name, for a generic default.
+Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. The optional top-level `icon` is `{ type: "lucide", icon, color? }`, `{ type: "url", url }` (https), or `{ type: "agent-fs", path }` (swarm drive; add `orgId` and `driveId` for another drive). The dashboard shows a glyph when an image cannot load.
 
 ### app-patch
 
