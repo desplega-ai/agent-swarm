@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.317
+ARG CLAUDE_CODE_VERSION=2.1.318
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793707234-gc72860
-ARG AMP_SHA512_AMD64=af99dd46ac1d9f8cfa6cc2b82c8db75f00ed0d97427bfd2ede073cbd7ff8ced83885b0a86543a84160c75c148f5b25675e2c8528639ca3767614a6052e0a4d4f
-ARG AMP_SHA512_ARM64=cde732b5313f26070be720d71b2dfb97ac113aa20aca2463b816a0f36fe8dcaea44c66a33a52b8f6407e29ccb4b972aa1fa1d354714f998b8da0db38d700581d
+ARG AMP_VERSION=0.0.1793764839-g19a5bc
+ARG AMP_SHA512_AMD64=a8fae24f8f8ce379baaebc11c8889040fb83e69e7dfe807f1fc6e664c2f5f3e8c26a7def61c2cde339ebc0dd2f78a4f7c8c483e73e95d07a3f20cc317a26fa21
+ARG AMP_SHA512_ARM64=d8b81267827bc6e02438a75f40cb5b796af9daae1dd88b02008f9855b33b44e157aa2538c04f2b17cda638bdff2f1dbc2bcf2ab617219ebb6182b7c3b5a27f86
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -592,7 +592,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.3.0
+ARG CURSOR_SDK_VERSION=1.3.1
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -634,8 +634,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.6), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.6
+# scripts are not needed for ACP (verified on 0.26.7), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.7
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
