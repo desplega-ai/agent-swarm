@@ -136,4 +136,26 @@ describe("NotifyExecutor slack readiness", () => {
     expect(Date.now() - started).toBeLessThan(300);
     expect(posted).toHaveLength(0);
   });
+
+  test("Slack becomes ready after the deadline aborts but before the next poll: does not post", async () => {
+    configureSlack(true);
+    // One long poll interval, so the abort and the readiness both land inside
+    // the same sleep.
+    _setNotifySlackReadyWaitForTests({ pollMs: 150 });
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 20);
+    const readyTimer = setTimeout(() => {
+      currentApp = fakeApp();
+    }, 60);
+    try {
+      const result = await run(controller.signal);
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Step deadline reached");
+      expect(posted).toHaveLength(0);
+    } finally {
+      clearTimeout(abortTimer);
+      clearTimeout(readyTimer);
+      _setNotifySlackReadyWaitForTests({ pollMs: 10 });
+    }
+  });
 });

@@ -31,6 +31,9 @@ async function waitForSlackApp(
   const deadline = Date.now() + slackReadyWait.timeoutMs;
   while (Date.now() < deadline && !signal?.aborted) {
     await Bun.sleep(Math.min(slackReadyWait.pollMs, Math.max(0, deadline - Date.now())));
+    // The deadline may have fired during the sleep. Posting now would land
+    // after the engine marked the step failed, and a retry would post again.
+    if (signal?.aborted) return null;
     const app = getApp();
     if (app) return app;
   }
@@ -109,6 +112,12 @@ export class NotifyExecutor extends BaseExecutor<
           // booting, shutting down, or reloading integrations. Reporting
           // success here would drop the message and hide it.
           app = await waitForSlackApp(getSlackApp, meta.signal);
+          if (meta.signal?.aborted) {
+            return {
+              status: "failed",
+              error: "Step deadline reached while waiting for the Slack client; message not sent",
+            };
+          }
           if (!app) {
             return {
               status: "failed",
