@@ -1,4 +1,4 @@
-import type { AgentTask, ModelSource } from "@/api/types";
+import { type AgentTask, type ModelProfile, type ModelSource, PROVIDER_NAMES } from "../api/types";
 import { modelTierLabel } from "./model-tiers";
 
 /** Labels for `agent_tasks.modelSource`, the layer that chose the model the task ran on. */
@@ -76,4 +76,27 @@ export function describeModelResolution(task: TaskModelFields): string[] {
   if (task.modelSource) lines.push(`Chosen by: ${modelSourceLabel(task.modelSource)}`);
   if (task.modelAlias) lines.push(`Alias: ${task.modelAlias}`);
   return lines;
+}
+
+/** Catalog metadata wins; older/loading catalogs fall back to the seed naming rules. */
+export function isSeededTaskProfile(
+  task: TaskModelFields & Pick<AgentTask, "effort" | "resolvedEffort">,
+  profile?: Pick<ModelProfile, "seededFrom">,
+): boolean {
+  if (profile) return profile.seededFrom !== null;
+  const name = taskDisplayProfile(task);
+  if (!name) return false;
+  const model = taskDisplayModel(task)?.toLowerCase();
+  const effort = taskDisplayEffort(task);
+  return PROVIDER_NAMES.some((harness) => {
+    if (["smol", "regular", "smart", "ultra"].some((tier) => name === `${harness}-${tier}`)) {
+      return true;
+    }
+    if (!model) return false;
+    const stem = (model.startsWith(`${harness}-`) ? model : `${harness}-${model}`).replace(
+      /[/:]/g,
+      "-",
+    );
+    return name === `${stem}${effort ? `-${effort}` : ""}`;
+  });
 }
