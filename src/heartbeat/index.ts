@@ -1,6 +1,7 @@
 export {
   getBootEpochMs,
   getRebootAffectedTasks,
+  parseHeartbeatIntervalMs,
   runRebootSweep,
   startHeartbeat,
   stopHeartbeat,
