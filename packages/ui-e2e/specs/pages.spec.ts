@@ -281,3 +281,66 @@ test("saved room inspector decodes persisted state without creating a missing ro
 
   await clean.assertClean();
 });
+
+test.describe("phone header", () => {
+  test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+
+  test("a tap on the header summary reveals the full description and the hidden slug", async ({
+    page,
+    seed,
+    swarm,
+  }, testInfo) => {
+    test.skip(!seed, "remote run without seed");
+    const slug = `e2e-phone-header-${crypto.randomUUID()}`;
+    const description =
+      "A description long enough to truncate on a phone, so its end only shows in the details";
+    const createResponse = await page.request.post(`${swarm.apiUrl}/api/pages`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "X-Agent-ID": seed!.agents.lead },
+      data: {
+        title: "e2e phone header",
+        slug,
+        description,
+        contentType: "text/html",
+        authMode: "public",
+        body: "<!doctype html><html><body><p>phone header</p></body></html>",
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const created = (await createResponse.json()) as { id: string };
+
+    try {
+      await page.goto(`/pages/${created.id}`);
+      const summary = page.getByRole("button", { name: description });
+      await expect(summary).toBeVisible();
+      // Below sm the slug leaves the row; the actions stay on the same line.
+      await expect(summary.getByText(slug, { exact: true })).toBeHidden();
+      const openBox = await page.getByRole("link", { name: "Open", exact: true }).boundingBox();
+      const summaryBox = await summary.boundingBox();
+      expect(
+        Math.abs(openBox!.y + openBox!.height / 2 - (summaryBox!.y + summaryBox!.height / 2)),
+      ).toBeLessThan(8);
+
+      await summary.tap();
+      const details = page.getByRole("dialog");
+      await expect(details.getByText(description, { exact: true })).toBeVisible();
+      await expect(details.getByText(`slug: ${slug}`)).toBeVisible();
+      // Let the popover open animation settle for the attached screenshot.
+      await page.waitForTimeout(300);
+      const screenshot = testInfo.outputPath("phone-header-details.png");
+      await page.screenshot({ path: screenshot });
+      await testInfo.attach("phone-header-details", { path: screenshot, contentType: "image/png" });
+
+      await page.keyboard.press("Escape");
+      await expect(details).toBeHidden();
+      await expect(summary).toBeFocused();
+      // Keyboard reaches the same details: Enter on the focused summary.
+      await page.keyboard.press("Enter");
+      await expect(details).toBeVisible();
+    } finally {
+      const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${created.id}`, {
+        headers: { Authorization: `Bearer ${swarm.apiKey}` },
+      });
+      expect(removed.status()).toBe(204);
+    }
+  });
+});

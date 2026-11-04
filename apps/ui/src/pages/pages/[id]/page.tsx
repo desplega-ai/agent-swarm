@@ -76,6 +76,7 @@ import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
 import { FeedbackConfirmDialog } from "./feedback-confirm-dialog";
 import { JsonPageRenderer } from "./json-page-renderer";
+import { PageHeaderSummary } from "./page-header-summary";
 import { RoomInspectorDialog } from "./room-inspector";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -747,50 +748,6 @@ export default function ArtifactPage() {
 }
 
 // ─── Header extras ─────────────────────────────────────────────────────────
-
-/**
- * The header's one-line summary: the description, then the slug in muted
- * mono. Both truncate; the tooltip carries the full text. The slug comes from
- * the bearer-authed `/api/pages/:id` lookup (the public `/p/:id.json` doesn't
- * expose it, it's a creator-side concept), so it appears once that loads.
- * Below sm the slug only shows in the tooltip, to leave the row to the
- * description.
- */
-function PageHeaderSummary({
-  description,
-  slug,
-}: {
-  description: string | null;
-  slug: string | null;
-}) {
-  if (!description && !slug) return null;
-  return (
-    // Not hoverable: the pointer leaving the wide summary for an action icon
-    // closes it at once, so the icon's own tooltip can open.
-    <Tooltip disableHoverableContent>
-      <TooltipTrigger asChild>
-        <span className="flex min-w-0 items-baseline gap-2">
-          {description ? <span className="min-w-0 truncate">{description}</span> : null}
-          {slug ? (
-            <span
-              className={cn(
-                "min-w-0 truncate font-mono text-xs text-muted-foreground/70",
-                // With a description the slug yields first and hides on phones.
-                description && "max-w-[40%] shrink-[2] max-sm:hidden",
-              )}
-            >
-              {slug}
-            </span>
-          ) : null}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent align="start" className="max-w-md text-pretty">
-        {description ? <p>{description}</p> : null}
-        {slug ? <p className="font-mono opacity-80">slug: {slug}</p> : null}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 /** Icon-only header action: its label is both the tooltip and the accessible name. */
 function HeaderIconButton({
