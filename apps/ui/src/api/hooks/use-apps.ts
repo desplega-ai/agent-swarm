@@ -92,6 +92,28 @@ export interface AppQueryPlan {
 }
 
 /**
+ * Merge-patch one app (`PATCH /api/apps/:id`), then refresh the catalog and
+ * that app's definition. Polls must not overwrite the write with a GET that
+ * started before it, so both keys are cancelled first.
+ */
+export function usePatchApp(appId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Parameters<typeof api.patchApp>[1]) => api.patchApp(appId, patch),
+    onMutate: async () => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["apps"] }),
+        queryClient.cancelQueries({ queryKey: ["app", appId] }),
+      ]);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["apps"] });
+      void queryClient.invalidateQueries({ queryKey: ["app", appId] });
+    },
+  });
+}
+
+/**
  * Runs a flat list of named queries in parallel on the standard 5s poll.
  * Returns the react-query results in the same order as `plans`.
  *

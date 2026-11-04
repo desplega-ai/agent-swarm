@@ -4381,6 +4381,22 @@ class ApiClient {
   }
 
   /**
+   * RFC 7396 merge patch of an app (`app.manage`). `definition` merges into the
+   * stored definition; a `null` value removes that key. `icon` is replaced
+   * whole, so switching icon types leaves no stale keys.
+   */
+  async patchApp(
+    id: string,
+    patch: { name?: string; description?: string | null; definition?: Record<string, unknown> },
+  ): Promise<{ app: AppDetail }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+      "Failed to update app",
+    );
+  }
+
+  /**
    * Resolve a named query from the app definition. `params` feed the query's
    * `{ "$param": "<name>" }` filters and ride as repeatable `param.<name>=`
    * keys (same idiom as the row-list `filter.<col>=`).
