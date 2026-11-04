@@ -9,6 +9,7 @@ mock.module("@/components/shared/app-update-prompt", () => ({ lazyRoute: () => S
 mock.module("@/components/shared/hive-loading-screen", () => ({ HiveLoadingScreen: Stub }));
 mock.module("@/pages/settings/settings-layout", () => ({ AdminRoute: Stub, SettingsLayout: Stub }));
 mock.module("@/pages/usage/usage-layout", () => ({ UsageLayout: Stub }));
+mock.module("@/components/link-preview/link-preview-state", () => ({ LinkPreviewScope: Stub }));
 
 const { appRoutes } = await import("./routes");
 const { missingNavMetadata, missingSearchProviders, navEntries, nav, unlisted } = await import(
