@@ -1,6 +1,7 @@
 {
   "title": "Guides",
   "pages": [
+    "choosing-an-ai-operating-model",
     "deployment",
     "one-click-deploy",
     "kubernetes",
