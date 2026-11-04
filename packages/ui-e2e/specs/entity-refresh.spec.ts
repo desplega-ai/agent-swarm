@@ -238,7 +238,7 @@ test("automatic reload confirms the new page version", async ({ page, seed, swar
     await expect(frame.getByRole("heading", { name: "Second page" })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByText(/^Updated to v\d+$/)).toBeVisible();
+    await expect(page.getByText("Updated to the latest version")).toBeVisible();
   } finally {
     const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${id}`, { headers });
     expect(removed.status()).toBe(204);

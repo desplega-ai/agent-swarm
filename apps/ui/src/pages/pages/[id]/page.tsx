@@ -565,7 +565,7 @@ export default function ArtifactPage() {
         return;
       }
       setFrameRevision((version) => version + 1);
-      if (auto) showVersionUpdatedToast(result.data.version);
+      if (auto) showVersionUpdatedToast();
     },
     [refetchMetadata, pageId],
   );

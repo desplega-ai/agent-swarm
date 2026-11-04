@@ -129,7 +129,11 @@ function showVersionUpdateToast(
   };
 }
 
-/** Confirms an automatic reload. */
-export function showVersionUpdatedToast(version?: number) {
-  toast(version === undefined ? "Updated to the latest version" : `Updated to v${version}`);
+/**
+ * Confirms an automatic reload. Pages, apps and workflows expose no head
+ * version number to the dashboard (page metadata pins `version: 1`), so the
+ * toast names no number.
+ */
+export function showVersionUpdatedToast() {
+  toast("Updated to the latest version");
 }
