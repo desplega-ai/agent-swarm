@@ -54,6 +54,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/hooks/use-theme";
 import { getConfig } from "@/lib/config";
 import { getPageContext } from "@/lib/page-context";
+import { PAGE_MODE_PARAM, PAGE_THEME_PARAM, pageFrameQuery } from "@/lib/page-query";
 import { DEFAULT_THEME_ID } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
@@ -79,45 +80,6 @@ const PAGE_ID_RE = /^[a-f0-9]{32}$/i;
 
 function getPageHtmlUrl(id: string): string {
   return `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
-}
-
-/**
- * Query params that give a design version 2 page the viewer's theme preset
- * and color mode. The API reads them on `/p/:id` under the same constant
- * names (`src/pages/page-head.ts`). Version 1 pages ignore them.
- */
-const PAGE_THEME_PARAM = "__swarm-theme";
-const PAGE_MODE_PARAM = "__swarm-mode";
-
-/**
- * Query params the SPA owns on `/pages/:id` and must never forward to the
- * page body: `mode` (full-screen toggle), `key` (password unlock is handled
- * by the password frame itself), the connection overrides, which would
- * otherwise hand the API key to agent-authored HTML, and the viewer theme
- * params, which only `withViewerTheme` sets (from the dashboard theme).
- */
-const SPA_RESERVED_PAGE_PARAMS = new Set([
-  "mode",
-  "key",
-  "apiUrl",
-  "apiKey",
-  PAGE_THEME_PARAM,
-  PAGE_MODE_PARAM,
-]);
-
-/**
- * Query string forwarded from the SPA route to the page body, so a link like
- * `/pages/<id>?target=pr-1373` reaches the iframe as `/p/<id>?target=pr-1373`
- * and the page can filter or deep-link on its own params. Empty when there is
- * nothing to forward.
- */
-function pageFrameQuery(searchParams: URLSearchParams): string {
-  const forwarded = new URLSearchParams();
-  for (const [name, value] of searchParams) {
-    if (!SPA_RESERVED_PAGE_PARAMS.has(name)) forwarded.append(name, value);
-  }
-  const query = forwarded.toString();
-  return query ? `?${query}` : "";
 }
 
 /**
@@ -450,9 +412,18 @@ function PageBody({
 /**
  * The page body alone, for the link preview panel (task and session pages):
  * no header, feedback overlay, or full mode. It shares the metadata query
- * with the page route.
+ * with the page route. `frameQuery` is the link's forwarded query
+ * (`pageFrameQuery`), so the preview shows the view the link names.
  */
-export function PagePreviewBody({ id, className }: { id: string; className?: string }) {
+export function PagePreviewBody({
+  id,
+  frameQuery,
+  className,
+}: {
+  id: string;
+  frameQuery: string;
+  className?: string;
+}) {
   const viewer = useTheme();
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
@@ -467,7 +438,12 @@ export function PagePreviewBody({ id, className }: { id: string; className?: str
     return <ArtifactPageError message={error instanceof Error ? error.message : "Not found"} />;
   }
   return (
-    <PageBody id={id} data={data} frameQuery={withViewerTheme("", viewer)} className={className} />
+    <PageBody
+      id={id}
+      data={data}
+      frameQuery={withViewerTheme(frameQuery, viewer)}
+      className={className}
+    />
   );
 }
 

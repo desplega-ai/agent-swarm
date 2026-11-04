@@ -28,6 +28,7 @@ import {
   type AgentFsLinkContext,
   AttachmentName,
   agentFsAttachmentLinks,
+  resolveAgentFsLiveUrl,
 } from "@/components/shared/task-attachment-link";
 import {
   AlertDialog,
@@ -293,8 +294,16 @@ function AttachmentRow({
 }) {
   const agentFs = useOptionalAgentFs();
   const { href, combTo } = resolveLinks(attachment, agentFs);
-  // On the task and session pages an agent-fs file or a page opens the preview panel.
-  const previewClick = useLinkPreviewClick(href, useSwarmLinkOrigins());
+  // On the task and session pages an agent-fs file or a page opens the preview
+  // panel. `href` uses the resolved live host (with a fallback when the server
+  // sets none), so detection must match that host, not only the configured one.
+  const linkOrigins = useSwarmLinkOrigins();
+  const liveUrl = agentFs?.liveUrl;
+  const origins = useMemo(
+    () => ({ ...linkOrigins, agentFsLive: resolveAgentFsLiveUrl(liveUrl) }),
+    [linkOrigins, liveUrl],
+  );
+  const previewClick = useLinkPreviewClick(href, origins);
   const previewKind = getPreviewKind(attachment);
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);

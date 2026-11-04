@@ -6,13 +6,20 @@
 
 import { combPathForLink } from "./comb/links";
 import type { DrivePath } from "./comb/paths";
+import { pageFrameQuery } from "./page-query";
 import { parseSwarmLink, type SwarmLinkOrigins } from "./swarm-links";
 
 export type LinkPreviewTarget =
-  /** `route` is the Comb route; `href` is the link as written. */
+  /**
+   * `route` is the Comb route, with the link's `?comment=` deep link when it
+   * has one; `href` is the link as written.
+   */
   | { kind: "file"; file: DrivePath; name: string; route: string; href: string }
-  /** `id` is the page id or slug, as the link names it. */
-  | { kind: "page"; id: string; href: string };
+  /**
+   * `id` is the page id or slug, as the link names it. `query` is the link's
+   * query minus the params the page route owns (`pageFrameQuery`), or "".
+   */
+  | { kind: "page"; id: string; query: string; href: string };
 
 /** A drive path from a Comb route (`/file/~/<org>/<drive>/<names>`) that `comb/links` built. */
 function driveFileFromRoute(route: string): DrivePath | null {
@@ -38,12 +45,27 @@ export function linkPreviewTarget(
     });
     const file = route ? driveFileFromRoute(route) : null;
     if (!route || !file) return null;
-    return { kind: "file", file, name: link.name, route: route.split("?")[0] ?? route, href };
+    return { kind: "file", file, name: link.name, route, href };
   }
   if (link.type === "dashboard" && link.route === "pages") {
-    return { kind: "page", id: link.id, href };
+    const query = pageFrameQuery(new URL(link.path, origins.dashboard).searchParams);
+    return { kind: "page", id: link.id, query, href };
   }
   return null;
+}
+
+/**
+ * The preview panel's "Open in new tab" link. A file opens in Comb while
+ * agent-fs is connected (keeping a `?comment=` deep link), else as written.
+ * A page opens on its route by id once resolved (`pageId`), with the query
+ * the link forwards, so the tab shows the same view as the preview.
+ */
+export function linkPreviewOpenHref(
+  target: LinkPreviewTarget,
+  opts: { connected?: boolean; pageId?: string | null } = {},
+): string {
+  if (target.kind === "file") return opts.connected ? target.route : target.href;
+  return `/pages/${encodeURIComponent(opts.pageId ?? target.id)}${target.query}`;
 }
 
 /**

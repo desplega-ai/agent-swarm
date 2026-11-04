@@ -27,7 +27,7 @@ import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import { formatBytes } from "@/lib/format-bytes";
-import type { LinkPreviewTarget } from "@/lib/link-preview";
+import { type LinkPreviewTarget, linkPreviewOpenHref } from "@/lib/link-preview";
 import { formatRelative } from "@/lib/relative-time";
 
 const DOCK_QUERY = "(min-width: 1280px)";
@@ -52,7 +52,7 @@ export function LinkPreviewPanel() {
     target.kind === "file" ? (
       <FilePreview key={target.route} target={target} onClose={close} />
     ) : (
-      <PagePreview key={target.id} target={target} onClose={close} />
+      <PagePreview key={`${target.id}${target.query}`} target={target} onClose={close} />
     );
 
   if (canDock) {
@@ -205,8 +205,7 @@ function FilePreview({
       title={target.name}
       detail={target.file.path}
       meta={meta}
-      // Comb (a new dashboard tab) while connected, else the link as written.
-      openHref={connected ? target.route : target.href}
+      openHref={linkPreviewOpenHref(target, { connected })}
       onClose={onClose}
     >
       {body}
@@ -247,7 +246,11 @@ function PagePreview({
   } else {
     body = (
       <Suspense fallback={<Skeleton className="m-3 h-40" />}>
-        <PagePreviewBody id={pageId} className="block h-full w-full border-0 bg-background" />
+        <PagePreviewBody
+          id={pageId}
+          frameQuery={target.query}
+          className="block h-full w-full border-0 bg-background"
+        />
       </Suspense>
     );
   }
@@ -259,7 +262,7 @@ function PagePreview({
       title={page?.title ?? (bySlug ? target.id : "Page")}
       detail={page?.slug ?? (bySlug ? target.id : undefined)}
       meta={meta}
-      openHref={`/pages/${encodeURIComponent(pageId ?? target.id)}`}
+      openHref={linkPreviewOpenHref(target, { pageId })}
       onClose={onClose}
     >
       {body}

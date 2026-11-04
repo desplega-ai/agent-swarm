@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isPlainClick, linkPreviewTarget } from "./link-preview";
+import { isPlainClick, linkPreviewOpenHref, linkPreviewTarget } from "./link-preview";
 import type { SwarmLinkOrigins } from "./swarm-links";
 
 const ORIGINS: SwarmLinkOrigins = {
@@ -31,7 +31,8 @@ describe("linkPreviewTarget", () => {
     });
     expect(target("https://dash.example.com/file/~/org-1/drive-1/a.md?comment=c1")).toMatchObject({
       kind: "file",
-      route: "/file/~/org-1/drive-1/a.md",
+      file: { orgId: "org-1", driveId: "drive-1", path: "/a.md" },
+      route: "/file/~/org-1/drive-1/a.md?comment=c1",
     });
   });
 
@@ -39,6 +40,7 @@ describe("linkPreviewTarget", () => {
     expect(target(`https://swarm.example.com/pages/${PAGE_ID}`)).toEqual({
       kind: "page",
       id: PAGE_ID,
+      query: "",
       href: `https://swarm.example.com/pages/${PAGE_ID}`,
     });
     expect(target("/pages/weekly-report")).toMatchObject({ kind: "page", id: "weekly-report" });
@@ -51,6 +53,33 @@ describe("linkPreviewTarget", () => {
     expect(target("https://example.org/file/~/org-1/drive-1/a.md")).toBeNull();
     expect(target("https://fs.example.com/file/~/org-1/drive-1/%2e%2e/x.md")).toBeNull();
     expect(target(null)).toBeNull();
+  });
+});
+
+describe("a page link's query", () => {
+  test("reaches the preview, minus the params the page route owns", () => {
+    const href = `/pages/${PAGE_ID}?target=pr-1373&mode=full&key=pw&apiUrl=u&apiKey=k&__swarm-theme=t&__swarm-mode=dark#top`;
+    expect(target(href)).toMatchObject({ kind: "page", id: PAGE_ID, query: "?target=pr-1373" });
+    expect(target(`/pages/weekly-report?a=1&a=2`)).toMatchObject({ query: "?a=1&a=2" });
+  });
+});
+
+describe("linkPreviewOpenHref", () => {
+  test("a page opens by id with the forwarded query", () => {
+    const page = target(`/pages/weekly-report?target=pr-1373&mode=full`);
+    if (!page) throw new Error("no target");
+    expect(linkPreviewOpenHref(page)).toBe("/pages/weekly-report?target=pr-1373");
+    expect(linkPreviewOpenHref(page, { pageId: PAGE_ID })).toBe(`/pages/${PAGE_ID}?target=pr-1373`);
+  });
+
+  test("a file keeps its comment deep link, in Comb or as written", () => {
+    const href = "https://fs.example.com/file/~/org-1/drive-1/a.md?comment=c1";
+    const file = target(href);
+    if (!file) throw new Error("no target");
+    expect(linkPreviewOpenHref(file, { connected: true })).toBe(
+      "/file/~/org-1/drive-1/a.md?comment=c1",
+    );
+    expect(linkPreviewOpenHref(file, { connected: false })).toBe(href);
   });
 });
 

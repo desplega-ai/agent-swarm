@@ -13,7 +13,7 @@ const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
  * then `VITE_AGENT_FS_LIVE_URL` (for an API that predates Comb), then the
  * public host.
  */
-function getAgentFsLiveUrl(liveUrl?: string | null): string {
+export function resolveAgentFsLiveUrl(liveUrl?: string | null): string {
   const raw = liveUrl?.trim() || import.meta.env.VITE_AGENT_FS_LIVE_URL?.trim();
   return (raw || DEFAULT_AGENT_FS_LIVE_URL).replace(/\/+$/, "");
 }
@@ -66,7 +66,7 @@ function agentFsFile(
 }
 
 function liveFileUrl(file: AgentFsFile, liveUrl: string | null | undefined): string {
-  return `${getAgentFsLiveUrl(liveUrl)}/file/~/${file.orgId}/${file.driveId}/${file.encodedPath}`;
+  return `${resolveAgentFsLiveUrl(liveUrl)}/file/~/${file.orgId}/${file.driveId}/${file.encodedPath}`;
 }
 
 export function buildAgentFsLiveUrl(
