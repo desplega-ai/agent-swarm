@@ -1,11 +1,13 @@
 import { isGroupKey } from "../assets/key";
 import { healthyChatSdkAdapters } from "../integrations/chat-sdk/status";
+import { isRbacEnabled } from "../rbac";
 import type { ChecklistItem } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getAutomationSetupStates, setupIntegrationFlags } from "./automation-preflight";
 import { getDbClient } from "./db";
 import { sessionSummaryQuery } from "./db/session-tree";
 import { hasOAuthTokens } from "./db-queries/oauth";
+import { getUserGrant } from "./rbac-roles";
 
 type ChecklistRow = Omit<ChecklistItem, "meta" | "signal" | "done" | "editable"> & {
   meta: string | null;
@@ -38,9 +40,21 @@ export class ChecklistError extends Error {
   }
 }
 
+/** Fixed so unstored defaults serialize the same on every read. */
+const UNSTORED_DEFAULT_AT = "1970-01-01T00:00:00.000Z";
+
+/**
+ * Whether the user's grants allow editing swarm-wide checklist items.
+ * Null when RBAC is off: role rows count only with RBAC on, so the caller applies the legacy policy.
+ */
+export async function userGrantCanEditSwarm(userId: string): Promise<boolean | null> {
+  if (!isRbacEnabled()) return null;
+  const grant = await getUserGrant(userId);
+  return grant.grantsAll || grant.verbs.has("config.write.any");
+}
+
 /** The default rows every list starts with: two swarm items and the reader's use case. */
 function defaultRows(userId: string | null): ChecklistRow[] {
-  const now = new Date().toISOString();
   const row = (
     id: string,
     scope: ChecklistRow["scope"],
@@ -64,8 +78,8 @@ function defaultRows(userId: string | null): ChecklistRow[] {
     statusReason: null,
     nudgedAt: null,
     nudgedTaskId: null,
-    createdAt: now,
-    lastUpdatedAt: now,
+    createdAt: UNSTORED_DEFAULT_AT,
+    lastUpdatedAt: UNSTORED_DEFAULT_AT,
   });
   return [
     row("swarm:channel", "swarm", "channel", "Connect a chat channel", "/integrations/channels", 0),
@@ -137,12 +151,13 @@ async function getUseCaseSignal(userId: string | null): Promise<boolean> {
   if (!userId) return false;
   // Apps have keys but no creator column. See .non-audit-tables.
   // Bound the check to the user's 100 most recently created group keys.
+  // The SQL LIMIT bounds the distinct keys read before the group-key filter.
   const keys = await getDbClient().query<{ key: string }>(
     `SELECT "key", MAX(createdAt) AS newest FROM (
        SELECT "key", createdAt FROM scheduled_tasks WHERE created_by = ?
        UNION ALL SELECT "key", createdAt FROM pages WHERE created_by = ?
        UNION ALL SELECT "key", createdAt FROM workflows WHERE created_by = ?
-     ) GROUP BY "key" ORDER BY newest DESC, "key"`,
+     ) GROUP BY "key" ORDER BY newest DESC, "key" LIMIT 500`,
     [userId, userId, userId],
   );
   const groups = keys

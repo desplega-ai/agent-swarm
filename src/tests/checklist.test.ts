@@ -15,6 +15,7 @@ import {
   listChecklist,
   markNudged,
   mutateChecklist,
+  userGrantCanEditSwarm,
 } from "../be/checklist";
 import { closeDb, createAgent, createUser, getDb, getDbClient, initDb } from "../be/db";
 import { getSessionReadState, triageSessionList } from "../be/db/session-tree";
@@ -553,6 +554,19 @@ describe("checklist ownership and mutations", () => {
     expect((await api("GET")).body.canEditSwarm).toBe(false);
     auth = { kind: "operator", fingerprint: "op:checklist" };
     expect((await api("GET")).body.canEditSwarm).toBe(true);
+  });
+
+  test("the checklist nudge honors RBAC off like the route: the Lead may edit swarm items", async () => {
+    await attachRole(userId, "admin");
+    expect(await userGrantCanEditSwarm(userId)).toBe(true);
+    process.env.RBAC_ENABLED = "false";
+    expect(await userGrantCanEditSwarm(userId)).toBeNull();
+  });
+
+  test("unstored defaults serialize the same on every read", async () => {
+    const first = await listChecklist(userId);
+    await Bun.sleep(5);
+    expect(await listChecklist(userId)).toEqual(first);
   });
 
   test("operator without a user sees swarm items, but cannot create user items", async () => {

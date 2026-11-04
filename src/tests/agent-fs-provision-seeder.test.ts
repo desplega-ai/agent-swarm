@@ -901,6 +901,20 @@ describe("agent-fs provisioning seeder", () => {
       }
     });
 
+    test("a 404 or 405 on the org GET is unsupported, with no write", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      for (const status of [404, 405]) {
+        const methods: string[] = [];
+        setAgentFsProvisionFetchForTests((async (_input, init) => {
+          methods.push(init?.method ?? "GET");
+          return new Response("nope", { status });
+        }) as typeof fetch);
+        expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("unsupported");
+        expect(methods).toEqual(["GET"]);
+      }
+    });
+
     test("a matching org value is unchanged with no write, and no APP_URL sends nothing", async () => {
       process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
       await seedSharedConfig();

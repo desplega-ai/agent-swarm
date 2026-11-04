@@ -90,7 +90,10 @@ function getItem(storage: CredentialStorage | null, key: string): string | null 
   }
 }
 
-/** The owner's stored string, else a legacy one that belongs to the owner. */
+/**
+ * The owner's stored string, else a legacy one that belongs to the owner. An
+ * owned legacy string moves to the owner's key on its first read.
+ */
 function readRaw(
   apiUrl: string,
   endpoint: string,
@@ -100,7 +103,14 @@ function readRaw(
   const own = getItem(storage, credentialStorageKey(apiUrl, endpoint, owner));
   if (own !== null || !owner) return own;
   const legacy = getItem(storage, credentialStorageKey(apiUrl, endpoint));
-  return ownsLegacy(owner, parseCredential(legacy)) ? legacy : null;
+  if (legacy === null || !ownsLegacy(owner, parseCredential(legacy))) return null;
+  try {
+    storage?.setItem(credentialStorageKey(apiUrl, endpoint, owner), legacy);
+    storage?.removeItem(credentialStorageKey(apiUrl, endpoint));
+  } catch {
+    // Storage unavailable: the legacy string still reads for its owner.
+  }
+  return legacy;
 }
 
 export function readCredential(
