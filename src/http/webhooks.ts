@@ -142,6 +142,45 @@ async function runBlockableHandler(
   }
 }
 
+/**
+ * GitHub events with a real handler (or a signature-checked control event).
+ * Every other event is a no-op today, so it is acknowledged before its body is
+ * read: the request span then excludes the payload upload, which dominated
+ * latency for large CI payloads (check_run, workflow_run, ...).
+ */
+const GITHUB_VERIFIED_EVENTS = new Set([
+  "ping",
+  "pull_request",
+  "issues",
+  "issue_comment",
+  "pull_request_review_comment",
+  "pull_request_review",
+]);
+
+const GITHUB_IGNORED_SUMMARY_MS = 60_000;
+const githubIgnoredCounts = new Map<string, number>();
+let githubIgnoredTimer: ReturnType<typeof setInterval> | null = null;
+
+function flushGithubIgnoredCounts(): void {
+  if (githubIgnoredCounts.size === 0) return;
+  const parts = [...githubIgnoredCounts.entries()].map(([name, n]) => `${name}=${n}`);
+  githubIgnoredCounts.clear();
+  console.log(
+    `[GitHub] ignored events last ${GITHUB_IGNORED_SUMMARY_MS / 1000}s: ${parts.join(" ")}`,
+  );
+}
+
+function countGithubIgnoredEvent(eventType: string): void {
+  // Bound the key space: the header is unauthenticated input.
+  const key =
+    githubIgnoredCounts.has(eventType) || githubIgnoredCounts.size < 50 ? eventType : "other";
+  githubIgnoredCounts.set(key, (githubIgnoredCounts.get(key) ?? 0) + 1);
+  if (!githubIgnoredTimer) {
+    githubIgnoredTimer = setInterval(flushGithubIgnoredCounts, GITHUB_IGNORED_SUMMARY_MS);
+    githubIgnoredTimer.unref();
+  }
+}
+
 const githubWebhook = route({
   method: "post",
   path: "/api/github/webhook",
@@ -397,6 +436,15 @@ export async function handleWebhooks(
 
     const eventType = req.headers["x-github-event"] as string | undefined;
     const signature = req.headers["x-hub-signature-256"] as string | undefined;
+
+    // Early ack: events nothing handles (check_run, workflow_run, push, ...) change
+    // no state, so skip the body read, HMAC and parse, and drain the body in the background.
+    if (typeof eventType === "string" && eventType && !GITHUB_VERIFIED_EVENTS.has(eventType)) {
+      countGithubIgnoredEvent(eventType);
+      githubWebhook.respond(res, 200, { created: false });
+      req.resume();
+      return true;
+    }
 
     const chunks: Buffer[] = [];
     for await (const chunk of req) {

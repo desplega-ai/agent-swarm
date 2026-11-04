@@ -316,6 +316,7 @@ value:getLatestPageBySlug
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestStepForNode
 value:getLatestTaskByContextKey
+value:getLatestTaskByContextKeyPrefix
 value:getLeadAgent
 value:getLiveAgentCounts
 value:getLogsByAgentId
@@ -651,6 +652,7 @@ value:getLatestLeadTaskByContextKey
 value:getLatestLeadTaskInThread
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestTaskByContextKey
+value:getLatestTaskByContextKeyPrefix
 value:getMostRecentTaskInThread
 value:getPendingChatRelayTasks
 value:getPendingSlackRelayTasks

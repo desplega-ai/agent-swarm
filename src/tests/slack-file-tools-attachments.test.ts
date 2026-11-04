@@ -66,6 +66,7 @@ mock.module("../slack/app", () => ({
   initSlackApp: async () => null,
   startSlackApp: async () => {},
   stopSlackApp: async () => {},
+  stopSlackAppUnderLifecycleLock: async () => {},
 }));
 
 function addSlackFile(id: string, name: string, bytes: Uint8Array, path = "files-pri"): SlackFile {

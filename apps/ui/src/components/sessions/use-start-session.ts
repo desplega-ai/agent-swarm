@@ -15,7 +15,6 @@ import { api } from "@/api/client";
 import { SESSION_TREE_KEY } from "@/api/hooks/use-session-tree";
 import type { AgentTask } from "@/api/types";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { notePromptSent } from "../../lib/github-star-nudge-toast";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
@@ -115,7 +114,6 @@ export function useStartSession({
       }
     },
     onSuccess: ({ created, uploadResult }) => {
-      notePromptSent();
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
       setAttachmentError(uploadError);
       if (uploadError) toast.error(uploadError);

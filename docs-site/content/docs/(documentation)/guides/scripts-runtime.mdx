@@ -144,8 +144,12 @@ The `ScriptContext` passed to your `default` export carries:
 - `ctx.logger` — Console-compatible logger; same destination as the global
   `console`.
 
-Most SDK results are wrapper objects; read `response.data ?? response` before
-narrowing the payload. Prefer registered connections for authenticated calls:
+Most SDK results are wrapper objects `{ success, status, data }`; read
+`response.data ?? response` before narrowing the payload. `success` is false
+when the HTTP call failed, and also when a tool reached through the generic MCP
+bridge refused the call (HTTP 200 with `data.success === false`); a refusal
+also copies `data.message` to `message`. Failures
+resolve; they do not throw, except for `script_search` and `script_run`. Prefer registered connections for authenticated calls:
 credentials are attached server-side and do not enter script source or args.
 
 Stored scripts are not automatically re-typechecked when an app definition or
@@ -386,8 +390,15 @@ access except the host calls below. These are the differences from `native`:
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
   `clearTimeout`, `setInterval`, `clearInterval`, `URL`, `URLSearchParams`,
   `TextEncoder`, `TextDecoder` (UTF-8 only), `atob`, `btoa`, `crypto.randomUUID`,
-  `crypto.getRandomValues`, and the `zod`, `zod/mini`, `stdlib`, and
-  `swarm-sdk` imports.
+  `crypto.getRandomValues`, `structuredClone`, and the `zod`, `zod/mini`,
+  `stdlib`, and `swarm-sdk` imports.
+- **`structuredClone`:** clones primitives, objects and class instances (as plain
+  objects), sparse arrays, boxed primitives, dates, regular expressions, maps,
+  sets, built-in errors, `ArrayBuffer`, typed arrays and `DataView`. Cycles and
+  shared references are preserved. Error subtypes and messages are retained;
+  custom error properties, including `cause`, are not. Non-empty transfer lists
+  and shared or resizable buffers throw `DataCloneError`; proxy objects are
+  outside the shim's supported surface. Cloning runs entirely inside the sandbox.
 - **`fetch` bodies:** a request body can be a string, a `Uint8Array` or other
   typed array, an `ArrayBuffer`, or `URLSearchParams`. A binary body is
   capped at 16 MiB, and the binary bodies one run has in flight or queued at
@@ -396,8 +407,8 @@ access except the host calls below. These are the differences from `native`:
   `FormData`, `arrayBuffer()`, and `AbortSignal` are not supported.
 - **Not available:** `ctx.stdlib.glob`, `ctx.stdlib.grep`, `process`, `Bun`,
   `Buffer`, `crypto.subtle`, `Intl` (so `toLocaleString(locale, options)`
-  ignores its arguments), `AbortController`, `AbortSignal`, and
-  `structuredClone`. The typecheck accepts some of them, so `script-upsert`,
+  ignores its arguments), `AbortController`, and `AbortSignal`.
+  The typecheck accepts some of them, so `script-upsert`,
   script API creation, and app writes return a `warnings` list when the source
   uses one. The same list flags a literal `fetch`, `ctx.stdlib.fetch`, or
   `fetchJson` URL whose host is single-label or private: whether quickjs

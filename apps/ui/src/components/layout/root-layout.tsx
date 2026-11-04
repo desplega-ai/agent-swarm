@@ -21,6 +21,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
+import { GitHubStarNudge } from "@/lib/github-star-nudge-toast";
 import { MAIN_GUTTER, MAIN_GUTTER_NO_TOP } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AccessEndedScreen } from "./access-ended-screen";
@@ -160,6 +161,7 @@ export function RootLayout() {
         <IdentityGate />
         <ConnectionParamsCleanup />
         <LaterNotifier />
+        <GitHubStarNudge />
         <NameConnectionModal />
         <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />

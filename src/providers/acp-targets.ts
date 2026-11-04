@@ -423,7 +423,7 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
-/** Qwen Code's `--auth-type` choices (0.26.6). `qwen-oauth` needs a browser, so it is left out. */
+/** Qwen Code's `--auth-type` choices (0.26.7). `qwen-oauth` needs a browser, so it is left out. */
 const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
 
 // Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt
@@ -475,7 +475,8 @@ const qwenTargetProfile: AcpTargetProfile = {
 /**
  * Kiro CLI reads its prompt from a Kiro agent config, not from a flag or an
  * env var, so the swarm system prompt is not injected (as with OpenCode).
- * Kiro 2.29.1 advertises no ACP config options, so the model rides on argv.
+ * Kiro advertises no ACP config options (checked on 2.29.1), so the model
+ * rides on argv as `--model`, which `kiro-cli acp` still accepts in 3.0.0.
  */
 const kiroTargetProfile: AcpTargetProfile = {
   target: "kiro",

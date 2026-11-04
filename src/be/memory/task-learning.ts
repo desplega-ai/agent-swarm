@@ -13,6 +13,12 @@
  * not stored: the existing row gets a positive rating instead. Known gap:
  * embeddings are written in the background, so two near-identical learnings
  * seconds apart can both pass the check. Nightly curation catches those.
+ *
+ * Before any of that, a noise floor rejects text that cannot hold a lesson:
+ * under LEARNING_MIN_CHARS, or a restatement of the same call's progress or
+ * output. Calibrated on the stored learnings (see LEARNING_MIN_CHARS). A
+ * "needs a second line" rule was measured and dropped: it would have rejected
+ * 15% of the rated or retrieved learnings, most of them good one-line gotchas.
  */
 import { getDbClient } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
@@ -27,6 +33,12 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 /** ~500 tokens at ceil(chars / 4); also keeps a learning to one memory chunk. */
 export const LEARNING_MAX_CHARS = 2000;
 export const LEARNING_MAX_TAGS = 5;
+/**
+ * ~20 tokens: room for a title and a "When X, do Y" rule, not for a status
+ * line. No stored learning was under 130 characters when this was set, so the
+ * floor rejects none of them.
+ */
+export const LEARNING_MIN_CHARS = 80;
 const SEGMENT_MAX_CHARS = 60;
 const KEY_ATTEMPTS = 4;
 /** Where a near duplicate can already live: any workstream's learnings and the whole curated tree. */
@@ -40,7 +52,10 @@ export type TaskLearningResult =
   | { status: "stored"; memoryId: string; key: string; workstream: string }
   | { status: "replayed"; memoryId: string; key: string }
   | { status: "duplicate"; memoryId: string; key: string; similarity: number }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string; noiseFloor?: LearningNoiseFloor };
+
+/** Which noise-floor rule rejected a learning; drives the store-progress nudge. */
+export type LearningNoiseFloor = "too-short" | "repeats-progress";
 
 /** Lowercase kebab slug: `Agent Swarm!` -> `agent-swarm`. Empty when nothing usable is left. */
 export function toKebab(value: string, maxChars = SEGMENT_MAX_CHARS): string {
@@ -75,6 +90,8 @@ export async function storeTaskLearning(params: {
   isLead: boolean;
   task: Pick<AgentTask, "id" | "vcsRepo">;
   learning: TaskLearningInput;
+  /** The same call's progress and output: a learning that only restates them is rejected. */
+  sameCall?: { progress?: string; output?: string };
 }): Promise<TaskLearningResult> {
   const { agentId, isLead, task } = params;
   const input = typeof params.learning === "string" ? { text: params.learning } : params.learning;
@@ -95,6 +112,8 @@ export async function storeTaskLearning(params: {
   if (tags.length > LEARNING_MAX_TAGS) {
     return { status: "failed", error: `learning takes at most ${LEARNING_MAX_TAGS} tags` };
   }
+  const noise = checkNoiseFloor(text, params.sameCall);
+  if (noise) return noise;
 
   const workstream = resolveLearningWorkstream(
     input.workstream === undefined ? undefined : scrubSecrets(input.workstream),
@@ -122,6 +141,40 @@ export async function storeTaskLearning(params: {
       error: scrubSecrets(err instanceof Error ? err.message : String(err)),
     };
   }
+}
+
+/** Lowercase, whitespace collapsed: the comparison form for the restatement check. */
+function normalizeForEcho(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The write-time noise floor. Exact rules only: a fuzzy word-overlap check
+ * against the task output was measured too, and every learning it caught was
+ * a real lesson that shared the output's vocabulary.
+ */
+export function checkNoiseFloor(
+  text: string,
+  sameCall: { progress?: string; output?: string } | undefined,
+): Extract<TaskLearningResult, { status: "failed" }> | null {
+  if (text.length < LEARNING_MIN_CHARS) {
+    return {
+      status: "failed",
+      noiseFloor: "too-short",
+      error: `learning is under ${LEARNING_MIN_CHARS} characters; write a title line, then the rule as "When X, do Y"`,
+    };
+  }
+  const learning = normalizeForEcho(text);
+  for (const [field, value] of Object.entries(sameCall ?? {})) {
+    if (value && normalizeForEcho(scrubSecrets(value)).includes(learning)) {
+      return {
+        status: "failed",
+        noiseFloor: "repeats-progress",
+        error: `learning repeats this call's ${field}; store the rule the next agent should follow, not the result`,
+      };
+    }
+  }
+  return null;
 }
 
 async function findReplay(

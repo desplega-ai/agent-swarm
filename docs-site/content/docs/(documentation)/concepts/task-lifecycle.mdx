@@ -164,6 +164,24 @@ For automatic or recurring tasks (schedules, heartbeat, monitors, digests), comp
 
 For longer waits, use [defer-task](/docs/concepts/scheduling#deferring-until-another-task-finishes) to complete the current task and book a continuation. Delegated tasks create a lead follow-up on completion or failure by default. A settlement that wakes a `defer-task` wait for the same agent skips that follow-up; see [scheduling](/docs/concepts/scheduling#deferring-until-another-task-finishes). The default lead prompt reserves inline polling for essential results expected within about a minute; that path sets `followUpConfig.disabled: true` to avoid an extra follow-up and defers if the wait runs longer.
 
+### Chained completions
+
+Some flows hand a result straight to a new task. A reviewer that requests changes, for example, creates the fix task itself. The lead follow-up for that review only confirms a chain that already runs. To skip it, complete with `chainedTaskId` set to the child task:
+
+```
+store-progress(taskId: "...", status: "completed", output: "CHAINED: fix task ...", chainedTaskId: "<child task id>")
+```
+
+The engine accepts the handoff only when the child:
+
+- exists and has the completing task as its `parentTaskId`;
+- was created by the agent that completes the task;
+- is live: `pending`, `offered`, `reviewing`, `in_progress` or `paused`.
+
+When it is accepted, no lead follow-up is created and nothing is posted for one. The completing task gets a `task_follow_up_suppressed` log entry with reason `chained_task_live` and the child's id, so the task tree and audits still show the handoff. The creator's `followUpConfig.onCompleted` text is not delivered; the entry records `droppedOnCompleted: true` when it existed.
+
+When any check fails, the normal follow-up is created and names the rejected id and the reason. It is created even when the completion wakes a `defer-task` wait for the lead, because the wake-up task does not carry the rejection. The completion itself never fails because of `chainedTaskId`. The field is ignored for `failed`, `cancelled` and `skipped`: a failure always wakes the lead. `followUpConfig.disabled` still wins: a disabled follow-up stays disabled.
+
 ### Terminal result consistency
 
 Task results use first-call-wins semantics across both `store-progress` and `POST /api/tasks/{id}/finish`. An identical repeat is treated as an idempotent no-op. A later write that would change `output` or `failureReason` is rejected instead of silently reporting success (`store-progress` returns an error result and the REST finish endpoint returns HTTP 409), which makes competing agent and runner results visible while preserving the original `finishedAt` and completion side effects.

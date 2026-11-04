@@ -17,6 +17,7 @@ import {
 import { LEARNING_TTL_DAYS } from "@/be/memory/constants";
 import {
   LEARNING_MAX_TAGS,
+  LEARNING_MIN_CHARS,
   storeTaskLearning,
   type TaskLearningResult,
 } from "@/be/memory/task-learning";
@@ -130,10 +131,11 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
       workstream: z.string().optional(),
       similarity: z.number().optional(),
       error: z.string().optional(),
+      noiseFloor: z.string().optional(),
     })
     .optional()
     .describe(
-      "Present when the call carried a learning: stored, replayed (same text already stored for this task), duplicate (an existing swarm memory at key/memoryId says the same; similarity is the raw cosine), or failed with error.",
+      "Present when the call carried a learning: stored, replayed (same text already stored for this task), duplicate (an existing swarm memory at key/memoryId says the same; similarity is the raw cosine), or failed with error. A failed learning rejected as noise also carries noiseFloor: too-short or repeats-progress.",
     ),
 });
 
@@ -152,7 +154,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
     {
       title: "Store task progress",
       description:
-        "Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you.",
+        "Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you. When a live child task you created continues the work, complete with chainedTaskId so the lead is not woken for this step.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
@@ -208,13 +210,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ])
           .optional()
           .describe(
-            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. Line 1 of text is the title. Line 2 is the rule, as "when X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Expires after ${LEARNING_TTL_DAYS} days. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
+            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under ${LEARNING_MIN_CHARS} characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. Expires after ${LEARNING_TTL_DAYS} days. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
           ),
         persistMemory: z
           .boolean()
           .optional()
           .describe(
             "Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true.",
+          ),
+        chainedTaskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "With status 'completed' only: the id of a live child task you created (send-task with parentTaskId set to this task) that carries this result forward. The engine then creates no lead follow-up for this completion and logs the handoff on this task. The child must exist, have this task as parentTaskId, be created by you, and be pending, offered, reviewing, in_progress or paused. If any check fails, the normal follow-up is created and names the reason; the completion itself never fails. Ignored for every other status: a failure always wakes the lead.",
           ),
         force: z
           .boolean()
@@ -240,6 +248,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         citations,
         learning,
         persistMemory,
+        chainedTaskId,
         force,
       },
       requestInfo,
@@ -508,6 +517,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 isLead: agent.isLead === true,
                 task: existingTask,
                 learning,
+                sameCall: { progress, output },
               }).then(resolve, (err) =>
                 resolve({ status: "failed", error: scrubSecrets(String(err)) }),
               ),
@@ -711,6 +721,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           failureReason,
           agentId: requestInfo.agentId,
           persistMemory,
+          ...(status === "completed" && chainedTaskId ? { chainedTaskId } : {}),
         });
       }
 

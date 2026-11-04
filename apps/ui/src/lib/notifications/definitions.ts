@@ -23,6 +23,6 @@ export const NOTIFICATION_DEFINITIONS: NotificationDefinition[] = [
   {
     key: "slack_connect_invite",
     title: "Connect with us on Slack",
-    body: "A shared Slack channel with the team that builds Agent Swarm. We reply within a business day.",
+    body: "We email a Slack Connect invite to the address below, for a shared channel with our team.",
   },
 ];

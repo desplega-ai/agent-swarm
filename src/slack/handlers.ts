@@ -187,6 +187,7 @@ interface MessageEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  channel_type?: string;
   files?: SlackFile[];
   assistant_thread?: Record<string, unknown>;
 }
@@ -572,11 +573,17 @@ export function registerMessageHandler(app: App): void {
     // those — file uploads included — are handled in assistant.ts. An assistant-thread
     // message that still lands here is treated as an implicit mention so it routes to
     // the lead agent rather than being silently dropped.
+    // A top-level message in a 1:1 DM with the bot is addressed to the bot too: it has no
+    // `thread_ts`, so the Assistant middleware lets it through to this handler. Group DMs
+    // (`mpim`) and DM thread replies keep their existing rules.
     // Guard: suppress implicit mention when the message @-mentions someone else but NOT us —
     // those messages are addressed to a different agent/user (e.g. Devin) and must not spawn.
     const isAssistantThread = !!msg.assistant_thread;
+    const isTopLevelDirectMessage = msg.channel_type === "im" && !msg.thread_ts;
     const isImplicitMention =
-      isAssistantThread && !botMentioned && !isAddressedToOtherUser(effectiveText, botUserId);
+      (isAssistantThread || isTopLevelDirectMessage) &&
+      !botMentioned &&
+      !isAddressedToOtherUser(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
@@ -749,7 +756,7 @@ export function registerMessageHandler(app: App): void {
     if (matches.length === 0) {
       if (!botMentioned && !isImplicitMention) return ignoreSlackInbound("not_addressed");
 
-      // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
+      // Bot was mentioned (or implicitly addressed) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
         if (!isSlackRenderV2Enabled()) {
           await say({

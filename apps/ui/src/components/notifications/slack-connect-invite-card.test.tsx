@@ -37,11 +37,13 @@ mock.module("@/components/shared/question-flow", () => ({
     footer,
     done,
     onSubmit,
+    submitLabel,
   }: {
     questions: Array<{ id: string; label: string; description?: string }>;
     footer?: ReactNode;
     done?: (values: Record<string, unknown>) => ReactNode;
     onSubmit: (values: Record<string, unknown>) => Promise<void>;
+    submitLabel?: string;
   }) => {
     const [sent, setSent] = useState(false);
     const values = flowValues[questions[0]?.id ?? ""] ?? {};
@@ -63,7 +65,7 @@ mock.module("@/components/shared/question-flow", () => ({
             )
           }
         >
-          Submit
+          {submitLabel ?? "Submit"}
         </button>
       </div>
     );
@@ -139,6 +141,7 @@ async function mount(state?: { status: string }) {
   };
   return container;
 }
+const SEND_INVITE = "Send me the Slack Connect invite";
 const button = (container: HTMLElement, label: string) =>
   [...container.querySelectorAll("button")].find((b) => b.textContent === label);
 
@@ -174,7 +177,7 @@ test("the role is optional: unset, it stays out of the request and the event", a
   moment = null;
   flowValues = { email: { email: "dana@acme.com" } };
   const container = await mount();
-  await act(async () => button(container, "Submit")?.click());
+  await act(async () => button(container, SEND_INVITE)?.click());
   expect(requests).toHaveLength(1);
   expect(requests[0]?.details).not.toHaveProperty("user_function");
   expect(requests[0]?.details.moment).toBeUndefined();
@@ -183,13 +186,13 @@ test("the role is optional: unset, it stays out of the request and the event", a
   expect(tracked[0]?.properties).toMatchObject({ email_domain: "acme.com" });
 });
 
-test("Submit requests the invite, then the second set updates the same submission", async () => {
+test("the invite button requests the invite, then the second set updates the same submission", async () => {
   flowValues = {
     email: { email: "dana@acme.com", user_function: "eng_lead" },
     team_size: { team_size: "11-50", working_on: "PR reviews" },
   };
   const container = await mount();
-  await act(async () => button(container, "Submit")?.click());
+  await act(async () => button(container, SEND_INVITE)?.click());
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({
     email: "dana@acme.com",
@@ -216,12 +219,35 @@ test("Submit requests the invite, then the second set updates the same submissio
 test("an invalid email does not send", async () => {
   flowValues = { email: { email: "dana", user_function: "engineer" } };
   const container = await mount();
-  await act(async () => button(container, "Submit")?.click());
+  await act(async () => button(container, SEND_INVITE)?.click());
   expect(requests).toEqual([]);
 });
 
 test("a resolved invite shows its state and no form", async () => {
   const container = await mount({ status: "dismissed" });
   expect(container.textContent).toContain("Dismissed");
-  expect(button(container, "Submit")).toBeUndefined();
+  expect(button(container, SEND_INVITE)).toBeUndefined();
+});
+
+test("before the click, each moment says the button emails a Slack Connect invite", async () => {
+  for (const next of ["task_failed", "first_workflow", "default"] as const) {
+    moment = next;
+    const container = await mount();
+    expect(button(container, SEND_INVITE)).toBeDefined();
+    expect(button(container, "Submit")).toBeUndefined();
+    expect(container.textContent).toContain("We email the invite here");
+    expect(container.textContent).not.toMatch(/Desplega(?! Labs)/);
+    if (next !== "default") expect(container.textContent).toContain("Slack Connect invite to");
+    await cleanup?.();
+    cleanup = undefined;
+  }
+});
+
+test("the second step keeps its Submit button", async () => {
+  flowValues = { email: { email: "dana@acme.com" } };
+  const container = await mount();
+  await act(async () => button(container, SEND_INVITE)?.click());
+  expect(requests).toHaveLength(1);
+  expect(button(container, SEND_INVITE)).toBeUndefined();
+  expect(button(container, "Submit")).toBeDefined();
 });

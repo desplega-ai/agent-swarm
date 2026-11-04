@@ -321,7 +321,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.2-alpha.2` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.2-alpha.3` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -386,7 +386,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.2.0`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.3.1`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -518,7 +518,7 @@ Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full
 
 Qwen Code runs `qwen --acp --auth-type <QWEN_AUTH_TYPE, default openai>` (baked pinned via `QWEN_CODE_VERSION`). A fresh worker has no `~/.qwen/settings.json`, and without an auth type the CLI waits for an interactive `/auth`, so the preset always passes one; `qwen-oauth` is rejected because it needs a browser. The default `openai` type reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` (unset means DashScope, not OpenAI). `MODEL_OVERRIDE` goes on argv as `--model`; the ACP `model` option is skipped because it wants a `<id>(<authType>)` value. Like Gemini, the system prompt goes to a `mkdtemp` file outside the task `cwd` and `QWEN_SYSTEM_MD` points at it (this replaces Qwen's built-in prompt); the file is removed when the session ends. Qwen loads the swarm MCP tools lazily, through its tool search.
 
-Kiro runs `kiro-cli acp` (baked pinned via `KIRO_CLI_VERSION` with SHA-256 pins; only `kiro-cli` and `kiro-cli-chat` are installed). Auth is `KIRO_API_KEY`, which only paid Kiro plans can create; without it the CLI exits before `initialize` with "You are not logged in". 2.29.1 advertises no ACP config options, so `MODEL_OVERRIDE` goes on argv as `--model`. Kiro takes its prompt from a Kiro agent config, so the swarm system prompt is not injected (same as OpenCode).
+Kiro runs `kiro-cli acp` (baked pinned via `KIRO_CLI_VERSION` with SHA-256 pins; since 3.0.0 the tarball ships only `kiro-cli`, and that is the one binary installed). Auth is `KIRO_API_KEY`, which only paid Kiro plans can create. Without it, 3.0.0 still answers `initialize`, then rejects `session/new` with JSON-RPC error `-32000` "Authentication required. Not logged in. Set the KIRO_API_KEY environment variable or run `kiro-cli login` first.", so the task fails with `ACP target failed during startup`. Releases before 3.0.0 exited before `initialize` with "You are not logged in". `kiro-cli acp` defaults to the v2 agent engine; the preset does not pass `--agent-engine`. 2.29.1 advertised no ACP config options, so `MODEL_OVERRIDE` goes on argv as `--model`. Kiro takes its prompt from a Kiro agent config, so the swarm system prompt is not injected (same as OpenCode).
 
 Goose runs `goose acp` (baked pinned via `GOOSE_VERSION` with SHA-256 pins). Set `GOOSE_PROVIDER` and that provider's key; the preset forces `GOOSE_DISABLE_KEYRING=1` (no Secret Service in a worker). `MODEL_OVERRIDE` uses the advertised ACP `model` option, with `GOOSE_MODEL` as the startup fallback. The system prompt goes to a `mkdtemp` file referenced by `GOOSE_MOIM_MESSAGE_FILE`, which Goose injects into each turn's context; no `.goosehints` is written into the repo. Goose sends every MCP tool to the model, so OpenAI-API providers reject the swarm's tool list (more than 128 tools); use a provider without that cap.
 

@@ -3,8 +3,10 @@ import { z } from "zod";
 import {
   ASSET_KEY_MAX_LENGTH,
   defaultAssetKey,
+  isResourceGroupPrefix,
   normalizeAssetKey,
   parseAssetKey,
+  RESOURCE_GROUPS_READ_ONLY,
 } from "../assets/key";
 import { SOURCE_GROUPS_READ_ONLY, sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
@@ -22,7 +24,7 @@ import {
   getTasksDispatchedFrom,
   listRecentSessions,
 } from "../be/db";
-import { getSessionLabels } from "../be/db/session-labels";
+import { getResourceSessionLabels, getSessionLabels } from "../be/db/session-labels";
 import {
   listPrefixRoots,
   listSharedPrefixRoots,
@@ -1098,8 +1100,12 @@ export async function handleSessions(
       showSource: parsed.query.showSource,
     });
     // Labels cover hidden sources too: a pane or tab of a hidden source still names its group.
-    const { sourceGroups, slackChannels, threadLabels, ...counts } = tree;
-    const labels = { ...threadLabels, ...(await getSessionLabels(sourceGroups)) };
+    const { sourceGroups, slackChannels, threadLabels, resourceGroups, ...counts } = tree;
+    const [sourceLabels, resourceLabels] = await Promise.all([
+      getSessionLabels(sourceGroups),
+      getResourceSessionLabels(resourceGroups),
+    ]);
+    const labels = { ...threadLabels, ...sourceLabels, ...resourceLabels };
     warmSlackChannelLabels(
       slackChannels.map((id) => `shared/slack/${id}/`).filter((key) => labels[key] === undefined),
     );
@@ -1164,6 +1170,13 @@ export async function handleSessions(
     const from = normalizeAssetKey(parsed.body.from);
     if (sourceOfKey(from) || (parsed.body.to && sourceOfKey(normalizeAssetKey(parsed.body.to)))) {
       jsonError(res, SOURCE_GROUPS_READ_ONLY, 400);
+      return true;
+    }
+    if (
+      isResourceGroupPrefix(from) ||
+      (parsed.body.to && isResourceGroupPrefix(normalizeAssetKey(parsed.body.to)))
+    ) {
+      jsonError(res, RESOURCE_GROUPS_READ_ONLY, 400);
       return true;
     }
     if (parseAssetKey(from).relativeSegments.length === 0) {

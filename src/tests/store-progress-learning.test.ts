@@ -83,8 +83,22 @@ function learningRows(taskId: string): MemoryRow[] {
 
 function learningData(result: ToolResult) {
   return result.structuredContent?.learning as
-    | { status: string; key?: string; memoryId?: string; similarity?: number; error?: string }
+    | {
+        status: string;
+        key?: string;
+        memoryId?: string;
+        similarity?: number;
+        error?: string;
+        noiseFloor?: string;
+      }
     | undefined;
+}
+
+/** A line-2 rule that lifts a short test title over the noise floor. */
+const RULE = "\nWhen this lesson applies, do what it says; the evidence would follow this line.";
+
+function lesson(title: string) {
+  return `${title}${RULE}`;
 }
 
 function message(result: ToolResult) {
@@ -141,11 +155,14 @@ describe("store-progress learning", () => {
 
   test("string form falls back to the repo name, then to general", async () => {
     const withRepo = await task("desplega-ai/agent-swarm");
-    await call({ taskId: withRepo.id, learning: "Run lint before tsc" });
+    await call({ taskId: withRepo.id, learning: lesson("Run lint before tsc") });
     expect(learningRows(withRepo.id)[0]?.key).toBe("/learnings/agent-swarm/run-lint-before-tsc");
 
     const withoutRepo = await task();
-    const result = await call({ taskId: withoutRepo.id, learning: { text: "Prefer scripts" } });
+    const result = await call({
+      taskId: withoutRepo.id,
+      learning: { text: lesson("Prefer scripts") },
+    });
     expect(learningData(result)).toMatchObject({ status: "stored", workstream: "general" });
     expect(learningRows(withoutRepo.id)[0]?.key).toBe("/learnings/general/prefer-scripts");
   });
@@ -153,8 +170,11 @@ describe("store-progress learning", () => {
   test("a taken key gets a short suffix instead of failing", async () => {
     const first = await task();
     const second = await task();
-    await call({ taskId: first.id, learning: "Same title\nfirst body" });
-    const result = await call({ taskId: second.id, learning: "Same title\nsecond body" });
+    await call({ taskId: first.id, learning: lesson("Same title") });
+    const result = await call({
+      taskId: second.id,
+      learning: `${lesson("Same title")} Second body.`,
+    });
 
     expect(learningData(result)?.status).toBe("stored");
     expect(learningRows(first.id)[0]?.key).toBe("/learnings/general/same-title");
@@ -165,8 +185,8 @@ describe("store-progress learning", () => {
 
   test("an exact replay on the same task is skipped", async () => {
     const t = await task();
-    await call({ taskId: t.id, learning: "Replay me" });
-    const replay = await call({ taskId: t.id, progress: "again", learning: "Replay me" });
+    await call({ taskId: t.id, learning: lesson("Replay me") });
+    const replay = await call({ taskId: t.id, progress: "again", learning: lesson("Replay me") });
 
     expect(learningData(replay)).toMatchObject({
       status: "replayed",
@@ -177,7 +197,7 @@ describe("store-progress learning", () => {
 
   test("overlapping calls with the same learning store it once", async () => {
     const t = await task();
-    const learning = "Concurrent replay\nKeep exactly one copy of this lesson.";
+    const learning = lesson("Concurrent replay");
     const results = await Promise.all([
       call({ taskId: t.id, learning }),
       call({ taskId: t.id, learning }),
@@ -199,7 +219,7 @@ describe("store-progress learning", () => {
     const result = await call({
       taskId: t.id,
       learning: {
-        text: `${token}\nKeep credentials out of memory.`,
+        text: `${token}${RULE}`,
         workstream: token,
         tags: [token],
       },
@@ -216,7 +236,7 @@ describe("store-progress learning", () => {
 
   test("a replay of a secret-bearing learning is still detected", async () => {
     const t = await task();
-    const learning = `Redact diagnostic tokens\nExample token: ${token}`;
+    const learning = `${lesson("Redact diagnostic tokens")} Example token: ${token}`;
     await call({ taskId: t.id, learning });
     const replay = await call({ taskId: t.id, learning });
 
@@ -235,7 +255,7 @@ describe("store-progress learning", () => {
         progress: "progress survives",
         status: "completed",
         output: "done",
-        learning: "This write fails",
+        learning: lesson("This write fails"),
       });
       expect(result.isError).toBeFalsy();
       expect(learningData(result)).toMatchObject({ status: "failed" });
@@ -267,13 +287,66 @@ describe("store-progress learning", () => {
     expect(learningRows(t.id)).toHaveLength(0);
   });
 
+  test("a learning under the noise floor is rejected with a steer, progress kept", async () => {
+    const t = await task();
+    const result = await call({
+      taskId: t.id,
+      progress: "PR opened",
+      learning: "PR opened, CI green",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(learningData(result)).toMatchObject({ status: "failed", noiseFloor: "too-short" });
+    expect(message(result)).toContain("Learning not stored: learning is under 80 characters");
+    expect(String(result.structuredContent?.nudge)).toContain('the rule as "When X, do Y"');
+    expect((await getTaskById(t.id))?.progress).toBe("PR opened");
+    expect(learningRows(t.id)).toHaveLength(0);
+  });
+
+  test("a learning that restates the same call's progress or output is rejected", async () => {
+    const t = await task();
+    const echoed = lesson("Fixed the flaky push hook");
+    const fromProgress = await call({
+      taskId: t.id,
+      progress: `Done. ${echoed.toUpperCase()}  Next: review.`,
+      learning: echoed,
+    });
+    expect(learningData(fromProgress)).toMatchObject({
+      status: "failed",
+      noiseFloor: "repeats-progress",
+    });
+    expect(learningData(fromProgress)?.error).toContain("this call's progress");
+    expect(String(fromProgress.structuredContent?.nudge)).toContain("restates this call's");
+
+    const fromOutput = await call({
+      taskId: t.id,
+      status: "completed",
+      output: `Shipped.\n${echoed}`,
+      learning: echoed,
+    });
+    expect(learningData(fromOutput)).toMatchObject({ noiseFloor: "repeats-progress" });
+    expect(learningData(fromOutput)?.error).toContain("this call's output");
+    expect((await getTaskById(t.id))?.status).toBe("completed");
+    expect(learningRows(t.id)).toHaveLength(0);
+  });
+
+  test("a learning that contains the progress line and adds a rule is stored", async () => {
+    const t = await task();
+    const result = await call({
+      taskId: t.id,
+      progress: "Fixed the flaky push hook",
+      learning: lesson("Fixed the flaky push hook"),
+    });
+    expect(learningData(result)?.status).toBe("stored");
+  });
+
   test("a learning on the completing call is stored", async () => {
     const t = await task();
     const result = await call({
       taskId: t.id,
       status: "completed",
       output: "done",
-      learning: "Ship on the completing call",
+      learning: lesson("Ship on the completing call"),
     });
     expect(learningData(result)?.status).toBe("stored");
     expect((await getTaskById(t.id))?.status).toBe("completed");
@@ -327,8 +400,8 @@ describe("store-progress learning near-duplicate guard", () => {
   afterAll(() => embedSpy.mockRestore());
 
   test("a near duplicate in another workstream is not stored and rates the existing row", async () => {
-    const existing = await seed("Upsert scripts from file bytes\nPOST the raw file.", vector(10));
-    const text = "Byte-exact script upsert from a local file\nPOST it to the API.";
+    const existing = await seed(lesson("Upsert scripts from file bytes"), vector(10));
+    const text = lesson("Byte-exact script upsert from a local file");
     vectors.set(text, vector(10, 0.9));
     const t = await task();
     const result = await call({ taskId: t.id, learning: { text, workstream: "other" } });
@@ -372,7 +445,7 @@ describe("store-progress learning near-duplicate guard", () => {
   ] as const) {
     test(`a near duplicate of a /longterm/${label} memory is not stored`, async () => {
       const existing = await seedLongterm(key, vector(axis));
-      const text = `Merge queue rule ${label}\nWhen a PR is unstable, enqueue it anyway.`;
+      const text = lesson(`Merge queue rule ${label}`);
       vectors.set(text, vector(axis, 0.86));
       const t = await task();
       const result = await call({ taskId: t.id, learning: text });
@@ -393,7 +466,7 @@ describe("store-progress learning near-duplicate guard", () => {
 
   test("a /longterm duplicate is found behind more than 4096 closer rows outside the prefixes", async () => {
     const existing = await seedLongterm("/longterm/facts/dedup/behind-the-cap", vector(200));
-    const text = "Behind the KNN cap\nWhen 4096 rows are closer, still match.";
+    const text = lesson("Behind the KNN cap");
     const query = vector(200, 0.86);
     vectors.set(text, query);
 
@@ -487,7 +560,7 @@ describe("store-progress learning near-duplicate guard", () => {
     const querySpy = spyOn(getDbClient(), "query");
     const logSpy = spyOn(console, "log");
     try {
-      const within = `Within the cap ${axis}\nThe oldest of 10,000 eligible rows is still scored.`;
+      const within = lesson(`Within the cap ${axis}`);
       vectors.set(within, vector(axis, 0.9));
       const t1 = await task();
       const found = await call({ taskId: t1.id, learning: within });
@@ -509,7 +582,7 @@ describe("store-progress learning near-duplicate guard", () => {
       noiseIds.push(...insertNewerLongtermNoise(1, `cap-overflow-${axis}`));
       makeOldest([twin.id]);
       logSpy.mockClear();
-      const past = `Past the cap ${axis}\nThe 10,001st eligible row is not scored.`;
+      const past = lesson(`Past the cap ${axis}`);
       vectors.set(past, vector(axis, 0.9));
       const t2 = await task();
       const missed = await call({ taskId: t2.id, learning: past });
@@ -548,7 +621,7 @@ describe("store-progress learning near-duplicate guard", () => {
 
   test("a retrieval floor above the dedup threshold still catches a /longterm duplicate", async () => {
     const existing = await seedLongterm("/longterm/facts/dedup/strict-floor", vector(80));
-    const text = "Strict retrieval floor\nMEMORY_MIN_SIMILARITY must not hide a duplicate.";
+    const text = lesson("Strict retrieval floor");
     vectors.set(text, vector(80, 0.86));
     const t = await task();
     const result = await withRetrievalFloor("0.9", () => call({ taskId: t.id, learning: text }));
@@ -560,7 +633,7 @@ describe("store-progress learning near-duplicate guard", () => {
 
   test("a retrieval floor below the dedup threshold does not lower it", async () => {
     await seedLongterm("/longterm/facts/dedup/loose-floor", vector(90));
-    const text = "Loose retrieval floor\nA 0.7 match is related, not a duplicate.";
+    const text = lesson("Loose retrieval floor");
     vectors.set(text, vector(90, 0.7));
     const t = await task();
     const result = await withRetrievalFloor("0.5", () => call({ taskId: t.id, learning: text }));
@@ -570,8 +643,8 @@ describe("store-progress learning near-duplicate guard", () => {
   });
 
   test("a related learning below the threshold is stored", async () => {
-    await seed("Retry flaky pushes once\nThe pre-push hook is slow.", vector(20));
-    const text = "Pre-push hooks take five minutes\nLet them finish.";
+    await seed(lesson("Retry flaky pushes once"), vector(20));
+    const text = lesson("Pre-push hooks take five minutes");
     vectors.set(text, vector(20, 0.7));
     const t = await task();
     const result = await call({ taskId: t.id, learning: text });
@@ -581,8 +654,8 @@ describe("store-progress learning near-duplicate guard", () => {
   });
 
   test("a failed search falls through to the normal insert", async () => {
-    await seed("Kebab keys only\nSlugs are lowercase.", vector(30));
-    const text = "Keys are kebab case\nSlugs stay lowercase.";
+    await seed(lesson("Kebab keys only"), vector(30));
+    const text = lesson("Keys are kebab case");
     vectors.set(text, vector(30, 0.95));
     const searchSpy = spyOn(getMemoryStore(), "search").mockRejectedValue(new Error("vec down"));
     try {
@@ -597,7 +670,7 @@ describe("store-progress learning near-duplicate guard", () => {
   });
 
   test("an exact replay on the same task is replayed, not a duplicate", async () => {
-    const text = "Replay before similarity\nThe same task retrying is not a duplicate.";
+    const text = lesson("Replay before similarity");
     const seeded = await seed(text, vector(40));
     const replay = await call({ taskId: seeded.task.id, learning: { text, workstream: "seeded" } });
 
@@ -629,8 +702,8 @@ describe("store-progress learning near-duplicate guard", () => {
     afterAll(() => reopenDb(originalVecPath));
 
     test("a near duplicate is still caught, not stored", async () => {
-      const existing = await seed("Pin the worktree path\nUse the retention root.", vector(220));
-      const text = "Worktrees live under the retention root\nNever under wt-*.";
+      const existing = await seed(lesson("Pin the worktree path"), vector(220));
+      const text = lesson("Worktrees live under the retention root");
       vectors.set(text, vector(220, 0.9));
       const t = await task();
       const result = await call({ taskId: t.id, learning: { text, workstream: "other" } });
@@ -664,7 +737,7 @@ describe("store-progress learning expiry", () => {
     const t = await task();
     const result = await call({
       taskId: t.id,
-      learning: "Learnings age out\nWhen stored, expire.",
+      learning: lesson("Learnings age out"),
     });
     const row = expiryRow(learningData(result)!.memoryId!)!;
 
@@ -695,7 +768,7 @@ describe("store-progress learning expiry", () => {
     const t = await task();
     const result = await call({
       taskId: t.id,
-      learning: "Edit keeps expiry\nWhen edited, keep it.",
+      learning: lesson("Edit keeps expiry"),
     });
     const id = learningData(result)!.memoryId!;
     const before = expiryRow(id)!.expiresAt;
@@ -705,8 +778,8 @@ describe("store-progress learning expiry", () => {
     await store.edit({
       id,
       mode: "exact",
-      oldString: "keep it",
-      newString: "still keep it",
+      oldString: "do what it says",
+      newString: "still do what it says",
       intent: "test edit",
     });
     expect(expiryRow(id)?.expiresAt).toBe(before);
@@ -770,7 +843,7 @@ describe("store-progress learning expiry", () => {
 
   test("a learning moved out of /learnings past its deadline survives the purge", async () => {
     const t = await task();
-    const result = await call({ taskId: t.id, learning: "Moved out\nWhen kept, survive GC." });
+    const result = await call({ taskId: t.id, learning: lesson("Moved out") });
     const id = learningData(result)!.memoryId!;
     getDb().run("UPDATE agent_memory SET expiresAt = '2000-01-01T00:00:00.000Z' WHERE id = ?", [
       id,
@@ -817,7 +890,7 @@ describe("store-progress learning expiry", () => {
 
   test("an expired learning is left out of search and removed by the purge", async () => {
     const t = await task();
-    const result = await call({ taskId: t.id, learning: "Expired learning\nWhen past, drop it." });
+    const result = await call({ taskId: t.id, learning: lesson("Expired learning") });
     const id = learningData(result)!.memoryId!;
     const embedding = new Float32Array(EMBEDDING_DIMENSIONS);
     embedding[90] = 1;
