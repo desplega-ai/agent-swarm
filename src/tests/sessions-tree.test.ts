@@ -1221,12 +1221,29 @@ describe("Mine view hides machine-started roots", () => {
     expect(((await resourceList.json()) as { total: number }).total).toBe(0);
     const hidden = await getSessionTree(actor(), NOW, { mine: true, hideSource: ["schedule"] });
     expect(hidden.groups.find((group) => group.key === key)).toBeUndefined();
+    // "Select all N" in the group writes the schedule runs the group list shows.
+    const bulk = await fetch(`${baseUrl}/api/session-triage`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ action: "read", groupKey: key }),
+    });
+    expect(bulk.status).toBe(200);
+    expect(await bulk.json()).toEqual({ updated: 2 });
     await state(run.id, "done");
     const triaged = await fetch(
       `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(key)}`,
       { headers },
     );
     expect(((await triaged.json()) as { total: number }).total).toBe(1);
+    // The Done count matches the Done list, which keeps the Mine rule for schedule runs.
+    const doneList = (await (
+      await fetch(`${baseUrl}/api/sessions?scope=tree&triage=done`, { headers })
+    ).json()) as { total: number; sessions: { root: { id: string } }[] };
+    expect(doneList.sessions.some((row) => row.root.id === run.id)).toBe(false);
+    const doneTree = (await (
+      await fetch(`${baseUrl}/api/session-tree`, { headers })
+    ).json()) as Awaited<ReturnType<typeof getSessionTree>>;
+    expect(doneTree.done.total).toBe(doneList.total);
   });
 
   test("a workflow root attributed to the viewer is hidden by default and shown under All", async () => {

@@ -8046,6 +8046,24 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of twenty account checks per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description agent-fs request failed */
                 502: {
                     headers: {
@@ -8226,7 +8244,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            /** @description `returnTo` with `#key=<af_...>` as its only fragment. */
+                            /** @description `returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment. */
                             redirectUrl: string;
                         };
                     };

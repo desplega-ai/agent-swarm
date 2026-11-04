@@ -19,6 +19,7 @@ import {
   scopeFromAttachment,
 } from "../be/task-attachment-store";
 import { findUserById } from "../be/users";
+import { getCombConfig } from "../comb/config";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, isRbacEnabled, type RbacResource } from "../rbac";
@@ -49,9 +50,13 @@ const fsKeyRateLimit = createIpRateLimiter({ capacity: 5, refillPerMs: 5 / 60_00
 
 const fsContinueRateLimit = createIpRateLimiter({ capacity: 10, refillPerMs: 10 / 60_000 });
 
+// `GET /api/fs/me` registers and invites on demand. Each Comb page load calls it once.
+const fsMeRateLimit = createIpRateLimiter({ capacity: 20, refillPerMs: 20 / 60_000 });
+
 export function _resetFsKeyRateLimitForTests(): void {
   fsKeyRateLimit.reset();
   fsContinueRateLimit.reset();
+  fsMeRateLimit.reset();
 }
 
 const userAgentFsStateSchema = z.object({
@@ -75,6 +80,8 @@ const userAgentFsMeRoute = route({
   responses: {
     200: { description: "Account readiness", schema: userAgentFsStateSchema },
     401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    429: { description: "Limit of twenty account checks per minute reached" },
     502: { description: "agent-fs request failed" },
   },
 });
@@ -125,7 +132,11 @@ const continueToAgentFsRoute = route({
     200: {
       description: "Redirect URL with the named key in the fragment",
       schema: z.object({
-        redirectUrl: z.string().describe("`returnTo` with `#key=<af_...>` as its only fragment."),
+        redirectUrl: z
+          .string()
+          .describe(
+            "`returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment.",
+          ),
       }),
     },
     400: { description: "invalid_return_to: the origin is not the configured agent-fs app" },
@@ -407,6 +418,27 @@ async function resolveInvite(
   return { email: ownEmail, role: grant.verbs.has("task.fs.mutate") ? "editor" : "viewer" };
 }
 
+/**
+ * The `fs.join.own` gate for the resolved user, also a user picked behind the
+ * operator key (`X-Swarm-User-Id`). Admission checks the caller's own grant
+ * only for non-GET routes and grants the operator key everything, so this
+ * reads the user's grant directly.
+ */
+async function denyFsJoin(userId: string): Promise<string | null> {
+  const decision = can({
+    principal: { kind: "user", userId },
+    verb: "fs.join.own",
+    resource: { kind: "none" },
+    source: "http",
+  });
+  if (!decision.allow) return decision.reason;
+  if (!isRbacEnabled()) return null;
+  const grant = await getUserGrant(userId);
+  return grant.grantsAll || grant.verbs.has("fs.join.own")
+    ? null
+    : "missing permission 'fs.join.own'";
+}
+
 async function resolveAgentFsUserId(req: IncomingMessage): Promise<string | null> {
   const auth = getRequestAuth(req);
   if (auth?.page) return null;
@@ -457,6 +489,15 @@ export async function handleFs(
       jsonError(res, "user identity required", 401);
       return true;
     }
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
+      return true;
+    }
+    if (!fsMeRateLimit.take(userId)) {
+      jsonError(res, "Limit of twenty account checks per minute reached", 429);
+      return true;
+    }
     try {
       userAgentFsMeRoute.respond(res, 200, await ensureUserAgentFsAccount(userId));
     } catch (error) {
@@ -473,19 +514,9 @@ export async function handleFs(
     }
     const parsed = await mintUserAgentFsKeyRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const principal = await requestPrincipal(req, myAgentId);
-    if (!principal) {
-      jsonError(res, "user identity required", 401);
-      return true;
-    }
-    const decision = can({
-      principal,
-      verb: "fs.join.own",
-      resource: { kind: "none" },
-      source: "http",
-    });
-    if (!decision.allow) {
-      jsonError(res, decision.reason, 403);
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
       return true;
     }
     if (!fsKeyRateLimit.take(userId)) {
@@ -515,19 +546,9 @@ export async function handleFs(
     }
     const parsed = await continueToAgentFsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const principal = await requestPrincipal(req, myAgentId);
-    if (!principal) {
-      jsonError(res, "user identity required", 401);
-      return true;
-    }
-    const decision = can({
-      principal,
-      verb: "fs.join.own",
-      resource: { kind: "none" },
-      source: "http",
-    });
-    if (!decision.allow) {
-      jsonError(res, decision.reason, 403);
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
       return true;
     }
     const target = new URL(parsed.body.returnTo);
@@ -539,12 +560,18 @@ export async function handleFs(
       jsonError(res, "Limit of ten continues per minute reached", 429);
       return true;
     }
+    // The same browser-facing agent-fs URL the dashboard uses (`/status` `agent_fs.comb.api_url`).
+    const browserApiUrl = getCombConfig().apiUrl;
+    if (!browserApiUrl) {
+      jsonError(res, "agent_fs_not_configured", 503);
+      return true;
+    }
     try {
       const date = new Date().toISOString().slice(0, 10);
       const result = await mintUserAgentFsKey(userId, `${target.host} · ${date}`);
       if (result.status === "minted") {
         // The fragment never reaches a server. The live app stores the key and strips it.
-        target.hash = `key=${encodeURIComponent(result.apiKey)}`;
+        target.hash = `key=${encodeURIComponent(result.apiKey)}&apiUrl=${encodeURIComponent(browserApiUrl)}`;
         res.setHeader("Cache-Control", "no-store");
         continueToAgentFsRoute.respond(res, 200, { redirectUrl: target.toString() });
       } else {

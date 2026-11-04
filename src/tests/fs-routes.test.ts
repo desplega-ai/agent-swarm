@@ -481,6 +481,8 @@ describe("personal agent-fs identity and keys", () => {
     "AGENT_FS_API_URL",
     "AGENT_FS_LIVE_URL",
     "AGENT_FS_APP_URL",
+    "AGENT_FS_PUBLIC_URL",
+    "AGENT_FS_PROXY",
     "RBAC_ENABLED",
     "PAGE_SESSION_SECRET",
   ];
@@ -579,6 +581,8 @@ describe("personal agent-fs identity and keys", () => {
     process.env.PAGE_SESSION_SECRET = "example-personal-fs-page-secret";
     delete process.env.AGENT_FS_LIVE_URL;
     delete process.env.AGENT_FS_APP_URL;
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs-api.example.test/";
+    delete process.env.AGENT_FS_PROXY;
     for (const [key, value] of [
       ["API_AGENT_FS_API_KEY", bootstrapKey],
       ["AGENT_FS_DEFAULT_ORG_ID", orgId],
@@ -641,7 +645,7 @@ describe("personal agent-fs identity and keys", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
-      redirectUrl: `https://live.agent-fs.dev/file/~/${orgId}/${driveId}/x.md?view=raw#key=${mintedKey}`,
+      redirectUrl: `https://live.agent-fs.dev/file/~/${orgId}/${driveId}/x.md?view=raw#key=${mintedKey}&apiUrl=${encodeURIComponent("https://fs-api.example.test")}`,
     });
     const keyRequest = requests.find((request) => request.path.endsWith("/keys"));
     expect(keyRequest?.body).toEqual({
@@ -669,10 +673,13 @@ describe("personal agent-fs identity and keys", () => {
     process.env.AGENT_FS_LIVE_URL = "https://files.acme.test/";
     process.env.AGENT_FS_APP_URL = "http://localhost:7433";
     expect((await continueTo("https://live.agent-fs.dev/file/x.md")).status).toBe(400);
+    // Without AGENT_FS_PUBLIC_URL the fragment carries the dashboard's URL: the API proxy, else agent-fs itself.
+    delete process.env.AGENT_FS_PUBLIC_URL;
+    process.env.AGENT_FS_PROXY = "false";
     const live = await continueTo("https://files.acme.test/file/x.md");
     expect(live.status).toBe(200);
     expect(await live.json()).toEqual({
-      redirectUrl: `https://files.acme.test/file/x.md#key=${mintedKey}`,
+      redirectUrl: `https://files.acme.test/file/x.md#key=${mintedKey}&apiUrl=${encodeURIComponent(process.env.AGENT_FS_API_URL!)}`,
     });
     expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(200);
   });
@@ -847,6 +854,34 @@ describe("personal agent-fs identity and keys", () => {
     delete process.env.AGENT_FS_API_URL;
     expect((await createKey()).status).toBe(503);
     expect(requests).toHaveLength(0);
+  });
+
+  test("a user without fs.join.own gets no account check, also behind the operator key", async () => {
+    process.env.RBAC_ENABLED = "true";
+    await getDbClient().run(
+      "DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?",
+      [userId],
+    );
+    const own = await personal("/api/fs/me");
+    expect(own.status).toBe(403);
+    expect(await own.json()).toEqual({ error: "missing permission 'fs.join.own'" });
+    const picked = { "X-Swarm-User-Id": userId, "Content-Type": "application/json" };
+    expect((await operatorFetch("/api/fs/me", { headers: picked })).status).toBe(403);
+    const mint = { method: "POST", headers: picked, body: JSON.stringify({ label: "picked" }) };
+    expect((await operatorFetch("/api/fs/keys", mint)).status).toBe(403);
+    const resume = JSON.stringify({ returnTo: "https://live.agent-fs.dev/file/x.md" });
+    expect(
+      (await operatorFetch("/api/fs/continue", { method: "POST", headers: picked, body: resume }))
+        .status,
+    ).toBe(403);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("the twenty-first account check per minute is limited per user", async () => {
+    for (let i = 0; i < 20; i++) expect((await personal("/api/fs/me")).status).toBe(200);
+    const count = requests.length;
+    expect((await personal("/api/fs/me")).status).toBe(429);
+    expect(requests).toHaveLength(count);
   });
 
   test("keys require fs.join.own permission", async () => {

@@ -36,7 +36,6 @@ import {
   getSessionGroupKey,
   getSessionReadState,
   getSessionTree,
-  showsScheduleRuns,
   triageSessionList,
 } from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
@@ -1046,7 +1045,6 @@ export async function handleSessions(
       contextKeyPrefix: parsed.query.contextKeyPrefix,
       keyPrefix: parsed.query.keyPrefix,
       groupKey: parsed.query.groupKey,
-      includeScheduleRuns: !!parsed.query.groupKey && showsScheduleRuns(parsed.query.groupKey),
       noGroup: parsed.query.noGroup,
       triage: parsed.query.triage,
       status: parsed.query.status,
@@ -1245,8 +1243,18 @@ export async function handleSessions(
           if (roots.length < SESSION_MOVE_LIMIT) break;
         }
         const moved = await moveSessionChains({ moves, changedBy });
-        // Stars on the group follow a rename. A delete leaves them in place.
-        if (key !== null && moved.length > 0) await moveKeyFavorites({ from, to: key });
+        // Stars on the group (every user's) follow a rename only when no session of
+        // any owner is left under the old key: nothing skipped, nothing remaining.
+        // So a retry that moves nothing still moves stale stars of an emptied group.
+        // A delete leaves the stars in place.
+        if (
+          key !== null &&
+          skipped.length === 0 &&
+          remaining === 0 &&
+          (await listPrefixRoots({ from, limit: 1 })).length === 0
+        ) {
+          await moveKeyFavorites({ from, to: key });
+        }
         moveSessionPrefix.respond(res, 200, { moved, skipped, remaining });
       },
     );

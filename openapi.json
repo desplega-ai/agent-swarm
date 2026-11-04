@@ -23119,6 +23119,26 @@
               }
             }
           },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of twenty account checks per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "agent-fs request failed",
             "content": {
@@ -23327,7 +23347,7 @@
                   "properties": {
                     "redirectUrl": {
                       "type": "string",
-                      "description": "`returnTo` with `#key=<af_...>` as its only fragment."
+                      "description": "`returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment."
                     }
                   },
                   "required": [
