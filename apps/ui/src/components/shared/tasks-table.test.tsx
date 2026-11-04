@@ -40,12 +40,28 @@ mock.module("@/components/shared/data-grid", () => ({
     return <div data-testid="model-cell">{renderCell({ data: rowData[0] })}</div>;
   },
 }));
-// Render tooltip content separately from its trigger so assertions distinguish
-// the visible cell label from information available only on hover.
 mock.module("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => <span>{children}</span>,
-  TooltipContent: ({ children }: { children: ReactNode }) => <aside>{children}</aside>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: () => null,
+}));
+// Render the card's inputs next to its trigger so assertions distinguish the
+// visible cell from what the details card receives.
+mock.module("@/components/shared/model-details-card", () => ({
+  ModelDetailsCard: ({
+    children,
+    label,
+    profile,
+  }: {
+    children: ReactNode;
+    label: string;
+    profile?: { name: string };
+  }) => (
+    <>
+      <span data-card={label}>{children}</span>
+      <aside>{profile ? `definition:${profile.name}` : "definition:none"}</aside>
+    </>
+  ),
 }));
 const { TasksTable } = await import("./tasks-table");
 
@@ -63,35 +79,26 @@ function renderModel(task: Partial<AgentTask>) {
   );
 }
 
-function expectProfileOnHover(html: string, profile: string) {
-  const [cell, tooltip] = html.split("<aside>");
-  expect(cell).toContain("Claude Opus 5.5");
-  expect(cell).not.toContain(profile);
-  expect(cell).not.toContain("Model profile:");
-  expect(tooltip).toContain(`Profile: ${profile}`);
-  expect(tooltip?.match(/Profile:/g)).toHaveLength(1);
+function cellOf(html: string): string {
+  return html.split("<aside>")[0] ?? "";
 }
 
 describe("tasks table model cell", () => {
-  test("claimed models show their resolved profile only in the tooltip", () => {
-    expectProfileOnHover(
-      renderModel({
-        resolvedModel: "claude-opus-5-5",
-        resolvedProfile: "claude-opus-5-5-high",
-        resolvedEffort: "high",
-      }),
-      "claude-opus-5-5-high",
-    );
+  test("claimed models show logo, name and effort only; the profile moves to the card", () => {
+    const html = renderModel({
+      id: "t1",
+      resolvedModel: "claude-opus-5-5",
+      resolvedProfile: "claude-opus-5-5-high",
+      resolvedEffort: "high",
+    });
+    const cell = cellOf(html);
+    expect(cell).toContain('data-card="claude-opus-5-5"');
+    expect(cell).toContain("Claude Opus 5.5");
+    expect(cell).toContain("High effort");
+    expect(cell).not.toContain("claude-opus-5-5-high");
   });
 
-  test("models without a claim-time resolution retain their profile on hover", () => {
-    expectProfileOnHover(
-      renderModel({ model: "claude-opus-5-5", profile: "claude-opus-5-5-high", effort: "high" }),
-      "claude-opus-5-5-high",
-    );
-  });
-
-  test("custom profiles keep a logo chip with their original casing and description", () => {
+  test("custom profiles no longer squeeze the name with a chip", () => {
     profiles = [
       {
         name: "Review Team",
@@ -101,27 +108,33 @@ describe("tasks table model cell", () => {
         description: "Code review",
       } as import("../../api/types").ModelProfile,
     ];
-    const html = renderModel({ resolvedModel: "gpt-6.1-sol", resolvedProfile: "Review Team" });
-    const cell = html.split("<aside>")[0];
-    expect(cell).toContain("Review Team");
-    expect(cell).toContain("normal-case");
-    expect(cell).toContain("<svg");
-    expect(cell).toContain("Model profile: Review Team: Code review");
+    const html = renderModel({
+      id: "t2",
+      resolvedModel: "gpt-6.1-sol",
+      resolvedProfile: "Review Team",
+    });
+    expect(cellOf(html)).not.toContain("Review Team");
+    expect(html).toContain("<aside>definition:Review Team</aside>");
     profiles = undefined;
   });
 
-  test("catalog seed metadata wins even for names the heuristic would keep", () => {
-    profiles = [
-      { name: "Old default", seededFrom: "agent-config" } as import("../../api/types").ModelProfile,
-    ];
-    const html = renderModel({ resolvedModel: "claude-opus-5-5", resolvedProfile: "Old default" });
-    expectProfileOnHover(html, "Old default");
-    profiles = undefined;
+  test("unclaimed tasks keep their tier and profile visible", () => {
+    const html = renderModel({ id: "t3", modelTier: "smart", profile: "Custom review" });
+    const cell = cellOf(html);
+    expect(cell).toContain("tier: Smart");
+    expect(cell).toContain("Custom review");
+    expect(cell).toContain('data-card="Custom review"');
   });
 
-  test("profile-only tasks retain their visible fallback chip", () => {
-    const html = renderModel({ profile: "Custom review" });
-    expect(html).toContain('title="Model profile: Custom review"');
-    expect(html).not.toContain("<aside>");
+  test("rows without an id render the label without a card", () => {
+    const html = renderModel({ resolvedModel: "claude-opus-5-5" });
+    expect(html).toContain("Claude Opus 5.5");
+    expect(html).not.toContain("data-card");
+  });
+
+  test("tasks without any model data render a dash", () => {
+    const html = renderModel({ id: "t4" });
+    expect(html).not.toContain("data-card");
+    expect(html).toContain("—");
   });
 });

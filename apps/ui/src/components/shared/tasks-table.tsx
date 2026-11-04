@@ -3,7 +3,6 @@ import {
   Activity,
   Calendar,
   Code2,
-  Cpu,
   FlaskConical,
   FolderOpen,
   GitBranch,
@@ -37,17 +36,15 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useUsers } from "@/api/hooks/use-users";
-import { type AgentTask, isProviderName, type ModelProfile, type User } from "@/api/types";
+import type { AgentTask, ModelProfile, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { ColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
-import { HarnessIcon } from "@/components/shared/harness-icon";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { ModelDetailsCard, type ModelDetailsTask } from "@/components/shared/model-details-card";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
-import { ModelLogo } from "@/components/shared/model-logo";
-import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskHoverCard } from "@/components/shared/task-hover-card";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +53,6 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
 import {
-  describeModelResolution,
-  isSeededTaskProfile,
   taskDisplayEffort,
   taskDisplayModel,
   taskDisplayProfile,
@@ -211,86 +206,40 @@ function ModelCell({
   liveCatalog,
   profilesByName,
 }: {
-  task: Pick<
-    AgentTask,
-    | "model"
-    | "modelTier"
-    | "resolvedModel"
-    | "modelSource"
-    | "modelAlias"
-    | "profile"
-    | "resolvedProfile"
-    | "effort"
-    | "resolvedEffort"
-  >;
+  task: Partial<ModelDetailsTask>;
   liveCatalog?: LiveModelsCatalog;
   profilesByName: Map<string, ModelProfile>;
 }) {
   const shown = taskDisplayModel(task);
   const effort = taskDisplayEffort(task);
   const profile = taskDisplayProfile(task);
-  const definition = profile ? profilesByName.get(profile) : undefined;
-  const prefix = profile?.match(/^(claude|codex|pi|opencode|devin)(?:-|$)/)?.[1];
-  const harness = isProviderName(definition?.harness) ? definition.harness : prefix;
-  const profileChip =
-    profile && !isSeededTaskProfile(task, definition) ? (
-      <Badge
-        variant="outline"
-        size="tag"
-        className="min-w-0 max-w-32 shrink border-status-info/30 text-status-info-strong normal-case"
-        title={`Model profile: ${profile}${definition?.description ? `: ${definition.description}` : ""}`}
-      >
-        {harness ? (
-          <HarnessIcon harness={harness} className="size-3" />
-        ) : definition?.model ? (
-          <ModelLogo model={definition.model} className="size-3" />
-        ) : (
-          <Cpu aria-hidden className="size-3 shrink-0" />
-        )}
-        <span className="truncate">{profile}</span>
-      </Badge>
-    ) : null;
   if (!shown && !task.modelTier && !profile) return DASH;
-  if (!shown) {
-    return (
-      <span className="flex min-w-0 items-center gap-1.5">
-        {task.modelTier ? (
-          <Badge variant="outline" size="tag" className="gap-1">
-            tier: {modelTierLabel(task.modelTier)}
-            <EffortMark effort={effort} />
-          </Badge>
-        ) : null}
-        {profileChip ??
-          (profile ? <span title={`Model profile: ${profile}`}>{profile}</span> : null)}
-      </span>
-    );
-  }
-  const cell = (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
-      <ModelEffortLabel
-        model={shown}
-        effort={effort}
-        catalog={liveCatalog}
-        className="min-w-28 max-w-full shrink-0"
-      />
-      {profileChip}
+  // The cell stays logo + name + effort; the profile, cost and credential live
+  // in the details card so the model name keeps the column's width.
+  const cell = shown ? (
+    <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} className="max-w-full" />
+  ) : (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {task.modelTier ? (
+        <Badge variant="outline" size="tag" className="shrink-0 gap-1">
+          tier: {modelTierLabel(task.modelTier)}
+          <EffortMark effort={effort} />
+        </Badge>
+      ) : null}
+      {profile ? <span className="truncate text-muted-foreground">{profile}</span> : null}
     </span>
   );
-  const lines = [
-    ...describeModelResolution(task),
-    ...(!task.resolvedModel && profile ? [`Profile: ${profile}`] : []),
-    ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),
-  ];
-  if (lines.length === 0) return cell;
+  // Skeleton rows (no id yet) have nothing to look up.
+  if (!task.id) return cell;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{cell}</TooltipTrigger>
-      <TooltipContent side="right" align="start">
-        {lines.map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-      </TooltipContent>
-    </Tooltip>
+    <ModelDetailsCard
+      task={task as ModelDetailsTask}
+      profile={profile ? profilesByName.get(profile) : undefined}
+      catalog={liveCatalog}
+      label={shown ?? profile ?? `${task.modelTier} tier`}
+    >
+      {cell}
+    </ModelDetailsCard>
   );
 }
 
