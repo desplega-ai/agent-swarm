@@ -1266,6 +1266,8 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "SWARM_ORG_NAME",
   "AGENT_FS_LINK_TARGET",
   "APP_URL",
+  // An explicit false keeps prompt file links on the live app (resolveAgentFsLinkBase).
+  "COMB_ENABLED",
   // Gate the public-ranking `ranking.usage` emit, so clearing the website or
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",
@@ -3467,7 +3469,8 @@ function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
 
-export type ChecklistNudge = { itemId: string; kind: string; label: string; href: string };
+/** `href` is absent when the API has no APP_URL: the nudge then carries no link. */
+export type ChecklistNudge = { itemId: string; kind: string; label: string; href?: string };
 
 /** The lead's one-shot setup suggestion, rendered into the task prompt only. */
 export async function buildChecklistNudgePrompt(
@@ -3476,8 +3479,8 @@ export async function buildChecklistNudgePrompt(
   if (!nudge) return "";
   const result = await resolveTemplateAsync("task.checklist.nudge", {
     label: nudge.label,
-    href: nudge.href,
-    kind: nudge.kind,
+    href: nudge.href ?? "",
+    link_clause: nudge.href ? `, with the link ${nudge.href}` : "",
   });
   return result.skipped ? "" : result.text.trim();
 }

@@ -240,7 +240,10 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     ) : null;
     const body =
       tab === NEW_SESSION_TAB ? null : tab === OVERVIEW_TAB && view ? (
+        // A new key per group: the last visit and the Ask the Lead draft
+        // never carry over to the next group.
         <OverviewTab
+          key={view}
           view={view}
           onOpen={(id) => openSession(id, { pane: 0 })}
           onOpenList={() => url.focusGroupPane("list")}

@@ -434,6 +434,8 @@ async function denyFsJoin(userId: string): Promise<string | null> {
     source: "http",
   });
   if (!decision.allow) return decision.reason;
+  // `can()` records the check but allows any user (legacy policy: anyAuthenticated),
+  // and admission skips GETs and the operator key: under RBAC the role grant decides.
   if (!isRbacEnabled()) return null;
   const grant = await getUserGrant(userId);
   return grant.grantsAll || grant.verbs.has("fs.join.own")

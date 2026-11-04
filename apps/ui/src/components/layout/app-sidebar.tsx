@@ -53,6 +53,7 @@ import { unhealthyCredentialCount } from "@/lib/ai-providers";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
+import { needsYouBadgePoll } from "@/lib/needs-you";
 import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
 import { useIsAdmin } from "@/lib/use-can";
@@ -672,7 +673,11 @@ export function AppSidebar() {
   const { data: apiKeys } = useApiKeyStatuses(undefined, { enabled: countsEnabled && isAdmin });
   const { data: codexAccounts } = useCodexAccounts({ enabled: countsEnabled && isAdmin });
   // The Home badge: the Needs-you count of Home (same reads, same caches).
-  const needsYou = useNeedsYou({ enabled: countsEnabled });
+  // Off Home it polls slower, since only the badge reads it there.
+  const needsYou = useNeedsYou({
+    enabled: countsEnabled,
+    refetchInterval: needsYouBadgePoll(location.pathname),
+  });
 
   // Map of `nav path -> resolved badge string`. An entry is present only when
   // the value is loaded and worth showing; absence means "no badge".

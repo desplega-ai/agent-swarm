@@ -1459,7 +1459,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_LINK_TARGET",
         label: "File link target",
         description:
-          "Where agents and task attachments link people for files. Unset: the dashboard when APP_URL is set, else the agent-fs live app. dashboard opens Files at APP_URL (task attachment links also need Files on). live always opens the agent-fs live app.",
+          "Where agents and task attachments link people for files. Unset: the dashboard when APP_URL is set and Files is not turned off, else the agent-fs live app. dashboard opens Files at APP_URL (links also need Files on). live always opens the agent-fs live app.",
         kind: "enum",
         options: ["live", "dashboard"],
         docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,

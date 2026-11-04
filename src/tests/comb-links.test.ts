@@ -208,17 +208,31 @@ describe("AGENT_FS_LINK_TARGET", () => {
   });
 
   test("unset with APP_URL: the dashboard by default", () => {
+    delete process.env.COMB_ENABLED;
     process.env.APP_URL = "http://localhost:5274/";
     expect(readAgentFsLinkTarget()).toBe("dashboard");
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
-    // Attachments still need Comb on.
-    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
-    process.env.COMB_ENABLED = "true";
     expect(resolveAgentFsLinkBase("attachment")).toBe("http://localhost:5274");
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+    // Attachments still need Comb on.
+    delete process.env.AGENT_FS_API_URL;
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+  });
+
+  test("unset with APP_URL and COMB_ENABLED=false: live on both surfaces", () => {
+    process.env.APP_URL = "http://localhost:5274/";
+    expect(readAgentFsLinkTarget()).toBe("live");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    // On a worker (no AGENT_FS_API_URL) the explicit flag still decides.
+    delete process.env.AGENT_FS_API_URL;
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+    delete process.env.COMB_ENABLED;
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });
 
   test("the deprecated DASHBOARD_URL also turns the dashboard default on", () => {
+    delete process.env.COMB_ENABLED;
     process.env.DASHBOARD_URL = "http://localhost:5274";
     expect(readAgentFsLinkTarget()).toBe("dashboard");
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
@@ -241,10 +255,20 @@ describe("AGENT_FS_LINK_TARGET", () => {
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });
 
-  test("dashboard with Comb off: attachments use the live URL, the prompt still uses APP_URL", () => {
+  test("dashboard with Comb explicitly off: the live URL on both surfaces", () => {
     process.env.APP_URL = "http://localhost:5274";
     process.env.AGENT_FS_LINK_TARGET = "dashboard";
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+  });
+
+  test("dashboard with Comb off for lack of agent-fs: the prompt still uses APP_URL", () => {
+    // A worker never has AGENT_FS_API_URL, so only an explicit false counts.
+    delete process.env.COMB_ENABLED;
+    delete process.env.AGENT_FS_API_URL;
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
     expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });

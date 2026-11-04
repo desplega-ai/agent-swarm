@@ -23,6 +23,7 @@ import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
 import { useNeedsYou } from "@/hooks/use-needs-you";
 import { quorumLabel } from "@/lib/approval-format";
 import { failuresNotListed, type NeedsYouItems } from "@/lib/needs-you";
@@ -45,6 +46,7 @@ export function NeedsYou({ className }: { className?: string }) {
   const { data: agents } = useAgents();
   const { userId } = useCurrentUser();
   const labels = useSessionLabels();
+  const now = useMinuteClock();
 
   const agentName = useMemo(() => {
     const names = new Map((agents ?? []).map((a) => [a.id, a.name]));
@@ -62,7 +64,7 @@ export function NeedsYou({ className }: { className?: string }) {
       failed={failed}
       agentName={agentName}
       groupName={(key) => groupLabel(key, userId ?? null, labels) || "No group"}
-      now={Date.now()}
+      now={now}
     />
   );
 }

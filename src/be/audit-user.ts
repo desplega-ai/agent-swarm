@@ -6,7 +6,7 @@ import { getAgentCurrentTask, getTaskById } from "./db";
 import { findUserByExternalId } from "./users";
 
 /** Resolve a source task only when the calling agent owns it. */
-async function resolveCallerTask(
+export async function resolveCallerTask(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
 ) {

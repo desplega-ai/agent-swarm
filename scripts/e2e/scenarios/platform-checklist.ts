@@ -151,8 +151,9 @@ export const platformChecklist: Scenario = {
       expect(
         nudge.kind === "use_case" &&
           typeof nudge.label === "string" &&
-          typeof nudge.href === "string",
-        "Nudge contains the worker prompt fields",
+          (nudge.href === undefined ||
+            (typeof nudge.href === "string" && /^https?:\/\//.test(nudge.href))),
+        "Nudge contains the worker prompt fields and never a relative link",
       );
       response = await ctx.api("GET", "/api/checklist", { headers });
       expectStatus(response, [200], "read nudged checklist");

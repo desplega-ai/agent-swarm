@@ -161,13 +161,26 @@ describe("buildTaskSessionPrompts", () => {
 
     expect(nudge).toContain("## Setup suggestion");
     expect(nudge).toContain("Open item: Connect a chat channel.");
-    expect(nudge).toContain("https://swarm.example.com/integrations/channels");
+    expect(nudge).toContain(
+      "at the end of your reply, with the link https://swarm.example.com/integrations/channels.",
+    );
     expect(withNudge.systemPrompt).toBe(withoutNudge.systemPrompt);
     expect(withNudge.systemPrompt).not.toContain("has not finished setting up");
     expect(withNudge.prompt.split("has not finished setting up").length - 1).toBe(1);
     expect(withoutNudge.prompt).not.toContain("has not finished setting up");
     // The static pointer for missing tools lives in the lead contract instead.
     expect(withNudge.systemPrompt).toContain("/integrations/tools");
+  });
+
+  test("a nudge with no link reads as a plain offer", async () => {
+    const nudge = await buildChecklistNudgePrompt({
+      itemId: "swarm:channel",
+      kind: "channel",
+      label: "Connect a chat channel",
+    });
+    expect(nudge).toContain("offer it once, at the end of your reply. If it does not fit");
+    expect(nudge).not.toContain("with the link");
+    expect(nudge).not.toContain("{{");
   });
 
   test("no nudge renders nothing", async () => {

@@ -114,24 +114,28 @@ export type AgentFsLinkTarget = "dashboard" | "live";
 /**
  * Where people-facing file links point. An explicit `AGENT_FS_LINK_TARGET`
  * (trimmed, lowercased) wins. Unset, blank, or invalid: `dashboard` when an
- * `APP_URL` / `DASHBOARD_URL` is configured (not the hosted fallback), else `live`.
+ * `APP_URL` / `DASHBOARD_URL` is configured (not the hosted fallback) and
+ * Comb is not explicitly off (`COMB_ENABLED=false`), else `live`.
  */
 export function readAgentFsLinkTarget(): AgentFsLinkTarget {
   const raw = process.env.AGENT_FS_LINK_TARGET?.trim().toLowerCase();
   if (raw === "dashboard" || raw === "live") return raw;
-  return getConfiguredAppUrls().length > 0 ? "dashboard" : "live";
+  return getConfiguredAppUrls().length > 0 && !isCombExplicitlyOff() ? "dashboard" : "live";
 }
 
 /**
  * The base URL (no trailing slash) that a people-facing file link starts with,
  * per {@link readAgentFsLinkTarget}. `dashboard` uses `APP_URL` when one is
- * configured (and, for attachments, Comb is on), else the live app.
+ * configured and Comb is on, else the live app.
  *
- * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`.
+ * The prompt surface checks only an explicit `COMB_ENABLED=false`: a worker
+ * sees `COMB_ENABLED` only from a swarm_config row (RELOADABLE_ENV_KEYS in
+ * runner.ts) and may lack the API's agent-fs settings, so `isCombEnabled()`
+ * does not hold there.
  */
 export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string {
   if (readAgentFsLinkTarget() === "dashboard" && getConfiguredAppUrls().length > 0) {
-    if (surface === "prompt" || isCombEnabled()) return getAppUrl();
+    if (surface === "prompt" ? !isCombExplicitlyOff() : isCombEnabled()) return getAppUrl();
   }
   return getAgentFsLiveUrl();
 }
@@ -235,14 +239,23 @@ export interface CombState {
  */
 export function getCombState(): CombState {
   const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
-  const raw = process.env.COMB_ENABLED;
-  // The two parses agree only when the value is a recognized flag literal.
-  const explicit = parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
-  if (explicit && !isEnvFlagEnabled("COMB_ENABLED", false)) {
+  const explicit = isCombFlagExplicit();
+  if (isCombExplicitlyOff()) {
     return { enabled: false, explicit, reason: "COMB_ENABLED is false." };
   }
   if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
   return { enabled: true, explicit, reason: null };
+}
+
+/** `COMB_ENABLED` holds a recognized flag literal (the two parses agree only then). */
+function isCombFlagExplicit(): boolean {
+  const raw = process.env.COMB_ENABLED;
+  return parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
+}
+
+/** `COMB_ENABLED` is an explicit false. Also readable on a worker, unlike {@link isCombEnabled}. */
+export function isCombExplicitlyOff(): boolean {
+  return isCombFlagExplicit() && !isEnvFlagEnabled("COMB_ENABLED", false);
 }
 
 /**

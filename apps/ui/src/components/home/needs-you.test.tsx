@@ -30,6 +30,7 @@ mock.module("@/api/hooks/use-session-tree", () => ({
 mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({}) }));
 mock.module("@/contexts/current-user-context", () => ({ useCurrentUser: () => ({}) }));
 mock.module("@/hooks/use-needs-you", () => ({ useNeedsYou: () => ({}) }));
+mock.module("@/hooks/use-minute-clock", () => ({ useMinuteClock: () => 0 }));
 
 const { NeedsYouView } = await import("./needs-you");
 const { needsYouCount, needsYouItems } = await import("../../lib/needs-you");

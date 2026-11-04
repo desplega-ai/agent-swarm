@@ -28,14 +28,17 @@ function isUnreadFailure(session: SessionListItem): boolean {
  * root is an approval's source task, and when only an approval explains its
  * `needsYou` (the approval can come from a child task of the chain). While
  * approvals are unknown (loading or failed), every session stays, so nothing
- * that needs the viewer disappears.
+ * that needs the viewer disappears. An approval the viewer cannot answer
+ * (`viewerCanRespond: false`, the respond route would refuse) is not listed.
  */
 export function needsYouItems(input: {
   approvals: ApprovalRequestSummary[] | undefined;
   sessions: SessionListItem[] | undefined;
   credentials: CredentialMissingAgent[] | undefined;
 }): NeedsYouItems {
-  const approvals = input.approvals ?? [];
+  const approvals = (input.approvals ?? []).filter(
+    (approval) => approval.viewerCanRespond !== false,
+  );
   const sources = new Set(approvals.map((approval) => approval.sourceTaskId).filter(Boolean));
   const sessions = (input.sessions ?? []).filter((session) => {
     if (session.needsYou === false) return false;
@@ -44,6 +47,14 @@ export function needsYouItems(input: {
     return isUnreadFailure(session);
   });
   return { approvals, sessions, credentials: input.credentials ?? [] };
+}
+
+/** How often the sidebar Home badge polls off Home. On Home it follows the widget's reads. */
+export const NEEDS_YOU_BADGE_POLL_MS = 30_000;
+
+/** The badge's poll for `pathname`: undefined keeps each read's own poll (Home). */
+export function needsYouBadgePoll(pathname: string): number | undefined {
+  return pathname === "/" ? undefined : NEEDS_YOU_BADGE_POLL_MS;
 }
 
 /** The Needs-you count: the sidebar Home badge and the widget's pill. */

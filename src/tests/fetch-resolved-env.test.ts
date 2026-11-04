@@ -874,7 +874,7 @@ describe("deleting a reloadable config row", () => {
 });
 
 describe("a global APP_URL row reaches the worker prompt", () => {
-  const keys = ["APP_URL", "AGENT_FS_API_URL"] as const;
+  const keys = ["APP_URL", "AGENT_FS_API_URL", "COMB_ENABLED", "AGENT_FS_LIVE_URL"] as const;
   const saved = new Map(keys.map((key) => [key, process.env[key]]));
   afterEach(() => {
     for (const [key, value] of saved) {
@@ -908,5 +908,34 @@ describe("a global APP_URL row reaches the worker prompt", () => {
     const cleared = await fetchResolvedEnv(testUrl, "key", agentId);
     applyResolvedEnvToProcessEnv(cleared.env);
     expect(process.env.APP_URL).toBeUndefined();
+  });
+
+  test("a COMB_ENABLED=false row keeps the prompt file links on the live app", async () => {
+    expect(RELOADABLE_ENV_KEYS.has("COMB_ENABLED")).toBe(true);
+    delete process.env.APP_URL;
+    delete process.env.COMB_ENABLED;
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_LIVE_URL = "https://live.example.test";
+    const agentId = "comb-off-row";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "APP_URL", value: "https://app.example.test" },
+          { key: "COMB_ENABLED", value: "false" },
+        ],
+      },
+    });
+    applyResolvedEnvToProcessEnv((await fetchResolvedEnv(testUrl, "key", agentId)).env);
+    expect(process.env.COMB_ENABLED).toBe("false");
+    const prompt = await getBasePrompt({
+      role: "worker",
+      agentId: "11111111-2222-3333-4444-555555555555",
+      traits: { hasMcp: true, hasLocalEnvironment: true },
+    });
+    expect(prompt).toContain("`https://live.example.test/file/~/<org>/<drive>/<path>`");
+    expect(prompt).not.toContain("https://app.example.test/file/~/");
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+    applyResolvedEnvToProcessEnv((await fetchResolvedEnv(testUrl, "key", agentId)).env);
   });
 });
