@@ -172,8 +172,16 @@ export interface AgentAvatarLucide {
 }
 export type AgentAvatar = AgentAvatarLucide;
 
-/** Apps reuse the agent avatar shape for their dashboard icon. */
-export type AppIcon = AgentAvatar;
+/** Mirrors `MediaIconSchema` (backend `src/types.ts`): a lucide glyph, an https
+ * image link, or an image file in agent-fs. With neither `orgId` nor `driveId`,
+ * an agent-fs icon lives on the swarm drive. */
+export type MediaIcon =
+  | AgentAvatarLucide
+  | { type: "url"; url: string }
+  | { type: "agent-fs"; path: string; orgId?: string; driveId?: string };
+
+/** Mirrors `AppIconSchema`: an app's dashboard icon. */
+export type AppIcon = MediaIcon;
 
 /** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
 export type AgentSlackIcon =
