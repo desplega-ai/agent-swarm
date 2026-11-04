@@ -347,6 +347,7 @@ describe("scripts DB & runSavedScriptAsAgent executor persistence (#2013)", () =
     const wfExecutor = new SwarmScriptExecutor({
       db: {
         getWorkflow: async () => null,
+        getRunWorkflow: async () => null,
       } as never,
       eventBus: { emit: () => {} } as never,
     });

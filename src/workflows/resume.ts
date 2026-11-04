@@ -7,9 +7,9 @@ import {
   getDbClient,
   getPendingEventWaitNames,
   getPendingWaitsByEvent,
+  getRunWorkflow,
   getTaskByWorkflowRunStepId,
   getWaitStateById,
-  getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
@@ -261,7 +261,7 @@ async function resumeFromTaskCompletionUnguarded(
   if (!step || step.status !== "waiting") return;
   if (await isStaleTaskEvent(step.id, event)) return;
 
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
   // Checkpoint: atomic step completion + context update
@@ -379,7 +379,7 @@ async function handleTaskFailureUnguarded(
   if (!step || step.status !== "waiting") return;
   if (await isStaleTaskEvent(step.id, event)) return;
 
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
   if (options.retryable) {
@@ -460,7 +460,7 @@ async function recordLateForeachOutcome(
   const step = await getWorkflowRunStep(stepId);
   if (!step || step.status !== "waiting") return;
   if (await isStaleTaskEvent(step.id, event)) return;
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow || !resolveForeachParent(workflow.definition, step.nodeId)) return;
   await settleForeachChild(
     workflow.definition,
@@ -513,7 +513,7 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const run = await getWorkflowRun(runId);
   if (!run || run.status !== "failed") throw new Error("Run is not in failed state");
 
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow) throw new Error("Workflow not found");
 
   // Find the failed step. Only the latest row per node id counts: a foreach
@@ -906,7 +906,7 @@ async function resumeFromApprovalResolutionUnguarded(
   const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
 
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
   if (event.status === "cancelled") {
@@ -1039,7 +1039,7 @@ async function resumeClaimedWait(
   const step = await getWorkflowRunStep(waitRow.workflowRunStepId);
   if (!step || step.status !== "waiting") return;
 
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
   // 3. Pick the output port.
@@ -1054,7 +1054,7 @@ async function resumeClaimedWait(
     payload: cappedPayload === undefined ? undefined : cappedPayload,
   };
 
-  // The `waiting` checks above ran before getWorkflow's await. The wait-state
+  // The `waiting` checks above ran before getRunWorkflow's await. The wait-state
   // claim only arbitrates two resumeWaitState callers, not a user cancel
   // landing in that window (cancelWorkflowRun never touches wait_states), so
   // the authoritative claim is the in-transaction re-read of the step.
@@ -1112,7 +1112,7 @@ export async function resumeFromChildRun(
   await failClosedOnUnreadableReplay(step.runId, step.id, async () => {
     const run = await getWorkflowRun(step.runId);
     if (!run || (run.status !== "waiting" && run.status !== "running")) return;
-    const workflow = await getWorkflow(run.workflowId);
+    const workflow = await getRunWorkflow(run);
     if (!workflow) return;
 
     const ctx = (run.context ?? {}) as Record<string, unknown>;

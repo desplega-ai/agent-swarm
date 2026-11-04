@@ -233,6 +233,11 @@ import {
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import {
+  deleteOrphanedRunDefinitions,
+  getPinnedRunDefinition,
+  mergePinnedDefinition,
+} from "./db/workflow-run-definitions";
+import {
   emitChildRunFinished,
   emitRunFinished,
   getRunLineageBlock,
@@ -327,6 +332,12 @@ export {
   assertAssetKeyMovesAllowed,
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
+export {
+  PINNED_WORKFLOW_KEYS,
+  type PinnedWorkflowDefinition,
+  pinWorkflowDefinition,
+  toPinnedDefinition,
+} from "./db/workflow-run-definitions";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -7738,6 +7749,23 @@ export async function getWorkflow(id: string): Promise<Workflow | null> {
 }
 
 /**
+ * The workflow a run executes: the definition it started with (migration 282)
+ * on top of the live row. Live fields (`enabled`, `key`, `createdByAgentId`,
+ * row metadata) come from the row. A run with no pin (created before 282, or
+ * a preflight failure) gets the live row unchanged. Null when the workflow is
+ * gone. Use this, not `getWorkflow`, for every read made on behalf of a run.
+ */
+export async function getRunWorkflow(run: {
+  id: string;
+  workflowId: string;
+}): Promise<Workflow | null> {
+  const live = await getWorkflow(run.workflowId);
+  if (!live) return null;
+  const pinned = await getPinnedRunDefinition(run.id);
+  return pinned ? mergePinnedDefinition(live, pinned) : live;
+}
+
+/**
  * Slim list-row mapper — drops the heavy `definition` (avg ~18 KB/row) and the
  * trigger config, keeping a derived `nodeCount` so the list view can still
  * answer "how big is this workflow" without the full DAG. Fetch the full shape
@@ -7956,6 +7984,7 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   );
   // 3. Delete runs (they reference workflow)
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await deleteOrphanedRunDefinitions();
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
@@ -8008,10 +8037,12 @@ export async function createWorkflowRun(data: {
   parentStepAttempt?: number;
   /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
   triggeredByAgentId?: string;
+  /** The `workflow_run_definitions` row the run is pinned to (migration 282). */
+  definitionHash?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -8022,6 +8053,7 @@ export async function createWorkflowRun(data: {
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
       data.triggeredByAgentId ?? null,
+      data.definitionHash ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");

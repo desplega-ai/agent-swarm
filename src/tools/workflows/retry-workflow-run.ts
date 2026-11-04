@@ -11,7 +11,7 @@ export const registerRetryWorkflowRunTool = (server: McpServer) => {
       title: "Retry Workflow Run",
       annotations: { destructiveHint: false },
       description:
-        "Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually.",
+        "Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually. Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
       inputSchema: z.object({
         runId: z.string().uuid().describe("Workflow run ID to retry"),
       }),
