@@ -24,6 +24,18 @@ The task's `vcsProvider` field or the remote URL tells you the provider.
 5. One logical change per PR. Conventional commit titles when the repo uses them.
 6. Review-fix round: fix the failure class, not the reported instance. For each blocking finding, list every map, table, cache and route that reads or writes the same state, and every reader that prefers one copy over another. Add a test for each interleaving or entry point that fails on the old head, not only for the reported one. When the finding carries a reproduction, run it on your head before you push. When `pr-review-fix-loop` is installed, load it for the round.
 
+## Write the PR body
+
+`gh pr create --body`, `--fill` and `wts pr` skip the repo's PR template. GitHub pre-fills it only in the web UI. Every PR or MR you open or rewrite follows these steps:
+
+1. Find the template. Look in the target repo for `.github/pull_request_template.md`, then `pull_request_template.md` and `docs/pull_request_template.md`. When none exists, use the org default: `gh api repos/<owner>/.github/contents/pull_request_template.md -H 'Accept: application/vnd.github.raw'`. On GitLab, use `.gitlab/merge_request_templates/Default.md`.
+2. Fill every lead line (such as `**Why:**`) and every required section. Keep the template's headings. Guidance lives in its HTML comments. Copy the urgency from the request; when the request gives none, pick "nice to have".
+3. Write the body to a file. When the repo ships a checker, run it on that file, for example `bun scripts/check-pr-body.ts --title "<title>" --body-file <file> --author <login>`. Fix every problem it reports.
+4. Open the PR with `gh pr create --title "<title>" --body-file <file>`. Rewrite a body with `gh pr edit <n> --body-file <file>`; no push is needed. Never use `--body` or `--fill`.
+5. On a public repo, keep internal identifiers out of the title, commits and body: task or run ids, chat ids, timestamps and links, internal URLs. The template's provenance section (such as `## Swarm provenance`) is the one place for task and workflow-run links. Customer names stay out everywhere.
+
+A workflow or task brief that opens a PR names this section instead of restating it.
+
 ## After you open a PR
 
 1. Wait about 30 seconds, then read CI: `gh pr checks <number>` or `glab mr view --json pipelines`.

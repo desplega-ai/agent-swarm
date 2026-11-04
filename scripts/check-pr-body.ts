@@ -33,7 +33,8 @@
  *   PR_TITLE="..." PR_BODY="..." PR_AUTHOR="..." bun scripts/check-pr-body.ts
  * Optional: `--changed-files-file <file>` / PR_CHANGED_FILES_FILE (one path per
  * line; a local run without it uses `git diff` against origin/main) and
- * `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions).
+ * `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions), and
+ * PR_TEMPLATE_PATH (the template to check against; default below).
  *
  * CI: `.github/workflows/pr-body.yml` passes the env above. On success, each
  * picked choice and the risk level are written to GITHUB_OUTPUT (for example
@@ -48,7 +49,9 @@ import {
   stripFencedCode,
 } from "../src/utils/pr-body-leaks";
 
-const TEMPLATE_PATH = ".github/pull_request_template.md";
+// PR_TEMPLATE_PATH lets the org-wide check (desplega-ai/.github) point at the
+// caller repo's template or the org default. Unset: this repo's template.
+const TEMPLATE_PATH = process.env.PR_TEMPLATE_PATH || ".github/pull_request_template.md";
 
 export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export type Risk = (typeof RISK_LEVELS)[number];

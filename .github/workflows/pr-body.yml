@@ -156,3 +156,26 @@ jobs:
               echo "Posted the asap comment."
             fi
           fi
+
+  sync-gate:
+    name: Sync Merge Gate
+    needs: pr-body
+    # Merge Gate embeds the PR Body result but does not run on a description
+    # edit. Re-run its gate job when the two disagree. Pushes and reopens start
+    # Merge Gate anyway. Fork PRs get a read-only token: re-run by hand there.
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      contains(fromJSON('["edited", "labeled", "unlabeled"]'), github.event.action) &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+
+    steps:
+      - name: Re-run Merge Gate's gate job when it disagrees with the PR body
+        uses: desplega-ai/.github/actions/rerun-gate@aa9436df8f0ef570f033e78dc68d1ef052add22c
+        with:
+          workflow: merge-gate.yml
+          job: Merge Gate
+          body-result: ${{ needs.pr-body.result }}

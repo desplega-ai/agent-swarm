@@ -98,6 +98,8 @@ wts pr --draft
 wts pr --web
 ```
 
+`wts pr` cannot read a body file, so its body skips the repo's PR template. In an agent run, open the PR with `gh pr create --body-file <file>` as the `code-quality` skill's "Write the PR body" section describes.
+
 ### Cleaning Up
 
 ```bash
