@@ -1,0 +1,213 @@
+import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { openAICompatibleProviders } from "@desplega/model-catalog";
+import type { ApiKeyStatus, PoolKey, UsageSummaryByCredentialRow } from "../api/types";
+import {
+  AI_PROVIDERS,
+  buildProviderRows,
+  healthLabel,
+  isUnhealthyKey,
+  LIST_POOL_VARS,
+  matchAiProviders,
+  rollUpHealth,
+} from "./ai-providers";
+
+/**
+ * The API's `CREDENTIAL_POOL_VARS` (`src/utils/credentials.ts`): the static
+ * names in the array literal, plus the canonical key var of every
+ * OpenAI-compatible registry provider (the spread). The dashboard never
+ * imports `src/`, so the test reads the file.
+ */
+async function apiPoolVars(): Promise<string[]> {
+  const path = join(import.meta.dir, "../../../../src/utils/credentials.ts");
+  const source = await Bun.file(path).text();
+  const block = source.match(/export const CREDENTIAL_POOL_VARS = \[([\s\S]*?)\] as const;/);
+  if (!block?.[1]) throw new Error("CREDENTIAL_POOL_VARS not found in src/utils/credentials.ts");
+  const literals = [...block[1].matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1] as string);
+  expect(block[1]).toContain("openAICompatibleProviders()");
+  return [...literals, ...openAICompatibleProviders().map((p) => p.envVar)];
+}
+
+describe("AI provider registry", () => {
+  test("every API credential pool var maps to a provider", async () => {
+    const vars = await apiPoolVars();
+    expect(vars.length).toBeGreaterThan(10);
+    const claimed = new Set(AI_PROVIDERS.flatMap((p) => (p.poolVar ? [p.poolVar] : [])));
+    const unclaimed = vars.filter((v) => !claimed.has(v));
+    expect(unclaimed).toEqual([]);
+  });
+
+  test("every provider pool var is an API pool var", async () => {
+    const vars = new Set(await apiPoolVars());
+    for (const p of AI_PROVIDERS) {
+      if (p.poolVar) expect(vars.has(p.poolVar)).toBe(true);
+      for (const field of p.fields) {
+        if (field.kind === "pool") expect(vars.has(field.key)).toBe(true);
+      }
+    }
+  });
+
+  test("ids are unique, and every provider can be set up", () => {
+    const ids = AI_PROVIDERS.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBe(16);
+    for (const p of AI_PROVIDERS) {
+      expect(p.steps.length).toBeGreaterThan(0);
+      // Codex signs in through the device flow; every other provider has a field.
+      if (p.id !== "codex") expect(p.fields.length).toBeGreaterThan(0);
+      expect(Boolean(p.poolVar) || Boolean(p.configuredBy?.length)).toBe(true);
+    }
+  });
+
+  test("the list reads every pool var once and never the Codex accounts", () => {
+    expect(LIST_POOL_VARS).not.toContain("CODEX_OAUTH");
+    expect(new Set(LIST_POOL_VARS).size).toBe(LIST_POOL_VARS.length);
+  });
+
+  test("search matches name, type and harness", () => {
+    expect(matchAiProviders(AI_PROVIDERS, "router").map((p) => p.id)).toEqual(["openrouter"]);
+    expect(matchAiProviders(AI_PROVIDERS, "dsh").map((p) => p.id)).toEqual([
+      "deepseek",
+      "openrouter",
+    ]);
+    expect(matchAiProviders(AI_PROVIDERS, "").length).toBe(AI_PROVIDERS.length);
+  });
+});
+
+function poolKey(index: number, suffix: string, extra: Partial<PoolKey> = {}): PoolKey {
+  return {
+    index,
+    suffix,
+    status: "ok",
+    error: null,
+    checkedAt: null,
+    rateLimitedUntil: null,
+    ...extra,
+  };
+}
+
+function status(keyType: string, keySuffix: string, extra: Partial<ApiKeyStatus> = {}) {
+  return {
+    id: `${keyType}-${keySuffix}`,
+    keyType,
+    keySuffix,
+    keyIndex: 0,
+    scope: "global",
+    scopeId: "",
+    status: "available",
+    rateLimitedUntil: null,
+    lastUsedAt: null,
+    lastRateLimitAt: null,
+    totalUsageCount: 0,
+    rateLimitCount: 0,
+    provider: "claude",
+    name: null,
+    plan: null,
+    planSource: null,
+    rateLimitWindows: {},
+    modelLimits: [],
+    createdAt: "",
+    updatedAt: "",
+    ...extra,
+  } as ApiKeyStatus;
+}
+
+function usage(keyType: string, keySuffix: string, costUsd: number) {
+  return { keyType, keySuffix, costUsd } as UsageSummaryByCredentialRow;
+}
+
+describe("status roll-up", () => {
+  test("worst state wins", () => {
+    expect(rollUpHealth([{ health: "ok" }, { health: "unchecked" }])).toBe("unchecked");
+    expect(rollUpHealth([{ health: "ok" }, { health: "limited" }])).toBe("limited");
+    expect(rollUpHealth([{ health: "limited" }, { health: "failing" }])).toBe("failing");
+    expect(rollUpHealth([])).toBe("ok");
+  });
+
+  test("the sidebar rule: rate limited or rejected", () => {
+    expect(isUnhealthyKey(status("X", "a"))).toBe(false);
+    expect(isUnhealthyKey(status("X", "a", { status: "rate_limited" }))).toBe(true);
+    expect(isUnhealthyKey(status("X", "a", { lastValidationFailedAt: "2026-11-04" }))).toBe(true);
+  });
+
+  test("rows join pools, statuses and usage, and skip providers with no keys", () => {
+    const rows = buildProviderRows({
+      pools: {
+        CLAUDE_CODE_OAUTH_TOKEN: {
+          readOnly: false,
+          keys: [
+            poolKey(0, "a91f2"),
+            poolKey(1, "77c2a", {
+              status: "rate_limited",
+              rateLimitedUntil: "2026-11-04T14:20:00Z",
+            }),
+          ],
+        },
+        DEEPSEEK_API_KEY: {
+          readOnly: false,
+          keys: [poolKey(0, "4f1cc", { status: "rejected", error: "HTTP 401" })],
+        },
+        OPENROUTER_API_KEY: { readOnly: true, keys: [] },
+      },
+      codexAccounts: [
+        {
+          slot: 0,
+          configKey: "codex_oauth_0",
+          legacy: false,
+          suffix: "zz123",
+          plan: "pro",
+          email: "taras@acme.dev",
+          status: "ok",
+        },
+      ],
+      statuses: [
+        status("CLAUDE_CODE_OAUTH_TOKEN", "a91f2", {
+          name: "team-max",
+          rateLimitWindows: {
+            five_hour: { status: "allowed", utilization: 0.62, lastSeenAt: "" },
+            seven_day: { status: "allowed", utilization: 0.41, lastSeenAt: "" },
+          },
+        }),
+      ],
+      usageToday: [usage("CLAUDE_CODE_OAUTH_TOKEN", "a91f2", 18.4)],
+      usage7d: [
+        usage("CLAUDE_CODE_OAUTH_TOKEN", "a91f2", 212.9),
+        usage("CLAUDE_CODE_OAUTH_TOKEN", "77c2a", 96.2),
+      ],
+    });
+
+    expect(rows.map((r) => r.provider.id)).toEqual(["claude", "codex", "deepseek"]);
+    const [claude, codex, deepseek] = rows;
+    expect(claude?.health).toBe("limited");
+    expect(healthLabel(claude!)).toBe("1 rate limited");
+    expect(claude?.reason).toMatch(/^Key ending 77c2a is back at /);
+    expect(claude?.keys[0]).toMatchObject({ label: "team-max", window5h: 62, window7d: 41 });
+    expect(claude?.costToday).toBeCloseTo(18.4);
+    expect(claude?.cost7d).toBeCloseTo(309.1);
+    expect(codex).toMatchObject({ health: "ok", keys: [{ label: "taras@acme.dev" }] });
+    expect(healthLabel(deepseek!)).toBe("Failing");
+    expect(deepseek?.reason).toBe("Key ending 4f1cc: HTTP 401");
+  });
+
+  test("a ChatGPT account that needs a new sign-in fails its provider", () => {
+    const [codex] = buildProviderRows({
+      pools: {},
+      codexAccounts: [
+        {
+          slot: 1,
+          configKey: "codex_oauth_1",
+          legacy: false,
+          suffix: null,
+          plan: null,
+          email: null,
+          status: "needs_login",
+        },
+      ],
+      statuses: [],
+      usageToday: [],
+      usage7d: [],
+    });
+    expect(codex?.health).toBe("failing");
+    expect(codex?.reason).toBe("Account in slot 1: sign in again");
+  });
+});
