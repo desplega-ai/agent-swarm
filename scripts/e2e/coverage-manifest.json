@@ -516,6 +516,10 @@
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
+    },
+    "post-onboarding-checklist": {
+      "description": "Checklist defaults, member ownership, admin status changes and custom completion",
+      "scenarios": ["platform-checklist"]
     }
   }
 }

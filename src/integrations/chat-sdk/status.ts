@@ -92,6 +92,20 @@ function readRawAdapters(): Partial<Record<ChatSdkAdapterName, Record<string, un
   }
 }
 
+/**
+ * Adapters that are configured, turned on and healthy, with the same rule as
+ * `getChatSdkStatus`. Reads local state only (no Discord guild lookup), so it
+ * is safe on a hot path or inside a transaction.
+ */
+export function healthyChatSdkAdapters(): ChatSdkAdapterName[] {
+  const raw = readRawAdapters();
+  const health = getChatSdkHealth();
+  return CHAT_SDK_ADAPTER_NAMES.filter(
+    (name) =>
+      raw[name] !== undefined && isAdapterEntryEnabled(raw[name]) && health[name]?.status === "ok",
+  );
+}
+
 export function chatSdkWebhookUrl(name: ChatSdkAdapterName): string {
   return `${getPublicMcpBaseUrl()}/api/integrations/chat/${name}/webhook`;
 }

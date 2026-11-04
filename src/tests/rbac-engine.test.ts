@@ -141,6 +141,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "mcp-oauth.authorize.any",
   "task.create.own",
   "favorite.write.own",
+  "checklist.write.own",
   "fs.join.own",
   "script.search",
   "improvement.submit",

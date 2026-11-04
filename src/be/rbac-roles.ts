@@ -38,6 +38,7 @@ export const BUILTIN_ROLES = [
       "task.action.own",
       "task.fs.mutate",
       "favorite.write.own",
+      "checklist.write.own",
       "session.share",
       "session.presence",
       "task.steer.own",
@@ -51,7 +52,13 @@ export const BUILTIN_ROLES = [
     description: "Read-only: no task, approval or script writes.",
     isBuiltin: true,
     grantsAll: false,
-    verbs: ["favorite.write.own", "session.presence", "comb.presence", "fs.join.own"],
+    verbs: [
+      "checklist.write.own",
+      "favorite.write.own",
+      "session.presence",
+      "comb.presence",
+      "fs.join.own",
+    ],
   },
   {
     // An extra role, never a primary one and never assigned by default. It is

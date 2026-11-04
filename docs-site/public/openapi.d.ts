@@ -7808,6 +7808,191 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the post-onboarding checklist */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Checklist items and swarm edit permission */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["ChecklistItem"][];
+                            canEditSwarm: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a checklist item */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        kind: "channel" | "tool" | "use_case" | "custom";
+                        label: string;
+                        href?: string;
+                        /** @enum {string} */
+                        scope: "swarm" | "user";
+                        meta?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Added checklist item */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description A user is required for user items */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit swarm items */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a checklist item */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "remove" | "restore" | "done" | "reorder";
+                        reason?: string;
+                        sortOrder?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated checklist item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description Invalid update */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit this item */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Checklist item not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/fs/me": {
         parameters: {
             query?: never;
@@ -29325,6 +29510,33 @@ export interface components {
             lastUpdatedAt: string;
             createdBy?: string;
             updatedBy?: string;
+        };
+        ChecklistItem: {
+            id: string;
+            /** @enum {string} */
+            scope: "swarm" | "user";
+            userId: string | null;
+            /** @enum {string} */
+            kind: "channel" | "tool" | "use_case" | "custom";
+            label: string;
+            href: string | null;
+            meta: {
+                [key: string]: unknown;
+            } | null;
+            sortOrder: number;
+            /** @enum {string} */
+            status: "open" | "done" | "removed";
+            statusChangedAt: string | null;
+            statusChangedBy: string | null;
+            statusChangedByName: string | null;
+            statusReason: string | null;
+            nudgedAt: string | null;
+            nudgedTaskId: string | null;
+            signal: boolean | null;
+            done: boolean;
+            editable: boolean;
+            createdAt: string;
+            lastUpdatedAt: string;
         };
         TaskAttachment: {
             /** Format: uuid */

@@ -121,6 +121,10 @@ export const PERMISSIONS = {
       "Opt in to read every user's tasks and sessions (the dashboard's All users scope). Read-only: writes and steering still need the principal's own access.",
     namespace: "task",
   },
+  "checklist.write.own": {
+    description: "Edit checklist items the caller owns.",
+    namespace: "checklist",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",
