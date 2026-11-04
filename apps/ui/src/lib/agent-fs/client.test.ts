@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { AgentFsClient, AgentFsError, isAgentFsAuthError, swarmProxyCredential } from "./client";
+import { AgentFsClient, AgentFsError, isAgentFsAuthError } from "./client";
 
 const KEY = "af_secret_0123456789abcdefghij";
 const realFetch = globalThis.fetch;
@@ -88,53 +88,6 @@ describe("AgentFsClient", () => {
     expect(offline.status).toBe(0);
     expect(offline.code).toBe("NETWORK");
     expect(offline.message).not.toContain(KEY);
-  });
-
-  test("register surfaces a taken email as a 409 CONFLICT", async () => {
-    const calls = mockFetch(() =>
-      jsonResponse(409, { error: "CONFLICT", message: "User with this email already exists" }),
-    );
-    const err = await caught(
-      AgentFsClient.register({ endpoint: "http://fs.test", email: "human@example.com" }),
-    );
-    expect(err.status).toBe(409);
-    expect(err.code).toBe("CONFLICT");
-    expect(calls[0]?.url).toBe("http://fs.test/auth/register");
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBeUndefined();
-  });
-
-  test("register through the swarm proxy sends the swarm key, scrubbed from errors", async () => {
-    const swarmKey = "swarm-key-0123456789"; // gitleaks:allow (test fixture, not a real key)
-    const calls = mockFetch(() =>
-      jsonResponse(403, { error: "FORBIDDEN", message: `bad ${swarmKey}` }),
-    );
-    const err = await caught(
-      AgentFsClient.register({ endpoint: "http://api.test/agentfs", email: "me@x.test", swarmKey }),
-    );
-    expect(err.status).toBe(403);
-    expect(err.message).not.toContain(swarmKey);
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe(
-      `Bearer ${swarmKey}`,
-    );
-  });
-
-  test("swarmProxyCredential: only the connection's own /agentfs gets the swarm key", () => {
-    const connection = { apiUrl: "https://swarm.test/", apiKey: "k" };
-    expect(swarmProxyCredential("https://swarm.test/agentfs", connection)).toBe("k");
-    expect(swarmProxyCredential("https://swarm.test/agentfs/", connection)).toBe("k");
-    expect(swarmProxyCredential("https://fs.swarm.test/agentfs", connection)).toBeUndefined();
-    expect(swarmProxyCredential("https://swarm.test/other", connection)).toBeUndefined();
-    expect(swarmProxyCredential("http://swarm.test/agentfs", connection)).toBeUndefined();
-    expect(swarmProxyCredential("https://swarm.test/agentfs", { ...connection, apiKey: "" })).toBe(
-      undefined,
-    );
-    expect(
-      swarmProxyCredential("https://host.test/api/agentfs", {
-        apiUrl: "https://host.test/api",
-        apiKey: "k",
-      }),
-    ).toBe("k");
-    expect(swarmProxyCredential("not a url", connection)).toBeUndefined();
   });
 
   test("health reads the public route without a key", async () => {

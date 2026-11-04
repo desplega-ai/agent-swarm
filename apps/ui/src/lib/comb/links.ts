@@ -27,9 +27,16 @@ const ID_RE = /^[\w-]+$/;
 /** A "." or ".." path segment in any spelling (`%2e`), ended by "/", "\", or the end. */
 const DOT_SEGMENT_RE = /(?:^|[/\\])(?:\.|%2e){1,2}(?=[/\\]|$)/i;
 
-/** Comb links open in the same tab only when the human is connected. */
+/**
+ * Comb links open in the same tab while Comb can show the file: connected, or
+ * about to be (`loading`, and `needs-connect` / `invalid-key` while the
+ * browser mints its own key). Only `disabled` and `unreachable` keep the
+ * link's own target.
+ */
 export function isCombNavigable(state: AgentFsState): boolean {
-  return state === "ready";
+  return (
+    state === "ready" || state === "loading" || state === "needs-connect" || state === "invalid-key"
+  );
 }
 
 function parseUrl(value: string, base?: string): URL | null {
@@ -136,9 +143,8 @@ export function combPathForLink(
 }
 
 /**
- * The Comb route for a link while Comb is connected (`ready`). Null in every
- * other state, so the link keeps its target (a new tab). While Comb is loading
- * the link stays too: a click never goes to Comb before the key is checked.
+ * The Comb route for a link while Comb is navigable ({@link isCombNavigable}).
+ * Null otherwise, so the link keeps its target (a new tab).
  */
 export function combLinkFor(
   state: AgentFsState,

@@ -29,9 +29,9 @@ beforeEach(() => {
   }
   process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
   process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
-  // The proxy defaults on with AGENT_FS_API_URL set. Off, the internal
-  // agent-fs host keeps Comb off unless COMB_ENABLED forces it.
-  process.env.AGENT_FS_PROXY = "false";
+  // Comb is on by default with AGENT_FS_API_URL set. Tests that need it off
+  // set COMB_ENABLED=false.
+  process.env.COMB_ENABLED = "false";
 });
 
 afterEach(() => {
@@ -63,8 +63,12 @@ describe("taskAttachmentDisplayUrl for agent-fs attachments", () => {
   test("flag off: the live URL, even with APP_URL set", () => {
     process.env.APP_URL = "http://localhost:5274";
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
-    process.env.COMB_ENABLED = "false";
-    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+  });
+
+  test("flag unset: on by default, so the dashboard URL with APP_URL", () => {
+    delete process.env.COMB_ENABLED;
+    process.env.APP_URL = "http://localhost:5274/";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
   });
 
   test("flag on with APP_URL: the dashboard URL", () => {

@@ -93,7 +93,7 @@ export interface AgentFsLinkContext {
 /**
  * The links of an agent-fs attachment row. `href` opens the agent-fs live UI
  * (new tab). `combTo` opens the file in Comb (same tab) while Comb is
- * connected. A row without ids uses the swarm drive only while Comb is on.
+ * connected or connecting (`isCombNavigable`). A row without ids uses the swarm drive only while Comb is on.
  * With Comb off such a row has no link, the same as before Comb. `agentFs` is
  * null outside the provider (`/setup`).
  */

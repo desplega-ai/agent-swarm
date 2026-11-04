@@ -45,7 +45,7 @@ export interface AgentFsContextValue extends AgentFsLive {
   credential: Omit<AgentFsCredential, "apiKey"> | null;
   /** Set whenever a credential exists, before the key is verified. */
   client: AgentFsClient | null;
-  /** Set in `ready`. */
+  /** Set in `ready`: the saved identity, after the key check passed. */
   me: MeResponse | null;
   /** `/health` features of the agent-fs server. Empty when unknown. */
   features: Set<string>;
@@ -80,12 +80,35 @@ function useAgentFsHealth(endpoint: string | null) {
   });
 }
 
-/** The connected identity: the check that the saved key still works. */
-function useAgentFsMe(meKey: readonly unknown[], client: AgentFsClient | null) {
+/**
+ * The check that the saved key still works: `ls /` on the swarm drive. Not
+ * agent-fs `/auth/me`: a key the dashboard minted is scoped to the shared org,
+ * so the identity comes from the saved credential (`GET /api/fs/me` at mint
+ * time). With no swarm drive configured there is nothing to check against.
+ */
+function useAgentFsKeyCheck(
+  checkKey: readonly unknown[],
+  client: AgentFsClient | null,
+  credential: Omit<AgentFsCredential, "apiKey"> | null,
+  drive: { orgId: string | null; driveId: string | null },
+) {
+  const { orgId, driveId } = drive;
   return useQuery({
-    queryKey: meKey,
-    queryFn: ({ signal }) => (client as AgentFsClient).getMe({ signal }),
-    enabled: client !== null,
+    queryKey: checkKey,
+    queryFn: async ({ signal }): Promise<MeResponse> => {
+      if (orgId && driveId) {
+        await (client as AgentFsClient).callOp(orgId, "ls", { path: "/" }, driveId, { signal });
+      }
+      const saved = credential as Omit<AgentFsCredential, "apiKey">;
+      return {
+        userId: saved.userId,
+        email: saved.email,
+        displayName: saved.displayName,
+        defaultOrgId: orgId,
+        defaultDriveId: driveId,
+      };
+    },
+    enabled: client !== null && credential !== null,
     ...CONNECTION_QUERY,
   });
 }
@@ -123,11 +146,15 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const userId = saved?.userId ?? null;
 
   const health = useAgentFsHealth(endpoint);
+  const orgId = comb?.org_id ?? null;
+  const driveId = comb?.drive_id ?? null;
+  // Keyed by the key id too: a re-minted key for the same user checks again.
+  const keyId = saved?.keyId ?? null;
   const meKey = useMemo(
-    () => agentFsKey(endpoint ?? "", userId, null, null, "me"),
-    [endpoint, userId],
+    () => agentFsKey(endpoint ?? "", userId, orgId, driveId, "me", keyId),
+    [endpoint, userId, orgId, driveId, keyId],
   );
-  const meQuery = useAgentFsMe(meKey, client);
+  const meQuery = useAgentFsKeyCheck(meKey, client, credential, { orgId, driveId });
   const healthFeatures = health.data?.features;
   const features = useMemo(() => new Set(healthFeatures ?? []), [healthFeatures]);
   const maxUploadBytes = health.data?.maxUploadBytes ?? null;
@@ -180,8 +207,6 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   });
 
   // Memoized: every link and attachment row reads this context.
-  const orgId = comb?.org_id ?? null;
-  const driveId = comb?.drive_id ?? null;
   const liveUrl = comb?.live_url ?? null;
   const value = useMemo<AgentFsContextValue>(
     () => ({

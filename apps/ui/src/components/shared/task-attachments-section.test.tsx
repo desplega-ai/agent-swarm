@@ -191,7 +191,12 @@ describe("an attachment row without org/drive ids", () => {
   test("uses the swarm drive only while Comb is on", () => {
     expect(agentFsAttachmentLinks(ID_LESS, null)).toEqual({ href: null, combTo: null });
     expect(agentFsAttachmentLinks(ID_LESS, COMB_OFF)).toEqual({ href: null, combTo: null });
+    // The browser is minting its key: the row already opens in Comb.
     expect(agentFsAttachmentLinks(ID_LESS, { ...COMB_READY, state: "needs-connect" })).toEqual({
+      href: SWARM_LIVE,
+      combTo: SWARM_COMB,
+    });
+    expect(agentFsAttachmentLinks(ID_LESS, { ...COMB_READY, state: "unreachable" })).toEqual({
       href: SWARM_LIVE,
       combTo: null,
     });

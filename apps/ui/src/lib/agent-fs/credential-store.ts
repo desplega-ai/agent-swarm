@@ -12,6 +12,12 @@ export interface AgentFsCredential {
   displayName: string | null;
   /** ISO timestamp. */
   connectedAt: string;
+  /**
+   * Set for a key the dashboard minted for this browser (`POST /api/fs/keys`):
+   * its agent-fs label and id. Absent for a pasted key.
+   */
+  label?: string;
+  keyId?: string;
 }
 
 type CredentialStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -48,6 +54,8 @@ function parseCredential(raw: string | null): AgentFsCredential | null {
       email: value.email,
       displayName: typeof value.displayName === "string" ? value.displayName : null,
       connectedAt: value.connectedAt,
+      ...(typeof value.label === "string" ? { label: value.label } : {}),
+      ...(typeof value.keyId === "string" ? { keyId: value.keyId } : {}),
     };
   } catch {
     return null;

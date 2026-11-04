@@ -10,7 +10,6 @@ import { scrubSecretText } from "../scrub-secrets";
 import type {
   HealthResponse,
   MeResponse,
-  RegisterResponse,
   ShareCreateResult,
   SignedUrlDisposition,
   SignedUrlResult,
@@ -27,28 +26,6 @@ export class AgentFsError extends Error {
     this.name = "AgentFsError";
     this.status = status;
     this.code = code;
-  }
-}
-
-/**
- * The swarm credential for `endpoint` when it is this swarm's own agent-fs
- * proxy (`<API URL>/agentfs`, same origin), else undefined. The proxy asks
- * for it on register. Any other agent-fs host never gets the swarm key.
- */
-export function swarmProxyCredential(
-  endpoint: string,
-  connection: { apiUrl: string; apiKey: string },
-): string | undefined {
-  if (!connection.apiKey) return undefined;
-  try {
-    const target = new URL(trimEndpoint(endpoint));
-    const api = new URL(connection.apiUrl);
-    const proxyPath = `${api.pathname.replace(/\/+$/, "")}/agentfs`;
-    return target.origin === api.origin && target.pathname === proxyPath
-      ? connection.apiKey
-      : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -126,24 +103,6 @@ export class AgentFsClient {
     this.#apiKey = opts.apiKey;
   }
 
-  /**
-   * Create an agent-fs user. A taken email answers 409 (`CONFLICT`). Through
-   * the swarm's `/agentfs` proxy the route needs the swarm credential
-   * (`swarmKey`, see `swarmProxyCredential`). Sent nowhere else.
-   */
-  static async register(opts: {
-    endpoint: string;
-    email: string;
-    swarmKey?: string;
-  }): Promise<RegisterResponse> {
-    const res = await send(`${trimEndpoint(opts.endpoint)}/auth/register`, {
-      method: "POST",
-      body: { email: opts.email },
-      apiKey: opts.swarmKey,
-    });
-    return res.json() as Promise<RegisterResponse>;
-  }
-
   /** Public `GET /health`: server version and the `features` it supports. */
   static async health(
     endpoint: string,
@@ -172,6 +131,10 @@ export class AgentFsClient {
     return res.json() as Promise<T>;
   }
 
+  /**
+   * `GET /auth/me`. The paste-key fallback only: a key the dashboard minted
+   * is scoped to the shared org, and its identity comes from the swarm.
+   */
   async getMe(opts: { signal?: AbortSignal } = {}): Promise<MeResponse> {
     const res = await send(`${this.endpoint}/auth/me`, {
       apiKey: this.#apiKey,

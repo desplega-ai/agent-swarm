@@ -1450,7 +1450,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "COMB_ENABLED",
         label: "Files",
         description:
-          "Show the agent-fs review space in the dashboard. On by default, but it stays off until agent-fs is set up and browsers can reach it (AGENT_FS_PUBLIC_URL, AGENT_FS_PROXY, or a public AGENT_FS_API_URL). Saving on or off here overrides that.",
+          "Show the agent-fs review space in the dashboard. On whenever agent-fs is set up (AGENT_FS_API_URL): browsers reach it through AGENT_FS_PUBLIC_URL, or the API's /agentfs proxy. Save off to turn it off.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}ui/comb`,

@@ -62,13 +62,13 @@ afterEach(() => {
 });
 
 describe("/status agent_fs.comb", () => {
-  test("proxy disabled and AGENT_FS_API_URL is internal: off, and says what is missing", async () => {
+  test("proxy disabled and an internal AGENT_FS_API_URL: still on, the browser gets that URL", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.AGENT_FS_PROXY = "false";
     const result = await comb();
-    expect(result.enabled).toBe(false);
+    expect(result.enabled).toBe(true);
+    expect(result.reason).toBeNull();
     expect(result.api_url).toBe("http://agent-fs:7433");
-    expect(result.reason).toContain("AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true");
   });
 
   test("proxy unset: on by default, through the API", async () => {
@@ -80,21 +80,12 @@ describe("/status agent_fs.comb", () => {
     expect(result.api_url).toBe("https://swarm.example.com/agentfs");
   });
 
-  test("unset, AGENT_FS_PROXY on and an internal API address: off, and names PUBLIC_MCP_BASE_URL", async () => {
+  test("an internal API address no longer turns Comb off", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.MCP_BASE_URL = "http://api:3013";
-    process.env.AGENT_FS_PROXY = "true";
     const result = await comb();
-    expect(result.enabled).toBe(false);
-    expect(result.reason).toContain("PUBLIC_MCP_BASE_URL");
-  });
-
-  test("unset and an IPv4-mapped private IPv6 AGENT_FS_API_URL: off", async () => {
-    process.env.AGENT_FS_API_URL = "http://[::ffff:10.0.0.5]:7433";
-    process.env.AGENT_FS_PROXY = "false";
-    const result = await comb();
-    expect(result.enabled).toBe(false);
-    expect(result.reason).toContain("not reachable from a browser");
+    expect(result.enabled).toBe(true);
+    expect(result.api_url).toBe("http://api:3013/agentfs");
   });
 
   test("unset and AGENT_FS_PUBLIC_URL set: on", async () => {
@@ -105,12 +96,7 @@ describe("/status agent_fs.comb", () => {
     expect(result.api_url).toBe("https://fs.example.com");
   });
 
-  test("unset and a browser-reachable AGENT_FS_API_URL: on", async () => {
-    process.env.AGENT_FS_API_URL = "https://fs.example.com";
-    expect((await comb()).enabled).toBe(true);
-  });
-
-  test("COMB_ENABLED=false wins over a reachable URL", async () => {
+  test("COMB_ENABLED=false wins over AGENT_FS_PUBLIC_URL", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
     process.env.COMB_ENABLED = "false";
