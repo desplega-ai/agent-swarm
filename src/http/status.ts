@@ -141,7 +141,7 @@ export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
 export const StatusCombSchema = z.object({
   enabled: z.boolean(),
-  /** What is missing when Comb is off (for example no browser-reachable agent-fs URL). Null when on. */
+  /** Why Comb is off (no `AGENT_FS_API_URL`, or `COMB_ENABLED=false`). Null when on. */
   reason: z.string().nullable(),
   api_url: z.string().nullable(),
   live_url: z.string(),

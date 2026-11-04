@@ -66,6 +66,7 @@ import type {
   FavoritesResponse,
   FeedbackInput,
   FleetBenchmarkResponse,
+  FsMeResponse,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -90,6 +91,7 @@ import type {
   MetricSaveInput,
   MetricSaveResponse,
   MetricsListResponse,
+  MintedFsKey,
   MintTokenResponse,
   ModelProfile,
   ModelProfileCheckResult,
@@ -368,6 +370,19 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
     // fall through to the generic throw below
   }
   throw new Error(`${genericLabel}: ${res.status}`);
+}
+
+/**
+ * A failed `GET /api/fs/me` or `POST /api/fs/keys`. `status` tells a 501
+ * (agent-fs too old for named keys) and a 409 (account pending) from the rest.
+ */
+export class FsKeyApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "FsKeyApiError";
+    this.status = status;
+  }
 }
 
 /**
@@ -1218,6 +1233,42 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** The current user's agent-fs account (`GET /api/fs/me`). */
+  async fsMe(): Promise<FsMeResponse> {
+    const url = `${this.getBaseUrl()}/api/fs/me`;
+    const res = await fetch(url, { headers: this.getHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsKeyApiError(
+        err.error || `Failed to load the files account: ${res.status}`,
+        res.status,
+      );
+    }
+    return res.json();
+  }
+
+  /**
+   * Mint a named agent-fs key for this browser (`POST /api/fs/keys`). The API
+   * returns the key once and never stores it.
+   */
+  async mintFsKey(label: string): Promise<MintedFsKey> {
+    const url = `${this.getBaseUrl()}/api/fs/keys`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ label }),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsKeyApiError(
+        err.error || `Failed to create a files key: ${res.status}`,
+        res.status,
+      );
     }
     return res.json();
   }

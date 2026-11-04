@@ -16,7 +16,7 @@ interface ConfigRow {
 }
 
 // Comb reads the agent-fs server's /health features. The flow below needs
-// agent-fs 0.15.0 or later. Run it locally with an agent-fs server, for example:
+// agent-fs 0.18.17 or later (named keys). Run it locally with an agent-fs server, for example:
 //   E2E_COMB_AGENT_FS_URL=http://localhost:7433 bun run e2e:ui -- specs/comb.spec.ts
 const agentFsUrl = process.env.E2E_COMB_AGENT_FS_URL?.trim().replace(/\/+$/, "") || null;
 
@@ -41,30 +41,42 @@ test("Comb is off without agent-fs", { tag: "@local" }, async ({ page, api, swar
   await clean.assertClean();
 });
 
-test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@local" }, async ({
-  page,
-  api,
-  clean,
-  seed,
-}) => {
+test("Comb mints a named key per browser, then comments, replies, and resolves", {
+  tag: "@local",
+}, async ({ page, browser, baseURL, storageState, api, swarm, clean, seed }) => {
   test.skip(
     !agentFsUrl,
-    "set E2E_COMB_AGENT_FS_URL to an agent-fs 0.15.0+ server to run this flow",
+    "set E2E_COMB_AGENT_FS_URL to an agent-fs 0.18.17+ server (named keys) to run this flow",
   );
   test.skip(!seed, "remote run without seed");
   const baseUrl = agentFsUrl as string;
+  const userId = seed?.user.id as string;
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // The seeded user gets a fresh email, so this run's agent-fs account is new.
   const humanEmail = `e2e-comb-${stamp}@example.com`;
   // Keys this test sets. The finally block deletes them, so later tests on
-  // this worker's API run without agent-fs again.
+  // this worker's API run without agent-fs again. COMB_ENABLED stays unset:
+  // Comb is on by default with AGENT_FS_API_URL.
   const settings: Record<string, string> = {
     AGENT_FS_API_URL: baseUrl,
     // Each run provisions a new swarm drive with its own service account.
     AGENT_FS_REGISTER_EMAIL: `e2e-swarm-${stamp}@agent-fs.local`,
-    COMB_ENABLED: "true",
   };
+  const patchUser = (body: Record<string, unknown>) =>
+    fetch(`${swarm.apiUrl}/api/users/${userId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const before = await api.get<{ user: { email: string | null } }>(`/api/users/${userId}`);
+  const secondContext = await browser.newContext({ baseURL, storageState });
 
   try {
+    expect((await patchUser({ email: humanEmail })).ok, "the seeded user takes the email").toBe(
+      true,
+    );
+    // The test registers the account itself only to hold its primary key: the
+    // primary key lists the named keys the browsers mint (`GET /auth/keys`).
     const registered = await fetch(`${baseUrl}/auth/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -96,13 +108,29 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
     });
     expect(written.ok, "the human writes the seed file").toBe(true);
 
+    // No key, no click: the drive lists in this browser.
     await page.goto("/file");
     await expect(page.getByRole("link", { name: /^Files\b/ })).toBeVisible();
-    await page.getByRole("tab", { name: "Paste a key" }).click();
-    await page.getByRole("textbox", { name: "agent-fs key" }).fill(human.apiKey);
-    await page.getByRole("button", { name: "Connect", exact: true }).click();
-    // The account button in the Comb header names who is connected.
-    await expect(page.getByRole("button", { name: `Connected as ${humanEmail}` })).toBeVisible();
+    await expect(page.getByText("comb-e2e", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "agent-fs key" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Connected as / })).toBeVisible();
+
+    // A second browser with only the swarm connection lists it too.
+    const second = await secondContext.newPage();
+    await second.goto("/file");
+    await expect(second.getByText("comb-e2e", { exact: true }).first()).toBeVisible();
+
+    // One named key per browser, listed in agent-fs.
+    const keys = await fetch(`${baseUrl}/auth/keys`, {
+      headers: { Authorization: `Bearer ${human.apiKey}` },
+    });
+    expect(keys.ok, "agent-fs lists the human's keys").toBe(true);
+    const body = (await keys.json()) as
+      | { keys?: { label?: string; revokedAt?: string | null }[] }
+      | { label?: string; revokedAt?: string | null }[];
+    const list = Array.isArray(body) ? body : (body.keys ?? []);
+    const minted = list.filter((key) => key.label?.startsWith("Swarm dashboard · "));
+    expect(minted).toHaveLength(2);
 
     await page.goto(`/file/~/${drive}/comb-e2e/notes.md`);
     await expect(page.getByRole("heading", { name: "E2E notes" })).toBeVisible();
@@ -125,6 +153,8 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
 
     await clean.assertClean();
   } finally {
+    await secondContext.close();
+    await patchUser({ email: before.user.email });
     const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
     for (const row of configs.filter((config) => config.key in settings)) {
       await api.delete(`/api/config/${row.id}`);

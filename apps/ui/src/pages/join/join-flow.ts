@@ -96,9 +96,9 @@ export const JOIN_COPY = {
   missing: "This invite link is incomplete. Open the full link from your invite.",
 } as const;
 
-/** Where to land after joining. Comb on: Comb, which then connects the files account. */
+/** Where to land after joining. Comb on: Comb, which mints this browser its own files key. */
 export function joinRedirect(combEnabled: boolean): string {
-  return combEnabled ? "/file?connect=auto" : "/";
+  return combEnabled ? "/file" : "/";
 }
 
 /**
