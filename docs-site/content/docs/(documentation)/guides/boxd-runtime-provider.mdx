@@ -17,7 +17,7 @@ The provider is part of [Agent Swarm](https://agent-swarm.dev) runtime pools. It
 - **One machine per worker.** Every runtime gets a new machine named `swarm-rt-<runtime-id>`. The machine is created isolated, so worker code has no metadata endpoint, no `boxd` CLI, and no access to your other machines.
 - **Docker inside the machine.** The worker container runs in the machine's Docker daemon. Pool `env`, `slotsPerRuntime`, and lifecycle settings apply as they do for a Docker pool.
 - **Fast starts from a snapshot.** A fresh machine pulls the worker image on every provision. With the slim worker image, that took about 40 seconds. A snapshot that already holds the image gave a worker in about 3 seconds.
-- **No machine when there is no work.** With `minRuntimes: 0`, an idle agent has no machine. The router wakes it when a task waits longer than the wake grace.
+- **Scale down to no machines.** `minRuntimes: 0` lets a pool scale down to zero. A `per-task` runtime ends with its task. An `idle` runtime ends after `idleMinutes`, and stays up when `idleMinutes` is unset. The router wakes a sleeping agent when a task waits longer than the wake grace.
 
 ## When to use it
 
@@ -33,25 +33,30 @@ A Docker pool needs less setup when all workers share one Docker host. See [runt
 | --- | --- |
 | Agent Swarm v2.7.4 or later | The provider first ships in this version. |
 | A boxd account and API key | Create one with `boxd auth keys create agent-swarm --org <your-org>`. Machines are created and billed in the key's organization. |
-| A public HTTPS API URL | The machine connects back to the API over the internet, so the URL must use HTTPS and be reachable from outside your network. |
+| A public HTTPS API URL | The machine connects back to the API over the internet, so the URL must use HTTPS and be reachable from outside your network. Set it as `RUNTIME_WORKER_API_URL` in step 1. |
 | A worker image | Use the same image as a Docker pool, for example `ghcr.io/desplega-ai/agent-swarm-worker:slim`. |
 | Runtime pools turned on | Set `RUNTIME_POOLS_ENABLED=true` and keep `MULTI_RUNTIME_ENABLED=true`. |
 
 ## Configure a pool
 
-1. Add the key to the API environment and restart the API:
+1. Add the settings to the API environment and restart the API:
 
 ```bash
 RUNTIME_POOLS_ENABLED=true
 MULTI_RUNTIME_ENABLED=true
+RUNTIME_WORKER_API_URL=https://swarm.example.com
 BOXD_API_KEY=bxd_...
 ```
 
+`RUNTIME_WORKER_API_URL` is the public HTTPS origin of your API, the address the machines use to reach it. If it is unset, the API falls back to `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`, which defaults to `http://localhost:3013`. The controller stays offline until the URL is HTTPS.
+
 On restart, the API seeds a `builtin-boxd` controller and copies the key into that controller's encrypted configuration. An organization key selects its own organization. For a personal key, also set `BOXD_ORG` in the controller configuration.
 
-2. Confirm that the controller is online:
+2. Set the two variables the `curl` commands on this page use, then confirm that the controller is online:
 
 ```bash
+export API=https://swarm.example.com          # your API origin
+export AGENT_SWARM_API_KEY=...                # your swarm API key
 curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
   "$API/api/runtime-controllers" | jq '.controllers[] | {id, kind, status}'
 ```
