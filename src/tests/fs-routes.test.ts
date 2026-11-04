@@ -654,7 +654,7 @@ describe("personal agent-fs identity and keys", () => {
     expect(logged.some((line) => line.includes(mintedKey))).toBe(false);
   });
 
-  test("continue only accepts the live app and AGENT_FS_APP_URL origins", async () => {
+  test("continue only accepts the live app origin", async () => {
     for (const rejected of [
       "https://live.agent-fs.dev.evil.test/file/x.md",
       "https://evil.test/",
@@ -681,7 +681,8 @@ describe("personal agent-fs identity and keys", () => {
     expect(await live.json()).toEqual({
       redirectUrl: `https://files.acme.test/file/x.md#key=${mintedKey}&apiUrl=${encodeURIComponent(process.env.AGENT_FS_API_URL!)}`,
     });
-    expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(200);
+    // AGENT_FS_APP_URL is the dashboard agent-fs opens, never a key target.
+    expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(400);
   });
 
   test("continue needs a user, fs.join.own, a ready account, and a new agent-fs", async () => {

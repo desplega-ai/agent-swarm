@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { ChecklistError, listChecklist, mutateChecklist } from "../be/checklist";
 import { getUserGrant } from "../be/rbac-roles";
-import { can } from "../rbac";
+import { can, isRbacEnabled } from "../rbac";
 import { ChecklistItemSchema } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { resolveRequestPrincipal } from "./request-principal";
@@ -40,12 +40,20 @@ const addChecklistItem = route({
       .regex(/^\/(?!\/)/, "href must be an in-app path starting with /")
       .optional(),
     scope: z.enum(["swarm", "user"]),
-    meta: z.record(z.string(), z.unknown()).optional(),
+    // The dashboard sends `{ adapter }` for a channel item. The size cap keeps
+    // free-form meta from the Lead small.
+    meta: z
+      .looseObject({ adapter: z.string().min(1).max(64).optional() })
+      .refine((meta) => JSON.stringify(meta).length <= 1024, {
+        message: "meta must be at most 1024 characters as JSON",
+      })
+      .optional(),
   }),
   responses: {
     201: { description: "Added checklist item", schema: z.object({ item: ChecklistItemSchema }) },
     400: { description: "A user is required for user items" },
     403: { description: "The caller cannot edit swarm items" },
+    409: { description: "An open channel item for the same adapter already exists" },
   },
 });
 
@@ -106,16 +114,28 @@ export async function handleChecklist(
     jsonError(res, "An authenticated principal is required", 401);
     return true;
   }
+  // Agents act on the checklist only as the Lead.
+  if (
+    principal.kind === "agent" &&
+    !principal.isLead &&
+    !getChecklist.match(req.method, pathSegments)
+  ) {
+    jsonError(res, "Only the Lead agent can change the checklist", 403);
+    return true;
+  }
   // The dashboard's selected user has the same grants as that user's token.
+  // Role rows count only with RBAC on; off, the legacy policy decides.
   const grant =
-    principal.kind !== "agent" && owner.userId ? await getUserGrant(owner.userId) : null;
+    principal.kind !== "agent" && owner.userId && isRbacEnabled()
+      ? await getUserGrant(owner.userId)
+      : null;
   const canEditSwarm = grant
     ? grant.grantsAll || grant.verbs.has("config.write.any")
     : principal.kind === "operator" ||
       can({ principal, verb: "config.write.any", resource: { kind: "none" }, source: "http" })
         .allow;
   const actor = {
-    id: myAgentId ? `lead:${myAgentId}` : owner.actorId,
+    id: principal.kind === "agent" ? `lead:${principal.agentId}` : owner.actorId,
     userId: owner.userId,
     canEditSwarm,
   };

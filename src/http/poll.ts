@@ -227,7 +227,7 @@ async function buildChecklistNudge(task: AgentTask, agent: Agent) {
       const canEditSwarm = grant.grantsAll || grant.verbs.has("config.write.any");
       const item = await firstOpenItem(userId, canEditSwarm);
       if (!item) return undefined;
-      await markNudged(item.id, task.id);
+      await markNudged(item.id, task.id, userId);
       const appUrl = await resolveAppUrl();
       const href = item.href ?? "/";
       return {

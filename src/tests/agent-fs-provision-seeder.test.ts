@@ -840,7 +840,11 @@ describe("agent-fs provisioning seeder", () => {
   });
 
   describe("org swarm URL", () => {
-    function patchStub(records: RequestRecord[], response: () => Response): typeof fetch {
+    function patchStub(
+      records: RequestRecord[],
+      response: () => Response,
+      org: Record<string, unknown> = { id: "shared-org" },
+    ): typeof fetch {
       return (async (input, init) => {
         const url = new URL(String(input));
         const method = init?.method ?? "GET";
@@ -851,6 +855,7 @@ describe("agent-fs provisioning seeder", () => {
           authorization: new Headers(init?.headers).get("authorization"),
           hasSignal: init?.signal instanceof AbortSignal,
         });
+        if (url.pathname === "/orgs/shared-org" && method === "GET") return Response.json(org);
         if (url.pathname === "/orgs/shared-org" && method === "PATCH") return response();
         return Response.json({ error: "unexpected route" }, { status: 500 });
       }) as typeof fetch;
@@ -866,6 +871,13 @@ describe("agent-fs provisioning seeder", () => {
 
       expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("set");
       expect(records).toEqual([
+        {
+          method: "GET",
+          path: "/orgs/shared-org",
+          body: undefined,
+          authorization: "Bearer example-afs-admin-key",
+          hasSignal: true,
+        },
         {
           method: "PATCH",
           path: "/orgs/shared-org",
@@ -885,8 +897,25 @@ describe("agent-fs provisioning seeder", () => {
           patchStub(records, () => new Response("404 Not Found", { status })),
         );
         expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("unsupported");
-        expect(records).toHaveLength(1);
+        expect(records.map((record) => record.method)).toEqual(["GET", "PATCH"]);
       }
+    });
+
+    test("a matching org value is unchanged with no write, and no APP_URL sends nothing", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(
+        patchStub(records, () => Response.json({}), {
+          id: "shared-org",
+          swarmUrl: "https://swarm.example.test",
+        }),
+      );
+      expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test/")).toBe("unchanged");
+      expect(records.map((record) => record.method)).toEqual(["GET"]);
+      records.length = 0;
+      expect(await syncAgentFsOrgSwarmUrl(undefined)).toBe("skipped");
+      expect(records).toHaveLength(0);
     });
 
     test("other failures throw, and an unprovisioned org is skipped with no request", async () => {

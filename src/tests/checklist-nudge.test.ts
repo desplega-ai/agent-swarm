@@ -13,7 +13,7 @@ import {
 import { attachRole, detachRole } from "../be/rbac-roles";
 import { handlePoll } from "../http/poll";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import type { AgentTask, ChecklistItem } from "../types";
+import type { AgentTask } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
@@ -160,7 +160,9 @@ test("a worker gets no nudge for a human task", async () => {
 test("a member gets only their use case, once, with a relative root for a null href", async () => {
   await detachRole(userId, "admin");
   await attachRole(userId, "requester");
-  await listChecklist(userId);
+  // Reads never store the defaults: a write does.
+  const actor = { id: userId, userId, canEditSwarm: false };
+  await mutateChecklist(actor, { action: "restore", id: `user:${userId}:use_case` });
   await getDbClient().run("UPDATE checklist_items SET href = NULL WHERE userId = ?", [userId]);
   expect((await pollTask()).checklistNudge).toMatchObject({
     itemId: `user:${userId}:use_case`,
@@ -190,9 +192,8 @@ test("a checklist write failure rolls back the nudge but still hands out the tas
     const trigger = await pollTask();
     expect(trigger.checklistNudge).toBeUndefined();
     expect((await getTaskById(trigger.taskId))?.status).toBe("completed");
-    const channel = await getDbClient().get<ChecklistItem>(
-      "SELECT * FROM checklist_items WHERE id = 'swarm:channel'",
-    );
+    // The rollback also drops the default rows the nudge stored.
+    const channel = (await listChecklist(userId, true)).find((row) => row.id === "swarm:channel");
     expect(channel?.nudgedAt).toBeNull();
     expect(channel?.nudgedTaskId).toBeNull();
     expect(warn).toHaveBeenCalledWith(

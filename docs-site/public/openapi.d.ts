@@ -7874,6 +7874,8 @@ export interface paths {
                         /** @enum {string} */
                         scope: "swarm" | "user";
                         meta?: {
+                            adapter?: string;
+                        } & {
                             [key: string]: unknown;
                         };
                     };
@@ -7902,6 +7904,15 @@ export interface paths {
                 };
                 /** @description The caller cannot edit swarm items */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An open channel item for the same adapter already exists */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8249,7 +8260,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description invalid_return_to: the origin is not the configured agent-fs app */
+                /** @description invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL) */
                 400: {
                     headers: {
                         [name: string]: unknown;

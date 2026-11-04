@@ -269,13 +269,16 @@ export async function resolveAgentFsSharedContext(): Promise<{
 /**
  * Tell agent-fs which swarm the shared org trusts, so the live app can offer
  * "Continue with <swarm>" (`PATCH /orgs/{orgId}` with `{ swarmUrl }`). Runs
- * once per boot, after the seeders. It only acts when the shared org is
- * already provisioned and never provisions it. An agent-fs without the route
- * (404 or 405, for example 0.18.17) is "unsupported", not an error.
+ * once per boot, after the seeders, with the explicit `APP_URL`. No URL (the
+ * hosted fallback is not this swarm) or an unprovisioned shared org is
+ * "skipped": it never provisions. The org is read first, and a matching value
+ * is "unchanged" with no write. An agent-fs without the route (404 or 405,
+ * for example 0.18.17) is "unsupported", not an error.
  */
 export async function syncAgentFsOrgSwarmUrl(
-  swarmUrl: string,
-): Promise<"set" | "unsupported" | "skipped"> {
+  swarmUrl: string | undefined,
+): Promise<"set" | "unchanged" | "unsupported" | "skipped"> {
+  if (!swarmUrl) return "skipped";
   const apiUrl = await resolveApiUrl();
   const apiKey =
     (await getConfigValue(API_KEY_CONFIG)) ||
@@ -284,12 +287,13 @@ export async function syncAgentFsOrgSwarmUrl(
   const orgId =
     (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) || process.env.AGENT_FS_DEFAULT_ORG_ID;
   if (!apiUrl || !apiKey || !orgId) return "skipped";
+  const orgPath = `/orgs/${encodeURIComponent(orgId)}`;
+  const headers = { authorization: `Bearer ${apiKey}` };
+  const org = await agentFsRequest<{ swarmUrl?: unknown }>(apiUrl, orgPath, { headers });
+  // agent-fs drops the trailing slash when it stores the value.
+  if (org?.swarmUrl === swarmUrl.replace(/\/+$/, "")) return "unchanged";
   try {
-    await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}`, {
-      method: "PATCH",
-      headers: { authorization: `Bearer ${apiKey}` },
-      body: { swarmUrl },
-    });
+    await agentFsRequest(apiUrl, orgPath, { method: "PATCH", headers, body: { swarmUrl } });
     return "set";
   } catch (error) {
     if (error instanceof AgentFsRequestError && (error.status === 404 || error.status === 405)) {
