@@ -171,20 +171,22 @@ export default function AppsListingPage() {
         ))}
       </div>
     ) : (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3">
-        {rows.map((app) => (
-          <Link
-            key={app.id}
-            to={`/apps/${app.id}`}
-            title={app.name}
-            className="group flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground group-hover:text-foreground">
-              <AppGlyph icon={app.icon} className="h-7 w-7" />
-            </div>
-            <span className="line-clamp-2 text-sm font-medium text-foreground">{app.name}</span>
-          </Link>
-        ))}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3">
+          {rows.map((app) => (
+            <Link
+              key={app.id}
+              to={`/apps/${app.id}`}
+              title={app.name}
+              className="group flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground group-hover:text-foreground">
+                <AppGlyph icon={app.icon} className="h-7 w-7" />
+              </div>
+              <span className="line-clamp-2 text-sm font-medium text-foreground">{app.name}</span>
+            </Link>
+          ))}
+        </div>
       </div>
     );
   } else {

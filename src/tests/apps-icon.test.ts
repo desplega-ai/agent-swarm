@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { parseAppDefinition } from "../apps/definition";
-import { createApp, listApps } from "../apps/store";
+import { createApp, getApp, listApps, updateApp } from "../apps/store";
 import { closeDb, getDbClient, initDb } from "../be/db";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-icon-${process.pid}.sqlite`;
@@ -73,6 +73,26 @@ describe("app icon", () => {
         );
       }
     }
+  });
+
+  test("an icon written through the normal create and update path survives to listApps", async () => {
+    const icon = { type: "lucide", icon: "layout-grid", color: "#f59e0b" };
+    const parsed = await parseAppDefinition({ ...baseDefinition, icon }, { writerIsUser: true });
+    if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
+    const app = await createApp({ name: "Round trip", definition: parsed.definition });
+
+    expect((await listApps()).find((summary) => summary.id === app.id)?.icon).toEqual(icon);
+    expect((await getApp(app.id))?.definition.icon).toEqual(icon);
+
+    const nextIcon = { type: "lucide", icon: "star" };
+    const reparsed = await parseAppDefinition(
+      { ...baseDefinition, icon: nextIcon },
+      { writerIsUser: true },
+    );
+    if (!reparsed.success) throw new Error(JSON.stringify(reparsed.issues));
+    await updateApp(app.id, { definition: reparsed.definition });
+
+    expect((await listApps()).find((summary) => summary.id === app.id)?.icon).toEqual(nextIcon);
   });
 
   test("listApps projects a valid icon and omits it when absent or invalid", async () => {
