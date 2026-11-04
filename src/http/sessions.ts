@@ -28,6 +28,7 @@ import { getResourceSessionLabels, getSessionLabels } from "../be/db/session-lab
 import {
   listPrefixRoots,
   listSharedPrefixRoots,
+  moveKeyFavorites,
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
@@ -1242,6 +1243,8 @@ export async function handleSessions(
           if (roots.length < SESSION_MOVE_LIMIT) break;
         }
         const moved = await moveSessionChains({ moves, changedBy });
+        // Stars on the group follow a rename. A delete leaves them in place.
+        if (key !== null && moved.length > 0) await moveKeyFavorites({ from, to: key });
         moveSessionPrefix.respond(res, 200, { moved, skipped, remaining });
       },
     );

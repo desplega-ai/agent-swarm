@@ -689,6 +689,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "279_backfill_learning_expiry.sql");
       // 281 alters model_profiles (made by the skipped 220) and scheduled_tasks.
       markMigrationApplied(database, "281_model_profiles_pr2.sql");
+      // 283 rebuilds user_favorites, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "283_favorites_key_type.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
