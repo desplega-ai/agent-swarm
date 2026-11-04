@@ -3,6 +3,7 @@ import {
   Activity,
   Calendar,
   Code2,
+  Cpu,
   FlaskConical,
   FolderOpen,
   GitBranch,
@@ -33,16 +34,19 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentTask, User } from "@/api/types";
+import { type AgentTask, isProviderName, type ModelProfile, type User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { ColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
+import { HarnessIcon } from "@/components/shared/harness-icon";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
+import { ModelLogo } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskHoverCard } from "@/components/shared/task-hover-card";
@@ -53,6 +57,7 @@ import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
 import {
   describeModelResolution,
+  isSeededTaskProfile,
   taskDisplayEffort,
   taskDisplayModel,
   taskDisplayProfile,
@@ -204,6 +209,7 @@ function DescriptionCell({ task }: { task: AgentTask | undefined }) {
 function ModelCell({
   task,
   liveCatalog,
+  profilesByName,
 }: {
   task: Pick<
     AgentTask,
@@ -218,21 +224,33 @@ function ModelCell({
     | "resolvedEffort"
   >;
   liveCatalog?: LiveModelsCatalog;
+  profilesByName: Map<string, ModelProfile>;
 }) {
   const shown = taskDisplayModel(task);
   const effort = taskDisplayEffort(task);
   const profile = taskDisplayProfile(task);
-  const profileChip = profile ? (
-    <Badge
-      variant="outline"
-      size="tag"
-      className="max-w-32 shrink-0 border-status-info/30 text-status-info-strong"
-      title={`Model profile: ${profile}`}
-    >
-      <span className="truncate">{profile}</span>
-    </Badge>
-  ) : null;
-  if (!shown && !task.modelTier && !profileChip) return DASH;
+  const definition = profile ? profilesByName.get(profile) : undefined;
+  const prefix = profile?.match(/^(claude|codex|pi|opencode|devin)(?:-|$)/)?.[1];
+  const harness = isProviderName(definition?.harness) ? definition.harness : prefix;
+  const profileChip =
+    profile && !isSeededTaskProfile(task, definition) ? (
+      <Badge
+        variant="outline"
+        size="tag"
+        className="min-w-0 max-w-32 shrink border-status-info/30 text-status-info-strong normal-case"
+        title={`Model profile: ${profile}${definition?.description ? `: ${definition.description}` : ""}`}
+      >
+        {harness ? (
+          <HarnessIcon harness={harness} className="size-3" />
+        ) : definition?.model ? (
+          <ModelLogo model={definition.model} className="size-3" />
+        ) : (
+          <Cpu aria-hidden className="size-3 shrink-0" />
+        )}
+        <span className="truncate">{profile}</span>
+      </Badge>
+    ) : null;
+  if (!shown && !task.modelTier && !profile) return DASH;
   if (!shown) {
     return (
       <span className="flex min-w-0 items-center gap-1.5">
@@ -242,21 +260,25 @@ function ModelCell({
             <EffortMark effort={effort} />
           </Badge>
         ) : null}
-        {profileChip}
+        {profileChip ??
+          (profile ? <span title={`Model profile: ${profile}`}>{profile}</span> : null)}
       </span>
     );
   }
-  const label = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
-  const cell = profileChip ? (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {label}
+  const cell = (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <ModelEffortLabel
+        model={shown}
+        effort={effort}
+        catalog={liveCatalog}
+        className="min-w-28 max-w-full shrink-0"
+      />
       {profileChip}
     </span>
-  ) : (
-    label
   );
   const lines = [
     ...describeModelResolution(task),
+    ...(!task.resolvedModel && profile ? [`Profile: ${profile}`] : []),
     ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),
   ];
   if (lines.length === 0) return cell;
@@ -582,6 +604,11 @@ export function TasksTable({
   paginationQueryKey,
 }: TasksTableProps) {
   const { data: modelsCatalog } = useModelsCatalog();
+  const { data: modelProfiles } = useModelProfiles();
+  const profilesByName = useMemo(
+    () => new Map(modelProfiles?.map((profile) => [profile.name, profile])),
+    [modelProfiles],
+  );
   // Build a `userId → User` lookup for the "Requested by" column. We skip the
   // network call entirely on swarms that don't support the column — the
   // gate-hidden set already filters the column out of `columnDefs`, so the
@@ -652,7 +679,11 @@ export function TasksTable({
         width: 200,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
-          <ModelCell task={p.data ?? {}} liveCatalog={modelsCatalog?.providers} />
+          <ModelCell
+            task={p.data ?? {}}
+            liveCatalog={modelsCatalog?.providers}
+            profilesByName={profilesByName}
+          />
         ),
       },
       {
@@ -738,7 +769,7 @@ export function TasksTable({
     ];
 
     return all.filter((c) => !columns.isHidden(c._id)).map(({ _id, ...col }) => col);
-  }, [agentNameById, columns, userById, modelsCatalog?.providers]);
+  }, [agentNameById, columns, userById, modelsCatalog?.providers, profilesByName]);
 
   return (
     <DataGrid

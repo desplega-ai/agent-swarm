@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   describeModelResolution,
+  isSeededTaskProfile,
   MODEL_SOURCE_LABELS,
   modelSourceLabel,
   taskDisplayModel,
@@ -80,5 +81,59 @@ describe("describeModelResolution", () => {
     expect(modelSourceLabel("profile:tier-alias")).toBe("Tier (via profile)");
     expect(modelSourceLabel("profile:agent-default")).toBe("Agent default profile");
     expect(modelSourceLabel("something-new")).toBe("something-new");
+  });
+});
+
+describe("isSeededTaskProfile", () => {
+  test("catalog metadata overrides naming guesses", () => {
+    expect(isSeededTaskProfile({ profile: "claude-smart" }, { seededFrom: null })).toBe(false);
+    expect(isSeededTaskProfile({ profile: "Custom name" }, { seededFrom: "agent-config" })).toBe(
+      true,
+    );
+    expect(isSeededTaskProfile({ profile: "Custom name" }, { seededFrom: "tier:smart" })).toBe(
+      true,
+    );
+  });
+  test("recognizes tier seeds while the catalog is unavailable", () => {
+    expect(isSeededTaskProfile({ profile: "claude-smart" })).toBe(true);
+    expect(isSeededTaskProfile({ profile: "codex-ultra" })).toBe(true);
+    expect(isSeededTaskProfile({ profile: "review-smart" })).toBe(false);
+  });
+  test("matches migration names against the task model and effort", () => {
+    expect(
+      isSeededTaskProfile({
+        resolvedProfile: "claude-opus-5-5-high",
+        resolvedModel: "claude-opus-5-5",
+        resolvedEffort: "high",
+      }),
+    ).toBe(true);
+    expect(
+      isSeededTaskProfile({
+        profile: "codex-gpt-6.1-sol-medium",
+        model: "gpt-6.1-sol",
+        effort: "medium",
+      }),
+    ).toBe(true);
+    expect(
+      isSeededTaskProfile({
+        profile: "pi-anthropic-claude-opus-5-5",
+        model: "anthropic/claude-opus-5-5",
+      }),
+    ).toBe(true);
+    expect(
+      isSeededTaskProfile({
+        profile: "claude-opus-5-5-low",
+        model: "claude-opus-5-5",
+        effort: "high",
+      }),
+    ).toBe(false);
+    expect(
+      isSeededTaskProfile({
+        profile: "claude-other-high",
+        model: "claude-opus-5-5",
+        effort: "high",
+      }),
+    ).toBe(false);
+    expect(isSeededTaskProfile({ profile: "Review Team" })).toBe(false);
   });
 });
