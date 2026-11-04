@@ -8,7 +8,7 @@
 
 import { RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { AgentAvatar } from "@/api/types";
+import type { AgentAvatarLucide } from "@/api/types";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { AVATAR_ICON_CATALOG, searchAvatarIcons } from "@/lib/agent-icon";
 import { cn } from "@/lib/utils";
@@ -30,8 +30,9 @@ function iconLabel(icon: string): string {
 }
 
 export interface AgentAppearancePickerProps {
-  avatar: AgentAvatar | null | undefined;
-  onChange: (avatar: AgentAvatar | null) => void;
+  /** The stored glyph. Pass `undefined` when the stored icon is a link or a file. */
+  avatar: AgentAvatarLucide | null | undefined;
+  onChange: (avatar: AgentAvatarLucide | null) => void;
   trigger: React.ReactNode;
 }
 

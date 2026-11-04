@@ -1373,9 +1373,9 @@ export const MediaIconSchema = z.discriminatedUnion("type", [
 ]);
 export type MediaIcon = z.infer<typeof MediaIconSchema>;
 
-// Agent avatars stay lucide-only for now.
-export const AgentAvatarSchema = z.discriminatedUnion("type", [LucideIconSchema]);
-export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
+// Agent avatars accept the same shapes as app icons.
+export const AgentAvatarSchema = MediaIconSchema;
+export type AgentAvatar = MediaIcon;
 
 /**
  * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https
@@ -1470,7 +1470,8 @@ export const AgentSchema = z
       .nullable()
       .optional(),
 
-    // Custom avatar (icon + color). Null/missing = fall back to the
+    // Custom avatar: a lucide glyph, an https image link, or an agent-fs image.
+    // Null/missing = fall back to the
     // deterministic hash-derived icon and color (see apps/ui/src/lib/agent-icon.ts
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z

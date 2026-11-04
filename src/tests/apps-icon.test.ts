@@ -6,7 +6,14 @@ import {
   parseAppDefinition,
 } from "../apps/definition";
 import { createApp, getApp, listApps, updateApp } from "../apps/store";
-import { closeDb, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getAgentById,
+  getDbClient,
+  initDb,
+  updateAgentProfile,
+} from "../be/db";
 import { AgentAvatarSchema, AgentSlackIconSchema, AppIconSchema } from "../types";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-icon-${process.pid}.sqlite`;
@@ -235,10 +242,33 @@ describe("app icon merge patch", () => {
   });
 });
 
-describe("agent avatars stay lucide-only", () => {
-  test("AgentAvatarSchema rejects url and agent-fs icons", () => {
+describe("agent avatars take the same icons", () => {
+  test("AgentAvatarSchema accepts lucide, url and agent-fs icons", () => {
     expect(AgentAvatarSchema.safeParse({ type: "lucide", icon: "bot" }).success).toBe(true);
-    expect(AgentAvatarSchema.safeParse(URL_ICON).success).toBe(false);
-    expect(AgentAvatarSchema.safeParse(AGENT_FS_ICON).success).toBe(false);
+    expect(AgentAvatarSchema.safeParse(URL_ICON).success).toBe(true);
+    expect(AgentAvatarSchema.safeParse(AGENT_FS_ICON).success).toBe(true);
+  });
+
+  test("AgentAvatarSchema rejects http links and a single drive ID", () => {
+    expect(
+      AgentAvatarSchema.safeParse({ type: "url", url: "http://example.com/x.png" }).success,
+    ).toBe(false);
+    expect(
+      AgentAvatarSchema.safeParse({ type: "agent-fs", path: "/agents/a/avatar.png", orgId: "o" })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a url avatar round trips through the profile update, then an agent-fs one replaces it", async () => {
+    const agent = await createAgent({ name: "Avatar Agent", isLead: false, status: "idle" });
+    await updateAgentProfile(agent.id, { avatar: URL_ICON });
+    expect((await getAgentById(agent.id))?.avatar).toEqual(URL_ICON);
+
+    const fsAvatar = { type: "agent-fs" as const, path: `/agents/${agent.id}/avatar-1.png` };
+    await updateAgentProfile(agent.id, { avatar: fsAvatar });
+    expect((await getAgentById(agent.id))?.avatar).toEqual(fsAvatar);
+
+    await updateAgentProfile(agent.id, { avatar: null });
+    expect((await getAgentById(agent.id))?.avatar).toBeNull();
   });
 });
