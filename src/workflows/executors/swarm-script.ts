@@ -89,7 +89,10 @@ export class SwarmScriptExecutor extends BaseExecutor<
       };
     }
 
-    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getRunWorkflow({
+      id: meta.runId,
+      workflowId: meta.workflowId,
+    });
     // Never `trigger.agentId`: trigger data is caller-supplied, so reading the
     // principal from it let any agent run a creator-less workflow's scripts as
     // the lead. The run row carries the server-stamped starting agent.

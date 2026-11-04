@@ -27814,7 +27814,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry a failed workflow run */
+        /**
+         * Retry a failed workflow run
+         * @description Retries on the definition the run started with; to use an edited workflow, trigger a new run.
+         */
         post: {
             parameters: {
                 query?: never;

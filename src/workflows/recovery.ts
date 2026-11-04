@@ -2,10 +2,10 @@ import {
   getApprovalRequestById,
   getCompletedStepNodeIds,
   getDbClient,
+  getRunWorkflow,
   getStuckApprovalRuns,
   getStuckWaitRuns,
   getStuckWorkflowRuns,
-  getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
@@ -114,7 +114,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
         continue;
       }
 
-      const workflow = await getWorkflow(run.workflowId);
+      const workflow = await getRunWorkflow(run);
       if (!workflow) continue;
 
       const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
@@ -189,7 +189,7 @@ async function recoverOrphanedSubWorkflowSteps(registry: ExecutorRegistry): Prom
       if (isWorkflowRunActive(row.runId) || isStepExecuting(row.stepId)) continue;
       const run = await getWorkflowRun(row.runId);
       if (!run || (run.status !== "running" && run.status !== "waiting")) continue;
-      const workflow = await getWorkflow(run.workflowId);
+      const workflow = await getRunWorkflow(run);
       const node = workflow?.definition.nodes.find((n) => n.id === row.nodeId);
       if (!workflow || !node) continue;
       // DB reads above yield; a resume may have acquired the run meanwhile.
@@ -267,7 +267,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
   for (const stuck of stuckRuns) {
     try {
       const run = await getWorkflowRun(stuck.runId);
-      const workflow = await getWorkflow(stuck.workflowId);
+      const workflow = await getRunWorkflow({ id: stuck.runId, workflowId: stuck.workflowId });
       if (!run || run.status !== "waiting" || !workflow) continue;
 
       const taskCompleted = stuck.taskStatus === "completed";
@@ -378,7 +378,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
   for (const stuck of stuckRuns) {
     try {
       const run = await getWorkflowRun(stuck.runId);
-      const workflow = await getWorkflow(stuck.workflowId);
+      const workflow = await getRunWorkflow({ id: stuck.runId, workflowId: stuck.workflowId });
       if (!run || !workflow) continue;
 
       const ctx = (run.context ?? {}) as Record<string, unknown>;
@@ -533,7 +533,7 @@ async function recoverForeachFanouts(registry: ExecutorRegistry): Promise<number
     try {
       // The drive re-checks the run, the parent step and each child's latest
       // row, so a stale snapshot row claims nothing.
-      const workflow = await getWorkflow(fanout.workflowId);
+      const workflow = await getRunWorkflow({ id: fanout.runId, workflowId: fanout.workflowId });
       const parent = workflow?.definition.nodes.find((node) => node.id === fanout.parentNodeId);
       if (parent?.type !== "foreach") continue;
       const drive = await runForeachDrive(fanout.runId, fanout.parentNodeId, registry);

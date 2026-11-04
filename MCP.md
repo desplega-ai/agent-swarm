@@ -1564,7 +1564,7 @@ Get details of a workflow run by ID, including all steps and their statuses.
 
 **Retry Workflow Run**
 
-Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually.
+Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually. Retries on the definition the run started with; to use an edited workflow, trigger a new run.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

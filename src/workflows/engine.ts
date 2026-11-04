@@ -18,6 +18,7 @@ import {
   getStepCountForNode,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
+  pinWorkflowDefinition,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -131,6 +132,9 @@ export async function startWorkflowExecution(
   registry: ExecutorRegistry,
   options: WorkflowExecutionOptions = {},
 ): Promise<string> {
+  // The run pins the definition exactly as the caller read it, before token
+  // rendering: resume paths read the pin back raw, as they read the live row.
+  const pinSource = workflow;
   const preflight = preflightAutomation(
     workflowPreflightInput(workflow),
     await getAutomationSetupStates(),
@@ -198,6 +202,7 @@ export async function startWorkflowExecution(
       options,
       initial,
       newRunId,
+      pinSource,
     );
     if (!created) return runId;
     if (initial.status === "failed" && initial.preflight) {
@@ -317,6 +322,7 @@ async function createRunWithInitialState(
   options: WorkflowExecutionOptions,
   initial: InitialRunState,
   runId: string,
+  pinSource: Workflow,
 ): Promise<{
   runId: string;
   created: boolean;
@@ -343,6 +349,7 @@ async function createRunWithInitialState(
       (await shouldSkipCooldown(workflow.id, workflow.cooldown))
         ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
         : initial;
+    const definitionHash = await pinWorkflowDefinition(pinSource);
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -352,6 +359,7 @@ async function createRunWithInitialState(
       parentStepId,
       parentStepAttempt: parentStepId ? attempt : undefined,
       triggeredByAgentId: options.triggeredByAgentId,
+      definitionHash,
     });
     await updateWorkflowRun(
       runId,

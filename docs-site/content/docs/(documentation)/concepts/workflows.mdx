@@ -673,6 +673,8 @@ Interpolation sources available in node config:
 
 Every workflow update creates a snapshot in the version history table, recording the previous definition. This provides an audit trail and enables rollback.
 
+An update affects only runs that start after it. Each run keeps the definition it started with until it finishes, including after a resume, a retry, or a server restart. To run an edited workflow, trigger a new run; retrying a failed run re-runs it on its original definition.
+
 ## MCP Tools
 
 | Tool | Description |

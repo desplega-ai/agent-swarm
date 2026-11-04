@@ -3575,6 +3575,17 @@
       "pending": "unassigned: no batch yet scrubs this writer"
     }
   },
+  "workflow_run_definitions": {
+    "hash": {
+      "exempt": "hash or digest"
+    },
+    "snapshot": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
   "workflow_run_steps": {
     "id": {
       "exempt": "identifier"
@@ -3659,6 +3670,9 @@
     },
     "triggeredByAgentId": {
       "exempt": "identifier"
+    },
+    "definitionHash": {
+      "exempt": "hash or digest"
     }
   },
   "workflow_versions": {
