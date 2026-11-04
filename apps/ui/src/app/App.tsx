@@ -9,13 +9,8 @@ import { router } from "./router";
 export default function App() {
   return (
     <Providers>
-      {/* Lifted clear of the message box pinned to the bottom of Task
-          details and Sessions, so a toast never covers Send. */}
-      <Toaster
-        position="bottom-right"
-        offset={{ bottom: "10rem" }}
-        mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 8rem)" }}
-      />
+      {/* One root toaster keeps notifications in the bottom-right corner. */}
+      <Toaster position="bottom-right" />
       <CommandMenuRoutesProvider routes={router.routes}>
         <RouterProvider router={router} />
       </CommandMenuRoutesProvider>
