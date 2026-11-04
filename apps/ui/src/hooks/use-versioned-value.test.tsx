@@ -102,6 +102,23 @@ describe("versioned value", () => {
     container.remove();
   });
 
+  test("automatic updates wait when the pointer enters a frame", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const render = (revision: string) =>
+      act(async () => root.render(<Probe id="one" revision={revision} auto />));
+    await render("v1");
+    await act(async () =>
+      container.querySelector("iframe")?.dispatchEvent(new Event("pointerover", { bubbles: true })),
+    );
+    await render("v2");
+    expect(container.querySelector('[data-testid="value"]')?.textContent).toBe("v1");
+    expect(container.querySelector('[data-testid="pending"]')?.textContent).toBe("true");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   test("automatic updates wait for drafts in a portal", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

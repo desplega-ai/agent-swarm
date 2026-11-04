@@ -26,7 +26,8 @@ export function useVersionedValue<T>(
     (event: { target: EventTarget | null; type: string }) => {
       const target = event.target;
       if (!id || !(target instanceof HTMLElement)) return;
-      const isFrame = target.tagName === "IFRAME" && event.type === "focusin";
+      const isFrame =
+        target.tagName === "IFRAME" && (event.type === "focusin" || event.type === "pointerover");
       const isDraft = event.type === "input" && target.matches(EDITABLE);
       const isClick = event.type === "click" && !!target.closest("button, a, [role=button]");
       if (isFrame || isDraft || isClick) setInteractedId(id);
@@ -49,11 +50,13 @@ export function useVersionedValue<T>(
       if (!inScope(next) || !next.matches(EDITABLE)) setFocusedDraft(false);
     };
     document.addEventListener("focusin", onDocumentInteraction);
+    document.addEventListener("pointerover", onDocumentInteraction);
     document.addEventListener("input", onDocumentInteraction);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", onFocusOut);
     return () => {
       document.removeEventListener("focusin", onDocumentInteraction);
+      document.removeEventListener("pointerover", onDocumentInteraction);
       document.removeEventListener("input", onDocumentInteraction);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
