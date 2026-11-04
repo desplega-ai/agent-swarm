@@ -299,10 +299,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
       : [];
     // Reuse rows are learnings already triaged (at or before the cursor) and not yet carried by a /longterm doc (its
     // Sources list the id). Only after a committed run: the first run has nothing to compare against. Read in (first
-    // reuse event since the watermark, id) order past the watermark (at, atId), so rows over the cap stay eligible.
+    // reuse event past the watermark, id) order, so rows over the cap stay eligible. An event is past the watermark
+    // (at, atId) when (event time, row id) sorts after it: a row at or below atId already had its events at `at` read,
+    // so only its later events count. Taking the first event >= at instead would hide that row's later reuse.
+    const pastWatermark = (col: string) => `(${col} > ?1 OR (${col} = ?1 AND m.id > ?6))`;
     const firstReuseExpr = `min(
-        coalesce((SELECT MIN(r.retrievedAt) FROM memory_retrieval r WHERE r.memoryId = m.id AND r.retrievedAt >= ?1 AND r.agentId <> coalesce(m.agentId, '') AND r.taskId IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store'), '~'),
-        coalesce((SELECT MIN(g.createdAt) FROM memory_rating g JOIN agent_tasks t ON t.id = g.taskId WHERE g.memoryId = m.id AND g.createdAt >= ?1 AND t.agentId <> coalesce(m.agentId, '')), '~'))`;
+        coalesce((SELECT MIN(r.retrievedAt) FROM memory_retrieval r WHERE r.memoryId = m.id AND ${pastWatermark("r.retrievedAt")} AND r.agentId <> coalesce(m.agentId, '') AND r.taskId IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store'), '~'),
+        coalesce((SELECT MIN(g.createdAt) FROM memory_rating g JOIN agent_tasks t ON t.id = g.taskId WHERE g.memoryId = m.id AND ${pastWatermark("g.createdAt")} AND t.agentId <> coalesce(m.agentId, '')), '~'))`;
     const reuseRan = !!(reuseCap && from.at && from.createdAt);
     const reuseErrors = errors.length;
     const reuse = reuseRan
@@ -310,7 +313,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
           "reuse",
           `SELECT * FROM (SELECT ${cols(reuseExpr)}, ${firstReuseExpr} AS firstReuse FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt < ?3 OR (m.createdAt = ?3 AND m.id <= ?4))
                AND NOT EXISTS (SELECT 1 FROM agent_memory l WHERE l.chunkIndex = 0 AND (l.name GLOB '/longterm/*' OR coalesce(l.key, '') GLOB '/longterm/*') AND instr(l.content, m.id) > 0)) x
-             WHERE x.firstReuse <> '~' AND (x.firstReuse > ?1 OR (x.firstReuse = ?1 AND x.id > ?6)) ORDER BY x.firstReuse, x.id LIMIT ?5`,
+             WHERE x.firstReuse <> '~' ORDER BY x.firstReuse, x.id LIMIT ?5`,
           [from.at, at, from.createdAt, from.id, reuseCap, from.atId],
         )
       : [];

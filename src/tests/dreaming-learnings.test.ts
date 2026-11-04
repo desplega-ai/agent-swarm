@@ -2,7 +2,10 @@ import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
 import dreamingLearnings from "../be/seed-scripts/catalog/dreaming-learnings";
 import dreamingMemtax from "../be/seed-scripts/catalog/dreaming-memtax";
-import dreamingMemtaxCreate from "../be/seed-scripts/catalog/dreaming-memtax-create";
+import dreamingMemtaxCreate, {
+  boundCarry,
+  cosine,
+} from "../be/seed-scripts/catalog/dreaming-memtax-create";
 
 // The learnings-triage step and its lane B half run against an in-memory SQLite with the columns the scripts read,
 // so every new query is executed for real (numbered params, GLOB filters, hex(embedding)).
@@ -618,6 +621,48 @@ describe("memtax-create with the learnings triage", () => {
     expect(edit.content).toContain("Runs the jan box");
   });
 
+  test("near-dup: an existing doc embedded at another dimension is never a twin (no shared-prefix match)", async () => {
+    expect(cosine([1, 0], [1])).toBe(0);
+    expect(cosine([1, 0], [1, 0])).toBe(1);
+    // A 1-d vector equal to the prefix of the source's 2-d one: scored on the prefix alone, cosine was 1.
+    longterm(
+      "o1",
+      "/longterm/entities/customers/evalion",
+      "type: entity · path: /longterm/entities/customers/evalion\naliases: evalion\n\n## Facts\n- Evalion runs a box (stated 2026-10-01, src: 00000091-aaaa-4bbb-8ccc-000000000091)",
+      new Uint8Array(new Float32Array([0.6]).buffer),
+    );
+    learning(1, "2026-10-27T00:00:00.000Z", { embedding: vecAt(0.6) });
+    const out: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r1",
+        dryRun: true,
+        leadAgentId: lead,
+        plan: {
+          entities: [],
+          clusters: [
+            { clusterId: "c1", path: "/longterm/entities/customers/aurica", memberIds: [uuid(1)] },
+          ],
+          memberNames: {},
+        },
+        distill: distill([
+          {
+            clusterId: "c1",
+            aliases: ["aurica"],
+            bullets: [
+              { claim: "Aurica runs a box in the EU region", stated: "2026-10-27", src: [uuid(1)] },
+            ],
+          },
+        ]),
+      },
+      ctx() as any,
+    );
+    expect(out.nearDup.redirected).toEqual([]);
+    expect(out.proposals.filter((p: any) => p.op === "create").map((p: any) => p.name)).toEqual([
+      "/longterm/entities/customers/aurica",
+    ]);
+  });
+
   test("near-dup sibling: a templated customer doc at 0.93 still gets its own create", async () => {
     longterm(
       "c1",
@@ -965,6 +1010,34 @@ describe("cursor and reuse watermark (Lead namespace, no lost reuse signal)", ()
     expect(n2.cursor.to).toMatchObject({ at: "2026-11-05T03:30:00.000Z", atId: "" });
   });
 
+  test("a row at or below a capped watermark still surfaces its later reuse", async () => {
+    // Last night's capped read ended at (12:00, uuid(2)): uuid(1) and uuid(2) had their 12:00 reuse read.
+    for (let i = 1; i <= 3; i++) learning(i, `2026-10-2${i}T00:00:00.000Z`);
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t-b', 'agent-b')");
+    const reuse = (id: string, n: number, at: string) =>
+      db.run(
+        "INSERT INTO memory_retrieval (id, taskId, agentId, memoryId, retrievedAt, intent) VALUES (?, 't-b', 'agent-b', ?, ?, 'context')",
+        [id, uuid(n), at],
+      );
+    reuse("r1", 1, "2026-11-03T12:00:00.000Z");
+    reuse("r1b", 1, "2026-11-03T14:00:00.000Z"); // uuid(1)'s later reuse, after the watermark
+    reuse("r2", 2, "2026-11-03T12:00:00.000Z");
+    reuse("r3", 3, "2026-11-03T12:00:00.000Z"); // same time, id above the watermark: not read yet
+    kv.set(CURSOR, {
+      createdAt: "2026-10-30T00:00:00.000Z",
+      id: uuid(99),
+      at: "2026-11-03T12:00:00.000Z",
+      atId: uuid(2),
+    });
+    const out = await night("2026-11-04T03:30:00.000Z", {
+      batchSize: 5,
+      maxBatches: 0,
+      reuseBatches: 1,
+    });
+    expect(out.batches.map((b: any) => b.docs.map((d: any) => d.id))).toEqual([[uuid(3), uuid(1)]]);
+    expect(out.cursor.to).toMatchObject({ at: "2026-11-04T03:30:00.000Z", atId: "" });
+  });
+
   test("a night over the soft budget reads no reuse and holds the reuse watermark", async () => {
     learning(1, "2026-10-27T00:00:00.000Z");
     learning(2, "2026-10-29T00:00:00.000Z");
@@ -1230,5 +1303,93 @@ describe("lane B keeps pending drops, promotions and the cursor on failures", ()
     expect(kv.has(CURSOR)).toBe(false);
     expect(out.learnings.cursor).toContain("pending-promotion queue");
     expect((kv.get(PROMOS) as any).promotions).toHaveLength(1);
+  });
+
+  test("boundCarry keeps every carried entry and cuts only tonight's overflow", () => {
+    const e = (id: number, carried: boolean) => ({ id, carried });
+    const night = [
+      e(1, false),
+      e(2, false),
+      ...Array.from({ length: 3 }, (_, i) => e(10 + i, true)),
+    ];
+    expect(boundCarry(night, (x) => x.carried, 4)).toEqual({
+      keep: [e(10, true), e(11, true), e(12, true), e(1, false)],
+      cut: 1,
+    });
+    expect(boundCarry(night, (x) => x.carried, 10).cut).toBe(0);
+  });
+
+  test("a full pending-drop queue keeps every carried drop and holds the cursor for tonight's", async () => {
+    const carried = Array.from({ length: 600 }, (_, i) => drop(1001 + i));
+    kv.set(PENDING, { drops: carried });
+    learning(1001, "2026-10-20T00:00:00.000Z");
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(2, "2026-10-27T01:00:00.000Z");
+    const c: any = ctx();
+    c.swarm.memory_delete = async () => ({ data: { success: false, message: "busy" } });
+    const out: any = await dreamingMemtaxCreate(
+      { ...live, maxLearningDrops: 1, plan: planWith({ drops: [drop(1), drop(2)] }) },
+      c,
+    );
+    // The one attempt (the oldest carried drop) failed and is retried; 599 were never attempted.
+    const q = (kv.get(PENDING) as any).drops;
+    expect(q).toHaveLength(600);
+    expect(new Set(q.map((d: any) => d.id))).toEqual(new Set(carried.map((d) => d.id)));
+    expect(q.find((d: any) => d.id === uuid(1001)).tries).toBe(1);
+    // Tonight's two drops did not fit: the cursor holds, so tomorrow re-triages them.
+    expect(out.learnings.dropsOverflow).toBe(2);
+    expect(kv.has(CURSOR)).toBe(false);
+    expect(out.learnings.cursor).toContain("pending-drop queue is full");
+  });
+
+  test("601 deferred promotions: all 600 queued ones stay queued and tonight's overflow holds the cursor", async () => {
+    const promo = (n: number, tries = 1) => ({
+      id: uuid(n),
+      path: `/longterm/workstreams/active/w-${n}`,
+      kind: "workstream",
+      action: `merge-into:/longterm/workstreams/active/w-${n}`,
+      entitySlugs: [],
+      reason: "effort",
+      tries,
+    });
+    const queued = Array.from({ length: 600 }, (_, i) => promo(1001 + i));
+    for (let i = 0; i < 600; i++) learning(1001 + i, "2026-10-20T00:00:00.000Z");
+    learning(1, "2026-10-27T00:00:00.000Z");
+    kv.set(PROMOS, { promotions: queued });
+    const { tries: _t, entitySlugs: _e, ...tonight } = promo(1);
+    const plan: any = await dreamingMemtaxCreate(
+      {
+        mode: "plan",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        learnings: {
+          classifications: [tonight],
+          docs: [
+            {
+              id: uuid(1),
+              name: "learning 1",
+              created: "2026-10-27",
+              text: "Effort 1 is underway",
+            },
+          ],
+          promotedIds: [uuid(1)],
+          drops: [],
+          cursor: { to: cursorTo },
+          counts: { read: 1, promoted: 1 },
+        },
+      },
+      ctx() as any,
+    );
+    expect(plan.learnings.carriedPromotions).toBe(600);
+    expect(plan.learnings.promotions).toHaveLength(601);
+    // No distill output tonight: nothing is written, so all 601 are still owed.
+    const out: any = await dreamingMemtaxCreate({ ...live, plan }, ctx() as any);
+    const q = (kv.get(PROMOS) as any).promotions;
+    expect(new Set(q.map((r: any) => r.id))).toEqual(new Set(queued.map((r) => r.id)));
+    expect(out.learnings.promotionsOverflow).toBe(1);
+    expect(kv.has(CURSOR)).toBe(false);
+    expect(out.learnings.cursor).toContain("pending-promotion queue is full");
   });
 });

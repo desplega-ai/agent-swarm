@@ -84,6 +84,16 @@ export const pendingDropsNs = (leadId: string) => `task:agent:${leadId}`;
 export const LEARNINGS_CURSOR_KEY = "dreaming-v2:learnings:cursor";
 export const LEARNINGS_PENDING_PROMOTIONS_KEY = "dreaming-v2:learnings:pending-promotions";
 const LEARNINGS_PENDING_MAX = 600;
+// Bound a carry queue without losing a decision. Entries carried from earlier nights are past the committed cursor,
+// so the queue is their only copy: they are always kept (the last write bounded them, and each yields at most one
+// entry). Tonight's entries fill what is left; the ones that do not fit are `cut`, and apply then holds the cursor so
+// tomorrow re-triages them instead of the queue dropping them.
+export function boundCarry<T>(entries: T[], isCarried: (e: T) => boolean, max = LEARNINGS_PENDING_MAX): { keep: T[]; cut: number } {
+  const old = entries.filter(isCarried);
+  const fresh = entries.filter((e) => !isCarried(e));
+  const room = Math.max(0, max - old.length);
+  return { keep: [...old, ...fresh.slice(0, room)], cut: Math.max(0, fresh.length - room) };
+}
 const LEARNINGS_PENDING_TRIES = 5;
 const MAX_DOC = 1950;
 const TAGS = ["dreaming-v2", "longterm"]; // never "memtax": B1's read-only control counts memtax-tagged writes
@@ -489,8 +499,11 @@ export function decodeVec(hex: unknown): Float32Array | null {
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   return new Float32Array(bytes.buffer);
 }
+// Vectors of different dimensions (rows from two embedding models while a re-embed is in flight) are not comparable:
+// a shared prefix can score 1, so they score 0 and never make a twin.
 export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
-  const n = Math.min(a.length, b.length);
+  if (a.length !== b.length) return 0;
+  const n = a.length;
   let dot = 0;
   let na = 0;
   let nb = 0;
@@ -794,9 +807,12 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const leadId = String(a.leadAgentId ?? "").trim();
     let promotionsRead = leadId ? "ok" : "no leadAgentId";
     let carriedPromotions = 0;
+    // Every id in the old queue, including ones tonight's triage re-decided: apply keeps these before tonight's own.
+    const queuedPromotionIds: string[] = [];
     if (leadId) {
       try {
         const v: any = (await ctx.swarm.kv_getOrNull({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_PROMOTIONS_KEY }))?.value;
+        for (const r of Array.isArray(v?.promotions) ? v.promotions : []) if (r && typeof r.id === "string") queuedPromotionIds.push(r.id);
         const carried: any[] = (Array.isArray(v?.promotions) ? v.promotions : []).filter((r: any) => r && typeof r.id === "string" && !promoRows.has(r.id) && !ltRows.some((x) => String(x?.id) === r.id));
         if (carried.length) {
           const cids = carried.map((r) => r.id);
@@ -902,7 +918,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const picked = distillOn ? clusters.slice(0, a.maxClusters) : [];
     // Promotions in a memory cluster the cap or the budget left out were never attempted: apply carries them untouched.
     const pickedIds = new Set(picked.flatMap((c) => c.members.map((m: any) => String(m.id))));
-    const deferredPromotionIds = [...promoRows.keys()].filter((id) => !pickedIds.has(id) && clusters.some((c) => c.members.some((m: any) => m.id === id)));
+    const deferredPromotionIds = [...promoRows.keys()].filter((id) => !pickedIds.has(id) && clusters.some((c) => c.members.some((m: any) => String(m.id) === id)));
     const jobs: any[] = [];
     for (let i = 0; i < picked.length; i += a.clustersPerJob) {
       const slice = picked.slice(i, i + a.clustersPerJob);
@@ -959,7 +975,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // Carried to apply: the drops it deletes and the cursor it commits on a live run.
       learnings:
         lt.counts || ltRows.length || Array.isArray(lt.drops) || carriedPromotions || promotionsRead === "failed"
-          ? { drops: Array.isArray(lt.drops) ? lt.drops : [], cursor: lt.cursor ?? null, counts: lt.counts ?? null, promotedIds: [...promotedIds], promotions: [...promoRows.values()], deferredPromotionIds, carriedPromotions, promotionsRead, skipReason: lt.skipReason ?? null }
+          ? { drops: Array.isArray(lt.drops) ? lt.drops : [], cursor: lt.cursor ?? null, counts: lt.counts ?? null, promotedIds: [...promotedIds], promotions: [...promoRows.values()], deferredPromotionIds, queuedPromotionIds, carriedPromotions, promotionsRead, skipReason: lt.skipReason ?? null }
           : null,
       jobs,
       tidy,
@@ -1214,6 +1230,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     let dropsQueueOk = true;
     let promotionsQueueOk = true;
     let promotionsPending: number | null = null;
+    let dropsOverflow = 0;
+    let promotionsOverflow = 0;
     const promotions: any[] = Array.isArray(ltPlan?.promotions) ? ltPlan.promotions.filter((r: any) => r && typeof r.id === "string") : [];
     const carriedRead = String(ltPlan?.promotionsRead ?? (promotions.length ? "ok" : "none"));
     let cursorState = !ltPlan ? "none (no triage tonight)" : runDry ? "not committed (dry run)" : "not committed (v3Writes off)";
@@ -1351,9 +1369,11 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         // A skipped drop (gone, multi-chunk, or edited since triage, so the decision no longer matches the row) is final.
         // The carry list is bounded; a row whose delete failed LEARNINGS_PENDING_TRIES nights in a row is left to its TTL.
         try {
-          const keep = pending.slice(0, LEARNINGS_PENDING_MAX);
+          const carriedIds = new Set(carried.map((d) => d.id));
+          const { keep, cut } = boundCarry(pending, (d) => carriedIds.has(d.id));
           await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
           dropsPending = keep.length;
+          dropsOverflow = cut;
         } catch (e: any) {
           dropsQueueOk = false;
           errors.push(`learnings pending drops write: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -1379,9 +1399,11 @@ async function runScript(args: unknown, ctx: ScriptContext) {
             if (tries < LEARNINGS_PENDING_TRIES) next.push({ id: r.id, path: r.path, kind: r.kind, action: r.action, entitySlugs: r.entitySlugs ?? [], reason: String(r.reason ?? "").slice(0, 300), tries });
           }
           try {
-            const keep = next.slice(0, LEARNINGS_PENDING_MAX);
+            const queued = new Set<string>((Array.isArray(ltPlan?.queuedPromotionIds) ? ltPlan.queuedPromotionIds : []).map(String));
+            const { keep, cut } = boundCarry(next, (r) => queued.has(r.id));
             await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_PROMOTIONS_KEY, value: { promotions: keep, runId, at: new Date().toISOString() } as any });
             promotionsPending = keep.length;
+            promotionsOverflow = cut;
           } catch (e: any) {
             promotionsQueueOk = false;
             errors.push(`learnings pending promotions write: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -1407,7 +1429,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // A failed distill job may have held a promotion, and a queue that could not be read or written would lose the
       // drops and promotions it carries, so each holds the cursor too (re-triage is cheap and idempotent).
       const to = ltPlan?.cursor?.to;
-      const hold = !to ? null : !leadId ? "no leadAgentId" : failedJobs.length ? "a distill job failed" : !dropsQueueOk ? "the pending-drop queue could not be read or written" : !promotionsQueueOk ? "the pending-promotion queue could not be read or written" : null;
+      const hold = !to ? null : !leadId ? "no leadAgentId" : failedJobs.length ? "a distill job failed" : !dropsQueueOk ? "the pending-drop queue could not be read or written" : !promotionsQueueOk ? "the pending-promotion queue could not be read or written" : dropsOverflow ? `the pending-drop queue is full (${dropsOverflow} of tonight's drops did not fit)` : promotionsOverflow ? `the pending-promotion queue is full (${promotionsOverflow} of tonight's promotions did not fit)` : null;
       if (to && !hold) {
         try {
           await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_CURSOR_KEY, value: { createdAt: String(to.createdAt ?? ""), id: String(to.id ?? ""), at: String(to.at ?? ""), atId: String(to.atId ?? ""), runId, committedAt: new Date().toISOString() } as any });
@@ -1498,8 +1520,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           dropsLeft,
           dropsCarried,
           dropsPending,
+          dropsOverflow,
           promotionsCarried: Number(ltPlan?.carriedPromotions ?? 0),
           promotionsPending,
+          promotionsOverflow,
           cursor: cursorState,
         }
       : null;
