@@ -325,6 +325,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -382,6 +383,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -439,6 +441,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -496,6 +499,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -553,6 +557,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -610,6 +615,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -667,6 +673,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -728,6 +735,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -785,6 +793,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -842,6 +851,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -899,6 +909,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -956,6 +967,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}

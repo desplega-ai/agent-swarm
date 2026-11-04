@@ -1459,7 +1459,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_LINK_TARGET",
         label: "File link target",
         description:
-          "Where agents and task attachments link people for files. dashboard opens Files at APP_URL and needs Files on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+          "Where agents and task attachments link people for files. Unset: the dashboard when APP_URL is set, else the agent-fs live app. dashboard opens Files at APP_URL (task attachment links also need Files on). live always opens the agent-fs live app.",
         kind: "enum",
         options: ["live", "dashboard"],
         docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
@@ -1903,10 +1903,19 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/personalization`,
       },
       {
-        key: "DASHBOARD_URL",
+        key: "APP_URL",
         label: "Dashboard URL",
         description:
-          "Public URL of this dashboard. Used to build deep links in Slack, email, and other outbound messages.",
+          "Public URL of this dashboard, or a comma-separated list where the first entry wins. Used for deep links in Slack, email, and other outbound messages. With APP_URL set, agents link files to Files in the dashboard by default. A saved value reaches running workers at their next poll.",
+        kind: "string",
+        placeholder: "https://swarm.example.com",
+        docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
+      },
+      {
+        key: "DASHBOARD_URL",
+        label: "Dashboard URL (deprecated)",
+        description:
+          "Deprecated alias of APP_URL, read only when APP_URL is unset. Use APP_URL: a saved DASHBOARD_URL does not reach workers.",
         kind: "string",
         placeholder: "https://swarm.example.com",
       },

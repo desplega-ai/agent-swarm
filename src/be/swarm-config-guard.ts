@@ -441,6 +441,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ),
   // Where people-facing file links point. Blank keeps the automatic choice.
   ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
+  // Dashboard origin(s), comma-separated; the first is the link base.
+  APP_URL: (value) => {
+    const invalid =
+      "Invalid APP_URL (must be comma-separated http(s) URLs with no query string or fragment, e.g. https://app.example.com)";
+    if (typeof value !== "string") return invalid;
+    const entries = value.split(",").map((entry) => entry.trim());
+    if (value.trim() && entries.some((entry) => !entry)) return invalid;
+    return entries.some((entry) => validateHttpBaseUrl(entry, invalid)) ? invalid : null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
