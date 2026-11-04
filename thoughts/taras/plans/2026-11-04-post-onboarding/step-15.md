@@ -3,7 +3,8 @@ id: step-15
 name: "Home command center + Needs-you badge"
 track: E
 depends_on: [step-5, step-11, step-13, step-16]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-15
 claimed_at: 2026-11-04T16:59:57Z
 ---

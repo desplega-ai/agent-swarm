@@ -3,7 +3,9 @@ id: step-12
 name: "Lead prompts: use-case planning, steering, channel thread"
 track: D
 depends_on: [step-10]
-status: ready
+status: claimed
+assignee: po-orch-step-12
+claimed_at: 2026-11-04T19:30:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while

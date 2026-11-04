@@ -3,7 +3,8 @@ id: step-10
 name: "Use-case Overview tab (next run, schedules, outputs, Ask the Lead)"
 track: D
 depends_on: [step-9, step-2, step-16]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-10
 claimed_at: 2026-11-04T16:59:57Z
 ---

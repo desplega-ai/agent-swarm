@@ -3,7 +3,8 @@ id: step-3
 name: In-app file links by default + files-first delivery prompt
 track: A
 depends_on: [step-2]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-3
 claimed_at: 2026-11-04T16:59:57Z
 ---

@@ -3,7 +3,8 @@ id: step-17
 name: "Connect › AI providers: System One, Embeddings, Transcription tabs"
 track: C
 depends_on: [step-7]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-17
 claimed_at: 2026-11-04T16:59:57Z
 ---

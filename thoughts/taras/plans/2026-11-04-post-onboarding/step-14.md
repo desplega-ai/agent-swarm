@@ -3,7 +3,8 @@ id: step-14
 name: "Lead nudges from checklist (one-shot)"
 track: E
 depends_on: [step-13]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-14
 claimed_at: 2026-11-04T16:59:57Z
 ---
