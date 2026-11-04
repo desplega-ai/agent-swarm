@@ -109,8 +109,9 @@ The event and deadline compete for the same durable wait. Only one creates the c
 | `priority` | Task priority 0-100 (default: 50) |
 | `tags` | Tags applied to created tasks |
 | `taskType` | Type classification for created tasks |
+| `profile` | Model profile for created agent tasks (preferred): a named harness + model + effort. With `targetAgentId`, the agent must pass the profile check. Exclusive with `model` and `modelTier`; on update, setting one clears the other |
 | `model` | Concrete model override for created agent tasks |
-| `modelTier` | Portable model intent for created agent tasks: `smol`, `regular`, `smart`, or `ultra` |
+| `modelTier` | Deprecated. Portable model intent: `smol`, `regular`, `smart`, or `ultra`. Use `profile: "<harness>-<tier>"` for the same model |
 | `enabled` | Whether the schedule is active (default: true) |
 
 ## Automation setup checks
@@ -191,7 +192,7 @@ For `agent-task` schedules:
 1. A new task is created with the schedule's `taskTemplate`
 2. The task is linked back to its schedule via `scheduleId`
 3. If `targetAgentId` is set, the task is assigned to that agent; otherwise it goes into the unassigned pool
-4. If `model` or `modelTier` is set, the task inherits that runtime selection
+4. If `profile`, `model` or `modelTier` is set, the task inherits that runtime selection
 5. The schedule's `lastRunAt` is updated
 6. **One-time schedules** are automatically disabled after execution
 

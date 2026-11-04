@@ -2,11 +2,12 @@
 // default (MODEL_PROFILE), and how both sit in the precedence next to a raw
 // `model` and a `modelTier`. Drives the real `/api/poll` handler.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
   createAgent,
+  createSwarmRepo,
   createTaskExtended,
   getDbClient,
   getTaskById,
@@ -14,10 +15,21 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { createModelProfile, getAgentDefaultProfileName } from "../be/db/model-profiles";
+import { checkProfileForAgent } from "../be/model-profile-check";
 import { recordClaimModelResolution } from "../be/model-tier-resolution";
+import { upsertRuntimeInstance } from "../be/multi-runtime";
+import {
+  bindAgentToPool,
+  createRuntimeController,
+  createRuntimePool,
+} from "../be/runtime-pools/db";
+import { routePoolTasks } from "../be/runtime-pools/routing";
+import { mintRuntimeToken } from "../be/users";
 import { handlePoll } from "../http/poll";
 import { taskModelPin } from "../tasks/model-pin";
 import { inheritedModelSelection } from "../tasks/worker-follow-up";
+import { registerPollTaskTool } from "../tools/poll-task";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-profile-claim.sqlite";
 
@@ -33,13 +45,34 @@ async function removeDbFiles(path: string): Promise<void> {
 
 type Trigger = { type: string; taskId: string; task: Record<string, unknown> };
 
-async function callPoll(agentId: string): Promise<Trigger | null> {
+async function callPoll(
+  agentId: string,
+  runtimeId?: string,
+  auth: "runtime-token" | "shared-key" = "runtime-token",
+): Promise<Trigger | null> {
   let bodyStr = "";
   const req = {
     method: "GET",
     url: "/api/poll",
-    headers: { "x-agent-id": agentId },
+    headers: {
+      "x-agent-id": agentId,
+      ...(runtimeId ? { "x-runtime-instance-id": runtimeId } : {}),
+    },
   } as unknown as Parameters<typeof handlePoll>[0];
+  // A runtime-token poll, as a pooled worker's runtime makes it; a shared-key
+  // runtime authenticates as the operator.
+  if (runtimeId && auth === "shared-key") {
+    setRequestAuth(req, { kind: "operator", fingerprint: "shared-key" });
+  } else if (runtimeId) {
+    setRequestAuth(req, {
+      kind: "agent",
+      agentId,
+      taskId: null,
+      runtimeId,
+      tokenId: "runtime-token",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+  }
   const res = {
     setHeader() {},
     writeHead() {},
@@ -73,9 +106,33 @@ async function setDefault(agentId: string, profile: string): Promise<void> {
   });
 }
 
+type PollTaskHandler = (args: unknown, extra: unknown) => Promise<unknown>;
+const mcpHandlers = new Map<string, PollTaskHandler>();
+
+/** MCP poll-task as a worker runtime calls it; onNotify runs between passes. */
+async function pollTaskAs(agentId: string, runtimeId: string, onNotify: () => Promise<void>) {
+  const handler = mcpHandlers.get("poll-task");
+  if (!handler) throw new Error("poll-task not registered");
+  return (await handler(
+    {},
+    {
+      sessionId: "test-session",
+      requestInfo: { headers: { "x-agent-id": agentId, "x-runtime-instance-id": runtimeId } },
+      sendNotification: onNotify,
+    },
+  )) as { structuredContent?: { task?: { id?: string } } };
+}
+
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
+  const mcp = {
+    registerTool(name: string, _config: unknown, handler: PollTaskHandler) {
+      mcpHandlers.set(name, handler);
+      return { name };
+    },
+  };
+  registerPollTaskTool(mcp as unknown as Parameters<typeof registerPollTaskTool>[0]);
 });
 
 afterAll(async () => {
@@ -169,6 +226,361 @@ describe("a task's own profile", () => {
     const trigger = await callPoll(claude.id);
     expect(trigger?.taskId).toBe(task.id);
     expect(trigger?.task.resolvedProfile).toBe("claude-opus-high");
+  });
+
+  test("a pool task waits for a worker that passes the profile check", async () => {
+    await createModelProfile({
+      name: "claude-pinned-key",
+      harness: "claude",
+      model: "opus",
+      credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["22222"] },
+    });
+    const a = await worker("p-check-fail", "claude");
+    const b = await worker("p-check-pass", "claude");
+    for (const [agentId, value] of [
+      [a.id, "sk-ant-oat01-key-a-11111"],
+      [b.id, "sk-ant-oat01-key-b-22222"],
+    ] as const) {
+      await upsertSwarmConfig({
+        scope: "agent",
+        scopeId: agentId,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value,
+        exportToEnv: true,
+      });
+    }
+    // Two tasks on one profile: A judges it once per poll and skips both.
+    const first = await createTaskExtended("pool work", { profile: "claude-pinned-key" });
+    await createTaskExtended("pool work", { profile: "claude-pinned-key" });
+
+    expect(await callPoll(a.id)).toBeNull();
+    expect((await getTaskById(first.id))?.status).toBe("unassigned");
+    const trigger = await callPoll(b.id);
+    expect(trigger?.taskId).toBe(first.id);
+    expect(trigger?.task.resolvedProfile).toBe("claude-pinned-key");
+  });
+
+  test("a pool task's repo-scoped key counts, and one poll judges each repo apart", async () => {
+    await createModelProfile({
+      name: "claude-repo-key",
+      harness: "claude",
+      model: "opus",
+      credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["22222"] },
+    });
+    const w = await worker("p-repo", "claude");
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: w.id,
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "sk-ant-oat01-key-a-11111",
+      exportToEnv: true,
+    });
+    const repo = await createSwarmRepo({ url: "https://github.com/acme/widgets", name: "widgets" });
+    await upsertSwarmConfig({
+      scope: "repo",
+      scopeId: repo.id,
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "sk-ant-oat01-key-b-22222",
+      exportToEnv: true,
+    });
+    // The repo-less task is scanned first and fails on the agent's key; the
+    // repo task must not inherit that verdict.
+    const bare = await createTaskExtended("pool work", { profile: "claude-repo-key" });
+    await Bun.sleep(5);
+    const scoped = await createTaskExtended("pool work", {
+      profile: "claude-repo-key",
+      vcsRepo: "acme/widgets",
+    });
+
+    const trigger = await callPoll(w.id);
+    expect(trigger?.taskId).toBe(scoped.id);
+    expect((await getTaskById(bare.id))?.status).toBe("unassigned");
+  });
+
+  test("automatic pool routing skips a worker that fails the profile check", async () => {
+    await createModelProfile({
+      name: "claude-routed-key",
+      harness: "claude",
+      model: "opus",
+      credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["22222"] },
+    });
+    const a = await worker("p-route-fail", "claude");
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: a.id,
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "sk-ant-oat01-key-a-11111",
+      exportToEnv: true,
+    });
+    const task = await createTaskExtended("pool work", { profile: "claude-routed-key" });
+    expect((await checkProfileForAgent(a.id, "claude-routed-key"))?.ok).toBe(false);
+
+    expect(await routePoolTasks()).toEqual([]);
+    expect(await callPoll(a.id)).toBeNull();
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+
+    const b = await worker("p-route-pass", "claude");
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: b.id,
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "sk-ant-oat01-key-b-22222",
+      exportToEnv: true,
+    });
+    expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: b.id }]);
+    const trigger = await callPoll(b.id);
+    expect(trigger?.taskId).toBe(task.id);
+    expect(trigger?.task.resolvedProfile).toBe("claude-routed-key");
+  });
+
+  test("pool routing judges a runtime worker on the config its runtime token reads", async () => {
+    const saved = {
+      RUNTIME_POOLS_ENABLED: process.env.RUNTIME_POOLS_ENABLED,
+      MULTI_RUNTIME_ENABLED: process.env.MULTI_RUNTIME_ENABLED,
+    };
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    try {
+      await createModelProfile({
+        name: "claude-secret-repo-key",
+        harness: "claude",
+        model: "opus",
+        credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["22222"] },
+      });
+      const w = await worker("p-route-runtime", "claude");
+      const runtimeId = crypto.randomUUID();
+      await upsertRuntimeInstance({ id: runtimeId, agentId: w.id, reportedSlots: 1 });
+      await mintRuntimeToken(w.id, runtimeId);
+      await upsertSwarmConfig({
+        scope: "agent",
+        scopeId: w.id,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-a-11111",
+        exportToEnv: true,
+      });
+      const repo = await createSwarmRepo({
+        url: "https://github.com/acme/widgets",
+        name: "widgets",
+      });
+      // A non-lead runtime token does not read secret repo rows, so this worker's
+      // env keeps the agent's 11111 key.
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repo.id,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-b-22222",
+        isSecret: true,
+        exportToEnv: true,
+      });
+      const task = await createTaskExtended("pool work", {
+        profile: "claude-secret-repo-key",
+        vcsRepo: "acme/widgets",
+      });
+
+      expect(await routePoolTasks()).toEqual([]);
+      expect(await callPoll(w.id, runtimeId)).toBeNull();
+      expect((await getTaskById(task.id))?.status).toBe("unassigned");
+
+      // Control: the same key as a plain repo row reaches the runtime, and routes.
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repo.id,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-b-22222",
+        isSecret: false,
+        exportToEnv: true,
+      });
+      expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: w.id }]);
+      const trigger = await callPoll(w.id, runtimeId);
+      expect(trigger?.taskId).toBe(task.id);
+      expect(trigger?.task.resolvedProfile).toBe("claude-secret-repo-key");
+    } finally {
+      await getDbClient().run("DELETE FROM runtime_instances");
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  describe("pool routing by runtime authentication", () => {
+    let saved: Record<string, string | undefined>;
+    beforeEach(() => {
+      saved = {
+        RUNTIME_POOLS_ENABLED: process.env.RUNTIME_POOLS_ENABLED,
+        MULTI_RUNTIME_ENABLED: process.env.MULTI_RUNTIME_ENABLED,
+      };
+      process.env.RUNTIME_POOLS_ENABLED = "true";
+      process.env.MULTI_RUNTIME_ENABLED = "true";
+    });
+    afterEach(async () => {
+      await getDbClient().run("DELETE FROM runtime_instances");
+      await getDbClient().run("UPDATE agents SET runtime_pool_id = NULL");
+      await getDbClient().run("DELETE FROM runtime_pools");
+      await getDbClient().run("DELETE FROM runtime_controllers");
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+
+    // Agent key 11111, secret repo override 22222, and one profile per key.
+    async function keyedWorker(name: string) {
+      await createModelProfile({
+        name: `${name}-key-a`,
+        harness: "claude",
+        model: "opus",
+        credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["11111"] },
+      });
+      await createModelProfile({
+        name: `${name}-key-b`,
+        harness: "claude",
+        model: "opus",
+        credentials: { CLAUDE_CODE_OAUTH_TOKEN: ["22222"] },
+      });
+      const w = await worker(name, "claude");
+      await upsertSwarmConfig({
+        scope: "agent",
+        scopeId: w.id,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-a-11111",
+        exportToEnv: true,
+      });
+      const repo = await createSwarmRepo({
+        url: "https://github.com/acme/widgets",
+        name: "widgets",
+      });
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repo.id,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-b-22222",
+        isSecret: true,
+        exportToEnv: true,
+      });
+      return w;
+    }
+
+    test("a shared-key runtime is judged on the secret repo rows it reads", async () => {
+      const w = await keyedWorker("p-route-shared");
+      const runtimeId = crypto.randomUUID();
+      await upsertRuntimeInstance({ id: runtimeId, agentId: w.id, reportedSlots: 1 });
+
+      // Its operator config read carries the secret repo key 22222, not 11111.
+      const keyA = await createTaskExtended("needs 11111", {
+        profile: "p-route-shared-key-a",
+        vcsRepo: "acme/widgets",
+      });
+      expect(await routePoolTasks()).toEqual([]);
+      expect((await getTaskById(keyA.id))?.status).toBe("unassigned");
+
+      const keyB = await createTaskExtended("needs 22222", {
+        profile: "p-route-shared-key-b",
+        vcsRepo: "acme/widgets",
+      });
+      expect(await routePoolTasks()).toEqual([{ taskId: keyB.id, agentId: w.id }]);
+      const trigger = await callPoll(w.id, runtimeId, "shared-key");
+      expect(trigger?.taskId).toBe(keyB.id);
+      expect(trigger?.task.resolvedProfile).toBe("p-route-shared-key-b");
+    });
+
+    test("an agent with token and shared-key runtimes routes only when both pass", async () => {
+      const w = await keyedWorker("p-route-mixed");
+      const tokenRuntime = crypto.randomUUID();
+      await upsertRuntimeInstance({ id: tokenRuntime, agentId: w.id, reportedSlots: 1 });
+      await mintRuntimeToken(w.id, tokenRuntime);
+      await upsertRuntimeInstance({ id: crypto.randomUUID(), agentId: w.id, reportedSlots: 1 });
+
+      // The token runtime gets 11111 and the shared-key runtime 22222: either may
+      // start the task, so neither single-key profile routes.
+      const keyA = await createTaskExtended("needs 11111", {
+        profile: "p-route-mixed-key-a",
+        vcsRepo: "acme/widgets",
+      });
+      const keyB = await createTaskExtended("needs 22222", {
+        profile: "p-route-mixed-key-b",
+        vcsRepo: "acme/widgets",
+      });
+      expect(await routePoolTasks()).toEqual([]);
+
+      // Control: once the token runtime also sees 22222, the 22222 task routes.
+      const repoId = (await getDbClient().get<{ id: string }>("SELECT id FROM swarm_repos"))!.id;
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repoId,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-b-22222",
+        isSecret: false,
+        exportToEnv: true,
+      });
+      expect(await routePoolTasks()).toEqual([{ taskId: keyB.id, agentId: w.id }]);
+      expect((await getTaskById(keyA.id))?.status).toBe("unassigned");
+    });
+
+    test("a wake past the grace still judges the agent's live shared-key runtime", async () => {
+      const w = await keyedWorker("p-route-wake");
+      const controller = await createRuntimeController({ name: "p-wake-docker", kind: "docker" });
+      const pool = await createRuntimePool({
+        name: "p-wake-coders",
+        kind: "docker",
+        placements: [controller.id],
+        image: "test-worker",
+      });
+      await bindAgentToPool(w.id, pool.id);
+      await upsertRuntimeInstance({ id: crypto.randomUUID(), agentId: w.id, reportedSlots: 1 });
+
+      // The live runtime reads 22222 and would poll the woken task before any
+      // new runtime starts, so the 11111 task waits, before and after the grace.
+      const task = await createTaskExtended("needs 11111", {
+        profile: "p-route-wake-key-a",
+        vcsRepo: "acme/widgets",
+      });
+      const afterGrace = new Date(Date.parse(task.createdAt) + 16000);
+      expect(await routePoolTasks({ now: new Date(task.createdAt) })).toEqual([]);
+      expect(await routePoolTasks({ now: afterGrace })).toEqual([]);
+      expect((await getTaskById(task.id))?.status).toBe("unassigned");
+
+      // Control: a fully cold wake is judged as the minted token, which reads 11111.
+      await getDbClient().run("DELETE FROM runtime_instances");
+      expect(await routePoolTasks({ now: afterGrace })).toEqual([
+        { taskId: task.id, agentId: w.id },
+      ]);
+      expect((await getTaskById(task.id))?.poolWakeAt).toBe(afterGrace.toISOString());
+    });
+
+    test("a draining token runtime is still judged, since MCP poll-task can start work on it", async () => {
+      const w = await keyedWorker("p-route-drain");
+      await upsertRuntimeInstance({ id: crypto.randomUUID(), agentId: w.id, reportedSlots: 1 });
+      const draining = crypto.randomUUID();
+      await upsertRuntimeInstance({ id: draining, agentId: w.id, reportedSlots: 1 });
+      await mintRuntimeToken(w.id, draining);
+      await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [draining]);
+
+      // The shared-key sibling reads 22222, the draining token runtime 11111.
+      const task = await createTaskExtended("needs 22222", {
+        profile: "p-route-drain-key-b",
+        vcsRepo: "acme/widgets",
+      });
+      await routePoolTasks();
+      const result = await pollTaskAs(w.id, draining, async () => {
+        // Retire the runtime so the long poll ends on its next pass.
+        await getDbClient().run("DELETE FROM runtime_instances WHERE id = ?", [draining]);
+      });
+      expect(result.structuredContent?.task?.id ?? null).toBeNull();
+      expect((await getTaskById(task.id))?.status).toBe("unassigned");
+
+      // Control: once the token view also reads 22222, the task routes.
+      const repoId = (await getDbClient().get<{ id: string }>("SELECT id FROM swarm_repos"))!.id;
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repoId,
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "sk-ant-oat01-key-b-22222",
+        isSecret: false,
+        exportToEnv: true,
+      });
+      expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: w.id }]);
+    });
   });
 });
 
