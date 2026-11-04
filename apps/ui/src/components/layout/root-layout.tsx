@@ -22,7 +22,7 @@ import { useConfig } from "@/hooks/use-config";
 import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
 import { GitHubStarNudge } from "@/lib/github-star-nudge-toast";
-import { MAIN_GUTTER, MAIN_GUTTER_NO_TOP } from "@/lib/main-gutter";
+import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AccessEndedScreen } from "./access-ended-screen";
 import { AppFooter } from "./app-footer";
@@ -86,15 +86,9 @@ export function RootLayout() {
   const { pathname, search, hash } = useLocation();
   const { config, isConfigured } = useConfig();
   // The unified Home (`/`) owns its own internal padding so the full-bleed
-  // canvas can reach the content-area edges. Comb (`/file`) drops the top
-  // gutter: its header (path, file actions) sits right under the app header.
-  // Every other route gets the standard gutter.
-  const mainPadding =
-    pathname === "/"
-      ? "p-0"
-      : pathname === "/file" || pathname.startsWith("/file/")
-        ? MAIN_GUTTER_NO_TOP
-        : MAIN_GUTTER;
+  // canvas can reach the content-area edges. Every other route gets the
+  // standard gutter, which has no top: content starts under the app header.
+  const mainPadding = pathname === "/" ? "p-0" : MAIN_GUTTER;
 
   const access = useAccessCheck();
 
