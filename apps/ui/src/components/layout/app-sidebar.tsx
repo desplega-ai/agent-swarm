@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { navRequirementMet } from "@/lib/agent-fs/state";
+import { isUnhealthyKey } from "@/lib/ai-providers";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
@@ -680,9 +681,8 @@ export function AppSidebar() {
     if (Array.isArray(users) && gates["1.80.0"].supported) {
       badges["/people"] = formatCompactNumber(users.length);
     }
-    const failingKeys = (apiKeys ?? []).filter(
-      (key) => key.status === "rate_limited" || key.lastValidationFailedAt != null,
-    ).length;
+    // The same rule as the LLMs tab dot on Connect › AI providers.
+    const failingKeys = (apiKeys ?? []).filter(isUnhealthyKey).length;
     if (failingKeys > 0) {
       badges["/integrations/ai"] = (
         <span
