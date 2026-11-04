@@ -34,6 +34,7 @@ import dreamingApplySrc from "./catalog/dreaming-apply.ts" with { type: "text" }
 import dreamingGatherSrc from "./catalog/dreaming-gather.ts" with { type: "text" };
 import dreamingHeartbeatSrc from "./catalog/dreaming-heartbeat.ts" with { type: "text" };
 import dreamingLearnSrc from "./catalog/dreaming-learn.ts" with { type: "text" };
+import dreamingLearningsSrc from "./catalog/dreaming-learnings.ts" with { type: "text" };
 import dreamingMemtaxSrc from "./catalog/dreaming-memtax.ts" with { type: "text" };
 import dreamingMemtaxCreateSrc from "./catalog/dreaming-memtax-create.ts" with { type: "text" };
 import dreamingOwnersSrc from "./catalog/dreaming-owners.ts" with { type: "text" };
@@ -349,6 +350,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "Dreaming learning loop: scores past cuts and pins and records per-lane night-over-night metrics in KV.",
     intent: "Score the effect of earlier dreaming changes so the next night can learn from them.",
     source: asText(dreamingLearnSrc),
+  },
+  {
+    name: "dreaming-learnings",
+    description:
+      "Dreaming learnings triage: plan (cursor-ordered and reused learnings in bounded batches), report (promote, keep or drop per learning, as rows for lane B) and controls. No writes.",
+    intent:
+      "Decide each learning's fate before its TTL: promote it into /longterm, keep it, or drop it.",
+    source: asText(dreamingLearningsSrc),
   },
   {
     name: "dreaming-memtax",

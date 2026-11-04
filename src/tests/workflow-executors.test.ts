@@ -374,13 +374,22 @@ describe("NotifyExecutor", () => {
     expect(out.sent).toBe(false);
   });
 
-  test("slack stub returns sent=false", async () => {
-    const result = await executor.run(
-      input({ channel: "slack", target: "#general", template: "hi" }, {}),
-    );
-    expect(result.status).toBe("success");
-    const out = result.output as { sent: boolean };
-    expect(out.sent).toBe(false);
+  test("slack returns sent=false when Slack is not configured", async () => {
+    // A configured Slack with no client makes the executor wait, then fail
+    // (see workflow-notify-slack-ready.test.ts). Pin the unconfigured case.
+    const previous = process.env.SLACK_DISABLE;
+    process.env.SLACK_DISABLE = "true";
+    try {
+      const result = await executor.run(
+        input({ channel: "slack", target: "#general", template: "hi" }, {}),
+      );
+      expect(result.status).toBe("success");
+      const out = result.output as { sent: boolean };
+      expect(out.sent).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.SLACK_DISABLE;
+      else process.env.SLACK_DISABLE = previous;
+    }
   });
 
   test("email stub returns sent=false", async () => {

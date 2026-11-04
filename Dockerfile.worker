@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.317
+ARG CLAUDE_CODE_VERSION=2.1.318
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -244,7 +244,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.15
+ARG AGENT_FS_VERSION=0.18.17
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -558,8 +558,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-alpha.2
-ARG DSH_SHA512=99d729805f03d5e15057c1aedd3fec60b901c1fc3d87f2e2d2e3c8c57c9bcb55726c982b160f015352dee3416232737e85e2fb937cce32e0157bbb05abf24ee3
+ARG DSH_VERSION=0.2.2-alpha.3
+ARG DSH_SHA512=7df574e9f3a088e78824e980dc480f8fe53a6b326bb0b0028ac70b8fdb7e01f33ba7da75e1b33312b591860782f278b3053c90d9c93190f42d8f83eaa27f261b
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793682830-gad461e
-ARG AMP_SHA512_AMD64=46c23219c410ba503a5dcb9d84880e320816ebabf093af60a94253dda4fce80ae6414e75c20c3c3a6210c3b0607835e7b9183a0525819cb865524d9c14c10d9f
-ARG AMP_SHA512_ARM64=71c573312337337bc0d8bbc9b2c31bba2aa400ce61ba5c85ac1ca71316d6dc15b90c40eb12c0218d83e461b946b7263a4b1d499632b7995cd31e5bb68c7a5794
+ARG AMP_VERSION=0.0.1793764839-g19a5bc
+ARG AMP_SHA512_AMD64=a8fae24f8f8ce379baaebc11c8889040fb83e69e7dfe807f1fc6e664c2f5f3e8c26a7def61c2cde339ebc0dd2f78a4f7c8c483e73e95d07a3f20cc317a26fa21
+ARG AMP_SHA512_ARM64=d8b81267827bc6e02438a75f40cb5b796af9daae1dd88b02008f9855b33b44e157aa2538c04f2b17cda638bdff2f1dbc2bcf2ab617219ebb6182b7c3b5a27f86
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -592,7 +592,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.2.0
+ARG CURSOR_SDK_VERSION=1.3.1
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -634,8 +634,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.6), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.6
+# scripts are not needed for ACP (verified on 0.26.7), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.7
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -661,12 +661,13 @@ RUN case "$TARGETARCH" in \
     && rm -rf /tmp/goose.tgz /tmp/goose-home
 # Kiro CLI, the `kiro` ACP target (`kiro-cli acp`). The headless tarball from
 # the versioned download path, verified against the SHA-256 the stable channel
-# manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
-# the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
-# pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.37.1
-ARG KIRO_CLI_SHA256_AMD64=cf6c7438934a169781b3d564e81bcdfccac901c5d659f35235ac19e0d01192a3
-ARG KIRO_CLI_SHA256_ARM64=10f0318a379b27ba9bbfb2a06b33db2abaedcde2ea0c10f46e3cffbce86368aa
+# manifest lists. Since 3.0.0 the tarball ships a single `kiro-cli` binary
+# (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
+# KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
+# licence before publishing.
+ARG KIRO_CLI_VERSION=3.0.0
+ARG KIRO_CLI_SHA256_AMD64=2ebb8688b84765e4baf46d6e28b3e79780e7724e198591c22d0528d03a88a282
+ARG KIRO_CLI_SHA256_ARM64=ee719fcf8d1166a44eb543e9acada6e2766cf13765787612336d0a43f3903766
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -674,7 +675,7 @@ RUN case "$TARGETARCH" in \
     esac \
     && curl -fsSL "https://prod.download.cli.kiro.dev/stable/${KIRO_CLI_VERSION}/kirocli-${kiro_arch}-linux.tar.gz" -o /tmp/kiro.tgz \
     && echo "${kiro_sha256}  /tmp/kiro.tgz" | sha256sum -c - \
-    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli kirocli/bin/kiro-cli-chat \
+    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli \
     && test "$(HOME=/tmp/kiro-home /usr/local/bin/kiro-cli --version)" = "kiro-cli ${KIRO_CLI_VERSION}" \
     && rm -rf /tmp/kiro.tgz /tmp/kiro-home
 
@@ -738,7 +739,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.41.1",
+    "agent-browser": "0.41.2",
     "playwright": "1.58.0"
   },
   "overrides": {

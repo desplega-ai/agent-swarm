@@ -26,6 +26,7 @@ import { withSpan } from "../otel";
 import { COLOR_LITERAL_THRESHOLD } from "../pages/color-literals";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
+import { DEFAULT_MODEL_TIER_MAP, type ModelTier, type ProviderName } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -299,14 +300,30 @@ const storeProgressBlockedWaitingNudge = (r: SwarmToolResult): string | undefine
   return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — keep working if you can, and if the wait is genuinely long, defer-task is one way to resume later instead of polling.`;
 };
 
+/** One steer per noise-floor rule (src/be/memory/task-learning.ts), each naming the fix. */
+const LEARNING_NOISE_FLOOR_NUDGES: Record<string, string> = {
+  "too-short":
+    'That learning was too short to hold a lesson; resend it as a title line, then the rule as "When X, do Y", or drop it if it is only status.',
+  "repeats-progress":
+    'That learning restates this call\'s progress or output; resend only the rule the next agent should follow ("When X, do Y"), or drop it.',
+};
+
 const storeProgressNudge = (r: SwarmToolResult): string | undefined => {
-  const learning = (r.data as { learning?: { status?: unknown; memoryId?: unknown } } | undefined)
-    ?.learning;
-  // nudgeMiddleware permits exactly one steer: the duplicate-learning steer
-  // names a concrete next call, so it wins over the blocked-waiting reminder.
+  const learning = (
+    r.data as
+      | { learning?: { status?: unknown; memoryId?: unknown; noiseFloor?: unknown } }
+      | undefined
+  )?.learning;
+  // nudgeMiddleware permits exactly one steer: the learning steers name a
+  // concrete fix, so they win over the blocked-waiting reminder, duplicate first.
   if (r.ok && learning?.status === "duplicate" && typeof learning.memoryId === "string") {
     return `That learning repeats memory ${learning.memoryId}; if your text adds something, memory-edit that memory instead of storing a new one.`;
   }
+  const noiseSteer =
+    r.ok && learning?.status === "failed" && typeof learning.noiseFloor === "string"
+      ? LEARNING_NOISE_FLOOR_NUDGES[learning.noiseFloor]
+      : undefined;
+  if (noiseSteer) return noiseSteer;
   return storeProgressBlockedWaitingNudge(r);
 };
 
@@ -314,6 +331,41 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
   if (!r.ok) return undefined;
   const hint = (r.data as { longScriptTimeoutHint?: unknown } | undefined)?.longScriptTimeoutHint;
   return hint ? WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE : undefined;
+};
+
+/** Result extra for a tool that received `modelTier` (runbooks/model-tiers.md § Model profiles). */
+export type ModelTierDeprecated = { tier: ModelTier; suggestedProfile: string | null };
+
+export const modelTierDeprecatedOutputSchema = z.looseObject({
+  tier: z.string().optional(),
+  suggestedProfile: z.string().nullable().optional(),
+});
+
+/**
+ * `modelTier` is an alias for the seeded `<harness>-<tier>` profile. The
+ * suggestion is null when the harness is unknown (a pool task) or has no seed
+ * for the tier (acp).
+ */
+export function modelTierDeprecation(
+  tier: ModelTier | null | undefined,
+  harness: ProviderName | null | undefined,
+): ModelTierDeprecated | undefined {
+  if (!tier) return undefined;
+  const seeded = harness ? Boolean(DEFAULT_MODEL_TIER_MAP[harness]?.[tier]) : false;
+  return { tier, suggestedProfile: seeded ? `${harness}-${tier}` : null };
+}
+
+const modelTierDeprecatedNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const note = (
+    r.data as { modelTierDeprecated?: { tier?: unknown; suggestedProfile?: unknown } } | undefined
+  )?.modelTierDeprecated;
+  if (!note) return undefined;
+  const profile =
+    typeof note.suggestedProfile === "string"
+      ? note.suggestedProfile
+      : `<harness>-${String(note.tier)}`;
+  return `modelTier is deprecated: pass profile "${profile}" (same model).`;
 };
 
 /**
@@ -365,6 +417,11 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "patch-workflow": workflowLongScriptTimeoutNudge,
   "patch-workflow-node": workflowLongScriptTimeoutNudge,
   "slack-download-file": slackDownloadFileNudge,
+  "send-task": modelTierDeprecatedNudge,
+  "task-action": modelTierDeprecatedNudge,
+  "create-schedule": modelTierDeprecatedNudge,
+  "update-schedule": modelTierDeprecatedNudge,
+  "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
   create_page: createPageNudge,
   "script-search": (r) => {

@@ -119,7 +119,8 @@ export const platformWebhooks: Scenario = {
       const badJson = "not json";
       expectStatus(
         await github(badJson, {
-          "X-GitHub-Event": "push",
+          // A handled event: unhandled ones are acked before the body is read.
+          "X-GitHub-Event": "pull_request",
           "X-Hub-Signature-256": githubSig(badJson),
         }),
         [400],

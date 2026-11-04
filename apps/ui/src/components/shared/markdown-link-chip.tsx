@@ -26,6 +26,7 @@ import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
 import { useOptionalStatusContext } from "@/app/status-context";
 import { FileKindIcon } from "@/components/comb/file-icon";
+import { useLinkPreviewClick } from "@/components/link-preview/link-preview-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useCombLinks } from "@/hooks/use-comb-links";
@@ -214,6 +215,8 @@ export function SwarmLinkView({
 }) {
   const name = useLinkName(link);
   const combTo = useCombLinks()(link.type === "file" ? link.href : null);
+  // On the task and session pages a file or page link opens the preview panel.
+  const previewClick = useLinkPreviewClick(link.href, useSwarmLinkOrigins());
   let icon: ReactNode;
   let label: ReactNode;
   let tip: string;
@@ -247,7 +250,10 @@ export function SwarmLinkView({
           to={to}
           href={link.href}
           data-slot="swarm-link"
-          onClick={onClick}
+          onClick={(event) => {
+            onClick?.(event);
+            previewClick?.(event);
+          }}
           // `!`: the unlayered `.prose-chat a` rules would underline it on hover.
           className={cn(
             "hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60",

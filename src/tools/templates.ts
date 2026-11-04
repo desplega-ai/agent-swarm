@@ -82,6 +82,19 @@ Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   category: "task_lifecycle",
 });
 
+registerTemplate({
+  eventType: "task.worker.chain_rejected",
+  header: "",
+  defaultBody: `
+
+The worker completed with chainedTaskId {{chained_task_id}} to say its result continues in that task. The engine rejected it because {{reason}}, so this follow-up was created. Check whether the work really continues somewhere.`,
+  variables: [
+    { name: "chained_task_id", description: "The chainedTaskId passed to store-progress" },
+    { name: "reason", description: "Why the engine did not accept the chained task" },
+  ],
+  category: "task_lifecycle",
+});
+
 // ============================================================================
 // HITL follow-up (created when a standalone approval request is resolved)
 // ============================================================================

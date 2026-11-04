@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { LEARNING_TTL_DAYS } from "@/be/memory/constants";
 import { assertKeyWritable, MemoryKeyError } from "@/be/memory/key-guard";
 import {
   MEMORY_KEY_MAX_LENGTH,
@@ -83,7 +84,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
           .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
           .optional()
           .describe(
-            "Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.",
+            `Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A move into /learnings starts a ${LEARNING_TTL_DAYS}-day expiry; a move out of /learnings takes the source's own expiry (none for manual). A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.`,
           ),
       }),
       outputSchema: swarmToolOutputSchema({

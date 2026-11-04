@@ -27,7 +27,8 @@ import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
@@ -166,6 +167,7 @@ function GroupList({
     },
   );
 
+  const gridColumns = useDataGridColumns("sessions-group");
   // biome-ignore lint/correctness/useExhaustiveDependencies: nameOf reads `users`, rebuilt each render
   const columns = useMemo(
     // No column sorts: the grid holds one page of 50, and a sort of one page reads like a sort of all.
@@ -316,6 +318,11 @@ function GroupList({
             { value: "needs", label: "Needs you" },
           ]}
         />
+        {phone ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
       </ListFilterBar>
       {phone ? (
         (phoneList?.(rows, { loading: list.isPending, label: title }) ?? null)
@@ -323,6 +330,7 @@ function GroupList({
         <DataGrid
           rowData={rows}
           columnDefs={columns}
+          columns={gridColumns}
           loading={list.isPending}
           emptyMessage={q || filter !== "all" ? "No sessions match." : "No sessions here."}
           pagination={false}

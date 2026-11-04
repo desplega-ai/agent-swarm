@@ -42,6 +42,9 @@ export function useLocalToggle(
         // Defensive: storage unavailable → in-memory flip below still works.
       }
       setValue(next);
+      window.dispatchEvent(
+        new CustomEvent("swarm-local-toggle", { detail: { storageKey, value: next } }),
+      );
     },
     [storageKey],
   );
@@ -52,8 +55,16 @@ export function useLocalToggle(
       if (e.newValue === null) setValue(defaultValue);
       else setValue(e.newValue === "1");
     };
+    const localHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{ storageKey: string; value: boolean }>).detail;
+      if (detail?.storageKey === storageKey) setValue(detail.value);
+    };
     window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+    window.addEventListener("swarm-local-toggle", localHandler);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.removeEventListener("swarm-local-toggle", localHandler);
+    };
   }, [storageKey, defaultValue]);
 
   return [value, set];

@@ -75,7 +75,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `1` (on) | Hybrid memory retrieval blends vector similarity with a full-text pass before reranking. Set to `0` or `false` to use vector-only search. |
 | `MEMORY_GRAPH_EXPANSION` | `1` (on) | Expands search candidates with 1-hop memory-link neighbors (resolved `[[wikilink]]` targets) before reranking. Neighbors are damped (`parentRawSimilarity × strength × 0.7`), capped at 5 per search, respect the caller's scope/source/lead ACL, and carry `retrievalSource: "graph"` so `GET /api/memory/usefulness` can measure the arm's citation rate. Set to `0` or `false` to disable expansion. |
-| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
+| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. The store-progress learning duplicate check ignores it and uses its own 0.80 threshold. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
@@ -332,6 +332,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
+| `SLACK_ENTERPRISE_INSTALL` | Set to `true` when `SLACK_BOT_TOKEN` comes from an org-wide Enterprise Grid install (`is_enterprise_install` from `oauth.v2.access`). The swarm then accepts deliveries for its enterprise's org-wide install instead of its workspace (default: `false`). See [Slack: Workspace guard](/docs/integrations/slack#workspace-guard) |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |
 | `SLACK_WORK_OBJECTS_ENABLED` | Set to `true` to populate task Work Object flexpanes (default: `false`). Apply the updated Slack manifest, reinstall the app, and enable Work Object Previews. See [Slack setup](/docs/integrations/slack#task-work-objects). |
@@ -646,6 +647,7 @@ OpenTelemetry traces and OTLP metrics are disabled unless `OTEL_EXPORTER_OTLP_EN
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
 | `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
 | `OTEL_EXPORT_API_LOGS` | OFF | When set to `1`/`true` on the API, also exports its console output as OTLP log records to the same endpoint as traces, scrubbed of secrets. Read at startup. |
+| `EVENT_LOOP_STALL_WARN_MS` | `1000` | Event-loop stall threshold in milliseconds. When a probe tick lags past it, the API logs the stalled request path and the slowest SQL statements recorded during the stall (scrubbed, params never logged). Read on every tick, so a config reload applies without a restart. |
 
 ## Business-Use Instrumentation
 

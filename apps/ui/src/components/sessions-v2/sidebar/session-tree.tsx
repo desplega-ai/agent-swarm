@@ -45,7 +45,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { useSessionsFilter } from "@/lib/sessions-show";
-import { SESSIONS_TOAST_POSITION, type SessionSection, userName } from "@/lib/sessions-v2";
+import { type SessionSection, userName } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { MobileBulkBar } from "../mobile/mobile-bulk-bar";
 import { MobileTreeBody } from "../mobile/mobile-tree-body";
@@ -379,7 +379,7 @@ export function SessionTree({
         return;
       }
     }
-    toast("No unread sessions in the open lists.", { position: SESSIONS_TOAST_POSITION });
+    toast("No unread sessions in the open lists.");
   };
   /** What a key acts on: the selection, else the cursor's session. */
   const keyTargets = () => selection.keyTargets(cursorSession);

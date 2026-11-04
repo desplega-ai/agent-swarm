@@ -163,6 +163,8 @@ type AgentTaskSummaryRow = Pick<
   | "modelAlias"
   | "effort"
   | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -243,7 +245,7 @@ const LIST_COLUMNS = {
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
-    agent_tasks.resolvedEffort,
+    agent_tasks.resolvedEffort, agent_tasks.profile, agent_tasks.resolvedProfile,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -432,6 +434,8 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
       ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
+    profile: row.profile ?? undefined,
+    resolvedProfile: row.resolvedProfile ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     progress: row.progress ?? undefined,
@@ -1778,14 +1782,28 @@ export async function findExistingLinearTrackerContextWork(
   return null;
 }
 
-export async function getLatestTaskByContextKey(contextKey: string): Promise<AgentTask | null> {
+/**
+ * Latest task on a contextKey. `requestedByUserId` keeps only that user's
+ * tasks; `notRequestedByUserId` keeps only tasks of anyone else, including
+ * tasks with no requester.
+ */
+export async function getLatestTaskByContextKey(
+  contextKey: string,
+  options: { requestedByUserId?: string; notRequestedByUserId?: string } = {},
+): Promise<AgentTask | null> {
   if (!contextKey) return null;
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       ${options.requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
+       ${options.notRequestedByUserId !== undefined ? "AND requestedByUserId IS NOT ?" : ""}
        ORDER BY createdAt DESC
        LIMIT 1`,
-    [contextKey],
+    [
+      contextKey,
+      ...(options.requestedByUserId !== undefined ? [options.requestedByUserId] : []),
+      ...(options.notRequestedByUserId !== undefined ? [options.notRequestedByUserId] : []),
+    ],
   );
   return row ? rowToAgentTask(row) : null;
 }
@@ -1927,19 +1945,62 @@ export async function getAgentWorkingOnContextKey(
   return null;
 }
 
+/**
+ * Latest task whose contextKey starts with `prefix` (a half-open key range, so
+ * the contextKey index serves it). The Chat SDK keys a Slack or Discord task by
+ * `<channel>:<thread>`, while a slash command only knows the channel: the
+ * prefix finds the tasks of every thread in it. `activeOnly` narrows to
+ * `in_progress` and `pending`; `source` narrows as in the exact-key twins;
+ * `requestedByUserId` keeps only that user's tasks.
+ */
+export async function getLatestTaskByContextKeyPrefix(
+  prefix: string,
+  options: { activeOnly?: boolean; source?: string; requestedByUserId?: string } = {},
+): Promise<AgentTask | null> {
+  if (!prefix) return null;
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  const source = options.source ?? null;
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE contextKey >= ? AND contextKey < ?
+       AND ${contextKeySourceSql()}
+       ${options.activeOnly ? "AND status IN ('in_progress', 'pending')" : ""}
+       ${options.requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [
+      prefix,
+      upper,
+      source,
+      source,
+      source,
+      ...(options.requestedByUserId !== undefined ? [options.requestedByUserId] : []),
+    ],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 /** Latest `in_progress` or `pending` task on a contextKey (dependency chaining). */
 export async function getLatestActiveTaskByContextKey(
   contextKey: string,
   source?: string,
+  requestedByUserId?: string,
 ): Promise<AgentTask | null> {
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND ${contextKeySourceSql()}
        AND status IN ('in_progress', 'pending')
+       ${requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null, source ?? null],
+    [
+      contextKey,
+      source ?? null,
+      source ?? null,
+      source ?? null,
+      ...(requestedByUserId !== undefined ? [requestedByUserId] : []),
+    ],
   );
 
   return row ? rowToAgentTask(row) : null;

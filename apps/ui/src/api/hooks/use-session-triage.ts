@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { getSessionsShow, getSessionsShownSources } from "@/lib/sessions-show";
-import { plural, SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
+import { plural, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { InboxItemStatus } from "../types";
 import { SESSION_TREE_KEY } from "./session-query-keys";
@@ -105,10 +105,7 @@ export function useSessionTriage() {
     },
     onError: (error, _variables, context) => {
       if (context) rollBackTriageCaches(queryClient, context);
-      // Bottom left, over the sidebar: bottom right covers the composer's Send button.
-      toast.error(error.message || "Couldn't update the session", {
-        position: SESSIONS_TOAST_POSITION,
-      });
+      toast.error(error.message || "Couldn't update the session");
     },
     onSettled: (_data, _error, { targets, action }, context) => {
       // Each session's detail refetches once no other write to it is in
@@ -186,14 +183,10 @@ export function useSessionListTriage() {
       });
     },
     onSuccess: ({ updated }, { action }) => {
-      toast(`${plural(updated, "session")} ${LIST_ACTION_DONE[action]}.`, {
-        position: SESSIONS_TOAST_POSITION,
-      });
+      toast(`${plural(updated, "session")} ${LIST_ACTION_DONE[action]}.`);
     },
     onError: (error) => {
-      toast.error(error.message || "Couldn't update the sessions", {
-        position: SESSIONS_TOAST_POSITION,
-      });
+      toast.error(error.message || "Couldn't update the sessions");
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });

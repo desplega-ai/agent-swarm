@@ -122,7 +122,16 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           if (!validation.valid) {
             return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
           }
-          const modelErrors = await workflowModelErrors(definition);
+        }
+        // A stored definition moving to another repo is judged again: its
+        // static profiles now check against that repo's credential pool.
+        const repoChanged =
+          vcsRepo !== undefined && (vcsRepo ?? null) !== (existing.vcsRepo ?? null);
+        const judged = definition ?? (repoChanged ? existing.definition : undefined);
+        if (judged) {
+          const modelErrors = await workflowModelErrors(judged, {
+            vcsRepo: vcsRepo === undefined ? existing.vcsRepo : vcsRepo,
+          });
           if (modelErrors.length > 0) {
             return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
           }

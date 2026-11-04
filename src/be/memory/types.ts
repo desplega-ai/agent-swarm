@@ -150,8 +150,31 @@ export interface MemorySearchOptions {
   isLead?: boolean;
   includeExpired?: boolean;
   queryText?: string;
-  /** Keep only memories whose `key` starts with this string. Applied inside each SQL arm, before top-K. */
+  /**
+   * Keep only memories whose `key` starts with this string. The vector arm
+   * applies it after the sqlite-vec KNN (capped at 4096 rows), so a prefix
+   * whose rows all rank below that cap returns nothing; pass `exhaustive`
+   * when a miss is not acceptable.
+   */
   keyPrefix?: string;
+  /**
+   * Score eligible rows' stored embeddings instead of the vector index's
+   * top-K, so rows outside `keyPrefix` can never hide a match. Bounded: it
+   * scores at most EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows, newest
+   * `updatedAt` first, so it is exact only while the eligible set fits the
+   * cap; past it, older rows are not scored and the search logs
+   * `capped=true`. With sqlite-vec, SQLite ranks the capped set
+   * (`vec_distance_cosine`); without it, JS scores the same set reading only
+   * id and embedding. Either way only the top `limit` full rows are loaded.
+   * Ignores `queryText`.
+   */
+  exhaustive?: boolean;
+  /**
+   * Raw-cosine floor for this call, replacing MEMORY_MIN_SIMILARITY. Honored by
+   * the exhaustive, vector and brute-force paths (raw cosine); the FTS and
+   * hybrid paths score differently and ignore it.
+   */
+  minSimilarity?: number;
 }
 
 /**

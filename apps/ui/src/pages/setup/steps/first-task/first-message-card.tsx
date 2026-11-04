@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { optionValue, SWARM_ORG_USE_CASE, storedOrgName, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
-import { notePromptSent } from "../../../../lib/github-star-nudge-toast";
 import type { StepProps } from "../../step-contract";
 import type { LeadReadiness } from "./agents-card";
 import { InviteTeamCard } from "./invite-team-card";
@@ -96,7 +95,6 @@ export function FirstTaskComposer({
         requestedByUserId: userId ?? undefined,
         source: "ui",
       });
-      notePromptSent();
       const method = suggestions.includes(task) ? "suggestion" : "free_form";
       try {
         await act({ action: "first_task", taskId: created.id, method });

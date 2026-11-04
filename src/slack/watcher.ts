@@ -38,6 +38,10 @@ import { slackTaskOutput } from "./task-output";
 
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
+// Bumped by stopTaskWatcher(). A start that sees a new epoch after its
+// hydration awaits was abandoned (watchdog restart timeout or shutdown) and
+// must not install a timer.
+let watcherEpoch = 0;
 
 // Track notified completion tasks (taskId -> timestamp)
 const notifiedCompletions = new Map<string, number>();
@@ -236,6 +240,9 @@ export function _getLastRenderedTree(): Map<string, string> {
 }
 export function _getTreeLastUpdateTime(): Map<string, number> {
   return treeLastUpdateTime;
+}
+export function _isTaskWatcherRunning(): boolean {
+  return watcherInterval !== null;
 }
 
 // Expose DM helpers for testing
@@ -644,13 +651,15 @@ export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()
     return;
   }
 
+  const epoch = watcherEpoch;
   let hydratedTrees = 0;
   let hydratedFlat = 0;
   const hydrationTasks = new Map<string, AgentTask>();
-  for (const task of [
-    ...(await getInProgressSlackTasks()),
-    ...(await getPendingSlackRelayTasks()),
-  ]) {
+  const inProgress = await getInProgressSlackTasks();
+  const pendingRelays = await getPendingSlackRelayTasks();
+  // Abandoned while it hydrated (stopped, or overtaken by another start).
+  if (epoch !== watcherEpoch || watcherInterval) return;
+  for (const task of [...inProgress, ...pendingRelays]) {
     hydrationTasks.set(task.id, task);
   }
   for (const task of hydrationTasks.values()) {
@@ -876,6 +885,8 @@ export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()
 }
 
 export function stopTaskWatcher(): void {
+  // Fence any start still hydrating, even when no timer is installed yet.
+  watcherEpoch += 1;
   if (watcherInterval) {
     clearInterval(watcherInterval);
     watcherInterval = null;
