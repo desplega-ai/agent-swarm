@@ -8017,7 +8017,7 @@ export async function createWorkflowRun(data: {
   parentStepAttempt?: number;
   /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
   triggeredByAgentId?: string;
-  /** The `workflow_run_definitions` row the run is pinned to (migration 282). */
+  /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
   definitionHash?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();

@@ -3,8 +3,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDbClient, initDb } from "../be/db";
 
-const TEST_DB_PATH = "./test-migration-282-workflow-run-definitions.sqlite";
-const MIGRATION = "src/be/migrations/282_workflow_run_definitions.sql";
+const TEST_DB_PATH = "./test-migration-283-workflow-run-definitions.sqlite";
+const MIGRATION = "src/be/migrations/283_workflow_run_definitions.sql";
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
@@ -17,7 +17,7 @@ afterAll(async () => {
   }
 });
 
-test("migration 282 applies on a fresh database", async () => {
+test("migration 283 applies on a fresh database", async () => {
   const client = getDbClient();
   const columns = await client.query<{ name: string; notnull: number }>(
     "SELECT name, \"notnull\" FROM pragma_table_info('workflow_run_definitions') ORDER BY cid",
@@ -37,7 +37,7 @@ test("migration 282 applies on a fresh database", async () => {
   expect(index?.name).toBe("idx_workflow_runs_definitionHash");
 });
 
-test("migration 282 leaves existing runs unpinned and rejects an unknown hash", async () => {
+test("migration 283 leaves existing runs unpinned and rejects an unknown hash", async () => {
   const db = new Database(":memory:");
   try {
     db.exec("PRAGMA foreign_keys = ON");

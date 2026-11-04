@@ -451,7 +451,7 @@ describe("which definition a run uses", () => {
     await expectFollowed(runB, "B");
   });
 
-  test("a run with no pin (created before migration 282) follows the live row", async () => {
+  test("a run with no pin (created before migration 283) follows the live row", async () => {
     const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
     const runId = await startOnA(workflow);
     await getDbClient().run("UPDATE workflow_runs SET definitionHash = NULL WHERE id = ?", [runId]);

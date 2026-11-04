@@ -3,7 +3,7 @@ import { getWorkflow } from "../db";
 import { computeContentHash } from "./context-versions";
 import { getDbClient } from "./runtime";
 
-// A run is pinned to the definition it started with (migration 282). The
+// A run is pinned to the definition it started with (migration 283). The
 // snapshot lives once per distinct content in `workflow_run_definitions`, keyed
 // by its hash; `workflow_runs.definitionHash` points at it. Rows are immutable,
 // so a lookup never races an edit.
@@ -67,7 +67,7 @@ export async function pinWorkflowDefinition(workflow: Workflow): Promise<string>
   return hash;
 }
 
-/** The pinned definition of a run, or null when the run has none (pre-282 or preflight-failed). */
+/** The pinned definition of a run, or null when the run has none (pre-283 or preflight-failed). */
 export async function getPinnedRunDefinition(
   runId: string,
 ): Promise<PinnedWorkflowDefinition | null> {
@@ -94,9 +94,9 @@ export function mergePinnedDefinition(live: Workflow, pinned: PinnedWorkflowDefi
 }
 
 /**
- * The workflow a run executes: the definition it started with (migration 282)
+ * The workflow a run executes: the definition it started with (migration 283)
  * on top of the live row. Live fields (`enabled`, `key`, `createdByAgentId`,
- * row metadata) come from the row. A run with no pin (created before 282, or
+ * row metadata) come from the row. A run with no pin (created before 283, or
  * a preflight failure) gets the live row unchanged. Null when the workflow is
  * gone. Use this, not `getWorkflow`, for every read made on behalf of a run.
  */
