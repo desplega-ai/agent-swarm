@@ -161,13 +161,17 @@ function copyEnvKeys(
 
 function parseStringArray(value: string | undefined): string[] {
   if (!value?.trim()) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")) {
-      return parsed;
-    }
+    parsed = JSON.parse(value);
   } catch {
     // Accept comma-separated values for hand-authored environment config.
+  }
+  if (Array.isArray(parsed)) {
+    if (!parsed.every((entry) => typeof entry === "string")) {
+      throw new AcpTargetResolutionError("ACP_TARGET_ENV_KEYS must be a JSON array of strings.");
+    }
+    return parsed;
   }
   return value
     .split(",")

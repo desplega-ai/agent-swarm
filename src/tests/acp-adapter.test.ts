@@ -1047,6 +1047,88 @@ ${serveFakeAcpAgent("FakeCopilot")}
     expect(env.AGENT_MODEL).toBe("custom-model");
   });
 
+  test.each([
+    ["number", 1],
+    ["boolean", false],
+    ["null", null],
+    ["object", { key: "ALLOWED_TOKEN" }],
+    ["nested array", ["ALLOWED_TOKEN"]],
+  ])("custom target rejects a JSON env-key array containing a %s", (_name, entry) => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: JSON.stringify(["ALLOWED_TOKEN", entry]),
+        ALLOWED_TOKEN: "allowed",
+      },
+    });
+    const resolveEnv = () => resolveAcpTarget(config).env(config);
+
+    expect(resolveEnv).toThrow(AcpTargetResolutionError);
+    expect(resolveEnv).toThrow("ACP_TARGET_ENV_KEYS");
+  });
+
+  test("custom target preserves literal keys in an all-string JSON env-key array", () => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: JSON.stringify(["ALLOWED_TOKEN", " SPACED_KEY ", "", "ALLOWED_TOKEN"]),
+        ALLOWED_TOKEN: "allowed",
+        " SPACED_KEY ": "literal",
+        "": "empty-key",
+        BLOCKED_TOKEN: "blocked",
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+
+    expect(env.ALLOWED_TOKEN).toBe("allowed");
+    expect(env[" SPACED_KEY "]).toBe("literal");
+    expect(env[""]).toBe("empty-key");
+    expect(env.SPACED_KEY).toBeUndefined();
+    expect(env.BLOCKED_TOKEN).toBeUndefined();
+  });
+
+  test("custom target trims comma-separated env keys and ignores empty segments", () => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: " ALLOWED_TOKEN , , SECOND_TOKEN, ALLOWED_TOKEN , ",
+        ALLOWED_TOKEN: "allowed",
+        SECOND_TOKEN: "second",
+        BLOCKED_TOKEN: "blocked",
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+
+    expect(env.ALLOWED_TOKEN).toBe("allowed");
+    expect(env.SECOND_TOKEN).toBe("second");
+    expect(env.BLOCKED_TOKEN).toBeUndefined();
+  });
+
+  test.each([
+    undefined,
+    "",
+    "   ",
+    "[]",
+  ])("custom target forwards no extra env keys for an empty list (%j)", (value) => {
+    const config = baseConfig({
+      env: { ACP_TARGET_ENV_KEYS: value, ALLOWED_TOKEN: "allowed" },
+    });
+
+    expect(resolveAcpTarget(config).env(config).ALLOWED_TOKEN).toBeUndefined();
+  });
+
+  test.each([
+    '["ALLOWED_TOKEN"',
+    '"ALLOWED_TOKEN"',
+    "123",
+    "true",
+    "null",
+    '{"key":"value"}',
+  ])("custom target keeps the text fallback for non-array or invalid JSON (%s)", (value) => {
+    const config = baseConfig({
+      env: { ACP_TARGET_ENV_KEYS: value, [value]: "allowed" },
+    });
+
+    expect(resolveAcpTarget(config).env(config)[value]).toBe("allowed");
+  });
+
   test("configured options are nonfatal when absent or rejected", async () => {
     const advertised = [
       {
