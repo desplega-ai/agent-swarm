@@ -147,3 +147,31 @@ describe("newViewLink (the legacy view's New sessions view button)", () => {
     });
   });
 });
+
+test("local toggles synchronize within and across tabs", async () => {
+  const { useLocalToggle } = await import("./use-local-toggle");
+  function Toggles() {
+    const [first, setFirst] = useLocalToggle("version-test", false);
+    const [second] = useLocalToggle("version-test", false);
+    return (
+      <div>
+        <button type="button" onClick={() => setFirst(!first)}>
+          Toggle
+        </button>
+        <output>{String(second)}</output>
+      </div>
+    );
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<Toggles />));
+  await act(async () => container.querySelector("button")?.click());
+  expect(container.querySelector("output")?.textContent).toBe("true");
+  const key = deriveStorageKey(API_URL, "version-test");
+  expect(localStorage.getItem(key)).toBe("1");
+  await act(async () => window.dispatchEvent(new StorageEvent("storage", { key, newValue: "0" })));
+  expect(container.querySelector("output")?.textContent).toBe("false");
+  await act(async () => root.unmount());
+  container.remove();
+});
