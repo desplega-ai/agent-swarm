@@ -35,6 +35,9 @@ import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
+  type ModelTierDeprecated,
+  modelTierDeprecatedOutputSchema,
+  modelTierDeprecation,
   type SwarmToolResult,
   swarmToolOutputSchema,
   toolErr,
@@ -99,7 +102,7 @@ export const taskActionInputSchema = z.object({
       "Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
     ),
   modelTier: ModelTierSchema.optional().describe(
-    "Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action.",
+    "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the seeded <harness>-<tier> profile of its harness. Only used with 'create' action.",
   ),
   allowCustomModel: z
     .boolean()
@@ -143,6 +146,7 @@ export const taskActionOutputSchema = swarmToolOutputSchema({
   userSpend: z.number().optional(),
   userBudget: z.number().optional(),
   resetAt: z.string().optional(),
+  modelTierDeprecated: modelTierDeprecatedOutputSchema.optional(),
 });
 
 type TaskActionArgs = z.infer<typeof taskActionInputSchema>;
@@ -159,6 +163,7 @@ type TaskActionResult = {
   userBudget?: number;
   resetAt?: string;
   refusalSideEffects?: unknown;
+  modelTierDeprecated?: ModelTierDeprecated;
 };
 
 function agentOnlyActionResult(): SwarmToolResult {
@@ -365,10 +370,13 @@ export async function taskActionHandler(
           preparedCreate!.description,
           preparedCreate!.options,
         );
+        // A pool task has no harness until claim, so there is no profile to suggest.
+        const modelTierDeprecated = modelTierDeprecation(input.modelTier, null);
         return {
           success: true,
           message: `Created unassigned task "${newTask.id}".`,
           task: newTask,
+          ...(modelTierDeprecated ? { modelTierDeprecated } : {}),
         };
       }
 
