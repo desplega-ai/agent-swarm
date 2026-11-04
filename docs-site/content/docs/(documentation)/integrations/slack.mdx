@@ -53,6 +53,8 @@ SLACK_DISABLE=true
 
 `SLACK_MODE` accepts only `socket` or `http` and defaults to `socket`. Invalid values fail closed. In the current phase, selecting `http` validates the bot token and signing-secret configuration but deliberately leaves Slack unavailable; it does not open a Socket Mode fallback, HTTP route, listener, or ingress. Keep `socket` selected until the signed HTTP receiver is installed.
 
+A socket watchdog restarts the Slack app when the Socket Mode link stays down for 60 seconds, for example after `@slack/socket-mode` gives up on a failed reconnect. Retries back off exponentially from 30 seconds to 5 minutes, and a restart never overlaps a config reload. Each down and restart transition is logged.
+
 Development API processes do not open Socket Mode by default, even when Slack tokens are present in the ambient environment. This prevents a local `bun run start:http` process from consuming events intended for production. Set `SLACK_ALLOW_DEV_SOCKET_MODE=true` only when that development process must connect to the configured Slack app; the server logs the blocked reason and this opt-in name otherwise.
 
 ## How It Works
