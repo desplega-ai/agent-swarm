@@ -3,7 +3,8 @@ import { z } from "zod";
 
 // dreaming-v2 lane B, CREATE + VALIDATE + TIDY on top of B1 classify (global dreaming-memtax). Operator 2026-10-01:
 // curated memories live at name = /longterm/<path> (taxonomy dreaming-v2/memory-taxonomy.md §3.2), scope swarm.
-// Anything not under /longterm/ is inbox and is never written or deleted here (B2/B3).
+// Anything not under /longterm/ is inbox and is never written here (B2/B3). The one exception is a learnings-triage
+// drop: apply deletes those /learnings rows (pre-image, ledger, rollback) and commits the triage cursor.
 //   plan     -> read-only. Ingest every /longterm/* doc (chunk 0), the source records (users, agents, swarm_repos)
 //               and tonight's B1 classifications. Propose deterministic entity docs, B1 clusters to distill,
 //               validate verdicts (ok / stale / drift / duplicate / bad-path) and tidy ops inside /longterm/.
@@ -40,13 +41,21 @@ export const argsSchema = z.object({
   budget: z.unknown().optional(), // gather.result.budget
   classifyPlan: z.unknown().optional(), // memtax-plan.result (B1)
   classify: z.unknown().optional(), // memtax-classify foreach aggregate (B1)
+  learnings: z.unknown().optional(), // learnings-report.result (dreaming-learnings): promotions, how-to keeps, drops, cursor
   plan: z.unknown().optional(), // memtax-create-plan.result (apply)
   distill: z.unknown().optional(), // memtax-distill foreach aggregate (apply)
   leadAgentId: z.string().optional(), // gather.result.leadAgentId: apply trusts only distill tasks this agent ran
   maxCreates: z.number().int().min(0).max(80).default(40),
   maxEdits: z.number().int().min(0).max(60).default(20),
   maxDeletes: z.number().int().min(0).max(20).default(5),
-  maxClusters: z.number().int().min(0).max(40).default(12),
+  maxLearningDrops: z.number().int().min(0).max(200).default(60),
+  // Near-duplicate guard on creates: cosine between the create's evidence (the mean of its source memories' embeddings)
+  // and each /longterm chunk-0 doc. A twin at >= twinCos under any name, or at >= nearDupCos about the same subject (same
+  // slug or a shared alias), turns the create into an edit of that doc. Templated siblings sit at 0.80-0.93 (two customer
+  // docs, two company-story sections), so 0.80 alone would merge different subjects.
+  nearDupCos: z.number().min(0.5).max(1).default(0.8),
+  twinCos: z.number().min(0.5).max(1).default(0.95),
+  maxClusters: z.number().int().min(0).max(40).default(24),
   clustersPerJob: z.number().int().min(1).max(12).default(6),
   memberChars: z.number().int().min(200).max(1500).default(900),
   sampleCount: z.number().int().min(0).max(100).default(20),
@@ -65,6 +74,7 @@ export const argsSchema = z.object({
 });
 
 const NS = "dreaming-v2";
+const LEARNINGS_CURSOR_KEY = "learnings:cursor"; // dreaming-learnings CURSOR_KEY: plan reads it, only this apply writes it
 const MAX_DOC = 1950;
 const TAGS = ["dreaming-v2", "longterm"]; // never "memtax": B1's read-only control counts memtax-tagged writes
 
@@ -460,6 +470,60 @@ export function rewriteFacts(current: Fact[], next: Fact[]): { ok: boolean; fact
   return { ok: facts.length > 0 && dropped <= maxDrop, facts, dropped, maxDrop };
 }
 
+// ---- near-duplicate guard (pure) ----
+// db_query returns embeddings as hex(embedding): little-endian float32.
+export function decodeVec(hex: unknown): Float32Array | null {
+  const h = typeof hex === "string" ? hex.trim() : "";
+  if (!h || h.length % 8 !== 0 || !/^[0-9a-fA-F]+$/.test(h)) return null;
+  const bytes = new Uint8Array(h.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return new Float32Array(bytes.buffer);
+}
+export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  const n = Math.min(a.length, b.length);
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < n; i++) {
+    dot += a[i]! * b[i]!;
+    na += a[i]! * a[i]!;
+    nb += b[i]! * b[i]!;
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+// The evidence of a create = the mean of its source memories' embeddings (the draft itself has no embedding yet).
+export function centroid(vs: Array<ArrayLike<number>>): Float32Array | null {
+  const ok = vs.filter((v) => v && v.length && v.length === vs[0]!.length);
+  if (!ok.length) return null;
+  const out = new Float32Array(ok[0]!.length);
+  for (const v of ok) for (let i = 0; i < out.length; i++) out[i]! += v[i]! / ok.length;
+  return out;
+}
+// Same subject = the same last path segment, or a shared alias (kebab, 4+ chars, not a generic word). Company-story
+// sections are fixed siblings of one subject (the company), so they never match by subject, only as near-identical.
+export function sameSubject(a: { path: string; aliases: string[] }, b: { path: string; aliases: string[] }): boolean {
+  if (a.path.startsWith("/longterm/company-story/") || b.path.startsWith("/longterm/company-story/")) return false;
+  const slug = (p: string) => p.split("/").pop() ?? "";
+  if (slug(a.path) && slug(a.path) === slug(b.path)) return true;
+  const names = (x: { path: string; aliases: string[] }) => new Set([slug(x.path), ...x.aliases].map(kebab).filter((n) => n.length >= 4 && !GENERIC.has(n)));
+  const A = names(a);
+  for (const n of names(b)) if (A.has(n)) return true;
+  return false;
+}
+export type TwinDoc = { id: string; path: string; aliases: string[]; vec: ArrayLike<number> };
+// The existing doc a create would duplicate, or null. A doc already on the create's path (an agent doc keyed there)
+// is always its twin. Highest cosine wins.
+export function nearestTwin(create: { path: string; aliases: string[]; vec: ArrayLike<number> }, docs: TwinDoc[], o: { nearDupCos: number; twinCos: number }): { id: string; path: string; cos: number; why: "same path" | "near-identical" | "same subject" } | null {
+  let best: { id: string; path: string; cos: number; why: "same path" | "near-identical" | "same subject" } | null = null;
+  for (const d of docs) {
+    const c = cosine(create.vec, d.vec);
+    if (d.path === create.path) return { id: d.id, path: d.path, cos: c, why: "same path" };
+    const why = c >= o.twinCos ? "near-identical" : c >= o.nearDupCos && sameSubject(create, d) ? "same subject" : null;
+    if (why && (!best || c > best.cos)) best = { id: d.id, path: d.path, cos: c, why };
+  }
+  return best;
+}
+
 // ---- validate (pure) ----
 export type Verdict = "ok" | "ok-unsourced" | "stale" | "drift" | "duplicate" | "bad-path" | "multi-chunk" | "misfiled";
 // A people/customers path whose slug names an agent or repo record: that subject lives in its profile / get-repos.
@@ -704,16 +768,24 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const cp: any = parse(a.classifyPlan) ?? {};
     const meta = new Map<string, any>();
     for (const b of Array.isArray(cp.batches) ? cp.batches : []) for (const d of b?.docs ?? []) meta.set(String(d.id), d);
+    // Learnings triage (dreaming-learnings report): its rows join B1's, validated by the same rules. A promotion is
+    // distilled even as a singleton: the triage already decided it belongs in that subject doc.
+    const lt: any = parse(a.learnings) ?? {};
+    const ltRows: any[] = Array.isArray(lt.classifications) ? lt.classifications : [];
+    for (const d of Array.isArray(lt.docs) ? lt.docs : []) if (d?.id && !meta.has(String(d.id))) meta.set(String(d.id), { ...d, fromLearning: true });
+    const promotedIds = new Set<string>((Array.isArray(lt.promotedIds) ? lt.promotedIds : []).map(String));
     const ids = new Set(meta.keys());
     const groups = new Map<string, any[]>();
     const howtoGroups = new Map<string, any[]>();
     const clusterStats = { classified: 0, inbox: 0, deleteAction: 0, deferredRoots: 0, failedBatches: 0, rejected: 0, noCreateRoot: 0, misfiled: 0, howto: 0, howtoRemapped: 0, episodic: 0, selfMember: 0 };
+    const feed: any[][] = [];
     for (const x of parseForeach(a.classify)) {
-      if (x.status !== "completed") {
-        clusterStats.failedBatches++;
-        continue;
-      }
-      for (const c of Array.isArray(x.out?.classifications) ? x.out.classifications : []) {
+      if (x.status !== "completed") clusterStats.failedBatches++;
+      else feed.push(Array.isArray(x.out?.classifications) ? x.out.classifications : []);
+    }
+    feed.push(ltRows);
+    for (const list of feed) {
+      for (const c of list) {
         const v = validateClassification(c, ids);
         if (!v.ok) {
           clusterStats.rejected++;
@@ -746,15 +818,16 @@ async function runScript(args: unknown, ctx: ScriptContext) {
             clusterStats.selfMember++;
             continue;
           }
-          groups.set(target, [...(groups.get(target) ?? []), { id: r.id, reason: r.reason }]);
+          groups.set(target, [...(groups.get(target) ?? []), { id: r.id, reason: r.reason, promoted: promotedIds.has(r.id) }]);
         }
       }
     }
     const entityPaths = new Set(entities.filter((e) => !noCreate(e.path)).map((e) => e.path));
     const allClusters = [...groups.entries()]
-      .map(([path, ms]) => ({ path, root: pathRoot(path)!, members: ms, attach: entityPaths.has(path) || byName.has(path) }))
-      .filter((c) => c.members.length >= 2 || c.attach)
-      .sort((x, y) => y.members.length - x.members.length || (x.path < y.path ? -1 : 1));
+      .map(([path, ms]) => ({ path, root: pathRoot(path)!, members: ms, attach: entityPaths.has(path) || byName.has(path), promoted: ms.filter((m: any) => m.promoted).length }))
+      .filter((c) => c.members.length >= 2 || c.attach || c.promoted > 0)
+      // Promotions first: the TTL deletes an undistilled learning, a B1 doc only waits a night.
+      .sort((x, y) => Number(y.promoted > 0) - Number(x.promoted > 0) || y.members.length - x.members.length || (x.path < y.path ? -1 : 1));
     // Skill routing: how-to clusters leave lane B before distill, so they never reach /longterm or use a cluster slot.
     const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE isEnabled = 1 ORDER BY name`)) as SkillRow[];
     const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND isScratch = 0 ORDER BY name`)) as SkillRow[];
@@ -833,7 +906,9 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       recallLeft,
       skillCatalog: skillRows.length,
       scriptCatalog: scriptRows.length,
-      clusterStats: { ...clusterStats, singletonsLeftForB2: singletons, overCap, routedToSkills: skillRoutes.length },
+      clusterStats: { ...clusterStats, singletonsLeftForB2: singletons, overCap, routedToSkills: skillRoutes.length, learningRows: ltRows.length, promotedClusters: picked.filter((c) => c.promoted > 0).length, promotedOverCap: clusters.slice(picked.length).reduce((n, c) => n + c.promoted, 0) },
+      // Carried to apply: the drops it deletes and the cursor it commits on a live run.
+      learnings: lt.counts || ltRows.length || Array.isArray(lt.drops) ? { drops: Array.isArray(lt.drops) ? lt.drops : [], cursor: lt.cursor ?? null, counts: lt.counts ?? null, promotedIds: [...promotedIds], skipReason: lt.skipReason ?? null } : null,
       jobs,
       tidy,
       memberNames: Object.fromEntries([...meta.entries()].map(([id, d]) => [id, String(d.name ?? "").slice(0, 120)])),
@@ -899,6 +974,46 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const texts = ids.map((id) => memberNames[id] ?? "");
         const r = routeCluster(hp, skillRows, texts);
         if (r.route === "skill-update" || r.route === "skill-new") skillRoutes.push({ ...handoffRow(hp, r, texts, scriptRows, ids), from: cl.path, flaggedBy: "distill" });
+      }
+    }
+    // Near-duplicate guard, before any create is composed: a distilled doc with no home yet whose evidence matches an
+    // existing /longterm doc folds into that doc as an edit (merged bullets) instead of becoming a second copy. A twin
+    // the lane cannot edit safely (an agent-written doc, multi-chunk, or a retired root) refuses the create instead.
+    const nearDup = { checked: 0, unchecked: 0, redirected: [] as any[], refused: [] as any[] };
+    const createPaths = [...distilled.keys()].filter((path) => !byName.has(path) && !src.entities.some((e) => e.path === path) && !noCreate(path) && !routedPaths.has(path) && !HOWTO_ROOTS.some((r) => path.startsWith(`${r}/`)));
+    if (createPaths.length) {
+      const srcIds = [...new Set(createPaths.flatMap((path) => distilled.get(path)!.facts.flatMap((f) => f.src)))];
+      const vecs = new Map<string, Float32Array>();
+      const srcRows = srcIds.length ? await q("near-dup-sources", `SELECT id, hex(embedding) e FROM agent_memory WHERE id IN (${srcIds.map(() => "?").join(",")}) AND embedding IS NOT NULL`, srcIds) : [];
+      for (const r of srcRows) {
+        const v = decodeVec(r.e);
+        if (v) vecs.set(String(r.id), v);
+      }
+      const twins: TwinDoc[] = [];
+      for (const r of await q("near-dup-docs", `SELECT id, name, key, substr(content, 1, 600) head, hex(embedding) e FROM agent_memory WHERE chunkIndex = 0 AND (name GLOB '/longterm/*' OR coalesce(key, '') GLOB '/longterm/*') AND embedding IS NOT NULL ORDER BY createdAt, id LIMIT 1000`)) {
+        const v = decodeVec(r.e);
+        const path = String(r.name ?? "").startsWith("/longterm/") ? String(r.name) : String(r.key ?? "");
+        if (v) twins.push({ id: String(r.id), path, aliases: parseDoc(String(r.head ?? "")).aliases, vec: v });
+      }
+      for (const path of createPaths) {
+        const d = distilled.get(path)!;
+        const vec = centroid([...new Set(d.facts.flatMap((f) => f.src))].map((id) => vecs.get(id)).filter((v): v is Float32Array => !!v));
+        if (!vec) {
+          nearDup.unchecked++;
+          continue;
+        }
+        nearDup.checked++;
+        const twin = nearestTwin({ path, aliases: d.aliases, vec }, twins, { nearDupCos: a.nearDupCos, twinCos: a.twinCos });
+        if (!twin) continue;
+        const cos = Math.round(twin.cos * 1000) / 1000;
+        const lane = byName.get(twin.path)?.[0];
+        const editable = !!lane && Number(lane.totalChunks) === 1 && /^type: /.test(String(lane.content ?? "")) && guardLongtermWrite({ op: "edit", name: twin.path }).ok && !routedPaths.has(twin.path);
+        distilled.delete(path);
+        if (editable) {
+          const prev = distilled.get(twin.path);
+          distilled.set(twin.path, prev ? { aliases: [...new Set([...prev.aliases, ...d.aliases])].slice(0, 6), facts: mergeFacts(prev.facts, d.facts), rewrite: prev.rewrite } : { aliases: d.aliases, facts: d.facts, rewrite: false });
+          nearDup.redirected.push({ from: path, to: twin.path, cos, why: twin.why });
+        } else nearDup.refused.push({ from: path, twin: twin.path, cos, why: twin.why, reason: lane ? "twin is multi-chunk, not lane format, or on a retired root" : "twin is an agent-written doc the lane does not edit" });
       }
     }
     // Compose proposals.
@@ -1037,6 +1152,12 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const overCap = { creates: Math.max(0, creates.length - a.maxCreates), edits: Math.max(0, edits.length - a.maxEdits), deletes: Math.max(0, deletes.length - a.maxDeletes) };
     const refused = [...props.filter((x) => x.verdict !== "ok" && x.op === "create" && !blocked.has(x)).map((x) => ({ name: x.name, verdict: x.verdict })), ...[...blocked].map(([x, why]) => ({ name: x.name, op: x.op, verdict: why }))];
 
+    // Learnings triage carried by the plan: drops to delete (capped) and the cursor to commit.
+    const ltPlan: any = pl.learnings && typeof pl.learnings === "object" ? pl.learnings : null;
+    const allDrops: any[] = Array.isArray(ltPlan?.drops) ? ltPlan.drops.filter((d: any) => d && typeof d.id === "string") : [];
+    const learningDrops = allDrops.slice(0, a.maxLearningDrops);
+    let dropsLeft = allDrops.length - learningDrops.length;
+    let cursorState = !ltPlan ? "none (no triage tonight)" : runDry ? "not committed (dry run)" : "not committed (v3Writes off)";
     // Writes (live only).
     const writes: any[] = [];
     const ledgerItems: any[] = [];
@@ -1109,6 +1230,36 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           writes.push({ actionId, op: x.op, id: x.id ?? null, name: x.name, status: "failed", why: String(e?.message ?? e).slice(0, 200) });
         }
       }
+      // Learnings-triage drops: delete each /learnings row after the /longterm writes, inside the same write budget.
+      // Re-checked live: still a /learnings row, one chunk, unchanged since the triage read it. A drop the cap or the
+      // budget leaves stays on its TTL.
+      for (const [i, dr] of learningDrops.entries()) {
+        if (Date.now() - t0 > (a.writeBudgetMs ?? 90000)) {
+          dropsLeft += learningDrops.length - i;
+          errors.push(`write budget reached; ${learningDrops.length - i} learning drops left to the TTL`);
+          break;
+        }
+        const actionId = `LT${i + 1}`;
+        try {
+          const cur = await q("pre-drop", `SELECT id, name, key, tags, content, contentHash, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [dr.id]);
+          if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || (dr.contentHash && cur[0].contentHash !== dr.contentHash) || Number(cur[0].totalChunks) !== 1) {
+            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, or changed since triage" });
+            continue;
+          }
+          const preimageKey = `memtax-create:pre:${runId}:${dr.id}`;
+          await ctx.swarm.kv_set({ namespace: NS, key: preimageKey, value: { rows: [{ id: dr.id, name: cur[0].name, key: cur[0].key, tags: cur[0].tags, content: cur[0].content }], sha256: cur[0].contentHash, at: new Date().toISOString() } as any });
+          const res: any = await ctx.swarm.memory_delete({ id: dr.id });
+          if (res?.data?.success === false) {
+            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200), preimageKey });
+            continue;
+          }
+          const back = await q("post-drop", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [dr.id]);
+          writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: String(cur[0].name ?? ""), key: cur[0].key, beforeSha: cur[0].contentHash, afterSha: null, preimageKey, why: `${dr.dropWhy}: ${String(dr.reason ?? "").slice(0, 120)}`, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
+          ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: String(cur[0].name ?? ""), memoryIds: [dr.id] }, preimageKey });
+        } catch (e: any) {
+          writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(e?.message ?? e).slice(0, 200) });
+        }
+      }
       // Write log for rollback + ledger items for the next night's dreaming-verify survival check. verify already
       // wrote ledger:<runId> earlier in this run (verify -> learn -> memtax), so this read-append-write has no racer.
       try {
@@ -1124,6 +1275,18 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       } catch (e: any) {
         errors.push(`log: ${String(e?.message ?? e).slice(0, 200)}`);
       }
+      // Commit the triage cursor only now, after the writes: a skipped or failed night re-reads the same learnings.
+      // A failed distill job may have held a promotion, so it holds the cursor too (re-triage is cheap and idempotent).
+      const to = ltPlan?.cursor?.to;
+      if (to && failedJobs.length === 0) {
+        try {
+          await ctx.swarm.kv_set({ namespace: NS, key: LEARNINGS_CURSOR_KEY, value: { createdAt: String(to.createdAt ?? ""), id: String(to.id ?? ""), at: String(to.at ?? ""), runId, committedAt: new Date().toISOString() } as any });
+          cursorState = `committed to ${String(to.createdAt ?? "").slice(0, 19) || "start"}`;
+        } catch (e: any) {
+          errors.push(`learnings cursor: ${String(e?.message ?? e).slice(0, 200)}`);
+          cursorState = "commit failed; tomorrow re-reads the same learnings";
+        }
+      } else cursorState = to ? "not committed: a distill job failed, tomorrow re-reads the same learnings" : "none (no triage tonight)";
     }
     // Handoff to the next night's synthesize (it runs before lane B). Not a memory write, so it does not wait on
     // v3Writes; dry runs write nothing. Fixed key :latest so synthesize reads it by exact name.
@@ -1156,7 +1319,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       edits: edits.length,
       deletes: deletes.length,
       planned: planned.length,
-      written: writes.filter((w) => w.status === "verified").length,
+      written: writes.filter((w) => w.status === "verified" && w.kind !== "learning").length,
       unverified: writes.filter((w) => w.status === "unverified" || w.status === "failed").length,
       stale: verdicts.filter((v) => v.verdict === "stale").length,
       drift: verdicts.filter((v) => v.verdict === "drift").length,
@@ -1179,10 +1342,33 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // Operator 2026-10-08 invariant: rendered docs refused before the write, and existing docs that break it.
       invariantRefused: invBlocked.size + writes.filter((w) => w.status === "refused" && String(w.why).startsWith("invariant")).length,
       invariantExisting: verdicts.filter((v) => v.invariant.length).length,
+      nearDupChecked: nearDup.checked,
+      nearDupRedirected: nearDup.redirected.length,
+      nearDupRefused: nearDup.refused.length,
       existingDocs: existing.length,
       longtermRowsBefore: pl.longtermRowsBefore ?? null,
       longtermRowsAfter,
     };
+    // Learnings triage, applied: what tonight's decisions became. A promotion counts once a /longterm write cites it.
+    const promotedSet = new Set<string>((Array.isArray(ltPlan?.promotedIds) ? ltPlan.promotedIds : []).map(String));
+    const verifiedNames = new Set(writes.filter((w) => w.status === "verified" && w.kind !== "learning").map((w) => w.name));
+    const cites = (xs: Prop[]) => new Set(xs.flatMap((x) => x.sources).filter((id) => promotedSet.has(id))).size;
+    const ltc: any = ltPlan?.counts ?? {};
+    const learnings = ltPlan
+      ? {
+          read: Number(ltc.read ?? 0),
+          promoted: Number(ltc.promoted ?? 0),
+          kept: Number(ltc.kept ?? 0),
+          dropped: Number(ltc.dropped ?? 0),
+          promotedPlanned: cites(planned),
+          promotedWritten: live ? cites(planned.filter((x) => verifiedNames.has(x.name))) : 0,
+          dropsPlanned: learningDrops.length,
+          dropsDeleted: writes.filter((w) => w.kind === "learning" && w.status === "verified").length,
+          dropsSkipped: writes.filter((w) => w.kind === "learning" && w.status === "skipped").length,
+          dropsLeft,
+          cursor: cursorState,
+        }
+      : null;
     const L: string[] = ["## Long-term memories (lane B, create/validate/tidy)"];
     L.push(
       live
@@ -1202,6 +1388,15 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       for (const r of skillRoutes) L.push(`| \`${r.path}\` | ${r.lane} ${r.op} | ${r.skill ? `\`${r.skill}\`` : "new"} | ${r.scriptExisting ? `wire \`${r.scriptExisting}\`` : r.script ? "new" : "-"} | ${(r.memberIds ?? []).length} |`);
       L.push("");
     }
+    if (learnings) {
+      L.push(
+        `**Learnings triage (applied)**: ${learnings.read} read, ${learnings.promoted} promoted, ${learnings.kept} kept, ${learnings.dropped} dropped · ` +
+          (live ? `${learnings.promotedWritten} promoted learnings cited by verified /longterm writes · ${learnings.dropsDeleted} of ${learnings.dropsPlanned} drops deleted` : `${learnings.promotedPlanned} promoted learnings cited by planned /longterm writes · ${learnings.dropsPlanned} drops would be deleted`) +
+          `${learnings.dropsLeft ? `, ${learnings.dropsLeft} left to the TTL (cap ${a.maxLearningDrops} or write budget)` : ""} · cursor ${learnings.cursor}.`,
+      );
+    }
+    const nd = (x: any) => `\`${x.from}\` -> \`${x.to ?? x.twin}\` (${x.why}, cos ${x.cos})`;
+    L.push(`**Near-duplicate guard** (creates vs existing /longterm docs): ${nearDup.checked} checked, ${nearDup.redirected.length} turned into edits${nearDup.redirected.length ? ` (${nearDup.redirected.map(nd).join("; ")})` : ""}, ${nearDup.refused.length} refused${nearDup.refused.length ? ` (${nearDup.refused.map(nd).join("; ")})` : ""}${nearDup.unchecked ? `, ${nearDup.unchecked} with no embedded source to compare` : ""}.`);
     if (Object.values(overCap).some((n) => n > 0)) L.push(`Over the nightly cap, left for tomorrow: ${Object.entries(overCap).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(", ")}.`);
     if (src.skipped.length) L.push(`Source records skipped: ${src.skipped.map((s) => `${s.name} (${s.why})`).slice(0, 12).join("; ")}.`);
     L.push("", "| path | create | edit | delete |", "|---|---:|---:|---:|");
@@ -1228,6 +1423,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       distillRejected,
       writes,
       ledgerItems: ledgerItems.length,
+      nearDup,
+      learnings,
       markdown: L.join("\n"),
       errors,
     };
@@ -1257,8 +1454,13 @@ async function runScript(args: unknown, ctx: ScriptContext) {
             step.undo = `restore content of ${w.id} (sha ${String(w.beforeSha).slice(0, 12)})`;
             if (a.execute) await ctx.swarm.memory_edit({ memoryId: w.id, mode: "replace", content, intent: `rollback memtax-create ${rid} ${w.actionId}` });
           } else {
+            // A learnings-triage drop comes back under its own key and tags, so it is a learning again.
+            const row: any = pre?.value?.rows?.[0] ?? {};
+            const key = typeof row.key === "string" && row.key.startsWith("/learnings/") ? row.key : undefined;
+            const prior = parse(row.tags);
+            const tags = key ? [...new Set([...(Array.isArray(prior) ? prior.map(String) : ["learning"]), "rollback"])] : [...TAGS, "rollback"];
             step.undo = `re-store ${w.name} (new id)`;
-            if (a.execute) await ctx.swarm.memory_store({ name: w.name, content, scope: "swarm", tags: [...TAGS, "rollback"], intent: `rollback memtax-create ${rid} ${w.actionId}` });
+            if (a.execute) await ctx.swarm.memory_store({ name: w.name, content, scope: "swarm", tags, ...(key ? { key } : {}), intent: `rollback memtax-create ${rid} ${w.actionId}` });
           }
         }
         step.status = a.execute ? "done" : "would";
@@ -1439,6 +1641,21 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     t("handoff: covered how-to -> skill-refactor skill-update, no script", h2.lane === "skill-refactor" && h2.op === "skill-update" && h2.skill === "agentmail-sending" && h2.scriptLane === null, h2);
     const h3 = handoffRow("/howto/bluesky", routeCluster("/howto/bluesky", sk), ["POST /xrpc/com.atproto.repo.createRecord with Bearer token"], scr, ["d4", "d5"]);
     t("handoff: API how-to with no script -> script candidate", h3.scriptExisting === null && h3.script === true && h3.scriptLane === "scriptify", h3);
+    // Near-duplicate guard. Vectors with a known cosine: [1, 0] vs [c, sqrt(1 - c^2)].
+    const at = (c: number) => [c, Math.sqrt(1 - c * c)];
+    const o = { nearDupCos: 0.8, twinCos: 0.95 };
+    const ndTwin = nearestTwin({ path: "/longterm/entities/customers/jan-carbonell", aliases: ["jan"], vec: [1, 0] }, [{ id: "p1", path: "/longterm/entities/people/jan-carbonell", aliases: ["jan carbonell"], vec: at(0.82) }], o);
+    t("near-dup: same person under another root at 0.82 -> twin (positive control)", ndTwin?.path === "/longterm/entities/people/jan-carbonell" && ndTwin.why === "same subject", ndTwin);
+    const ndSibling = nearestTwin({ path: "/longterm/entities/customers/aurica", aliases: ["aurica"], vec: [1, 0] }, [{ id: "c1", path: "/longterm/entities/customers/evalion", aliases: ["evalion"], vec: at(0.928) }], o);
+    const ndStory = nearestTwin({ path: "/longterm/company-story/history", aliases: [], vec: [1, 0] }, [{ id: "s1", path: "/longterm/company-story/overview", aliases: [], vec: at(0.837) }], o);
+    t("near-dup: templated siblings at 0.84-0.93 are not twins (negative control)", ndSibling === null && ndStory === null, { ndSibling, ndStory });
+    const ndIdent = nearestTwin({ path: "/longterm/workstreams/active/boxd", aliases: [], vec: [1, 0] }, [{ id: "w1", path: "/longterm/workstreams/active/boxd-self-host", aliases: [], vec: at(0.97) }, { id: "w2", path: "/longterm/workstreams/active/other", aliases: [], vec: at(0.5) }], o);
+    t("near-dup: near-identical under another name -> twin", ndIdent?.id === "w1" && ndIdent.why === "near-identical", ndIdent);
+    t("near-dup: an agent doc keyed on the create's path is a twin", nearestTwin({ path: "/longterm/workstreams/active/x", aliases: [], vec: [1, 0] }, [{ id: "k1", path: "/longterm/workstreams/active/x", aliases: [], vec: [0, 1] }], o)?.why === "same path");
+    const hex = Array.from(new Uint8Array(new Float32Array([1, 0.5, -2]).buffer)).map((x) => x.toString(16).padStart(2, "0")).join("");
+    const dv0 = decodeVec(hex);
+    t("near-dup: hex(embedding) decodes as float32; garbage -> null", !!dv0 && dv0.length === 3 && dv0[1] === 0.5 && dv0[2] === -2 && decodeVec("xyz") === null && decodeVec("") === null, dv0);
+    t("near-dup: centroid of one vector is that vector", cosine(centroid([[3, 4]])!, [3, 4]) > 0.9999 && centroid([]) === null);
     return { ok: cases.every((c) => c.pass), mode: "controls", passed: cases.filter((c) => c.pass).length, total: cases.length, failed: cases.filter((c) => !c.pass), errors };
   }
 }

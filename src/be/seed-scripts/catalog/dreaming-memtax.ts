@@ -33,6 +33,9 @@ export const argsSchema = z.object({
 
 const NS = "dreaming-v2";
 const CURSOR_KEY = "memtax:cursor";
+// /learnings rows belong to the learnings-triage step (script dreaming-learnings): it classifies each one once, in
+// cursor order, with the same path enum, and hands its rows to lane B. B1 skips them so no learning is classified twice.
+export const NOT_LEARNING = (alias: string) => `coalesce(${alias}key, '') NOT GLOB '/learnings/*'`;
 
 // Closed path enum, taxonomy §3.2, every long-term path under /longterm/ (2026-10-01). Anything not under
 // /longterm/ is inbox; `/inbox/<id>` is the explicit "fits nowhere" answer. `<slug>` = kebab, `<id>` = memory id.
@@ -270,7 +273,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
            SUM(CASE WHEN source='manual' AND (createdAt >= ?1 OR updatedAt >= ?1) THEN 1 ELSE 0 END) AS today,
            SUM(CASE WHEN (createdAt > ?2 OR (createdAt = ?2 AND id > ?3)) THEN 1 ELSE 0 END) AS backlogLeft,
            COUNT(*) AS curated
-         FROM agent_memory WHERE chunkIndex = 0 AND source IN ('manual','file_index')`,
+         FROM agent_memory WHERE chunkIndex = 0 AND source IN ('manual','file_index') AND ${NOT_LEARNING("")}`,
         [since, cursor.createdAt ?? "", cursor.id ?? ""],
       )
     )[0] ?? {};
@@ -282,13 +285,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
       FROM agent_memory m WHERE m.chunkIndex = 0 AND ${where}`;
     const P = a.previewChars;
     const today = todayCap
-      ? await q("today", docSql(`m.source = 'manual' AND (m.createdAt >= ? OR m.updatedAt >= ?) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)), [since, since, Math.min(todayCap, 400)])
+      ? await q("today", docSql(`m.source = 'manual' AND ${NOT_LEARNING("m.")} AND (m.createdAt >= ? OR m.updatedAt >= ?) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)), [since, since, Math.min(todayCap, 400)])
       : [];
     const todayIds = new Set(today.map((r) => r.id));
     const backlogRaw = backlogCap
       ? await q(
           "backlog",
-          docSql(`m.source IN ('manual','file_index') AND (m.createdAt > ? OR (m.createdAt = ? AND m.id > ?)) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)),
+          docSql(`m.source IN ('manual','file_index') AND ${NOT_LEARNING("m.")} AND (m.createdAt > ? OR (m.createdAt = ? AND m.id > ?)) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)),
           [cursor.createdAt ?? "", cursor.createdAt ?? "", cursor.id ?? "", Math.min(backlogCap + todayIds.size, 400)],
         )
       : [];
