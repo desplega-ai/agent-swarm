@@ -69,7 +69,7 @@ import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { ensure, initialize } from "../utils/business-use";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -811,6 +811,17 @@ httpServer
         scrubSecrets(err instanceof Error ? err.message : String(err)),
       );
     });
+
+    // The shared agent-fs org learns this swarm's URL on every boot, for the
+    // live app's "Continue with <swarm>". Not awaited: agent-fs is optional.
+    void import("../be/seed/agent-fs-provision")
+      .then(({ syncAgentFsOrgSwarmUrl }) => syncAgentFsOrgSwarmUrl(getAppUrl()))
+      .catch((err: unknown) => {
+        console.warn(
+          "[agent-fs] Failed to set the org swarm URL:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
 
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();

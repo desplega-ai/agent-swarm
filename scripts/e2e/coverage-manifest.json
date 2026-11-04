@@ -221,6 +221,10 @@
       "description": "User identity, personal key creation, pending membership and unsupported agent-fs servers",
       "scenarios": ["platformb-fs-keys"]
     },
+    "agentfs-continue": {
+      "description": "Continue with your swarm: origin allowlist, a named key in the redirect fragment only, pending membership and unsupported agent-fs servers",
+      "scenarios": ["platformb-fs-continue"]
+    },
     "agentfs-proxy": {
       "description": "Pass-through proxy to agent-fs with header allowlists, registration gate and rate limit, public share and site pages",
       "scenarios": ["platformb-agentfs-proxy"]

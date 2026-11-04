@@ -17,6 +17,7 @@ import {
   inviteEmailToSharedOrg,
   resetAgentFsProvisionFetchForTests,
   setAgentFsProvisionFetchForTests,
+  syncAgentFsOrgSwarmUrl,
 } from "../be/seed/agent-fs-provision";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
 
@@ -835,6 +836,75 @@ describe("agent-fs provisioning seeder", () => {
       status: "pending",
       inviteId: "invite-2",
       expiresAt: "2026-11-03T00:00:00.000Z",
+    });
+  });
+
+  describe("org swarm URL", () => {
+    function patchStub(records: RequestRecord[], response: () => Response): typeof fetch {
+      return (async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        records.push({
+          method,
+          path: url.pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          authorization: new Headers(init?.headers).get("authorization"),
+          hasSignal: init?.signal instanceof AbortSignal,
+        });
+        if (url.pathname === "/orgs/shared-org" && method === "PATCH") return response();
+        return Response.json({ error: "unexpected route" }, { status: 500 });
+      }) as typeof fetch;
+    }
+
+    test("a supporting agent-fs gets the swarm URL through the bootstrap key", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(
+        patchStub(records, () => Response.json({ id: "shared-org", swarmUrl: "x" })),
+      );
+
+      expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("set");
+      expect(records).toEqual([
+        {
+          method: "PATCH",
+          path: "/orgs/shared-org",
+          body: { swarmUrl: "https://swarm.example.test" },
+          authorization: "Bearer example-afs-admin-key",
+          hasSignal: true,
+        },
+      ]);
+    });
+
+    test("an agent-fs without the route (404 or 405) is unsupported, not an error", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      for (const status of [404, 405]) {
+        const records: RequestRecord[] = [];
+        setAgentFsProvisionFetchForTests(
+          patchStub(records, () => new Response("404 Not Found", { status })),
+        );
+        expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("unsupported");
+        expect(records).toHaveLength(1);
+      }
+    });
+
+    test("other failures throw, and an unprovisioned org is skipped with no request", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(
+        patchStub(records, () => Response.json({ error: "FORBIDDEN" }, { status: 403 })),
+      );
+      await expect(syncAgentFsOrgSwarmUrl("https://swarm.example.test")).rejects.toThrow(
+        "HTTP 403",
+      );
+
+      await deleteSwarmConfigByKey("global", null, "AGENT_FS_DEFAULT_ORG_ID");
+      delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+      records.length = 0;
+      expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("skipped");
+      expect(records).toHaveLength(0);
     });
   });
 });

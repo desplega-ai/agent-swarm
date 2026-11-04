@@ -22911,6 +22911,140 @@
         }
       }
     },
+    "/api/fs/continue": {
+      "post": {
+        "summary": "Mint a named agent-fs key for the live agent-fs app and return the redirect URL",
+        "description": "Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "returnTo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redirect URL with the named key in the fragment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectUrl": {
+                      "type": "string",
+                      "description": "`returnTo` with `#key=<af_...>` as its only fragment."
+                    }
+                  },
+                  "required": [
+                    "redirectUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_return_to: the origin is not the configured agent-fs app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent-fs account or membership is pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of ten continues per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "agent_fs_too_old",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent_fs_not_configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fs/capabilities": {
       "get": {
         "summary": "Get active file-storage provider capabilities",
