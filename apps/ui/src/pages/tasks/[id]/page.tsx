@@ -33,6 +33,7 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskStatus, TaskWithLogs } from "@/api/types";
+import { useOptionalContextPanel } from "@/components/context-panel/context-panel-state";
 import { useTaskPath } from "@/components/layout/use-task-path";
 import { LinkPreviewDock } from "@/components/link-preview/link-preview-dock";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
@@ -502,10 +503,22 @@ export default function TaskDetailPage() {
     [setParam],
   );
   // The details card next to the column folds away, as the app sidebar does.
-  const [detailsCollapsed, setDetailsCollapsed] = useLocalToggle(
+  const [storedDetailsCollapsed, setStoredDetailsCollapsed] = useLocalToggle(
     "tasks:details-panel-collapsed",
     false,
   );
+  // An open link preview folds the details card, so the transcript and the
+  // preview share the row. The toggle still shows the card while previewing,
+  // without touching the stored pick: closing the preview brings that back.
+  const previewOpen = !!useOptionalContextPanel()?.preview;
+  const [detailsWhilePreviewing, setDetailsWhilePreviewing] = useState(false);
+  useEffect(() => {
+    if (!previewOpen) setDetailsWhilePreviewing(false);
+  }, [previewOpen]);
+  const detailsCollapsed = previewOpen ? !detailsWhilePreviewing : storedDetailsCollapsed;
+  const setDetailsCollapsed = previewOpen
+    ? (collapsed: boolean) => setDetailsWhilePreviewing(!collapsed)
+    : setStoredDetailsCollapsed;
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. One scroller holds the column and the details card: the
   // log flows in it.
@@ -1144,8 +1157,17 @@ export default function TaskDetailPage() {
           header down to the message box, which is pinned under it (it bleeds
           into <main>'s padding). The hero scrolls away and the tabs stick to
           the top. The log flows in this scroller: the tabs' height goes to it
-          as a CSS variable, so its toolbar sticks under the tabs. */}
-      <div className={cn("@min-[60rem]:hidden flex min-h-0 flex-1 flex-col", MAIN_BLEED)}>
+          as a CSS variable, so its toolbar sticks under the tabs. With a link
+          preview open the breakpoint drops to 48rem, the room the transcript
+          (400 px) and the preview (360 px) take in a row: the details card
+          folds instead of the page turning into tabs. */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          previewOpen ? "@min-[48rem]:hidden" : "@min-[60rem]:hidden",
+          MAIN_BLEED,
+        )}
+      >
         <div
           ref={setNarrowScroller}
           style={{ "--log-sticky-top": `${narrowTabsHeight}px` } as CSSProperties}
@@ -1207,7 +1229,11 @@ export default function TaskDetailPage() {
           text, are not clipped. */}
       <div
         ref={wideAreaRef}
-        className={cn("hidden @min-[60rem]:flex flex-1 min-h-0 -mr-4 md:-mr-6", MAIN_BLEED_Y)}
+        className={cn(
+          "hidden flex-1 min-h-0 -mr-4 md:-mr-6",
+          previewOpen ? "@min-[48rem]:flex" : "@min-[60rem]:flex",
+          MAIN_BLEED_Y,
+        )}
       >
         <div
           ref={centerScrollerRef}
