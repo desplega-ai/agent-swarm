@@ -7,7 +7,9 @@
  * pane area (Phase 8) holds the main pane with its tabs and one split pane.
  * A tab shows the New session composer (it keeps the `?seed=` and
  * `?prefill=` links working), the group tab (`?view=`), or a session: the
- * header (Phase 6) over the turn timeline (Phase 7). The first-run guide
+ * header (Phase 6) over the turn timeline (Phase 7). A use-case group (one
+ * with a schedule or files under its key) gets a pinned Overview tab first
+ * (step-10), and `?tab=overview|list` picks its face. The first-run guide
  * and the "Open in split…" picker mount here too.
  */
 
@@ -24,11 +26,19 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import { detailGroupKey, GROUP_TAB, isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import {
+  detailGroupKey,
+  GROUP_TAB,
+  isSessionTab,
+  NEW_SESSION_TAB,
+  OVERVIEW_TAB,
+} from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
 import { GroupTab } from "./group-tab";
 import { NewSessionTab } from "./new-session-tab";
+import { GroupPanePending, useGroupPane } from "./overview/group-pane";
+import { OverviewTab } from "./overview/overview-tab";
 import { SessionPane } from "./pane/session-pane";
 import { usePaneKeys } from "./pane/use-pane-keys";
 import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
@@ -84,6 +94,18 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
   const url = useSessionsUrlState();
   const { focused, tabs, split, view, q, setQuery, focusTab } = url;
+  // The group tab's face, and whether its pinned Overview shows in the strip.
+  const groupPane = useGroupPane(view, url.groupPane);
+  const showOverview = groupPane.qualifies && tabs.includes(GROUP_TAB);
+  const stripTabs = showOverview ? [OVERVIEW_TAB, ...tabs] : tabs;
+  const stripFocused =
+    focused === GROUP_TAB && groupPane.pane === "overview" ? OVERVIEW_TAB : focused;
+  const focusStripTab = (tab: string) => {
+    setActivePane(0);
+    if (tab === OVERVIEW_TAB) url.focusGroupPane("overview");
+    else if (tab === GROUP_TAB && showOverview) url.focusGroupPane("list");
+    else focusTab(tab);
+  };
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
   // The pane that holds the pane keys, Cmd+K's session, and sidebar clicks.
@@ -217,9 +239,20 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
       </div>
     ) : null;
     const body =
-      tab === NEW_SESSION_TAB ? null : tab === GROUP_TAB && view ? (
-        // A row opens next to the group tab, in the main pane.
-        <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+      tab === NEW_SESSION_TAB ? null : tab === OVERVIEW_TAB && view ? (
+        <OverviewTab
+          view={view}
+          onOpen={(id) => openSession(id, { pane: 0 })}
+          onOpenList={() => url.focusGroupPane("list")}
+        />
+      ) : tab === GROUP_TAB && view ? (
+        groupPane.pane === "pending" ? (
+          // A link with no `?tab=` waits for the group's schedules and files.
+          <GroupPanePending />
+        ) : (
+          // A row opens next to the group tab, in the main pane.
+          <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+        )
       ) : (
         renderSession(tab, 0)
       );
@@ -305,17 +338,14 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
           </nav>
 
           <SplitPanes
-            tabs={tabs}
-            focused={focused}
+            tabs={stripTabs}
+            focused={stripFocused}
             split={split}
             view={view}
             activePane={activePane}
             onActivatePane={setActivePane}
-            onFocusTab={(tab) => {
-              setActivePane(0);
-              focusTab(tab);
-            }}
-            onCloseTab={url.closeTab}
+            onFocusTab={focusStripTab}
+            onCloseTab={(tab) => tab !== OVERVIEW_TAB && url.closeTab(tab)}
             onNewSession={() => newSession(null)}
             onPickSplit={() => setPickingSplit(true)}
             onCloseSplit={closeSplit}
@@ -332,7 +362,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         <StatusBar
           query={q}
           onQueryChange={setQuery}
-          tabCount={tabs.length + (split ? 1 : 0)}
+          tabCount={stripTabs.length + (split ? 1 : 0)}
           paneCount={split ? 2 : 1}
           onKeys={() => guide.open(GUIDE_KEYS_STEP)}
         />
