@@ -174,6 +174,7 @@ import type {
   SwarmConfigsResponse,
   SwarmRepo,
   SwarmReposResponse,
+  TaskAttachment,
   TaskContextResponse,
   TaskLineageResponse,
   TasksResponse,
@@ -782,6 +783,14 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
+    return res.json();
+  }
+
+  /** The file attachments of one task (`GET /api/fs/tasks/{id}/files`). */
+  async fetchTaskFiles(taskId: string): Promise<{ attachments: TaskAttachment[] }> {
+    const url = `${this.getBaseUrl()}/api/fs/tasks/${encodeURIComponent(taskId)}/files`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch task files: ${res.status}`);
     return res.json();
   }
 

@@ -12,7 +12,7 @@
  */
 
 import { useDraggable } from "@dnd-kit/core";
-import { Plus, X } from "lucide-react";
+import { Pin, Plus, X } from "lucide-react";
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -24,7 +24,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import { isSessionTab, NEW_SESSION_TAB, OVERVIEW_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { useQuietTooltip } from "../pane/quiet-focus";
 import { ReadMark, TipKey, UNREAD_TITLE } from "../sidebar/tree-row";
@@ -74,10 +74,12 @@ function TabItem({
   // and on a quiet focus (the focus coming back after the split closes).
   const tip = useQuietTooltip();
   const [overClose, setOverClose] = useState(false);
+  // The Overview is pinned: it closes with its list tab, never on its own.
+  const pinned = tab === OVERVIEW_TAB;
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") onFocusTab(tab);
-    else if (event.key === "Delete" || event.key === "Backspace") onCloseKey(tab);
+    else if ((event.key === "Delete" || event.key === "Backspace") && !pinned) onCloseKey(tab);
     else return;
     event.preventDefault();
   };
@@ -94,13 +96,13 @@ function TabItem({
           aria-selected={selected}
           aria-controls={selected ? panelId : undefined}
           aria-label={tabLabel(info)}
-          aria-keyshortcuts="Delete Backspace"
+          aria-keyshortcuts={pinned ? undefined : "Delete Backspace"}
           data-selected={selected ? "" : undefined}
           data-pane-active={paneActive ? "" : undefined}
           onClick={() => onFocusTab(tab)}
           onKeyDown={onKeyDown}
           onAuxClick={(event) => {
-            if (event.button !== 1) return;
+            if (event.button !== 1 || pinned) return;
             event.preventDefault();
             onCloseTab(tab);
           }}
@@ -114,8 +116,9 @@ function TabItem({
             "data-selected:after:absolute data-selected:after:inset-x-0 data-selected:after:-bottom-px data-selected:after:h-px data-selected:after:bg-background",
             "data-selected:before:absolute data-selected:before:inset-x-0 data-selected:before:top-0 data-selected:before:h-0.5 data-selected:before:bg-border",
             "data-pane-active:data-selected:before:bg-primary",
-            // "New session" is short and fixed: it keeps its whole label (UX review R9).
-            tab === NEW_SESSION_TAB && "shrink-0",
+            // "New session" and the pinned Overview are short and fixed: they keep their whole label (UX review R9).
+            (tab === NEW_SESSION_TAB || pinned) && "shrink-0",
+            pinned && "min-w-0",
             isDragging && "opacity-50",
           )}
         >
@@ -125,29 +128,36 @@ function TabItem({
             {info.title}
           </span>
           <TabActivity activity={info.activity} />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-label={`Close tab ${info.title}`}
-                onPointerEnter={() => setOverClose(true)}
-                onPointerLeave={() => setOverClose(false)}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseTab(tab);
-                }}
-                className={cn(
-                  "grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0",
-                  "hover:bg-muted-foreground/20 hover:text-foreground group-hover/tab:opacity-100",
-                  "group-data-selected/tab:opacity-100 group-focus-visible/tab:opacity-100",
-                )}
-              >
-                <X className="size-3" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Close tab</TooltipContent>
-          </Tooltip>
+          {pinned ? (
+            <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
+              <Pin aria-hidden className="size-3" />
+              <span className="sr-only">Pinned</span>
+            </span>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label={`Close tab ${info.title}`}
+                  onPointerEnter={() => setOverClose(true)}
+                  onPointerLeave={() => setOverClose(false)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTab(tab);
+                  }}
+                  className={cn(
+                    "grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0",
+                    "hover:bg-muted-foreground/20 hover:text-foreground group-hover/tab:opacity-100",
+                    "group-data-selected/tab:opacity-100 group-focus-visible/tab:opacity-100",
+                  )}
+                >
+                  <X className="size-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Close tab</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm wrap-anywhere">{info.tip}</TooltipContent>

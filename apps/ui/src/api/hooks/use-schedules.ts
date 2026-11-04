@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type { ScheduledTask } from "../types";
+import { SESSION_TREE_KEY } from "./session-query-keys";
 import { invalidateStatusQuery } from "./status-query";
 
 export interface ScheduledTaskFilters {
@@ -93,6 +94,9 @@ export function useRunScheduleNow() {
       queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-task"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      // The run is a new session in the schedule's Sessions group.
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
     },
   });
 }

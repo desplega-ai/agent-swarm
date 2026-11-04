@@ -28,15 +28,16 @@ export interface AutoConnect {
 /**
  * Connect this browser with no click: with no saved key, or a saved key that
  * agent-fs rejects, mint a named key through the swarm and save it.
+ * `enabled: false` starts no attempt (a surface that may not need Files).
  */
-export function useAutoConnect(): AutoConnect {
+export function useAutoConnect({ enabled = true }: { enabled?: boolean } = {}): AutoConnect {
   const { state, endpoint } = useAgentFs();
   const deps = useConnectFlowDeps();
   const { apiUrl } = useConfig().config;
   const runKey = endpoint ? `${apiUrl}|${endpoint}` : null;
   const [outcome, setOutcome] = useState<AutoConnectOutcome | null>(null);
   const [pending, setPending] = useState<Promise<AutoConnectOutcome> | null>(null);
-  const wantsKey = state === "needs-connect" || state === "invalid-key";
+  const wantsKey = enabled && (state === "needs-connect" || state === "invalid-key");
 
   // Start (or join) this page load's attempt.
   useEffect(() => {

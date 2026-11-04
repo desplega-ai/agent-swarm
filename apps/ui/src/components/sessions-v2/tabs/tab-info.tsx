@@ -8,6 +8,7 @@ import {
   Archive,
   Hash,
   Inbox,
+  LayoutGrid,
   type LucideIcon,
   SquareDashed,
   SquarePen,
@@ -24,6 +25,7 @@ import {
   isSessionTab,
   itemFromDetail,
   NEW_SESSION_TAB,
+  OVERVIEW_TAB,
   type SessionSection,
   userName,
 } from "@/lib/sessions-v2";
@@ -92,6 +94,16 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
       title: "New session",
       tip: "New session",
       icon: SquarePen,
+      unread: false,
+      activity: null,
+    };
+  }
+  if (tab === OVERVIEW_TAB) {
+    const crumb = groupCrumb(view ?? undefined, me, nameOf, labels);
+    return {
+      title: "Overview",
+      tip: `Overview of ${crumb}`,
+      icon: LayoutGrid,
       unread: false,
       activity: null,
     };
