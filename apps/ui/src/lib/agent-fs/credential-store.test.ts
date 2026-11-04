@@ -143,7 +143,7 @@ describe("credential owner (dashboard user)", () => {
   test("the owner's own key wins over the legacy one", () => {
     const storage = memoryStorage();
     storage.map.set(credentialStorageKey(API, FS), JSON.stringify(credential));
-    const fresh = { ...credential, apiKey: "af_fresh_0123456789" };
+    const fresh = { ...credential, apiKey: "af_fresh_0123456789" }; // gitleaks:allow (test fixture, not a secret)
     storage.map.set(credentialStorageKey(API, FS, alice), JSON.stringify(fresh));
     expect(readCredential(API, FS, alice, storage)?.apiKey).toBe("af_fresh_0123456789");
   });
