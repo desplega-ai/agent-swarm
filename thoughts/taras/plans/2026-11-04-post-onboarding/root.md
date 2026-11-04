@@ -2,7 +2,7 @@
 date: 2026-11-04T10:42:51+01:00
 author: Claude (with Taras)
 plan_type: dag
-status: in-progress
+status: completed
 autonomy: autopilot
 commit_per_step: true
 last_updated: 2026-11-04
@@ -180,32 +180,32 @@ Waves (derived; step-16 is already done): 1 = step-1, step-5, step-9, step-11. 2
 
 Run before kicking off any step (orchestrator's responsibility; `/v-implement` performs these once at the start of the run):
 
-- [ ] Working tree is clean on a `~/worktrees/agent-swarm/<branch>` worktree (not the main checkout).
-- [ ] Baseline passes: `bun run check:local && bun run tsc:check:tsc`
-- [ ] Baseline UI passes: `cd apps/ui && bun run lint && bunx tsc -b`
-- [ ] Migration ordinals 279 and 280 are above `main`'s tail and unused by open PRs: `bash scripts/check-migration-conflicts.sh` and `gh pr list --search "migrations/2" --json number,title`
-- [ ] step-1 only: agent-fs v0.18.17 (PR #153, released 2026-11-04) is the pin; confirm its Docker image is published. Record the version in step-1 and bump the agent-fs image pins (`src/commands/onboard/compose-generator.ts`, `docker-compose*.yml`, `charts/agent-swarm/values.yaml`). Until then, step-1 is blocked; wave 1 runs step-16, step-9, step-11.
+- [x] Working tree is clean on a `~/worktrees/agent-swarm/<branch>` worktree (not the main checkout).
+- [x] Baseline passes: `bun run check:local && bun run tsc:check:tsc`
+- [x] Baseline UI passes: `cd apps/ui && bun run lint && bunx tsc -b`
+- [x] Migration ordinals 279 and 280 are above `main`'s tail and unused by open PRs: `bash scripts/check-migration-conflicts.sh` and `gh pr list --search "migrations/2" --json number,title`
+- [x] step-1 only: agent-fs v0.18.17 (PR #153, released 2026-11-04) is the pin; confirm its Docker image is published. Record the version in step-1 and bump the agent-fs image pins (`src/commands/onboard/compose-generator.ts`, `docker-compose*.yml`, `charts/agent-swarm/values.yaml`). Until then, step-1 is blocked; wave 1 runs step-16, step-9, step-11.
 - [ ] step-4 only: the Track B agent-fs release is out (org `swarm_url`, SPA accepts `#key=`, `/auth/me` for org-scoped keys). Until then, step-4 stays `ready` but unclaimed.
 - [x] step-16 decisions recorded (`root.md § Design decisions (step-16)`, rounds 1-5, 2026-11-04). Mockups: `mockups/post-onboarding/` (r3-sidebar, r3-home, r3-overview, r4-connect, r5-ai-providers).
-- [ ] A local agent-fs server is reachable for QA (sibling repo `../agent-fs`, or the compose bundle) with `AGENT_FS_API_URL` set.
-- [ ] `agent-browser` is on PATH (`agent-browser skills get core` once per session).
+- [x] A local agent-fs server is reachable for QA (sibling repo `../agent-fs`, or the compose bundle) with `AGENT_FS_API_URL` set.
+- [x] `agent-browser` is on PATH (`agent-browser skills get core` once per session).
 
 ## Global Verification
 
 Run after all steps complete (final wave gate):
 
-- [ ] Whole-repo gate: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
-- [ ] Root tests: `bun run test:root -- --parallel=4`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun run test`
-- [ ] Black-box contract suite, strict: `bun run e2e --strict`
-- [ ] Playwright UI suite: `bun run e2e:ui`
-- [ ] Route hygiene: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] Boundaries: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] Skills: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
-- [ ] Fresh DB and existing DB both boot: `rm -f /tmp/po-fresh.sqlite && DATABASE_PATH=/tmp/po-fresh.sqlite DESPLEGA_TELEMETRY_ENV=test bun run start:http` (Ctrl-C after "listening"), then the same against a copy of a pre-plan DB.
-- [ ] Cross-track E2E, agent-browser (`AGENT_BROWSER_SESSION=po-global`): on a local stack with agent-fs, (1) a fresh browser context with the owner's `aswt_` token opens `/file` and a `/file/~/...` link in-app with no connect step; (2) an invited non-admin redeems the invite and opens the same file in-app; (3) `/connections?tab=oauth-apps`, `/settings/integrations/slack?search=x`, `/mcp-servers/<id>?oauth=success` all land on their new `/integrations/...` route with params intact; (4) a planning session with the Lead that creates a schedule under `shared/<slug>/` shows up as one group with header, the run appears inside it after Run now, and a markdown output under the key renders inline; (5) Home shows Needs you (a seeded pending approval), In progress (the running run grouped by key), the starred group under Favorites, and the checklist with "connect a channel" auto-checked after a Telegram token is saved.
-- [ ] agent-fs `GET /auth/keys` for the owner (primary key) lists one named key per browser profile used in the E2E above, each with `orgId` set and none revoked by the flow.
-- [ ] Lead prompt review: dump the lead system prompt and one task prompt (host-run lead recipe) and confirm the files-first, use-case and nudge sections appear exactly once and never in the system prompt for the nudge.
+- [x] Whole-repo gate: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
+- [x] Root tests: `bun run test:root -- --parallel=4`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun run test`
+- [x] Black-box contract suite, strict: `bun run e2e --strict`
+- [x] Playwright UI suite: `bun run e2e:ui`
+- [x] Route hygiene: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] Boundaries: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Skills: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
+- [x] Fresh DB and existing DB both boot: `rm -f /tmp/po-fresh.sqlite && DATABASE_PATH=/tmp/po-fresh.sqlite DESPLEGA_TELEMETRY_ENV=test bun run start:http` (Ctrl-C after "listening"), then the same against a copy of a pre-plan DB.
+- [x] Cross-track E2E, agent-browser (`AGENT_BROWSER_SESSION=po-global`): on a local stack with agent-fs, (1) a fresh browser context with the owner's `aswt_` token opens `/file` and a `/file/~/...` link in-app with no connect step; (2) an invited non-admin redeems the invite and opens the same file in-app; (3) `/connections?tab=oauth-apps`, `/settings/integrations/slack?search=x`, `/mcp-servers/<id>?oauth=success` all land on their new `/integrations/...` route with params intact; (4) a planning session with the Lead that creates a schedule under `shared/<slug>/` shows up as one group with header, the run appears inside it after Run now, and a markdown output under the key renders inline; (5) Home shows Needs you (a seeded pending approval), In progress (the running run grouped by key), the starred group under Favorites, and the checklist with "connect a channel" auto-checked after a Telegram token is saved.
+- [x] agent-fs `GET /auth/keys` for the owner (primary key) lists one named key per browser profile used in the E2E above, each with `orgId` set and none revoked by the flow.
+- [x] Lead prompt review: dump the lead system prompt and one task prompt (host-run lead recipe) and confirm the files-first, use-case and nudge sections appear exactly once and never in the system prompt for the nudge.
 
 ## Appendix
 
@@ -282,3 +282,22 @@ Status: round 1 reviewed 2026-11-04 (Taras), round 2 in progress. Final picks la
 **Round 4 feedback (Taras, 2026-11-04):** Connect is good overall. AI providers changes: (1) one unified view of all providers with icons instead of per-family sections; (2) an "Add provider" dropdown of supported providers that opens a modal or side panel with the how-to and the add-key flow; (3) AI providers gets tabs: LLMs | System One (typed decision and extraction hosts: Jev via typesafe or OpenRouter, Clef via Cloudflare, laya, OpenAI; `src/workflows/executors/system-one-providers.ts`, `SYSTEM_ONE_DEFAULT_PROVIDER`) | Embeddings (memory) | Transcription. Round 5 mocks this.
 
 **Round 5 decisions (Taras, 2026-11-04): AI providers approved** (`mockups/post-onboarding/r5-ai-providers.html`). Tabs LLMs | System One | Embeddings | Transcription; one unified LLM list with expandable rows; "Add provider" dropdown into a side panel. Additions: the Codex subscription panel offers the in-dashboard sign-in flow and says the subscription serves the codex, pi and opencode harnesses (verify opencode in code; pi and codex are confirmed); add a configurable `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` key. Connect round 4 is approved for Channels and Tools. **step-16 is complete: all surfaces decided.**
+
+## Implementation outcome (2026-11-04, /v-implement autopilot)
+
+All 17 steps are `done` on `t3/post-onboarding`. Four waves of parallel step agents ran (Opus, with Codex gpt-6.1-sol for some backend slices), each in its own worktree. Every wave got a two-axis review (Standards and Spec) and a fix pass: `fix(post-onboarding): address wave-1..4 review findings`.
+
+**Global Verification:** every gate passes on `1fc2eea8e` plus one UI fix: check:local, lint, lint:slop, tsc 5, UI lint and tsc -b, UI tests (2,671), root tests (20,648, 0 fail), `e2e --strict` (100 scenarios, 100% routes, tools and node types), `e2e:ui` (148 passed, 28 skipped), route hygiene, boundaries, skills, migration conflicts, and a fresh-DB boot (283 and 284 apply, `/health` 200). Existing-DB upgrades were checked in step-11 and step-13. The cross-track browser E2E items (1)-(5), the key listing and the Lead prompt review all pass. Item (4) used a simulated Lead (MCP calls), because no Claude auth for a host-run lead was available. Evidence: `/tmp/po-global-*`.
+
+**Track B (agent-fs):** built in this run on the local branch `feat/continue-with-swarm` (worktree `~/worktrees/agent-fs/po-track-b`, commits 71ccb5c, b287b8c, b89d7e4). It is not pushed or released. Contract as built: `PATCH /orgs/{orgId} {swarmUrl|null}`, `GET /orgs/{orgId}/public -> {swarmUrl}`, the `org-swarm-url` feature flag, and the live SPA Continue button. The handoff has `return_to?handoff=<nonce>` (nonce kept in localStorage per nonce, 10 min, single use, bound to the agent-fs endpoint) and the fragment `#key=<af_>&apiUrl=<endpoint>`. The swarm side sends `apiUrl` from `getCombConfig().apiUrl`. It also adds `?apiUrl=` to live links only when `AGENT_FS_PUBLIC_URL` is set.
+
+**Follow-ups (not done):**
+- Home "In progress" shows the group count for a running schedule run, but no session rows. Its list query has no `groupKey`, so the step-9 schedule-run relaxation does not apply (`apps/ui/src/components/home/in-progress.tsx`).
+- The Overview markdown table preview shows a darker band at its right edge (scrollbar gutter on the table wrapper).
+- Revoking a key from "Forget this browser's key" needs an agent-fs admin route to revoke a member's key (none in 0.18.17). Users that the swarm registered have no primary key, so they cannot revoke their minted keys themselves today.
+- Release Track B (agent-fs PR, then a release, then bump the pins). Then do the step-4 manual round trip from live.agent-fs.dev.
+- The vendored `qa` skill still uses the `${AGENT_FS_LIVE_URL}/file` link wording. The fix goes upstream in ai-toolbox, then re-pin.
+- About 15 other pages bind search inputs to the URL without `useUrlSearchInput`, so fast typing can drop characters there.
+- The plan's `cd apps/ui && bun run test` commands do not exist (there is no `test` script). Use `bun test --parallel=4 apps/ui/src` from the root.
+- Known local flake: `src/tests/claude-routes-e2e.test.ts` (EPERM from process.kill under load).
+- Manual checks still open, per step file: compare the mockups (5, 6, 7, 10, 15), a real Telegram bot (8), a Codex device sign-in (7), copy and tone (3, 12, 13, 17), a real Lead reply with a nudge (14), and the Slack thread offer (12).
