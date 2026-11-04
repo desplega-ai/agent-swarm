@@ -1,21 +1,21 @@
 ---
 title: "Worker Recovery: What Happens to Running Work When a Worker Stops"
-description: Agent Swarm pauses in-progress tasks when a worker stops, resumes them on the same agent, and has the Lead reroute work only when that agent never returns.
+description: When a worker stops, Agent Swarm supersedes its in-progress tasks and creates resume follow-ups, prefers the original agent, and escalates to the Lead when a pinned resume is never reclaimed.
 ---
 
-Agent Swarm pauses in-progress tasks when a worker stops. It does not fail them. Each paused task is then resumed on the same agent that was running it. If that agent does not come back, the Lead decides which agent takes the work next.
+When a worker stops, Agent Swarm normally supersedes each in-progress task and creates a resume follow-up for it. The resume prefers the agent that was running the task. When that agent is at capacity, the resume goes to the unassigned pool, gated by routing affinity. When a pinned resume is never reclaimed, the Lead decides which agent takes the work next. Recovery is best effort: a task can still end `failed`.
 
 ## Limits
 
 A resume starts a new agent session. Native session resume is deprecated, so continuity comes from a bounded context preamble built from the task's saved progress, not from the old conversation.
 
-If the original agent does not return, recovery escalates to the Lead, which re-delegates to an agent it chooses. The work never goes back to the open pool.
+A resume pinned to an agent that never returns escalates to the Lead, which re-delegates to an agent it chooses. A resume that could not be pinned, for example because the original agent was at capacity, enters the affinity-gated pool instead.
 
-Repeated resume failures end the task as `failed`. The cap is `HEARTBEAT_MAX_RESUME_GENERATIONS`, default `3` in `src/heartbeat/heartbeat.ts`, so a task that keeps flapping cannot retry forever.
+A task can still end `failed`. Repeated crash-recovery resumes stop at `HEARTBEAT_MAX_RESUME_GENERATIONS`, default `3` in `src/heartbeat/heartbeat.ts`, so a task that keeps flapping cannot retry forever. A shutdown also marks a task `failed` when the worker can neither supersede nor pause it through the API. An interrupted workflow step gets no resume follow-up: it fails, and the workflow's own retry policy decides what happens next.
 
 ## Graceful shutdown and resume
 
-When a worker container receives SIGTERM, it waits for its active tasks inside a grace period, `SHUTDOWN_TIMEOUT`, default 30 seconds. Any task still running when the grace period ends is marked `paused`, and its progress is saved to the database. On restart, the worker looks for paused tasks assigned to its own agent id, which survives the restart, and resumes each one.
+When a worker container receives SIGTERM, it waits for its active tasks inside a grace period, `SHUTDOWN_TIMEOUT`, default 30 seconds. Any task still running when the grace period ends is superseded, and the API creates a resume follow-up from its saved progress. The follow-up is pinned to the same agent id, which survives the restart, when that agent has a free slot. When the supersede call fails, the worker falls back to marking the task `paused`, and on restart it resumes paused tasks assigned to its own agent id. When both calls fail, the task is marked `failed`.
 
 The deployment guide also covers an optional API drain, which is off by default. With drain enabled, the API keeps serving after SIGTERM but hands out no new work, tells workers it is draining, and lets a worker hand off its in-flight task while the API is still up to receive the handoff. Enable it only where the API and the workers stop together, because an API-only restart with drain on would make every live worker drop its in-flight work.
 
@@ -25,11 +25,13 @@ A task can also stall without a clean shutdown: it stays `in_progress` while its
 
 ## Crash recovery and original-agent pinning
 
-A crashed task, and a gracefully paused one, is pinned back to the agent that was running it rather than released to the unassigned pool. Agent rows survive a restart, so the resume waits for that same agent, and a worker with the wrong specialization cannot pick it up in the meantime.
+A crash-recovery resume, and a graceful-shutdown one, is pinned back to the agent that was running it when that agent has capacity. Agent rows survive a restart, so the pinned resume waits for that same agent, and a worker with the wrong specialization cannot pick it up in the meantime. When the agent is at capacity, the resume is not pinned: it enters the unassigned pool with a routing affinity snapshot, described below.
 
 ## Lead fallback
 
-A pinned resume does not wait forever. When the agent has not returned, the resume sits `pending` for `HEARTBEAT_RESUME_PIN_GRACE_MIN`, default 10 minutes measured from the moment the crash was detected. After that a reaper escalates the task to a Lead-owned reroute decision, and the Lead re-delegates through `send-task` to an explicitly chosen agent. The task is never dropped into the pool as a fallback.
+A pinned resume that is never reclaimed sits `pending` for `HEARTBEAT_RESUME_PIN_GRACE_MIN`, default 10 minutes measured from the moment the resume was created. After that a reaper on the heartbeat sweep escalates the task to a Lead-owned reroute decision, and the Lead re-delegates through `send-task` to an explicitly chosen agent. The reaper does not drop an unreclaimed pin into the pool.
+
+The threshold is configurable, and setting it to `0` disables the reaper, so an unreclaimed pin then waits for its agent with no escalation. The reaper also needs a reachable Lead. Without one, the pin stays `pending` and is retried on the next sweep, though a resume already at the generation cap is still marked `failed`.
 
 ## Routing affinity
 
@@ -43,12 +45,15 @@ A one-off [script workflow run](/docs/guides/script-workflow-runs) journals ever
 
 | Outcome | Case |
 | --- | --- |
-| Resumes automatically | Graceful pause, then same-agent resume on the next start |
+| Resumes automatically | Graceful shutdown, then a resume pinned to the same agent on the next start |
 | Resumes automatically | Crash resume, when the original agent returns inside the grace window |
+| Resumes automatically | A resume that could not be pinned, once an eligible agent claims it from the pool |
 | Resumes automatically | Workflow step replay for completed steps of a durable run |
-| Needs Lead action | The original agent never returns and the pin is reaped |
+| Needs Lead action | The original agent never returns and the pin is reaped (reaper on, Lead reachable) |
+| Waits | The pin is unreclaimed and the reaper is off or no Lead is reachable |
 | Needs Lead action | An affinity-tagged task has no eligible agent |
 | Terminal | The resume cap is reached and the task is marked `failed` |
+| Terminal | Supersede and pause both fail at shutdown and the task is marked `failed` |
 
 ## Operator checks
 
@@ -56,7 +61,8 @@ A one-off [script workflow run](/docs/guides/script-workflow-runs) journals ever
 - Keep the container stop grace period above the shutdown grace period plus a buffer. The compose example in the [deployment guide](/docs/guides/deployment) uses 60 seconds.
 - Have long tasks call `store-progress` often, because that saved progress is what the context preamble is built from.
 - Turn the API drain on only where the API and workers stop together, and leave it off for API-only rollouts.
-- Leave `HEARTBEAT_PIN_CRASH_RESUME` and `HEARTBEAT_PIN_GRACEFUL_RESUME` at their defaults, which pin recovery to the original agent.
+- Leave `HEARTBEAT_PIN_CRASH_RESUME` and `HEARTBEAT_PIN_GRACEFUL_RESUME` at their defaults, which pin recovery to the original agent when it has capacity.
+- Keep `HEARTBEAT_RESUME_PIN_GRACE_MIN` above zero and a Lead running, so unreclaimed pins reach a Lead decision.
 - Test a deploy in staging and confirm the paused tasks come back before you rely on it in production.
 
 ## Related
