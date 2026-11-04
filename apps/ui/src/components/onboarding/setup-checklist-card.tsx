@@ -25,12 +25,12 @@ import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./st
 import { useResumeSetup } from "./use-resume-setup";
 
 /**
- * Home dashboard checklist while onboarding is open. Below `xl` it is only the
- * header (title, progress, Resume) as a bar above the timeline. From `xl` it is
- * the full checklist in a right sidebar (`xl:order-last` in the home row).
+ * Home dashboard checklist while onboarding is open. It takes the checklist
+ * slot of the Home grid. Below `xl` it is only the header (title, progress,
+ * Resume) as a bar. From `xl` it is the full checklist in the right column.
  * Wrapper `id="setup"` is the `/#setup` anchor.
  */
-export function SetupChecklistCard() {
+export function SetupChecklistCard({ className }: { className?: string }) {
   const { data } = useOnboarding();
   const steps = useVisibleOnboardingSteps();
   const { data: status } = useStatusContext();
@@ -75,11 +75,7 @@ export function SetupChecklistCard() {
   );
 
   return (
-    <div
-      id="setup"
-      // From `xl` a sidebar as tall as its content, capped at the region: the list scrolls inside.
-      className="flex-none scroll-mt-4 xl:order-last xl:flex xl:max-h-full xl:w-80 xl:flex-col xl:self-start"
-    >
+    <div id="setup" className={cn("flex-none scroll-mt-4 xl:flex xl:flex-col", className)}>
       <SetupCard
         title={title}
         description={progress}

@@ -23,6 +23,7 @@ mock.module("@/api/hooks/use-onboarding", () => ({
 }));
 mock.module("@/lib/use-can", () => ({ useCan: () => true }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/components/home/home-widget", () => require("../home/home-widget"));
 mock.module("@/components/shared/status-icon", () => ({
   StatusIcon: ({ label }: { label?: ReactNode }) => <span data-status="success">{label}</span>,
 }));

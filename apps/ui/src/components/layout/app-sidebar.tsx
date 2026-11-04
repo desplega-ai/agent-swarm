@@ -46,6 +46,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useNeedsYou } from "@/hooks/use-needs-you";
 import { navRequirementMet } from "@/lib/agent-fs/state";
 import { isUnhealthyKey } from "@/lib/ai-providers";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
@@ -668,6 +669,8 @@ export function AppSidebar() {
   const runtimePools = useRuntimePoolsGate();
   // The AI providers dot: any pooled key rate-limited or rejected.
   const { data: apiKeys } = useApiKeyStatuses(undefined, { enabled: countsEnabled && isAdmin });
+  // The Home badge: the Needs-you count of Home (same reads, same caches).
+  const needsYou = useNeedsYou({ enabled: countsEnabled });
 
   // Map of `nav path -> resolved badge string`. An entry is present only when
   // the value is loaded and worth showing; absence means "no badge".
@@ -680,6 +683,9 @@ export function AppSidebar() {
     }
     if (Array.isArray(users) && gates["1.80.0"].supported) {
       badges["/people"] = formatCompactNumber(users.length);
+    }
+    if (needsYou.count > 0) {
+      badges["/"] = formatCompactNumber(needsYou.count);
     }
     // The same rule as the LLMs tab dot on Connect › AI providers.
     const failingKeys = (apiKeys ?? []).filter(isUnhealthyKey).length;

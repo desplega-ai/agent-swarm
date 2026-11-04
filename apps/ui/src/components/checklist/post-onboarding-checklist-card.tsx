@@ -10,6 +10,7 @@ import type {
   ChecklistResponse,
   ChecklistUpdateRequest,
 } from "@/api/types";
+import { HomeWidget, HomeWidgetCount } from "@/components/home/home-widget";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +44,7 @@ import { cn } from "@/lib/utils";
  * check themselves from server signals; editing goes through the API, which
  * enforces who may change what (`editable` per item).
  *
- * Self-contained so the Home command center can mount it in its widget grid.
+ * Self-contained, in the shared `HomeWidget` chrome, so Home mounts it in its widget grid.
  */
 export function PostOnboardingChecklistCard({ className }: { className?: string }) {
   const { data: onboarding, isPending: onboardingPending } = useOnboarding();
@@ -124,7 +125,6 @@ export function PostOnboardingChecklistView({
   const [expanded, setExpanded] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
   const [removing, setRemoving] = useState<ChecklistItem | null>(null);
-  const titleId = useId();
 
   const visible = data.items.filter((item) => item.status !== "removed");
   const removed = data.items.filter((item) => item.status === "removed");
@@ -143,108 +143,111 @@ export function PostOnboardingChecklistView({
     });
 
   return (
-    <section
-      aria-labelledby={titleId}
-      className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-sm", className)}
-    >
-      <header className="flex h-11 items-center gap-2 px-4">
-        {allDone ? (
+    <HomeWidget
+      className={className}
+      title={allDone ? "Setup complete" : "Get the swarm working"}
+      icon={
+        allDone ? (
           <StatusIcon tone="success" focusable={false} />
         ) : (
           <ListTodo className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        )}
-        <h2 id={titleId} className="min-w-0 truncate text-sm font-semibold">
-          {allDone ? "Setup complete" : "Get the swarm working"}
-        </h2>
-        <span className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
-          {count}
-        </span>
-        {allDone ? null : (
-          <Progress
-            value={visible.length ? (doneCount / visible.length) * 100 : 0}
-            aria-label={`${count} done`}
-            className="h-1 w-10 shrink-0 bg-muted [&_[data-slot=progress-indicator]]:bg-status-success"
-          />
-        )}
-        {allDone ? (
+        )
+      }
+      meta={
+        <>
+          <HomeWidgetCount>{count}</HomeWidgetCount>
+          {allDone ? null : (
+            <Progress
+              value={visible.length ? (doneCount / visible.length) * 100 : 0}
+              aria-label={`${count} done`}
+              className="h-1 w-10 shrink-0 bg-muted [&_[data-slot=progress-indicator]]:bg-status-success"
+            />
+          )}
+        </>
+      }
+      action={
+        allDone ? (
           <Button
             type="button"
             size="xs"
             variant="ghost"
-            className="ml-auto"
             aria-expanded={expanded}
             onClick={() => setExpanded((open) => !open)}
           >
             {expanded ? "Hide" : "Show"}
           </Button>
-        ) : null}
-      </header>
-
+        ) : null
+      }
+    >
       {collapsed ? null : (
-        <ul className="divide-y divide-border-subtle border-t border-border-subtle">
-          {visible.map((item) => (
-            <ChecklistRow
-              key={item.id}
-              item={item}
-              busy={busy}
-              canAddChannel={data.canEditSwarm && item.kind === "channel"}
-              onRemove={() => setRemoving(item)}
-              onUpdate={(body) => onUpdate(item.id, body)}
-              onAddChannel={addChannel}
-            />
-          ))}
-        </ul>
-      )}
+        <>
+          <ul className="divide-y divide-border-subtle">
+            {visible.map((item) => (
+              <ChecklistRow
+                key={item.id}
+                item={item}
+                busy={busy}
+                canAddChannel={data.canEditSwarm && item.kind === "channel"}
+                onRemove={() => setRemoving(item)}
+                onUpdate={(body) => onUpdate(item.id, body)}
+                onAddChannel={addChannel}
+              />
+            ))}
+          </ul>
 
-      {removed.length > 0 && !collapsed ? (
-        <div className="border-t border-border-subtle">
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            className="mx-2 my-1.5 text-muted-foreground"
-            aria-expanded={showRemoved}
-            onClick={() => setShowRemoved((open) => !open)}
-          >
-            {showRemoved ? "Hide removed" : `Show removed (${removed.length})`}
-          </Button>
-          {showRemoved ? (
-            <ul className="divide-y divide-border-subtle border-t border-border-subtle">
-              {removed.map((item) => (
-                <li key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-muted-foreground">{item.label}</p>
-                    <p className="text-xs text-muted-foreground">{removedNote(item)}</p>
-                  </div>
-                  {item.editable ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => void onUpdate(item.id, { action: "restore" })}
-                    >
-                      Restore
-                    </Button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+          {removed.length > 0 ? (
+            <div className="border-t border-border-subtle">
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                className="mx-2 my-1.5 text-muted-foreground"
+                aria-expanded={showRemoved}
+                onClick={() => setShowRemoved((open) => !open)}
+              >
+                {showRemoved ? "Hide removed" : `Show removed (${removed.length})`}
+              </Button>
+              {showRemoved ? (
+                <ul className="divide-y divide-border-subtle border-t border-border-subtle">
+                  {removed.map((item) => (
+                    <li key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-muted-foreground">{item.label}</p>
+                        <p className="text-xs text-muted-foreground">{removedNote(item)}</p>
+                      </div>
+                      {item.editable ? (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void onUpdate(item.id, { action: "restore" })}
+                        >
+                          Restore
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
 
-      <RemoveDialog
-        item={removing}
-        busy={busy}
-        onClose={() => setRemoving(null)}
-        onConfirm={async (reason) => {
-          const item = removing;
-          setRemoving(null);
-          if (item) await onUpdate(item.id, { action: "remove", ...(reason ? { reason } : {}) });
-        }}
-      />
-    </section>
+          <RemoveDialog
+            item={removing}
+            busy={busy}
+            onClose={() => setRemoving(null)}
+            onConfirm={async (reason) => {
+              const item = removing;
+              setRemoving(null);
+              if (item) {
+                await onUpdate(item.id, { action: "remove", ...(reason ? { reason } : {}) });
+              }
+            }}
+          />
+        </>
+      )}
+    </HomeWidget>
   );
 }
 

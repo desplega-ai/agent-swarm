@@ -94,7 +94,7 @@ export function fleetCardMode(input: {
   benchmarkDismissed: boolean;
   inviteOpen: boolean;
   workflowRunsCompleted: number;
-  /** `/status` reports telemetry off and the telemetry banner does not show. */
+  /** `/status` reports telemetry off. */
   offStateAllowed?: boolean;
 }): FleetCardMode {
   const state = input.benchmark?.state;
