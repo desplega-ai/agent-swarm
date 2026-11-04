@@ -1,4 +1,6 @@
 import {
+  isGroupKey,
+  isResourceGroupPrefix,
   keyPrefixRange,
   NO_GROUP_LEAF_KINDS,
   normalizeAssetKey,
@@ -65,6 +67,11 @@ export interface SessionFilters {
   tree?: boolean;
   /** For user viewers: only human-started roots of the viewer and shares (the "Mine" view). */
   mine?: boolean;
+  /**
+   * Include schedule runs despite Mine, shown-source, and tree owner filters.
+   * Set only for a user group view ({@link showsScheduleRuns}).
+   */
+  includeScheduleRuns?: boolean;
   /** Match exactly this root (one session's summary, e.g. its read state). */
   rootId?: string;
 }
@@ -288,6 +295,15 @@ const SESSION_ROOTS = "(SELECT rootId AS id, * FROM session_summaries)";
  * Conditions on a session root `r`: a {@link SESSION_ROOTS} row or a root task
  * (`legacySessionSummaryQuery`). Only `q` reads the root task itself.
  */
+/**
+ * A user group (not a namespace root, a resource group, or a source group)
+ * shows the schedule runs filed in it, whoever owns them and whatever the
+ * source filter says. The list (`groupKey`) and the tree counts use this rule.
+ */
+export function showsScheduleRuns(groupKey: string): boolean {
+  return isGroupKey(groupKey) && !sourceOfKey(groupKey) && !isResourceGroupPrefix(groupKey);
+}
+
 export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   const conditions: string[] = [];
   const params: SqlFragment["params"] = [];
@@ -295,6 +311,10 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     conditions.push(fragment.sql);
     params.push(...fragment.params);
   };
+  const includeScheduled = (fragment: SqlFragment): SqlFragment => ({
+    ...fragment,
+    sql: opts.includeScheduleRuns ? `(${fragment.sql} OR r.scheduleId IS NOT NULL)` : fragment.sql,
+  });
   if (opts.rootId) add({ sql: "r.id = ?", params: [opts.rootId] });
   const sources = opts.source?.filter(Boolean) ?? [];
   if (sources.length)
@@ -311,12 +331,14 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     const shown = opts.showSource.filter(Boolean);
     const source = effectiveSourceSql();
     add(
-      shown.length
-        ? {
-            sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
-            params: [...source.params, ...shown],
-          }
-        : { sql: "0", params: [] },
+      includeScheduled(
+        shown.length
+          ? {
+              sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
+              params: [...source.params, ...shown],
+            }
+          : { sql: "0", params: [] },
+      ),
     );
   }
   if (opts.q?.trim()) {
@@ -337,8 +359,9 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   if (opts.viewer) {
     add(sessionViewerCondition(opts.viewer));
     // Unary +: a full pass over the narrow summaries beats the partial thread index here.
-    if (opts.tree) conditions.push("+r.requestedByUserId IS NOT NULL");
-    if (opts.mine) add(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll));
+    if (opts.tree) add(includeScheduled({ sql: "+r.requestedByUserId IS NOT NULL", params: [] }));
+    if (opts.mine)
+      add(includeScheduled(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll)));
   }
   if (opts.keyPrefix) {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
@@ -707,14 +730,25 @@ export async function getSessionTree(
 ): Promise<SessionTree> {
   // No source filter in SQL: the source counts must include hidden sources,
   // so the filter menu can offer them back. The loop skips them instead.
-  const query = sessionSummaryQuery({
+  const filterOpts: SessionFilters = {
     ...(actor.kind === "user"
       ? { viewer: { userId: actor.userId, scope: "all", readAll: actor.readAll } as const }
       : {}),
     now,
     tree: true,
     mine: opts.mine,
-  });
+  };
+  const query = sessionSummaryQuery({ ...filterOpts, includeScheduleRuns: true });
+  // The query relaxes the owner and Mine rules for schedule runs. A row outside
+  // a user group still needs them (the predicates `sessionRootFilter` relaxes).
+  const viewer = filterOpts.viewer;
+  const mine = viewer && opts.mine ? sessionMineCondition(viewer.userId, viewer.readAll) : null;
+  const defaultVisible: SqlFragment = viewer
+    ? {
+        sql: `(r.requestedByUserId IS NOT NULL${mine ? ` AND ${mine.sql}` : ""})`,
+        params: mine?.params ?? [],
+      }
+    : { sql: "1", params: [] };
   const [rows, threadRoots] = await Promise.all([
     getDbClient().query<{
       root_id: string;
@@ -725,11 +759,13 @@ export async function getSessionTree(
       latestStatus: string;
       readState: SessionReadState | null;
       needsYou: number;
+      scheduleId: string | null;
+      defaultVisible: number;
     }>(
       `SELECT a.root_id, a."key", a.source, a.slackChannelId, a.lastActivityAt, a.latestStatus,
-        a.readState, a.needsYou
-      FROM (${query.sql}) a`,
-      query.params,
+        a.readState, a.needsYou, r.scheduleId, (${defaultVisible.sql}) AS defaultVisible
+      FROM (${query.sql}) a JOIN ${SESSION_ROOTS} r ON r.id = a.root_id`,
+      [...defaultVisible.params, ...query.params],
     ),
     threadRootCounts(),
   ]);
@@ -762,9 +798,11 @@ export async function getSessionTree(
   };
   for (const row of rows) {
     const source = effectiveSource(row.key, row.source);
-    sources.set(source, (sources.get(source) ?? 0) + 1);
     const rowThreadRoots = threadRoots.get(row.key) ?? 0;
     const key = sessionThreadGroupKey(row.key, rowThreadRoots);
+    const groupedSchedule = row.scheduleId !== null && showsScheduleRuns(key);
+    if (!groupedSchedule && !row.defaultVisible) continue;
+    sources.set(source, (sources.get(source) ?? 0) + 1);
     const sourceGroupKey = sessionGroupKey(row.key);
     const channelId = /^shared\/slack\/([^/]+)\/$/.exec(sourceGroupKey)?.[1];
     if (channelId && row.slackChannelId?.toLowerCase() === channelId) {
@@ -777,7 +815,7 @@ export async function getSessionTree(
     if (sourceOfKey(key)) sourceGroups.add(key);
     const resource = sessionResourceGroupOf(key);
     if (resource) resourceGroups.add(key).add(resource.resourceKey);
-    if (hidden.has(source) || (shown && !shown.has(source))) continue;
+    if (hidden.has(source) || (shown && !shown.has(source) && !groupedSchedule)) continue;
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
     let group: SessionTreeGroup | undefined;

@@ -6,6 +6,9 @@ import { invalidateStatusQuery } from "./status-query";
 export interface ScheduledTaskFilters {
   enabled?: boolean;
   name?: string;
+  /** An exact asset key; `key`/`keyPrefix` switch to the full rows of `/api/schedules`. */
+  key?: string;
+  keyPrefix?: string;
   targetType?: ScheduledTask["targetType"];
   workflowId?: string;
   scriptName?: string;
@@ -31,6 +34,8 @@ export function useCreateSchedule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: {
+      /** The asset key (a Sessions group). Omitted: the server default `shared/schedule:<id>/`. */
+      key?: string;
       name: string;
       taskTemplate?: string;
       targetType?: ScheduledTask["targetType"];

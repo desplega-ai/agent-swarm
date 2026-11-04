@@ -391,7 +391,7 @@
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
-      "scenarios": ["core-sessions"]
+      "scenarios": ["core-sessions", "core-use-case-group"]
     },
     "skills-lifecycle": {
       "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",

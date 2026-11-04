@@ -4,6 +4,7 @@ import {
   closeDb,
   countSessions,
   createAgent,
+  createScheduledTask,
   createTaskExtended,
   createUser,
   getDbClient,
@@ -11,7 +12,9 @@ import {
   initDb,
   listRecentSessions,
   updateTaskTitle,
+  upsertInboxState,
 } from "../be/db";
+import { getSessionTree } from "../be/db/session-tree";
 import { withSiblingAwareness } from "../tasks/sibling-awareness";
 
 const TEST_DB_PATH = "./test-sessions.sqlite";
@@ -38,6 +41,72 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
   test("empty chain — no rows for non-existent root", async () => {
     const chain = await getRootTaskChain("nonexistent-root-id");
     expect(chain).toEqual([]);
+  });
+
+  test("schedule group relaxation preserves source and viewer restrictions", async () => {
+    const viewer = await createUser({ name: "Schedule viewer" });
+    const other = await createUser({ name: "Schedule creator" });
+    const schedule = await createScheduledTask({
+      name: crypto.randomUUID(),
+      intervalMs: 60_000,
+      taskTemplate: "Research",
+    });
+    const key = "shared/schedule-group/";
+    const run = await createTaskExtended("Grouped schedule", {
+      key,
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: other.id,
+    });
+    await createTaskExtended("Other user's UI task", {
+      key,
+      source: "ui",
+      requestedByUserId: other.id,
+    });
+    const opts = {
+      viewer: { userId: viewer.id, scope: "all" as const },
+      groupKey: key,
+      tree: true,
+      mine: true,
+      showSource: ["comb", "ui"],
+    };
+    expect(await countSessions(opts)).toBe(0);
+    const relaxed = { ...opts, includeScheduleRuns: true };
+    expect((await listRecentSessions(relaxed)).map((row) => row.root.id)).toEqual([run.id]);
+    expect(await countSessions(relaxed)).toBe(1);
+    expect(
+      await countSessions({ ...relaxed, viewer: { userId: viewer.id, scope: "shared" } }),
+    ).toBe(0);
+    expect(await countSessions({ ...relaxed, hideSource: ["schedule"] })).toBe(0);
+    const tree = await getSessionTree({ kind: "user", userId: viewer.id }, undefined, opts);
+    expect(tree.groups.find((group) => group.key === key)).toMatchObject({ total: 1, running: 1 });
+    expect(tree.inbox.total).toBe(0);
+    const ungrouped = { ...opts, groupKey: undefined };
+    expect((await listRecentSessions(ungrouped)).some((row) => row.root.id === run.id)).toBe(false);
+    const ownerless = await createTaskExtended("Ownerless grouped schedule", {
+      key: `${key}task:ownerless/`,
+      source: "schedule",
+      scheduleId: schedule.id,
+    });
+    expect((await listRecentSessions(relaxed)).map((row) => row.root.id).sort()).toEqual(
+      [run.id, ownerless.id].sort(),
+    );
+    const withOwnerless = await getSessionTree(
+      { kind: "user", userId: viewer.id },
+      undefined,
+      opts,
+    );
+    expect(withOwnerless.groups.find((group) => group.key === key)).toMatchObject({
+      total: 2,
+      running: 2,
+    });
+    await upsertInboxState({
+      userId: viewer.id,
+      itemType: "to_read",
+      itemId: run.id,
+      status: "done",
+    });
+    expect((await listRecentSessions(relaxed)).map((row) => row.root.id)).toEqual([ownerless.id]);
   });
 
   test("single-root chain — chain length 1", async () => {

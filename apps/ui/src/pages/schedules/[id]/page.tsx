@@ -660,6 +660,18 @@ function EditScheduleDialog({
               <Label>Name *</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-key">Key</Label>
+              <Input
+                id="schedule-key"
+                value={schedule.key}
+                readOnly
+                className="font-mono text-muted-foreground"
+              />
+              <p className="text-xs text-muted-foreground">
+                Its runs show in this Sessions group. This dialog cannot change it.
+              </p>
+            </div>
             <AutomationParamsFields
               requiredParams={schedule.requiredParams}
               params={params}

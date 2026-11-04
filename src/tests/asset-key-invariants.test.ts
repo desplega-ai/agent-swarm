@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createApp } from "../apps/store";
+import { isGroupKey, SESSION_LEAF_KINDS } from "../assets/key";
 import { auditAssetKeys } from "../be/asset-key-audit";
 import {
   closeDb,
@@ -61,6 +62,19 @@ afterAll(() => {
 });
 
 describe("cross-entity asset namespace invariants", () => {
+  test("group keys exclude namespace roots and every resource leaf", () => {
+    for (const base of ["shared/", "personal/user-1/"]) {
+      expect(isGroupKey(base)).toBe(false);
+      for (const kind of SESSION_LEAF_KINDS) {
+        expect(isGroupKey(`${base}${kind}:abc/`)).toBe(false);
+        expect(isGroupKey(`${base}research/${kind}:abc/`)).toBe(false);
+      }
+      for (const group of ["research/", "research/competitors/", "release:v2/", "mytask:abc/"]) {
+        expect(isGroupKey(`${base}${group}`)).toBe(true);
+      }
+    }
+    expect(isGroupKey(" Shared/Research ")).toBe(true);
+  });
   test("all primary entities receive deterministic resource-specific shared keys", async () => {
     const taskA = await createTaskExtended("first", { agentId });
     const taskB = await createTaskExtended("second", { agentId });
