@@ -17,12 +17,16 @@ export function useApprovalRequests(filters?: ApprovalRequestFilters) {
 }
 
 /** The approvals list page's slim rows; shares the `approval-requests` key prefix for invalidation. */
-export function useApprovalRequestSummaries(filters?: { status?: string; limit?: number }) {
+export function useApprovalRequestSummaries(
+  filters?: { status?: string; limit?: number },
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["approval-requests", "slim", filters],
     queryFn: () => api.fetchApprovalRequestSummaries(filters),
     select: (data) => data.approvalRequests,
     refetchInterval: 5000,
+    enabled: options?.enabled ?? true,
   });
 }
 
