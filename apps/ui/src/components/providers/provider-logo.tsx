@@ -1,4 +1,4 @@
-import { Route } from "lucide-react";
+import { Cloud, Route } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { ProviderIcon } from "@/components/shared/provider-icon";
@@ -27,7 +27,8 @@ export function ProviderLogo({
   } else if ("src" in logo) {
     mark = <BrandLogo src={logo.src} className={glyph} />;
   } else if ("lucide" in logo) {
-    mark = <Route aria-hidden className={glyph} />;
+    const Icon = logo.lucide === "cloud" ? Cloud : Route;
+    mark = <Icon aria-hidden className={glyph} />;
   } else {
     mark = (
       <span aria-hidden className="font-mono text-[11px] leading-none font-semibold">

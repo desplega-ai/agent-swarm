@@ -1,12 +1,12 @@
-import { Cpu, Info } from "lucide-react";
+import { ArrowLeftRight, Cpu, Info } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { AddProviderMenu } from "@/components/providers/add-provider-menu";
 import { PROVIDER_GRID } from "@/components/providers/pool-key-row";
 import { ProviderListRow } from "@/components/providers/provider-row";
 import { ProviderSetupPanel } from "@/components/providers/provider-setup-panel";
 import { useLlmProviderRows } from "@/components/providers/use-llm-provider-rows";
 import { EmptyState } from "@/components/shared/empty-state";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
@@ -19,12 +19,10 @@ import {
 } from "@/lib/ai-providers";
 import { formatCost } from "@/lib/cost-format";
 import { cn } from "@/lib/utils";
-import {
-  ConnectPhoneTitle,
-  ConnectSearch,
-  IntegrationCardGrid,
-  integrationsIn,
-} from "./connect-shell";
+import { EmbeddingsPanel, EmbeddingsTab } from "./ai-embeddings-tab";
+import { SystemOneTab, useSystemOneHosts } from "./ai-system-one-tab";
+import { TranscriptionPanel, TranscriptionTab } from "./ai-transcription-tab";
+import { ConnectPhoneTitle, ConnectSearch } from "./connect-shell";
 
 const TABS = [
   { value: "llm", label: "LLMs" },
@@ -38,9 +36,9 @@ function coerceTab(value: string): AiTab {
   return TABS.some((tab) => tab.value === value) ? (value as AiTab) : "llm";
 }
 
-// Until step-17 rebuilds these tabs, they mount today's integration cards.
-const EMBEDDINGS = integrationsIn(["llm"]).filter((def) => def.id === "memory");
-const TRANSCRIPTION = integrationsIn(["llm"]).filter((def) => def.id === "transcription");
+/** `?add=` values of the two tabs whose panel changes the one setup they show. */
+const EMBEDDINGS_PANEL = "embeddings";
+const TRANSCRIPTION_PANEL = "transcription";
 
 /** Rows whose provider, harness or key name matches the search. */
 function matchRows(rows: ProviderRow[], search: string): ProviderRow[] {
@@ -178,15 +176,25 @@ function LlmList({
  * Connect › AI providers: tabs LLMs | System One | Embeddings | Transcription
  * (`?tab=`). LLMs is one list of the configured providers with their keys,
  * status and spend, plus "Add provider", which opens a side panel with the
- * setup steps (`?add=<provider>`).
+ * setup steps (`?add=<provider>`). System One lists the typed decision and
+ * extraction hosts and the two defaults; its Set up opens the same panel
+ * (`?add=system-one-<host>`). Embeddings and Transcription show the one setup
+ * in use; "Change provider" opens their own panel (`?add=embeddings`,
+ * `?add=transcription`).
  */
 export default function AiProvidersPage() {
   const { searchParams, setParam } = useUrlSearchState();
   const tab = coerceTab(readStringParam(searchParams, "tab", "llm"));
   const search = readStringParam(searchParams, "search");
-  const panel = findAiProvider(readStringParam(searchParams, "add")) ?? null;
+  const add = readStringParam(searchParams, "add");
+  const panel = findAiProvider(add) ?? null;
   const { rows, loading, presence, unhealthyKeys } = useLlmProviderRows();
+  const systemOne = useSystemOneHosts();
+  const systemOneReady = systemOne.rows.filter((row) => row.state === "configured").length;
   const openPanel = (providerId: string) => setParam("add", providerId);
+  const closePanel = (isOpen: boolean) => {
+    if (!isOpen) setParam("add", null);
+  };
 
   return (
     <Tabs
@@ -204,6 +212,9 @@ export default function AiProvidersPage() {
               {entry.label}
               {entry.value === "llm" && rows.length > 0 ? (
                 <span className="font-mono text-xs text-muted-foreground">{rows.length}</span>
+              ) : null}
+              {entry.value === "system-one" && systemOneReady > 0 ? (
+                <span className="font-mono text-xs text-muted-foreground">{systemOneReady}</span>
               ) : null}
               {entry.value === "llm" && unhealthyKeys > 0 ? (
                 <span
@@ -224,6 +235,19 @@ export default function AiProvidersPage() {
             <AddProviderMenu configured={configuredMap(rows, presence)} onPick={openPanel} />
           </div>
         ) : null}
+        {tab === "system-one" ? (
+          <ConnectSearch placeholder="Search hosts" className="md:ml-auto" />
+        ) : null}
+        {tab === "embeddings" || tab === "transcription" ? (
+          <Button
+            type="button"
+            className="md:ml-auto"
+            onClick={() => openPanel(tab === "embeddings" ? EMBEDDINGS_PANEL : TRANSCRIPTION_PANEL)}
+          >
+            <ArrowLeftRight />
+            Change provider
+          </Button>
+        ) : null}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
@@ -236,29 +260,19 @@ export default function AiProvidersPage() {
           />
         </TabsContent>
         <TabsContent value="system-one">
-          <p className="text-sm text-muted-foreground">
-            System One runs fast typed decisions and extraction in workflows and gates. Set its
-            hosts and the default in{" "}
-            <Link to="/settings/configuration" className="text-primary hover:underline">
-              Settings › Configuration
-            </Link>
-            .
-          </p>
+          <SystemOneTab search={search} onSetUp={openPanel} />
         </TabsContent>
         <TabsContent value="embeddings">
-          <IntegrationCardGrid defs={EMBEDDINGS} />
+          <EmbeddingsTab />
         </TabsContent>
         <TabsContent value="transcription">
-          <IntegrationCardGrid defs={TRANSCRIPTION} />
+          <TranscriptionTab />
         </TabsContent>
       </div>
 
-      <ProviderSetupPanel
-        provider={panel}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) setParam("add", null);
-        }}
-      />
+      <ProviderSetupPanel provider={panel} onOpenChange={closePanel} />
+      <EmbeddingsPanel open={add === EMBEDDINGS_PANEL} onOpenChange={closePanel} />
+      <TranscriptionPanel open={add === TRANSCRIPTION_PANEL} onOpenChange={closePanel} />
     </Tabs>
   );
 }

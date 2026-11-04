@@ -1628,6 +1628,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}concepts/workflows`,
       },
       {
+        key: "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER",
+        label: "Default SystemOne extraction provider",
+        description:
+          "Extraction host for a system-one-extraction node that names no provider. cloudflare serves Clairic and needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. A node that names its provider keeps it. Applies to the next extraction.",
+        kind: "enum",
+        options: ["cloudflare"],
+        defaultValue: "cloudflare",
+        docsUrl: `${DOCS}concepts/workflows`,
+      },
+      {
         key: "FOLLOW_UP_GATE_MODE",
         label: "Follow-up gate mode",
         description:

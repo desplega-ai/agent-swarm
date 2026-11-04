@@ -22,7 +22,7 @@ export const AI_PROVIDER_GROUPS: { id: AiProviderGroup; label: string }[] = [
 export type AiProviderLogo =
   | { provider: ProviderIconKey }
   | { src: string }
-  | { lucide: "route" }
+  | { lucide: "route" | "cloud" }
   | { letter: string };
 
 /**
@@ -54,7 +54,7 @@ export interface AiProvider {
   name: string;
   group: AiProviderGroup;
   /** The type tag in the list. */
-  type: "Subscription" | "OAuth" | "API key" | "Gateway";
+  type: "Subscription" | "OAuth" | "API key" | "Gateway" | "System One";
   logo: AiProviderLogo;
   /** Harnesses that use the credential, as people name them. */
   harnesses: string[];
@@ -76,6 +76,8 @@ export interface AiProvider {
   fields: AiProviderField[];
   /** The integration page with every setting, for providers with more than the panel shows. */
   settingsPath?: string;
+  /** The panel footer line, in place of the live-check line. */
+  footer?: string;
 }
 
 const DOCS = "https://docs.agent-swarm.dev/docs/guides";
@@ -531,8 +533,160 @@ export const AI_PROVIDERS: AiProvider[] = [
   },
 ];
 
+const WORKFLOWS_GUIDE = {
+  label: "Workflows guide",
+  href: "https://docs.agent-swarm.dev/docs/concepts/workflows#systemone-decision",
+};
+const SYSTEM_ONE_FOOTER = "The swarm checks the key before a workflow's first decision.";
+const SECRETS_NOTE = "Saved as a global secret. Only the API server reads it.";
+
+/**
+ * The side panels of the System One hosts (`?add=system-one-<host>`). Not in
+ * the Add menu: the System One tab opens them. OpenRouter has none: its row
+ * opens the LLMs panel, because the key is the same pool.
+ */
+export const SYSTEM_ONE_SETUP: AiProvider[] = [
+  {
+    id: "system-one-typesafe",
+    name: "Jev via TypeSafe",
+    group: "api-key",
+    type: "System One",
+    logo: { letter: "T" },
+    harnesses: ["workflow decisions"],
+    noun: "key",
+    vendor: "TypeSafe",
+    configuredBy: ["TYPESAFE_API_KEY"],
+    liveCheck: false,
+    summary: "Jev answers typed decisions for workflow nodes, gates and scripts.",
+    steps: [
+      { text: "Get a TypeSafe API key from your TypeSafe account." },
+      { text: "Paste it below." },
+    ],
+    docs: WORKFLOWS_GUIDE,
+    footer: SYSTEM_ONE_FOOTER,
+    fields: [
+      {
+        key: "TYPESAFE_API_KEY",
+        label: "API key",
+        kind: "secret",
+        placeholder: "Paste the TypeSafe key",
+        help: SECRETS_NOTE,
+      },
+    ],
+  },
+  {
+    id: "system-one-cloudflare",
+    name: "Clef via Cloudflare",
+    group: "api-key",
+    type: "System One",
+    logo: { lucide: "cloud" },
+    harnesses: ["workflow decisions", "extraction"],
+    noun: "token",
+    vendor: "Cloudflare",
+    configuredBy: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    liveCheck: false,
+    summary: "Workers AI runs Clef and Clef-flash for decisions, and Clairic for typed extraction.",
+    steps: [
+      {
+        text: "In the [Cloudflare dashboard](https://dash.cloudflare.com), create an API token with Workers AI access.",
+      },
+      { text: "Copy the 32-character account id from the account's overview page." },
+      { text: "Paste both below." },
+    ],
+    note: "`CLOUDFLARE_API_KEY` is read when `CLOUDFLARE_API_TOKEN` is unset.",
+    docs: WORKFLOWS_GUIDE,
+    footer: SYSTEM_ONE_FOOTER,
+    fields: [
+      {
+        key: "CLOUDFLARE_API_TOKEN",
+        label: "API token",
+        kind: "secret",
+        placeholder: "Paste the Workers AI token",
+        help: SECRETS_NOTE,
+      },
+      {
+        key: "CLOUDFLARE_ACCOUNT_ID",
+        label: "Account ID",
+        kind: "text",
+        placeholder: "32 hex characters",
+      },
+    ],
+  },
+  {
+    id: "system-one-laya",
+    name: "laya",
+    group: "api-key",
+    type: "System One",
+    logo: { letter: "la" },
+    harnesses: ["workflow decisions"],
+    noun: "key",
+    vendor: "laya",
+    configuredBy: ["LAYA_API_KEY", "LAYA_URL"],
+    liveCheck: false,
+    summary:
+      "Your own laya server. This swarm's API server calls it directly, with no desplega API in between.",
+    steps: [
+      {
+        text: "Run a laya server: `@desplega.ai/laya-server` from [laya-js](https://github.com/desplega-ai/laya-js), from npm or built from its Dockerfile.",
+      },
+      { text: "Paste its base URL below. The API server must reach it." },
+      { text: "Paste the token that you gave the server." },
+    ],
+    note: "laya has no default model. It picks a checkpoint from the text, and the run output names it. Prefer choice questions on laya for now.",
+    docs: WORKFLOWS_GUIDE,
+    footer: SYSTEM_ONE_FOOTER,
+    fields: [
+      {
+        key: "LAYA_URL",
+        label: "Server URL",
+        kind: "text",
+        placeholder: "https://laya.example.com",
+        help: "https only. Plain http works for localhost only.",
+      },
+      {
+        key: "LAYA_API_KEY",
+        label: "API key",
+        kind: "secret",
+        placeholder: "The token that the server expects",
+        help: SECRETS_NOTE,
+      },
+    ],
+  },
+  {
+    id: "system-one-openai",
+    name: "OpenAI decisions",
+    group: "api-key",
+    type: "System One",
+    logo: { provider: "openai" },
+    harnesses: ["workflow decisions"],
+    noun: "key",
+    vendor: "OpenAI",
+    configuredBy: ["OPENAI_DECISIONS_API_KEY"],
+    liveCheck: false,
+    summary: "The OpenAI Decisions API (`gpt-6-luna`) for typed decisions.",
+    steps: [
+      {
+        text: "Create a key with Decisions access at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).",
+      },
+      { text: "Paste it below." },
+    ],
+    note: "A separate key from `OPENAI_API_KEY`, so this node never changes how agents sign in.",
+    docs: WORKFLOWS_GUIDE,
+    footer: SYSTEM_ONE_FOOTER,
+    fields: [
+      {
+        key: "OPENAI_DECISIONS_API_KEY",
+        label: "API key",
+        kind: "secret",
+        placeholder: "sk-...",
+        help: SECRETS_NOTE,
+      },
+    ],
+  },
+];
+
 export function findAiProvider(id: string): AiProvider | undefined {
-  return AI_PROVIDERS.find((p) => p.id === id);
+  return AI_PROVIDERS.find((p) => p.id === id) ?? SYSTEM_ONE_SETUP.find((p) => p.id === id);
 }
 
 /** Providers whose name, id, harness or group matches the query. */

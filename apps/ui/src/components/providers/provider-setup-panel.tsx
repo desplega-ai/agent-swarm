@@ -288,11 +288,13 @@ function CodexSignIn() {
 
 function stepsTitle(provider: AiProvider): string {
   if (provider.id === "codex") return "How to sign in";
+  if (provider.type === "System One") return `Get a ${provider.noun}`;
   if (!provider.poolVar) return "Before you start";
   return `Get a ${provider.noun}`;
 }
 
 function liveCheckLine(provider: AiProvider): string {
+  if (provider.footer) return provider.footer;
   if (provider.id === "codex") return "Each sign-in adds one account to the pool.";
   if (!provider.fields.some((f) => f.kind === "pool")) {
     return "No live check here: the provider checks it when a task runs.";
@@ -400,7 +402,15 @@ function PanelBody({ provider }: { provider: AiProvider }) {
         {provider.id === "codex" ? (
           <CodexSignIn />
         ) : (
-          <Section title={provider.poolVar ? `Add the ${provider.noun}` : "Settings"}>
+          <Section
+            title={
+              provider.poolVar
+                ? `Add the ${provider.noun}`
+                : provider.type === "System One"
+                  ? "Credentials"
+                  : "Settings"
+            }
+          >
             {provider.fields.map((field) => {
               if (field.kind === "pool") {
                 return <PoolField key={field.key} provider={provider} field={field} />;
