@@ -48235,6 +48235,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "hiddenInCatalog": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -57592,7 +57595,19 @@
                     "servers": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/McpServer"
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/McpServer"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "installCount": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
                       }
                     },
                     "total": {

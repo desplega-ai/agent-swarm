@@ -371,6 +371,7 @@ const oauthPresetSchema = z.object({
   requiresRefreshTokenRotation: z.boolean().optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   setupHints: z.array(z.string()),
+  hiddenInCatalog: z.boolean().optional(),
 });
 
 const sanitizedAuthorizationSchema = z.object({

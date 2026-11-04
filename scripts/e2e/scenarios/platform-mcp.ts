@@ -351,6 +351,11 @@ export const platformMcpServers: Scenario = {
         ]) !== null,
         "the install is persisted",
       );
+      const installCountOf = async () =>
+        asRecords((await ctx.api("GET", "/api/mcp-servers")).json, "servers").find(
+          (s) => s.id === http.id,
+        )?.installCount;
+      expect((await installCountOf()) === 1, "the list counts the active install");
       // The agent's server list resolves the header from config, never from the server row.
       const configRow = await putConfig(ctx, {
         key: tokenKey,
@@ -390,6 +395,7 @@ export const platformMcpServers: Scenario = {
         ).every((s) => s.id !== http.id),
         "an uninstalled server leaves the agent's list",
       );
+      expect((await installCountOf()) === 0, "the list count drops after uninstall");
 
       // ── MCP OAuth connection routes ────────────────────────────────────────
       const status0 = await ctx.api("GET", `/api/mcp-oauth/${http.id}/status`);

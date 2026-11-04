@@ -22705,7 +22705,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            servers: components["schemas"]["McpServer"][];
+                            servers: (components["schemas"]["McpServer"] & {
+                                installCount?: number;
+                            })[];
                             total: number;
                         };
                     };
@@ -32296,6 +32298,7 @@ export interface operations {
                                 [key: string]: string;
                             };
                             setupHints: string[];
+                            hiddenInCatalog?: boolean;
                         }[];
                     };
                 };
