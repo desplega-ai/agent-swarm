@@ -151,7 +151,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
     {
       title: "Store task progress",
       description:
-        "Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you.",
+        "Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you. When a live child task you created continues the work, complete with chainedTaskId so the lead is not woken for this step.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
@@ -215,6 +215,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             "Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true.",
           ),
+        chainedTaskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "With status 'completed' only: the id of a live child task you created (send-task with parentTaskId set to this task) that carries this result forward. The engine then creates no lead follow-up for this completion and logs the handoff on this task. The child must exist, have this task as parentTaskId, be created by you, and be pending, offered, reviewing, in_progress or paused. If any check fails, the normal follow-up is created and names the reason; the completion itself never fails. Ignored for every other status: a failure always wakes the lead.",
+          ),
         force: z
           .boolean()
           .optional()
@@ -239,6 +245,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         citations,
         learning,
         persistMemory,
+        chainedTaskId,
         force,
       },
       requestInfo,
@@ -710,6 +717,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           failureReason,
           agentId: requestInfo.agentId,
           persistMemory,
+          ...(status === "completed" && chainedTaskId ? { chainedTaskId } : {}),
         });
       }
 

@@ -397,4 +397,51 @@ describe("worker follow-up vs. deferred wake", () => {
     await reconcileDeferredTaskWaits(producer.id);
     expect(await wakeChildren(scheduleId)).toHaveLength(1);
   });
+
+  test("a rejected chainedTaskId keeps the follow-up and names the rejection", async () => {
+    const producer = await activeTask(workerId);
+    const { scheduleId } = await deferOn([producer], "any");
+    const missing = crypto.randomUUID();
+
+    const settled = await completeTask(producer.id, "the result");
+    const followUp = await createWorkerTaskFollowUp({
+      task: settled!,
+      status: "completed",
+      output: "the result",
+      chainedTaskId: missing,
+      completingAgentId: workerId,
+    });
+
+    expect(followUp?.agentId).toBe(leadId);
+    expect(followUp?.task).toContain(`chainedTaskId ${missing}`);
+    expect(followUp?.task).toContain("no task has this id");
+    expect(await suppressions(producer.id)).toHaveLength(0);
+    // The waiter still wakes; both run.
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await wakeChildren(scheduleId)).toHaveLength(1);
+  });
+
+  test("a live chainedTaskId suppresses the follow-up and the waiter still wakes", async () => {
+    const producer = await activeTask(workerId);
+    const { scheduleId } = await deferOn([producer], "any");
+    const child = await createTaskExtended("chained work", {
+      agentId: otherWorkerId,
+      creatorAgentId: workerId,
+      parentTaskId: producer.id,
+    });
+
+    const settled = await completeTask(producer.id, "the result");
+    const followUp = await createWorkerTaskFollowUp({
+      task: settled!,
+      status: "completed",
+      output: "the result",
+      chainedTaskId: child.id,
+      completingAgentId: workerId,
+    });
+
+    expect(followUp).toBeNull();
+    expect((await suppressions(producer.id)).map((s) => s.reason)).toEqual(["chained_task_live"]);
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await wakeChildren(scheduleId)).toHaveLength(1);
+  });
 });
