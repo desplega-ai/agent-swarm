@@ -377,26 +377,16 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
   throw new Error(`${genericLabel}: ${res.status}`);
 }
 
-/** `POST /api/fs/continue` failed. `status` picks the message (400, 409, 501, ...). */
-export class FsContinueError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "FsContinueError";
-    this.status = status;
-  }
-}
-
 /**
- * A failed `GET /api/fs/me` or `POST /api/fs/keys`. `status` tells a 501
- * (agent-fs too old for named keys) and a 409 (account pending) from the rest.
+ * A failed `/api/fs/*` call (`GET /api/fs/me`, `POST /api/fs/keys`,
+ * `POST /api/fs/continue`). `status` picks the message: a 501 (agent-fs too
+ * old for named keys), a 409 (account pending), a 400, and the rest.
  */
-export class FsKeyApiError extends Error {
+export class FsApiError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
     super(message);
-    this.name = "FsKeyApiError";
+    this.name = "FsApiError";
     this.status = status;
   }
 }
@@ -1267,7 +1257,7 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders(), cache: "no-store" });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new FsKeyApiError(
+      throw new FsApiError(
         err.error || `Failed to load the files account: ${res.status}`,
         res.status,
       );
@@ -1289,10 +1279,7 @@ class ApiClient {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new FsKeyApiError(
-        err.error || `Failed to create a files key: ${res.status}`,
-        res.status,
-      );
+      throw new FsApiError(err.error || `Failed to create a files key: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -1310,7 +1297,7 @@ class ApiClient {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new FsContinueError(err.error || `Failed to continue: ${res.status}`, res.status);
+      throw new FsApiError(err.error || `Failed to continue: ${res.status}`, res.status);
     }
     return res.json();
   }

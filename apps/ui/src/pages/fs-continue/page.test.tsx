@@ -7,7 +7,7 @@ GlobalRegistrator.register({ url: "http://localhost:5274/" });
 const { createRoot } = await import("react-dom/client");
 const { MemoryRouter } = await import("react-router-dom");
 
-class FsContinueError extends Error {
+class FsApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -20,7 +20,7 @@ let fsContinue: (data: { returnTo: string }) => Promise<{ redirectUrl: string }>
 };
 mock.module("@/api/client", () => ({
   api: { fsContinue: (data: { returnTo: string }) => fsContinue(data) },
-  FsContinueError,
+  FsApiError,
 }));
 const box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
 mock.module("@/components/ui/button", () => ({
@@ -127,7 +127,7 @@ describe("FsContinuePage", () => {
 
   test("an API error shows its message and a link to the files", async () => {
     stubApi(async () => {
-      throw new FsContinueError("invalid_return_to", 400);
+      throw new FsApiError("invalid_return_to", 400);
     });
     const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
     await confirm(view);
@@ -143,7 +143,7 @@ describe("FsContinuePage", () => {
       [501, "too old"],
     ] as const) {
       stubApi(async () => {
-        throw new FsContinueError("x", status);
+        throw new FsApiError("x", status);
       });
       const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
       await confirm(view);

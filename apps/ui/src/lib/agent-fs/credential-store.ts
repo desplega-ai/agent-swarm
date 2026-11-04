@@ -1,7 +1,11 @@
 // The human's agent-fs credential for Comb. It lives only in this browser's
 // localStorage and is never sent to the swarm API. The key is namespaced by
-// the swarm API URL and the agent-fs URL, so two swarms (or two agent-fs
-// servers) never share a credential.
+// the swarm API URL, the agent-fs URL, and the dashboard user, so two swarms,
+// two agent-fs servers, or two dashboard users never share a credential.
+//
+// Credentials saved before the user part existed sit under the key without
+// it (the legacy key). The owner still reads one when its email matches the
+// owner's email. A write or a clear for that owner removes it.
 
 import { deriveStorageKey } from "../../hooks/use-dismissible-card-key";
 
@@ -30,8 +34,24 @@ function browserStorage(): CredentialStorage | null {
   }
 }
 
-export function credentialStorageKey(apiUrl: string, endpoint: string): string {
-  return deriveStorageKey(apiUrl, `comb:agent-fs:${endpoint}`);
+/** The dashboard user a credential belongs to. Null: a tab with no user (the legacy key). */
+export interface CredentialOwner {
+  userId: string;
+  email: string | null;
+}
+
+export function credentialStorageKey(
+  apiUrl: string,
+  endpoint: string,
+  owner: CredentialOwner | null = null,
+): string {
+  const base = deriveStorageKey(apiUrl, `comb:agent-fs:${endpoint}`);
+  return owner ? `${base}:user:${owner.userId}` : base;
+}
+
+function ownsLegacy(owner: CredentialOwner, credential: AgentFsCredential | null): boolean {
+  const email = owner.email?.trim().toLowerCase();
+  return Boolean(email && credential && credential.email.trim().toLowerCase() === email);
 }
 
 function parseCredential(raw: string | null): AgentFsCredential | null {
@@ -62,24 +82,34 @@ function parseCredential(raw: string | null): AgentFsCredential | null {
   }
 }
 
-function readRaw(
-  apiUrl: string,
-  endpoint: string,
-  storage: CredentialStorage | null,
-): string | null {
+function getItem(storage: CredentialStorage | null, key: string): string | null {
   try {
-    return storage?.getItem(credentialStorageKey(apiUrl, endpoint)) ?? null;
+    return storage?.getItem(key) ?? null;
   } catch {
     return null;
   }
 }
 
+/** The owner's stored string, else a legacy one that belongs to the owner. */
+function readRaw(
+  apiUrl: string,
+  endpoint: string,
+  owner: CredentialOwner | null,
+  storage: CredentialStorage | null,
+): string | null {
+  const own = getItem(storage, credentialStorageKey(apiUrl, endpoint, owner));
+  if (own !== null || !owner) return own;
+  const legacy = getItem(storage, credentialStorageKey(apiUrl, endpoint));
+  return ownsLegacy(owner, parseCredential(legacy)) ? legacy : null;
+}
+
 export function readCredential(
   apiUrl: string,
   endpoint: string,
+  owner: CredentialOwner | null,
   storage: CredentialStorage | null = browserStorage(),
 ): AgentFsCredential | null {
-  return parseCredential(readRaw(apiUrl, endpoint, storage));
+  return parseCredential(readRaw(apiUrl, endpoint, owner, storage));
 }
 
 /**
@@ -89,12 +119,13 @@ export function readCredential(
 export function credentialSnapshot(
   apiUrl: string,
   endpoint: string,
+  owner: CredentialOwner | null,
   storage: CredentialStorage | null = browserStorage(),
 ): () => AgentFsCredential | null {
   let raw: string | null | undefined;
   let credential: AgentFsCredential | null = null;
   return () => {
-    const next = readRaw(apiUrl, endpoint, storage);
+    const next = readRaw(apiUrl, endpoint, owner, storage);
     if (next !== raw) {
       raw = next;
       credential = parseCredential(next);
@@ -111,34 +142,55 @@ function notifySameTab(storageKey: string): void {
   for (const listener of sameTabListeners) listener(storageKey);
 }
 
+/** Remove the legacy credential when it belongs to `owner`, so it cannot come back. */
+function dropOwnedLegacy(
+  apiUrl: string,
+  endpoint: string,
+  owner: CredentialOwner | null,
+  storage: CredentialStorage | null,
+): void {
+  if (!owner) return;
+  const legacyKey = credentialStorageKey(apiUrl, endpoint);
+  if (!ownsLegacy(owner, parseCredential(getItem(storage, legacyKey)))) return;
+  try {
+    storage?.removeItem(legacyKey);
+  } catch {
+    // Nothing stored.
+  }
+}
+
 export function writeCredential(
   apiUrl: string,
   endpoint: string,
+  owner: CredentialOwner | null,
   credential: AgentFsCredential,
   storage: CredentialStorage | null = browserStorage(),
 ): void {
-  const key = credentialStorageKey(apiUrl, endpoint);
+  const key = credentialStorageKey(apiUrl, endpoint, owner);
   try {
     storage?.setItem(key, JSON.stringify(credential));
   } catch {
     // Storage unavailable: nothing is saved (the dashboard needs localStorage).
     return;
   }
+  dropOwnedLegacy(apiUrl, endpoint, owner, storage);
   notifySameTab(key);
 }
 
 export function clearCredential(
   apiUrl: string,
   endpoint: string,
+  owner: CredentialOwner | null,
   storage: CredentialStorage | null = browserStorage(),
 ): void {
-  const key = credentialStorageKey(apiUrl, endpoint);
+  const key = credentialStorageKey(apiUrl, endpoint, owner);
   try {
     storage?.removeItem(key);
   } catch {
     // Nothing stored.
     return;
   }
+  dropOwnedLegacy(apiUrl, endpoint, owner, storage);
   notifySameTab(key);
 }
 
@@ -149,17 +201,22 @@ export function clearCredential(
 export function subscribeCredential(
   apiUrl: string,
   endpoint: string,
+  owner: CredentialOwner | null,
   onChange: () => void,
   target: EventTarget | null = typeof window === "undefined" ? null : window,
 ): () => void {
-  const key = credentialStorageKey(apiUrl, endpoint);
+  // The owner's key, plus the legacy key it may still read.
+  const keys = new Set([
+    credentialStorageKey(apiUrl, endpoint, owner),
+    credentialStorageKey(apiUrl, endpoint),
+  ]);
   const onSameTab = (changed: string) => {
-    if (changed === key) onChange();
+    if (keys.has(changed)) onChange();
   };
   const onStorage = (event: Event) => {
     // `key === null` means another tab called `localStorage.clear()`.
     const changed = (event as StorageEvent).key;
-    if (changed === null || changed === key) onChange();
+    if (changed === null || keys.has(changed)) onChange();
   };
   sameTabListeners.add(onSameTab);
   target?.addEventListener("storage", onStorage);

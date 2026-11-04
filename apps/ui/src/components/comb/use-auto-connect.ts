@@ -2,19 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 // The alias (not "./") lets the `/setup` Files step test swap the real calls.
 import { useConnectFlowDeps } from "@/components/comb/use-connect-flow-deps";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { browserKeyLabel } from "@/lib/agent-fs/key-label";
+import { autoConnectRunKey, currentAttempt, startAttempt } from "./auto-connect-attempts";
 import { type AutoConnectOutcome, autoConnect } from "./connect-flow";
 
-// One automatic attempt per swarm and agent-fs endpoint per page load. Every
-// caller (the Comb card, the `/setup` step, a StrictMode remount) shares it,
-// so a key that agent-fs keeps rejecting never mints in a loop. Retry starts
-// a new attempt on purpose.
-const attempts = new Map<string, Promise<AutoConnectOutcome>>();
-
-export function _resetAutoConnectAttemptsForTests(): void {
-  attempts.clear();
-}
+// One automatic attempt per swarm, agent-fs endpoint, and dashboard user per
+// page load (`auto-connect-attempts.ts`), so a key that agent-fs keeps
+// rejecting never mints in a loop. Retry starts a new attempt on purpose.
+export { _resetAutoConnectAttemptsForTests } from "./auto-connect-attempts";
 
 export interface AutoConnect {
   /** The last attempt's outcome. Null while none has settled. */
@@ -34,7 +31,9 @@ export function useAutoConnect({ enabled = true }: { enabled?: boolean } = {}): 
   const { state, endpoint } = useAgentFs();
   const deps = useConnectFlowDeps();
   const { apiUrl } = useConfig().config;
-  const runKey = endpoint ? `${apiUrl}|${endpoint}` : null;
+  // The minted key belongs to the dashboard user, so the attempt does too.
+  const { userId } = useCurrentUser();
+  const runKey = autoConnectRunKey(apiUrl, endpoint, userId);
   const [outcome, setOutcome] = useState<AutoConnectOutcome | null>(null);
   const [pending, setPending] = useState<Promise<AutoConnectOutcome> | null>(null);
   const wantsKey = enabled && (state === "needs-connect" || state === "invalid-key");
@@ -42,11 +41,8 @@ export function useAutoConnect({ enabled = true }: { enabled?: boolean } = {}): 
   // Start (or join) this page load's attempt.
   useEffect(() => {
     if (!deps || !runKey || !wantsKey) return;
-    let attempt = attempts.get(runKey);
-    if (!attempt) {
-      attempt = autoConnect(deps, browserKeyLabel());
-      attempts.set(runKey, attempt);
-    }
+    const attempt =
+      currentAttempt(runKey) ?? startAttempt(runKey, () => autoConnect(deps, browserKeyLabel()));
     setPending(attempt);
   }, [deps, runKey, wantsKey]);
 
@@ -66,8 +62,7 @@ export function useAutoConnect({ enabled = true }: { enabled?: boolean } = {}): 
 
   const retry = useCallback(() => {
     if (!deps || !runKey) return;
-    const attempt = autoConnect(deps, browserKeyLabel());
-    attempts.set(runKey, attempt);
+    const attempt = startAttempt(runKey, () => autoConnect(deps, browserKeyLabel()));
     setOutcome(null);
     setPending(attempt);
   }, [deps, runKey]);

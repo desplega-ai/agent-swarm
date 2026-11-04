@@ -714,6 +714,24 @@ export function isUnhealthyKey(key: ApiKeyStatus): boolean {
   return key.status === "rate_limited" || key.lastValidationFailedAt != null;
 }
 
+/**
+ * The count behind the sidebar dot and the LLMs tab dot: unhealthy key status
+ * rows, plus ChatGPT accounts that need a new sign-in (each counted once).
+ */
+export function unhealthyCredentialCount(
+  statuses: ApiKeyStatus[] | undefined,
+  codexAccounts: CodexAccount[] | undefined,
+): number {
+  const unhealthy = (statuses ?? []).filter(isUnhealthyKey);
+  const counted = new Set(
+    unhealthy.filter((s) => s.keyType === "CODEX_OAUTH").map((s) => s.keySuffix),
+  );
+  const signIns = (codexAccounts ?? []).filter(
+    (a) => a.status === "needs_login" && !(a.suffix && counted.has(a.suffix)),
+  );
+  return unhealthy.length + signIns.length;
+}
+
 export type KeyHealth = "ok" | "unchecked" | "limited" | "failing";
 
 /** Worst first: the roll-up of a provider takes the first state any key has. */
@@ -758,6 +776,11 @@ export interface ProviderRow {
   cost7d: number;
   /** The pool comes from the deployment env: keys change there, not here. */
   readOnly: boolean;
+  /**
+   * Set up with plain config fields, no pool (Bedrock, Claude Managed Agents,
+   * your own gateway): no keys to list, so the row opens the setup panel.
+   */
+  configOnly?: boolean;
 }
 
 export function rollUpHealth(keys: { health: KeyHealth }[]): KeyHealth {
@@ -830,10 +853,13 @@ export interface ProviderRowsInput {
   usageToday: UsageSummaryByCredentialRow[] | undefined;
   /** `byCredential` of the usage summary of the last 7 days. */
   usage7d: UsageSummaryByCredentialRow[] | undefined;
+  /** Env presence of the `configuredBy` keys, for the providers without a pool. */
+  presence?: Record<string, boolean>;
 }
 
 /**
- * One row per provider with at least one key or account, in registry order.
+ * One row per provider with at least one key or account, in registry order,
+ * plus one per provider without a pool whose `configuredBy` keys are all set.
  * Pool members come from the pool route (what is stored); the key status
  * rows add the name, plan, usage windows and last use.
  */
@@ -879,7 +905,23 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
   const rows: ProviderRow[] = [];
   for (const provider of AI_PROVIDERS) {
     const poolVar = provider.poolVar;
-    if (!poolVar) continue;
+    if (!poolVar) {
+      const configured = provider.configuredBy?.every((key) => input.presence?.[key] === true);
+      if (configured) {
+        rows.push({
+          provider,
+          keys: [],
+          health: "ok",
+          worstCount: 0,
+          reason: null,
+          costToday: 0,
+          cost7d: 0,
+          readOnly: false,
+          configOnly: true,
+        });
+      }
+      continue;
+    }
     let keys: ProviderKey[] = [];
     let readOnly = false;
     if (poolVar === "CODEX_OAUTH") {

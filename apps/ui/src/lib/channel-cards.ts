@@ -99,6 +99,16 @@ export const CHANNEL_DEFS: ChannelDef[] = [
   },
 ];
 
+/**
+ * The channel a Chat SDK page shows: `/integrations/chat-sdk?adapter=<name>`
+ * is one channel's page, so its breadcrumb names the channel, not "Chat SDK".
+ */
+export function chatSdkPageChannel(pathname: string, search: string): ChannelDef | undefined {
+  if (pathname.replace(/\/+$/, "") !== "/integrations/chat-sdk") return undefined;
+  const adapter = new URLSearchParams(search).get("adapter");
+  return adapter ? CHANNEL_DEFS.find((def) => def.adapter === adapter) : undefined;
+}
+
 /** Cards whose name, description or keywords contain the query. */
 export function matchChannels(defs: ChannelDef[], search: string): ChannelDef[] {
   const q = search.trim().toLowerCase();

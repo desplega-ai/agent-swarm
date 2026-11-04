@@ -17,6 +17,7 @@
 // Keep this module dependency-free (types only), so shared renderers such as
 // `MarkdownView` can use it without loading Comb.
 
+import type { AutoConnectOutcome } from "../../components/comb/connect-flow";
 import type { AgentFsState } from "../agent-fs/state";
 import type { DrivePath } from "./paths";
 
@@ -30,13 +31,18 @@ const DOT_SEGMENT_RE = /(?:^|[/\\])(?:\.|%2e){1,2}(?=[/\\]|$)/i;
 /**
  * Comb links open in the same tab while Comb can show the file: connected, or
  * about to be (`loading`, and `needs-connect` / `invalid-key` while the
- * browser mints its own key). Only `disabled` and `unreachable` keep the
- * link's own target.
+ * browser mints its own key). `disabled` and `unreachable` keep the link's
+ * own target. So do `needs-connect` / `invalid-key` once this page load's
+ * automatic connect settled without a key (`autoConnect`: unsupported,
+ * pending, or failed), because Comb would only show the paste-key card.
  */
-export function isCombNavigable(state: AgentFsState): boolean {
-  return (
-    state === "ready" || state === "loading" || state === "needs-connect" || state === "invalid-key"
-  );
+export function isCombNavigable(
+  state: AgentFsState,
+  autoConnect: AutoConnectOutcome | null = null,
+): boolean {
+  if (state === "ready" || state === "loading") return true;
+  if (state !== "needs-connect" && state !== "invalid-key") return false;
+  return autoConnect === null || autoConnect.kind === "connected";
 }
 
 function parseUrl(value: string, base?: string): URL | null {
@@ -151,8 +157,11 @@ export function combLinkFor(
   liveUrl: string | null | undefined,
   appOrigin: string,
   href: string | null | undefined,
+  autoConnect: AutoConnectOutcome | null = null,
 ): string | null {
-  return isCombNavigable(state) && href ? combPathForLink(href, { liveUrl, appOrigin }) : null;
+  return isCombNavigable(state, autoConnect) && href
+    ? combPathForLink(href, { liveUrl, appOrigin })
+    : null;
 }
 
 /**

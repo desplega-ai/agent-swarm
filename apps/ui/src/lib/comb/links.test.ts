@@ -162,6 +162,23 @@ describe("isCombNavigable", () => {
   });
 });
 
+describe("isCombNavigable after the automatic connect settled", () => {
+  test("a settled connect without a key keeps the link's own target", () => {
+    for (const state of ["needs-connect", "invalid-key"] as const) {
+      expect(isCombNavigable(state, null)).toBe(true);
+      expect(isCombNavigable(state, { kind: "connected" })).toBe(true);
+      expect(isCombNavigable(state, { kind: "unsupported" })).toBe(false);
+      expect(isCombNavigable(state, { kind: "pending", reason: "domain rule" })).toBe(false);
+      expect(isCombNavigable(state, { kind: "failed", message: "no" })).toBe(false);
+    }
+    // A saved key (pasted later) wins over an earlier failed attempt.
+    expect(isCombNavigable("ready", { kind: "unsupported" })).toBe(true);
+    expect(isCombNavigable("loading", { kind: "failed", message: "no" })).toBe(true);
+    const href = `${LIVE}/file/~/org-1/drive-1/notes.md`;
+    expect(combLinkFor("needs-connect", LIVE, APP, href, { kind: "unsupported" })).toBeNull();
+  });
+});
+
 describe("combLinkFor", () => {
   const href = `${LIVE}/file/~/org-1/drive-1/notes.md`;
 
