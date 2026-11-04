@@ -151,6 +151,102 @@ const echoServer = Bun.serve({
 afterAll(() => echoServer.stop(true));
 
 const PARITY_PROBES: Record<string, string> = {
+  "structuredClone graphs and built-ins": `async () => {
+  class Model { constructor() { this.value = 7; } }
+  const shared = { value: 1 };
+  const original = { shared, again: shared, model: new Model(), array: [, undefined, -0, NaN, Infinity, 12n] };
+  original.self = original;
+  const copy = structuredClone(original);
+  copy.shared.value = 2;
+  const date = structuredClone(new Date(123));
+  const regexp = /hello/gi;
+  regexp.lastIndex = 4;
+  const clonedRegexp = structuredClone(regexp);
+  const map = new Map([[shared, shared]]);
+  map.set(map, new Set([shared, map]));
+  const clonedMap = structuredClone(map);
+  const key = [...clonedMap.keys()][0];
+  const boxed = [new Boolean(false), new Number(NaN), new String('text'), Object(12n)].map(value => {
+    const cloned = structuredClone(value);
+    return [typeof cloned, typeof cloned.valueOf(), String(cloned.valueOf()), cloned !== value];
+  });
+  return {
+    cycle: copy.self === copy, shared: copy.shared === copy.again, independent: shared.value === 1,
+    model: [Object.getPrototypeOf(copy.model) === Object.prototype, copy.model.value],
+    array: [copy.array.length, 0 in copy.array, 1 in copy.array, Object.is(copy.array[2], -0), Number.isNaN(copy.array[3]), copy.array[4] === Infinity, String(copy.array[5])],
+    date: [date instanceof Date, date.getTime()],
+    regexp: [clonedRegexp instanceof RegExp, clonedRegexp.source, clonedRegexp.flags, clonedRegexp.lastIndex],
+    map: [clonedMap instanceof Map, key !== shared, clonedMap.get(key) === key, clonedMap.get(clonedMap) instanceof Set, clonedMap.get(clonedMap).has(key), clonedMap.get(clonedMap).has(clonedMap)],
+    boxed,
+  };
+}`,
+  "structuredClone error subtypes": `async () => {
+  const types = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError];
+  const errors = types.map(Type => {
+    const error = new Type('bad');
+    error.extra = 'ignored';
+    const cloned = structuredClone(error);
+    return [cloned instanceof Type, cloned.name, cloned.message, Object.hasOwn(cloned, 'extra')];
+  });
+  return errors;
+}`,
+  "structuredClone ignores overridden binary accessors": `async () => {
+  const buffer = new ArrayBuffer(16);
+  new Uint8Array(buffer).set([1, 2, 3, 4]);
+  buffer.slice = () => buffer;
+  Object.defineProperty(buffer, 'byteLength', { get() { throw Error('byteLength'); } });
+  const view = new Uint16Array(buffer, 2, 3);
+  view.constructor = Array;
+  for (const name of ['buffer', 'byteOffset', 'byteLength', 'length']) {
+    Object.defineProperty(view, name, { get() { throw Error(name); } });
+  }
+  Object.defineProperty(view, Symbol.toStringTag, { get() { throw Error('tag'); } });
+  const data = new DataView(buffer, 1, 4);
+  const copy = structuredClone({ buffer, view, data });
+  new Uint8Array(copy.buffer)[0] = 9;
+  const typed = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array, BigInt64Array, BigUint64Array].map(Type => {
+    const value = new Type(2);
+    const cloned = structuredClone(value);
+    return [cloned instanceof Type, cloned.length, cloned.buffer !== value.buffer];
+  });
+  return {
+    independent: copy.buffer !== buffer && new Uint8Array(buffer)[0] === 1,
+    bytes: Array.from(new Uint8Array(copy.buffer)),
+    view: [copy.view instanceof Uint16Array, copy.view.buffer === copy.buffer, copy.view.byteOffset, copy.view.length],
+    data: [copy.data instanceof DataView, copy.data.buffer === copy.buffer, copy.data.byteOffset, copy.data.byteLength],
+    typed,
+  };
+}`,
+  "structuredClone property snapshots and symbols": `async () => {
+  const original = {
+    get a() { delete this.b; this.c = 3; return 1; }, b: 2,
+    get [Symbol.toStringTag]() { throw Error('symbol getter ran'); },
+  };
+  Object.defineProperty(original, '__proto__', { value: { marker: true }, enumerable: true });
+  Object.defineProperty(original, 'hidden', { get() { throw Error('hidden getter ran'); } });
+  const copy = structuredClone(original);
+  return {
+    keys: Object.keys(copy), a: copy.a, hasB: Object.hasOwn(copy, 'b'), hasC: Object.hasOwn(copy, 'c'),
+    proto: [Object.getPrototypeOf(copy) === Object.prototype, Object.hasOwn(copy, '__proto__'), copy.__proto__.marker],
+    symbols: Object.getOwnPropertySymbols(copy).length,
+  };
+}`,
+  "structuredClone rejects uncloneable values": `async () => {
+  const failures = [Symbol('x'), Object(Symbol('x')), () => {}, new WeakMap(), new WeakSet(), Promise.resolve(1), { nested: () => {} }];
+  return failures.map(value => {
+    try { structuredClone(value); return 'accepted'; } catch(error) { return error.name; }
+  });
+}`,
+  "structuredClone argument and getter behavior": `async () => {
+  const thrown = new RangeError('getter');
+  const getter = { get value() { throw thrown; } };
+  const copy = structuredClone({ value: 1 }, { transfer: [] });
+  let missing;
+  try { structuredClone(); } catch (error) { missing = error.name; }
+  let sameError;
+  try { structuredClone(getter); } catch (error) { sameError = error === thrown; }
+  return { copy, missing, sameError };
+}`,
   URL: `async () => {
   const cases = [
     ["https://user:pa ss@Example.COM:443/a/./b/../c d?q=1 2&x='y'#frag ment"],
@@ -381,6 +477,98 @@ describe("quickjs parity shims match native and Bun", () => {
       );
     }
   }
+});
+
+describe("quickjs structuredClone boundaries", () => {
+  test("snapshots Map and Set entries before getters can mutate them", async () => {
+    // StructuredSerializeInternal snapshots collections before recursing. Bun's
+    // current live traversal differs, so use the standard's result as the oracle.
+    const output = await new QuickJSScriptExecutor().run(
+      input({
+        source: `export default async () => {
+          const map = new Map();
+          map.set('first', { get value() { map.delete('second'); map.set('third', 3); return 1; } });
+          map.set('second', 2);
+          const set = new Set();
+          set.add({ get value() { set.delete(2); set.add(3); return 1; } });
+          set.add(2);
+          return { map: [...structuredClone(map)], set: [...structuredClone(set)] };
+        };`,
+      }),
+    );
+    expect(output.error).toBeUndefined();
+    expect(output.result).toEqual({
+      map: [
+        ["first", { value: 1 }],
+        ["second", 2],
+      ],
+      set: [{ value: 1 }, 2],
+    });
+  });
+
+  test("rejects transfers without detaching the source buffer", async () => {
+    const output = await new QuickJSScriptExecutor().run(
+      input({
+        source: `export default async () => {
+          const buffer = new ArrayBuffer(8);
+          try { structuredClone(buffer, { transfer: [buffer] }); }
+          catch (error) { return { name: error.name, message: error.message, byteLength: buffer.byteLength }; }
+        };`,
+      }),
+    );
+    expect(output.error).toBeUndefined();
+    expect(output.result).toEqual({
+      name: "DataCloneError",
+      message: "quickjs structuredClone does not support transfers",
+      byteLength: 8,
+    });
+  });
+
+  test("rejects shared, resizable and detached buffers instead of changing their semantics", async () => {
+    const output = await new QuickJSScriptExecutor().run(
+      input({
+        source: `export default async () => {
+          const resizable = new ArrayBuffer(8, { maxByteLength: 16 });
+          const detached = new ArrayBuffer(8);
+          const view = new Uint8Array(detached);
+          detached.transfer();
+          return [new SharedArrayBuffer(8), resizable, new Uint8Array(resizable), detached, view].map(value => {
+            try { structuredClone(value); return 'accepted'; }
+            catch (error) { return error.name; }
+          });
+        };`,
+      }),
+    );
+    expect(output.error).toBeUndefined();
+    expect(output.result).toEqual(Array(5).fill("DataCloneError"));
+  });
+
+  test("uses captured intrinsics and a fresh clone function on the next run", async () => {
+    const executor = new QuickJSScriptExecutor();
+    const output = await executor.run(
+      input({
+        source: `export default async () => {
+          const value = { map: new Map([['x', 7]]), bytes: new Uint8Array([1, 2]), error: new TypeError('bad') };
+          const Type = TypeError;
+          const broken = () => { throw Error('replaced intrinsic'); };
+          Map.prototype.set = broken;
+          Uint8Array.prototype.set = broken;
+          Error.isError = broken;
+          globalThis.TypeError = broken;
+          const copy = structuredClone(value);
+          globalThis.structuredClone = broken;
+          return [copy.map.get('x'), copy.bytes[1], copy.error instanceof Type];
+        };`,
+      }),
+    );
+    expect(output.error).toBeUndefined();
+    expect(output.result).toEqual([7, 2, true]);
+    const next = await executor.run(
+      input({ source: "export default async () => structuredClone({ value: 7 });" }),
+    );
+    expect(next.error).toBeUndefined();
+    expect(next.result).toEqual({ value: 7 });
+  });
 });
 
 describe("native-only executor behavior", () => {
