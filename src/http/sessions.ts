@@ -35,6 +35,7 @@ import {
   getSessionGroupKey,
   getSessionReadState,
   getSessionTree,
+  showsScheduleRuns,
   triageSessionList,
 } from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
@@ -1044,6 +1045,7 @@ export async function handleSessions(
       contextKeyPrefix: parsed.query.contextKeyPrefix,
       keyPrefix: parsed.query.keyPrefix,
       groupKey: parsed.query.groupKey,
+      includeScheduleRuns: !!parsed.query.groupKey && showsScheduleRuns(parsed.query.groupKey),
       noGroup: parsed.query.noGroup,
       triage: parsed.query.triage,
       status: parsed.query.status,

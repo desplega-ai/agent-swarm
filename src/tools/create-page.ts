@@ -24,7 +24,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
-import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { resolveTaskAuditUserId, resolveTaskGroupKey } from "@/be/audit-user";
 import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
 import { getPageEditCounter } from "@/be/db/page-versions";
 import { classAttributeValues, countColorLiterals } from "@/pages/color-literals";
@@ -101,7 +101,7 @@ export const registerCreatePageTool = (server: McpServer) => {
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         key: AssetKeySchema.optional().describe(
-          "Logical namespace. Defaults to a shared/page:<id>/ resource key.",
+          "Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/.",
         ),
         title: z.string().min(1).describe("Human-readable title shown in listings."),
         slug: z
@@ -211,7 +211,11 @@ export const registerCreatePageTool = (server: McpServer) => {
       let assetKey: string | undefined;
       try {
         if (input.key !== undefined || !existing) {
-          assetKey = input.key ? await authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
+          const resolvedKey =
+            input.key ?? (await resolveTaskGroupKey(requestInfo.sourceTaskId, requestInfo.agentId));
+          assetKey = resolvedKey
+            ? await authorizeAssetKeyWrite(resolvedKey, trustedUserId)
+            : undefined;
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

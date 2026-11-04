@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
-import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { resolveTaskAuditUserId, resolveTaskGroupKey } from "@/be/audit-user";
 import {
   createScheduledTask,
   extensionAgentAssignmentError,
@@ -33,7 +33,7 @@ import {
 
 export const createScheduleInputSchema = z.object({
   key: AssetKeySchema.optional().describe(
-    "Logical namespace. Defaults to a shared/schedule:<id>/ resource key.",
+    "Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/.",
   ),
   name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),
   taskTemplate: z
@@ -327,7 +327,11 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         const createdBy =
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
           undefined;
-        const assetKey = key ? await authorizeAssetKeyWrite(key, createdBy) : undefined;
+        const resolvedKey =
+          key ?? (await resolveTaskGroupKey(requestInfo.sourceTaskId, requestInfo.agentId));
+        const assetKey = resolvedKey
+          ? await authorizeAssetKeyWrite(resolvedKey, createdBy)
+          : undefined;
 
         const schedule = await createScheduledTask({
           key: assetKey,

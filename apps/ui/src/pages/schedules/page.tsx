@@ -15,6 +15,8 @@ import {
   ScheduleTargetFields,
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
+import { StartInPicker } from "@/components/sessions-v2/start-in-picker";
+import { useMyGroups } from "@/components/sessions-v2/use-my-groups";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -45,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
@@ -52,10 +55,13 @@ import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
+import { groupCrumb } from "@/lib/session-groups";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 interface ScheduleFormData extends ScheduleTargetFormValue {
   name: string;
+  /** The Sessions group its runs start in, or null for the server default key. */
+  key: string | null;
   scheduleType: "cron" | "interval";
   cronExpression: string;
   intervalMinutes: number;
@@ -72,6 +78,7 @@ interface ScheduleFormData extends ScheduleTargetFormValue {
 
 const emptyScheduleForm: ScheduleFormData = {
   name: "",
+  key: null,
   ...EMPTY_SCHEDULE_TARGET,
   scheduleType: "cron",
   cronExpression: "",
@@ -105,6 +112,9 @@ function ScheduleDialog({
     [modelsCatalog?.providers],
   );
   const [form, setForm] = useState<ScheduleFormData>(editData ?? emptyScheduleForm);
+  const { userId } = useCurrentUser();
+  const me = userId ?? null;
+  const { targets, writeBlock } = useMyGroups(me);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -133,6 +143,23 @@ function ScheduleDialog({
                 required
               />
             </div>
+            {editData ? null : (
+              <div className="space-y-1">
+                {/* The ghost trigger's own padding: line its text up with the labels. */}
+                <div className="-ml-1.5">
+                  <StartInPicker
+                    value={form.key}
+                    label={form.key ? groupCrumb(form.key, me, () => "") : "No group"}
+                    targets={targets}
+                    writeBlock={writeBlock}
+                    onChange={(key) => setForm({ ...form, key })}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Its runs show in this Sessions group.
+                </p>
+              </div>
+            )}
             <ScheduleTargetFields value={form} onChange={(next) => setForm({ ...form, ...next })} />
             <div className="space-y-2">
               <Label>Schedule Type</Label>
@@ -335,6 +362,7 @@ export default function SchedulesPage() {
       .map((t) => t.trim())
       .filter(Boolean);
     createSchedule.mutate({
+      ...(data.key && { key: data.key }),
       name: data.name,
       targetType: data.targetType,
       ...(data.targetType === "agent-task" && { taskTemplate: data.taskTemplate }),
