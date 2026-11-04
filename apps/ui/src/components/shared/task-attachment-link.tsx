@@ -1,4 +1,5 @@
 // No `@/` imports: unit tests render this from the repo root.
+import type { MouseEvent } from "react";
 import type { AgentFsState } from "../../lib/agent-fs/state";
 import { encodedPathToCombPath, isCombNavigable } from "../../lib/comb/links";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
@@ -122,10 +123,13 @@ export function AttachmentName({
   href,
   to,
   name,
+  onClick,
 }: {
   href: string | null;
   to?: string | null;
   name: string;
+  /** The link preview's click handler (task and session pages). */
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
 }) {
   const className = "truncate text-sm font-medium text-foreground";
   if (!to && !href) return <span className={className}>{name}</span>;
@@ -133,6 +137,7 @@ export function AttachmentName({
     <InAppOrExternalLink
       to={to}
       href={href}
+      onClick={onClick}
       className={`${className} hover:text-primary hover:underline`}
     >
       {name}

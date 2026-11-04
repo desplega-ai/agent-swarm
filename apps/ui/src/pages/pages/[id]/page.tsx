@@ -219,16 +219,27 @@ interface FrameProps {
    */
   frameQuery: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  /** Replaces the frame's size classes (the link preview panel fills its body). */
+  className?: string;
 }
+
+const FRAME_CLASS = cn(
+  "w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background",
+  // Below md the frame bleeds through `<main>`'s gutter to the screen
+  // edges, so a phone gives the page its full width.
+  "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
+);
 
 function PageIframe({
   src,
   title,
   iframeRef,
+  className = FRAME_CLASS,
 }: {
   src: string;
   title: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  className?: string;
 }) {
   return (
     <iframe
@@ -245,19 +256,14 @@ function PageIframe({
       // lets agent-emitted forms POST. We deliberately do NOT include
       // `allow-top-navigation` to prevent runaway-redirect attacks.
       sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-      className={cn(
-        "w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background",
-        // Below md the frame bleeds through `<main>`'s gutter to the screen
-        // edges, so a phone gives the page its full width.
-        "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
-      )}
+      className={className}
     />
   );
 }
 
-function PublicHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PublicHtmlFrame({ id, title, frameQuery, iframeRef, className }: FrameProps) {
   const src = getPageHtmlUrl(id) + frameQuery;
-  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
+  return <PageIframe src={src} title={title} iframeRef={iframeRef} className={className} />;
 }
 
 async function assertAuthedPageBodyReady(
@@ -285,7 +291,7 @@ async function assertAuthedPageBodyReady(
   throw new Error(`page body ${id}: ${res.status}`);
 }
 
-function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function AuthedHtmlFrame({ id, title, frameQuery, iframeRef, className }: FrameProps) {
   const [frameState, setFrameState] = useState<
     { status: "loading" } | { status: "ready"; src: string } | { status: "error"; message: string }
   >({ status: "loading" });
@@ -336,17 +342,19 @@ function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
   }, [id, frameQuery]);
 
   if (frameState.status === "loading") {
-    return <Skeleton className="h-[calc(100vh-6rem)] w-full rounded-md" />;
+    return <Skeleton className={cn("h-[calc(100vh-6rem)] w-full rounded-md", className)} />;
   }
 
   if (frameState.status === "error") {
     return <ArtifactPageError message={frameState.message} />;
   }
 
-  return <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} />;
+  return (
+    <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} className={className} />
+  );
 }
 
-function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PasswordHtmlFrame({ id, title, frameQuery, iframeRef, className }: FrameProps) {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
 
@@ -361,6 +369,7 @@ function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
         src={`${getPageHtmlUrl(id)}?${params.toString()}`}
         title={title}
         iframeRef={iframeRef}
+        className={className}
       />
     );
   }
@@ -404,6 +413,63 @@ function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
 // component imported from `./json-page-renderer`. The catalog + action
 // handlers live there (kept separate so the artifact page itself stays
 // focused on the iframe / auth-mode plumbing).
+
+/**
+ * The page body: the JSON renderer, or the HTML frame for the page's auth
+ * mode. `className` sizes the HTML frame (see `FrameProps`).
+ */
+function PageBody({
+  id,
+  data,
+  frameQuery,
+  iframeRef,
+  className,
+}: Omit<FrameProps, "title"> & { data: PageMetadata }) {
+  if (data.contentType === "application/json") {
+    return (
+      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
+        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <Braces className="size-3" />
+          <span>JSON-rendered page</span>
+        </div>
+        <JsonPageRenderer body={data.body} />
+      </div>
+    );
+  }
+  const frame = { id, title: data.title, frameQuery, iframeRef, className };
+  switch (data.authMode) {
+    case "public":
+      return <PublicHtmlFrame {...frame} />;
+    case "authed":
+      return <AuthedHtmlFrame {...frame} />;
+    case "password":
+      return <PasswordHtmlFrame {...frame} />;
+  }
+}
+
+/**
+ * The page body alone, for the link preview panel (task and session pages):
+ * no header, feedback overlay, or full mode. It shares the metadata query
+ * with the page route.
+ */
+export function PagePreviewBody({ id, className }: { id: string; className?: string }) {
+  const viewer = useTheme();
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["page-metadata", id],
+    queryFn: () => fetchPageMetadataWithLaunchRetry(id),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+  if (isLoading) return <Skeleton className={className} />;
+  if (error || !data) {
+    return <ArtifactPageError message={error instanceof Error ? error.message : "Not found"} />;
+  }
+  return (
+    <PageBody id={id} data={data} frameQuery={withViewerTheme("", viewer)} className={className} />
+  );
+}
 
 // ─── Loading / error ────────────────────────────────────────────────────────
 
@@ -522,51 +588,9 @@ export default function ArtifactPage() {
     return <ArtifactPageError message={msg} />;
   }
 
-  let body: React.ReactNode;
-  if (data.contentType === "application/json") {
-    body = (
-      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
-        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-          <Braces className="size-3" />
-          <span>JSON-rendered page</span>
-        </div>
-        <JsonPageRenderer body={data.body} />
-      </div>
-    );
-  } else {
-    switch (data.authMode) {
-      case "public":
-        body = (
-          <PublicHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={themedFrameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-      case "authed":
-        body = (
-          <AuthedHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={themedFrameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-      case "password":
-        body = (
-          <PasswordHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={themedFrameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-    }
-  }
+  const body = (
+    <PageBody id={pageId!} data={data} frameQuery={themedFrameQuery} iframeRef={iframeRef} />
+  );
 
   if (fullMode) {
     // Maximize: render the page body as a fixed-position overlay on top of

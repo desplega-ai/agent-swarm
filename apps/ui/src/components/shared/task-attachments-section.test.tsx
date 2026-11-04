@@ -19,6 +19,11 @@ mock.module("@/api/fs", () => ({
   useTaskAttachments: () => ({ data: undefined }),
 }));
 mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => agentFs }));
+// No link preview scope here: links keep their behavior.
+mock.module("@/components/link-preview/link-preview-state", () => ({
+  useLinkPreviewClick: () => undefined,
+}));
+mock.module("@/components/shared/markdown-link-chip", () => ({ useSwarmLinkOrigins: () => null }));
 mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/components/shared/animated-reveal", () => require("./animated-reveal"));

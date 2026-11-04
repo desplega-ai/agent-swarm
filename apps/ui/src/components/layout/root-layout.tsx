@@ -7,6 +7,7 @@ import { ContextPanelProvider } from "@/components/context-panel/context-panel-s
 import { ContextSessionPanel } from "@/components/context-panel/context-session-panel";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
+import { LinkPreviewPanel } from "@/components/link-preview/link-preview-panel";
 import { FirstTaskInvitePrompt } from "@/components/onboarding/first-task-invite-prompt";
 import { OnboardingRedirect } from "@/components/onboarding/onboarding-redirect";
 import { CommandMenu, CommandMenuProvider } from "@/components/shared/command-menu";
@@ -153,6 +154,8 @@ export function RootLayout() {
               {/* Contextual session panel: a flex sibling of the inset, so the page
               stays interactive while the user gives feedback. */}
               <ContextSessionPanel />
+              {/* Link previews from task and session content, in the same column. */}
+              <LinkPreviewPanel />
             </SidebarProvider>
           </ContextPanelProvider>
           <CommandMenu />

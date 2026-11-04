@@ -19,9 +19,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import { useLinkPreviewClick } from "@/components/link-preview/link-preview-state";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
+import { useSwarmLinkOrigins } from "@/components/shared/markdown-link-chip";
 import {
   type AgentFsLinkContext,
   AttachmentName,
@@ -291,6 +293,8 @@ function AttachmentRow({
 }) {
   const agentFs = useOptionalAgentFs();
   const { href, combTo } = resolveLinks(attachment, agentFs);
+  // On the task and session pages an agent-fs file or a page opens the preview panel.
+  const previewClick = useLinkPreviewClick(href, useSwarmLinkOrigins());
   const previewKind = getPreviewKind(attachment);
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -471,6 +475,7 @@ function AttachmentRow({
             to={combTo}
             href={href}
             className="group flex min-w-0 flex-1 items-center gap-3 rounded-l-xl px-3 py-2.5 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            onClick={previewClick}
             aria-label={combTo ? `Open ${attachment.name}` : `Open ${attachment.name} in a new tab`}
             title={attachment.path || attachment.name}
           >
@@ -616,7 +621,7 @@ function AttachmentRow({
                 aria-label="Primary attachment"
               />
             )}
-            <AttachmentName href={href} to={combTo} name={name} />
+            <AttachmentName href={href} to={combTo} name={name} onClick={previewClick} />
           </div>
           {meta ? <p className="truncate text-xs text-muted-foreground">{meta}</p> : null}
           {note ? <p className="line-clamp-2 text-xs text-muted-foreground">{note}</p> : null}
