@@ -16,6 +16,13 @@ import { installSocketAckRecovery } from "./socket-ack";
 import { fenceSocketModeClient, type SlackSocketFence } from "./socket-fence";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
+import {
+  getSlackWorkspaceIdentity,
+  installSocketWorkspaceGate,
+  isSlackEnterpriseInstall,
+  resolveSlackIdentity,
+  setSlackWorkspaceIdentitySource,
+} from "./workspace-guard";
 
 let app: App | null = null;
 let receiver: SocketModeReceiver | null = null;
@@ -29,6 +36,14 @@ let socketFence: SlackSocketFence | null = null;
 let lifecycleGeneration = 0;
 // Last sign of life on the current socket: Slack's hello or any envelope.
 let lastSocketActivityAt: number | null = null;
+
+/** Backoff between start attempts while this swarm's workspace is unknown. */
+const DEFAULT_START_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+let startRetryDelaysMs = DEFAULT_START_RETRY_DELAYS_MS;
+let startRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let startRetryAttempt = 0;
+/** Bolt's deferred init (its own auth.test) succeeded for the current app. */
+let boltInitialized = false;
 
 const SOCKET_EVENT_STATES: Record<string, SlackConnectionState> = {
   connecting: "connecting",
@@ -351,12 +366,23 @@ export async function initSlackApp(): Promise<App | null> {
     receiver,
     socketMode: true,
     logLevel,
+    // Bolt's auth.test runs in startSlackApp(), where a failure is retried
+    // instead of being cached as a rejected promise for the app's lifetime.
+    deferInitialization: true,
     ...(clientOptions ? { clientOptions } : {}),
   });
 
   // Events whose Socket Mode ack failed are stored as receipts; the drain hands
   // them back to Bolt, so a crash or a failing listener leaves recoverable work.
   inboundDrain = installSocketAckRecovery(receiver.client, app);
+
+  // This swarm's installation. Installed last, the gate runs before the ack
+  // recovery wrapper and Bolt: a delivery for any other installation sharing
+  // this Slack app is never acked, stored or dispatched, so Slack redelivers it.
+  const authClient = app.client;
+  const enterpriseInstall = isSlackEnterpriseInstall();
+  setSlackWorkspaceIdentitySource(() => resolveSlackIdentity(authClient, enterpriseInstall));
+  installSocketWorkspaceGate(receiver.client);
 
   // Failed validation must remain retryable without requiring stopSlackApp().
   initialized = true;
@@ -399,6 +425,21 @@ export async function startSlackApp(): Promise<boolean> {
 
   const current = app;
   if (current && generation === lifecycleGeneration) {
+    clearStartRetry();
+    // Fail closed: without this swarm's identity the gate admits nothing, so
+    // the socket stays closed and other swarms sharing the app keep receiving.
+    // The start retry, not the watchdog, owns this case: the socket never opened.
+    const verified = await verifySlackIdentity(current);
+    if (generation !== lifecycleGeneration) return false;
+    if (!verified) {
+      const delay = scheduleStartRetry();
+      setSlackConnectionState("disconnected");
+      console.error(
+        `[Slack] Socket Mode not started: this swarm's workspace is unknown. Retrying in ${seconds(delay)}s`,
+      );
+      return false;
+    }
+    startRetryAttempt = 0;
     // Arm before app.start(): a start that throws is retried by the watchdog.
     startSocketWatchdog();
     // Establish the durable cutoff before Socket Mode can deliver new asks.
@@ -424,6 +465,49 @@ export async function startSlackApp(): Promise<boolean> {
   }
 
   return false;
+}
+
+/** Resolve this swarm's identity, then Bolt's own authorization. False on any failure. */
+async function verifySlackIdentity(current: App): Promise<boolean> {
+  if (!(await getSlackWorkspaceIdentity())) return false;
+  if (boltInitialized) return true;
+  try {
+    await current.init();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Slack] Bolt initialization failed: ${message}`);
+    return false;
+  }
+  boltInitialized = true;
+  return true;
+}
+
+function clearStartRetry(): void {
+  if (startRetryTimer) clearTimeout(startRetryTimer);
+  startRetryTimer = null;
+}
+
+/**
+ * Retry the start after a backoff, under the lifecycle lock like every other
+ * rebuild. Any teardown in between bumps the generation and cancels it.
+ * Returns the delay.
+ */
+function scheduleStartRetry(): number {
+  const delay = startRetryDelaysMs[Math.min(startRetryAttempt, startRetryDelaysMs.length - 1)]!;
+  startRetryAttempt += 1;
+  const generation = lifecycleGeneration;
+  startRetryTimer = setTimeout(() => {
+    startRetryTimer = null;
+    void runSlackLifecycleExclusive(async () => {
+      if (generation !== lifecycleGeneration) return;
+      await startSlackApp();
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Slack] Start retry failed: ${scrubSecrets(message)}`);
+    });
+  }, delay);
+  startRetryTimer.unref?.();
+  return delay;
 }
 
 /**
@@ -494,14 +578,23 @@ function detachSlackApp(): App | null {
   socketFence?.retire();
   socketFence = null;
   lifecycleGeneration += 1;
+  clearStartRetry();
+  startRetryAttempt = 0;
+  boltInitialized = false;
   stopTaskWatcher();
   inboundDrain?.stop();
   inboundDrain = null;
   const detached = app;
   app = null;
   receiver = null;
+  setSlackWorkspaceIdentitySource(null);
   lastSocketActivityAt = null;
   setSlackConnectionState("disconnected");
   initialized = false;
   return detached;
+}
+
+/** Test-only: shorten the start retry backoff; null restores the default. */
+export function setSlackStartRetryDelaysForTests(delaysMs: number[] | null): void {
+  startRetryDelaysMs = delaysMs ?? DEFAULT_START_RETRY_DELAYS_MS;
 }
