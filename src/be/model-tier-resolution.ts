@@ -10,7 +10,9 @@
  *   2. task `profile`                       → "profile:task"
  *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
  *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
- *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default"
+ *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:tier-alias" when the
+ *      seeded `<harness>-<tier>` profile exists (its model, same as the map unless edited).
+ *      A worker-env or tier-config win logs a deprecation line: edit the profile instead.
  *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
  *      no repo-scoped MODEL_OVERRIDE on the task's repo)
  *
@@ -43,6 +45,7 @@ import { z } from "zod";
 import {
   DEFAULT_MODEL_TIER_MAP,
   MODEL_TIERS,
+  type ModelProfileCredentials,
   type ModelTier,
   type ModelTierOverrides,
   type ProviderName,
@@ -54,6 +57,7 @@ import { getDbClient } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
+  hasUnreadableCredentialAllowlist,
   repoModelOverrideKeys,
 } from "./db/model-profiles";
 import {
@@ -85,7 +89,8 @@ export type ModelSource =
   | "fallback:cli-unsupported"
   | "fallback:cli-unsupported:model"
   | "profile:task"
-  | "profile:agent-default";
+  | "profile:agent-default"
+  | "profile:tier-alias";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -517,26 +522,38 @@ export type ClaimModelFields = Partial<TaskModelResolution> & {
   /** The profile's effort, when it has one and the task set none; the worker spawns with it. */
   effort?: ReasoningEffort;
   /**
+   * The applied profile's pooled-key allowlist (`{ VAR: [suffix] }`). Trigger only, never
+   * stored on the task: a re-claim re-resolves it. The worker picks keys within it.
+   */
+  credentialAllowlist?: ModelProfileCredentials;
+  /**
    * Set when the task's explicit model is rejected by this worker's CLI, or belongs to another
    * harness family (`[model-harness-mismatch]`); the worker fails the task without a spawn.
    */
   modelUnsupported?: string;
 };
 
+/** A profile that applies at claim, and the model it resolves to. */
+type ClaimProfile = {
+  profile: {
+    name: string;
+    effort: ReasoningEffort | null;
+    credentials: ModelProfileCredentials | null;
+  };
+  resolution: TaskModelResolution;
+};
+
 /**
  * Resolve a model profile for a claim. Null when the profile does not apply:
- * an agent default that is missing or on another harness falls through to the
- * tier chain. For a task's own `profile` both are a hard stop.
+ * an agent default or tier alias that is missing, on another harness, or
+ * unresolved falls through to the tier chain. For a task's own `profile` each
+ * is a hard stop. An unreadable credential allowlist is a hard stop for all.
  */
 async function resolveClaimProfile(
   name: string,
-  source: "profile:task" | "profile:agent-default",
+  source: "profile:task" | "profile:agent-default" | "profile:tier-alias",
   harness: ProviderName | null,
-): Promise<
-  | { profile: { name: string; effort: ReasoningEffort | null }; resolution: TaskModelResolution }
-  | { modelUnsupported: string }
-  | null
-> {
+): Promise<ClaimProfile | { modelUnsupported: string } | null> {
   const isTask = source === "profile:task";
   const profile = await getModelProfileByName(name);
   if (!profile) {
@@ -569,7 +586,59 @@ async function resolveClaimProfile(
       modelAlias: profile.model.trim().toLowerCase(),
     };
   }
-  return { profile: { name: profile.name, effort: profile.effort }, resolution };
+  // Null credentials would hand the worker the whole pool, so an unreadable
+  // allowlist is a hard stop for every source, never a fall-through.
+  if (hasUnreadableCredentialAllowlist(profile)) {
+    return {
+      modelUnsupported: `[model-profile-allowlist-unreadable] Model profile "${name}" has an unreadable credential allowlist. Set its credentials again.`,
+    };
+  }
+  return {
+    profile: { name: profile.name, effort: profile.effort, credentials: profile.credentials },
+    resolution,
+  };
+}
+
+/**
+ * `modelTier` as an alias for the seeded `<harness>-<tier>` profile. Applies
+ * only where the tier chain landed on `tier-default`: a worker-env or
+ * tier-config override keeps winning, with a deprecation line. Null keeps the
+ * tier result (no tier, no such profile, or a profile that does not apply).
+ * A profile with an unreadable credential allowlist returns `modelUnsupported`.
+ */
+async function resolveTierAlias(
+  resolved: TaskModelResolution | TaskModelHarnessMismatch | null,
+  task: { modelTier?: string | null },
+  harness: ProviderName | null,
+): Promise<ClaimProfile | { modelUnsupported: string } | null> {
+  const tier = parseModelTier(task.modelTier);
+  if (!resolved || "harnessMismatch" in resolved || !tier || !harness) return null;
+  const name = `${harness}-${tier}`;
+  if (resolved.modelSource === "worker-env" || resolved.modelSource === "tier-config") {
+    console.log(
+      `[model-tier] deprecated: ${resolved.modelSource} override for ${name}; edit profile ${name} instead`,
+    );
+    return null;
+  }
+  if (resolved.modelSource !== "tier-default") return null;
+  const picked = await resolveClaimProfile(name, "profile:tier-alias", harness);
+  if (!picked || !("profile" in picked)) return picked;
+  // A seed copied from a stale MODEL_TIER_* row can name another harness's model.
+  // The tier chain skipped that value, so the alias skips it too.
+  if (
+    isHarnessModelJudged(harness) &&
+    harnessModelMismatch(
+      picked.resolution.resolvedModel,
+      harness,
+      (await loadResolutionCatalog()).catalog as HarnessCatalogSections,
+    )
+  ) {
+    console.warn(
+      `[model-tiers] profile ${name} names ${picked.resolution.resolvedModel}, which does not run on ${harness}; keeping the tier result`,
+    );
+    return null;
+  }
+  return picked;
 }
 
 /**
@@ -646,16 +715,47 @@ export async function recordClaimModelResolution(
         ...(!task.effort && picked.profile.effort && !repoKeys.has("REASONING_EFFORT_OVERRIDE")
           ? { effort: picked.profile.effort }
           : {}),
+        ...(picked.profile.credentials ? { credentialAllowlist: picked.profile.credentials } : {}),
       };
     }
   }
 
-  const resolved = await resolveTaskModel({
+  const resolvedTier = await resolveTaskModel({
     model: task.model,
     modelTier: task.modelTier,
     harnessProvider,
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
+  const alias = await resolveTierAlias(resolvedTier, task, harnessProvider);
+  if (alias && "modelUnsupported" in alias) return { modelUnsupported: alias.modelUnsupported };
+  if (alias) {
+    const checked = await applyCliSupport(
+      alias.resolution,
+      harnessProvider,
+      await getAgentHarnessCliVersion(agent.id),
+    );
+    // A profile source never fails fast on the CLI check, as for a task's own profile.
+    const resolution = "unsupported" in checked ? alias.resolution : checked;
+    await getDbClient().run(
+      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
+      [
+        resolution.resolvedModel,
+        resolution.modelSource,
+        resolution.modelAlias,
+        alias.profile.name,
+        task.id,
+      ],
+    );
+    return {
+      resolvedModel: resolution.resolvedModel,
+      modelSource: resolution.modelSource,
+      ...(resolution.modelAlias ? { modelAlias: resolution.modelAlias } : {}),
+      resolvedProfile: alias.profile.name,
+      ...(!task.effort && alias.profile.effort ? { effort: alias.profile.effort } : {}),
+      ...(alias.profile.credentials ? { credentialAllowlist: alias.profile.credentials } : {}),
+    };
+  }
+  const resolved = resolvedTier;
   if (!resolved) {
     // A re-claimed row keeps the claim record of its previous run; drop it so
     // the trigger and the row do not replay that run's model.

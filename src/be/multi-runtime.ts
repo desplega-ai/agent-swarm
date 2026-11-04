@@ -454,6 +454,33 @@ export async function agentsWithLiveRuntime(): Promise<Set<string>> {
 }
 
 /**
+ * How each agent's live runtimes authenticate: true for a runtime token, false
+ * for the shared API key. Registration binds a runtime token to its runtime id,
+ * so a live runtime with no unrevoked, unexpired token row uses the shared key.
+ * Draining runtimes stay in: MCP poll-task can still start a pending task on one.
+ */
+export async function liveRuntimeAuthModes(): Promise<Map<string, boolean[]>> {
+  const now = new Date().toISOString();
+  const rows = await getDbClient().query<{ agent_id: string; runtime_token: number }>(
+    `SELECT r.agent_id, EXISTS(
+       SELECT 1 FROM session_tokens s
+       WHERE s.runtimeId = r.id AND s.agentId = r.agent_id
+         AND s.revokedAt IS NULL AND s.expiresAt > ?
+     ) AS runtime_token
+     FROM runtime_instances r
+     WHERE r.status = 'active' AND r.last_seen_at >= ?`,
+    [now, runtimeLivenessCutoff()],
+  );
+  const modes = new Map<string, boolean[]>();
+  for (const row of rows) {
+    const list = modes.get(row.agent_id) ?? [];
+    list.push(row.runtime_token === 1);
+    modes.set(row.agent_id, list);
+  }
+  return modes;
+}
+
+/**
  * Retire runtimes that stopped pinging and take their agents offline when
  * nothing live remains.
  *

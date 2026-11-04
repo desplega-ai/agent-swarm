@@ -16,7 +16,7 @@ Use a schedule when work repeats on a clock, or when it must run once at a later
 
 Choose `agent-task` only when the run needs judgment, open-ended work, or tool orchestration that no workflow or script covers. An `agent-task` whose template says "trigger workflow X" or "run script Y" is wrong: use the direct target instead.
 
-The agent-task fields `targetAgentId`, `model`, `modelTier`, `taskTemplate`, `priority`, and `tags` do not apply to workflow or script targets. Workflow cooldowns still gate workflow targets.
+The agent-task fields `targetAgentId`, `profile`, `model`, `modelTier`, `taskTemplate`, `priority`, and `tags` do not apply to workflow or script targets. Workflow cooldowns still gate workflow targets.
 
 ## Pick the timing
 
@@ -37,7 +37,7 @@ The template is the whole task the agent receives. It must state:
 - where the result goes (a page, agent-fs, a Slack thread, a task output),
 - what done looks like.
 
-`targetAgentId` pins the task to one agent. Omit it to use the pool. `modelTier` (`smol`, `regular`, `smart`, `ultra`) is the portable way to pick a model. `model` is a provider-specific override.
+`targetAgentId` pins the task to one agent. Omit it to use the pool. `profile` is the preferred way to pick a model: a named harness + model + effort (see `list-model-profiles`). With `targetAgentId`, the agent must pass the profile check (`check-model-profile`), or the save is refused. `model` is a provider-specific override. `modelTier` is deprecated: pass `profile: "<harness>-<tier>"` for the same model. `profile` is exclusive with `model` and `modelTier`; on update, setting one clears the other.
 
 Tasks created by a schedule are automatic tasks. Their completed output is not stored as memory unless the agent calls `store-progress` with `persistMemory: true`.
 

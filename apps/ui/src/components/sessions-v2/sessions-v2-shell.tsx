@@ -24,13 +24,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import {
-  detailGroupKey,
-  GROUP_TAB,
-  isSessionTab,
-  NEW_SESSION_TAB,
-  SESSIONS_TOAST_POSITION,
-} from "@/lib/sessions-v2";
+import { detailGroupKey, GROUP_TAB, isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
 import { GroupTab } from "./group-tab";
@@ -143,11 +137,10 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     id: string,
     options: { newTab?: boolean; background?: boolean; pane?: PaneIndex } = {},
   ) => {
-    const position = SESSIONS_TOAST_POSITION;
     if (options.background) {
       const open = id === split || tabs.includes(id);
       if (!open) url.openSession(id, { background: true });
-      toast(open ? "Already open in a tab." : "Opened in a new tab.", { position });
+      toast(open ? "Already open in a tab." : "Opened in a new tab.");
     } else if (id === split) setActivePane(1);
     else if (options.newTab || (options.pane ?? activePane) === 0 || split === NEW_SESSION_TAB) {
       setActivePane(0);
@@ -159,7 +152,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   };
   const openInSplit = (id: string) => {
     const message = url.openInSplit(id);
-    if (message) toast(message, { position: SESSIONS_TOAST_POSITION });
+    if (message) toast(message);
     else setActivePane(1);
   };
   const closeSplit = (keep: boolean) => {
@@ -189,7 +182,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     const group = startGroupOfPane();
     const message = url.openInSplit(id);
     if (message) {
-      toast(message, { position: SESSIONS_TOAST_POSITION });
+      toast(message);
       return;
     }
     setActivePane(1);

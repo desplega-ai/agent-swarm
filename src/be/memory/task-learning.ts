@@ -4,13 +4,15 @@
  * `sourceTaskId`, so "what did we learn doing X" is one `keyPrefix` search.
  *
  * Source stays `manual` so nightly curation (memtax B1 reads only manual and
- * file_index rows) picks learnings up without a new source value.
+ * file_index rows) picks learnings up without a new source value. The key
+ * gives it a LEARNING_TTL_DAYS expiry: what is worth keeping gets distilled
+ * into `/longterm`, the rest ages out.
  *
- * A learning close to an existing swarm memory (raw cosine at or above
- * LEARNING_DUPLICATE_MIN_SIMILARITY) is not stored: the existing row gets a
- * positive rating instead. Known gap: embeddings are written in the background,
- * so two near-identical learnings seconds apart can both pass the check.
- * Nightly curation catches those.
+ * A learning close to an existing swarm memory under `/learnings` or
+ * `/longterm` (raw cosine at or above LEARNING_DUPLICATE_MIN_SIMILARITY) is
+ * not stored: the existing row gets a positive rating instead. Known gap:
+ * embeddings are written in the background, so two near-identical learnings
+ * seconds apart can both pass the check. Nightly curation catches those.
  *
  * Before any of that, a noise floor rejects text that cannot hold a lesson:
  * under LEARNING_MIN_CHARS, or a restatement of the same call's progress or
@@ -22,6 +24,7 @@ import { getDbClient } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { LEARNING_DUPLICATE_MIN_SIMILARITY } from "@/be/memory/constants";
 import { indexMemoryContent } from "@/be/memory/index-content";
+import { LEARNINGS_ROOT, LONGTERM_ROOT } from "@/be/memory/key-paths";
 import { applyRating } from "@/be/memory/raters/store";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentTask } from "@/types";
@@ -36,11 +39,10 @@ export const LEARNING_MAX_TAGS = 5;
  * floor rejects none of them.
  */
 export const LEARNING_MIN_CHARS = 80;
-const LEARNINGS_ROOT = "/learnings";
 const SEGMENT_MAX_CHARS = 60;
 const KEY_ATTEMPTS = 4;
-/** Where a near duplicate can already live: any workstream's learnings and the workstream digests. */
-const DUPLICATE_SEARCH_PREFIXES = [`${LEARNINGS_ROOT}/`, "/longterm/workstreams/"];
+/** Where a near duplicate can already live: any workstream's learnings and the whole curated tree. */
+const DUPLICATE_SEARCH_PREFIXES = [`${LEARNINGS_ROOT}/`, `${LONGTERM_ROOT}/`];
 /** memory_rating.source for the positive rating a duplicate gives the existing row. */
 export const LEARNING_DUPLICATE_RATING_SOURCE = "learning-duplicate";
 
@@ -190,10 +192,14 @@ async function findReplay(
 
 /**
  * The closest swarm memory under the duplicate prefixes when its raw cosine to
- * the learning reaches the threshold. No `queryText`, so the store takes the
- * vector or brute-force path and `similarity` is raw cosine, not an FTS rank or
- * a fused score. Any failure (no embedding provider, a search error) returns
- * null so the learning is stored as usual.
+ * the learning reaches the threshold. The search scores each prefix's stored
+ * embeddings directly, so `similarity` is raw cosine (not an FTS rank or a
+ * fused score) and no amount of closer rows outside the prefixes can hide a
+ * match. Each prefix scan is bounded at EXHAUSTIVE_SEARCH_MAX_ROWS eligible
+ * rows, newest first: exact while a prefix holds at most that many, and past
+ * it an older twin is missed and the search logs `capped=true`. Without
+ * sqlite-vec the same capped scan runs in JS. Any failure (no embedding
+ * provider, a search error) returns null so the learning is stored as usual.
  */
 async function findNearDuplicate(params: {
   agentId: string;
@@ -211,6 +217,12 @@ async function findNearDuplicate(params: {
           isLead: params.isLead,
           keyPrefix,
           limit: 1,
+          // The vector index ranks the whole table before the prefix filter;
+          // past 4096 closer rows elsewhere it would hide a real duplicate.
+          exhaustive: true,
+          // The dedup bar, not the retrieval floor: MEMORY_MIN_SIMILARITY above
+          // it would drop a real duplicate before the threshold check below.
+          minSimilarity: LEARNING_DUPLICATE_MIN_SIMILARITY,
         }),
       ),
     );

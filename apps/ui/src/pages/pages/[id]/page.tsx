@@ -28,14 +28,22 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   Braces,
+  Database,
   ExternalLink,
+  FileDown,
   Lock,
   Maximize2,
   MessageSquarePlus,
   Minimize2,
-  Printer,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
@@ -51,6 +59,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTheme } from "@/hooks/use-theme";
 import { getConfig } from "@/lib/config";
 import { getPageContext } from "@/lib/page-context";
@@ -60,7 +69,8 @@ import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
 import { FeedbackConfirmDialog } from "./feedback-confirm-dialog";
 import { JsonPageRenderer } from "./json-page-renderer";
-import { RoomInspector } from "./room-inspector";
+import { PageHeaderSummary } from "./page-header-summary";
+import { RoomInspectorDialog } from "./room-inspector";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -596,11 +606,12 @@ export default function ArtifactPage() {
   return (
     <div className="flex flex-1 flex-col min-h-0 gap-4">
       <PageHeader
-        // Below sm the actions take their own row under a full-width
-        // description; side by side they squeezed it to one word per line.
-        className="max-sm:flex-col max-sm:items-stretch"
+        // One row at every width: the summary truncates, the icon actions
+        // keep their size.
         title={data.title}
-        description={data.description ?? undefined}
+        description={
+          <PageHeaderSummary description={data.description} slug={pageRow?.slug ?? null} />
+        }
         action={
           <PageHeaderActions
             id={pageId!}
@@ -624,8 +635,6 @@ export default function ArtifactPage() {
           />
         }
       />
-      <PageSlugLine id={pageId!} />
-      <RoomInspector key={pageId} pageId={pageId!} />
       {body}
       <FeedbackConfirmDialog bridge={feedbackBridge} />
     </div>
@@ -634,28 +643,35 @@ export default function ArtifactPage() {
 
 // ─── Header extras ─────────────────────────────────────────────────────────
 
-/**
- * Slug line shown right under the title. We pull the slug from the
- * bearer-authed `/api/pages/:id` lookup (the public `/p/:id.json` doesn't
- * expose slug — it's a creator-side concept). Renders nothing if the lookup
- * hasn't loaded yet.
- */
-function PageSlugLine({ id }: { id: string }) {
-  const { data } = usePage(id);
-  if (!data?.slug) return null;
+/** Icon-only header action: its label is both the tooltip and the accessible name. */
+function HeaderIconButton({
+  label,
+  tooltip,
+  className,
+  ...props
+}: ComponentProps<typeof Button> & { label: string; tooltip?: ReactNode }) {
   return (
-    <p className="font-mono text-xs text-muted-foreground -mt-2">
-      slug: <span className="text-foreground/70">{data.slug}</span>
-    </p>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          className={cn("h-7 w-7", className)}
+          {...props}
+        />
+      </TooltipTrigger>
+      <TooltipContent>{tooltip ?? label}</TooltipContent>
+    </Tooltip>
   );
 }
 
 /**
- * "Open external" link that pops `/p/:id` (the canonical API-served URL) in
- * a new tab. For password mode, opening the link triggers the browser's
- * native Basic-auth dialog; for authed mode it 401s unless the page-session
- * cookie still applies (works fine when the SPA is at the same origin as
- * the API; in cross-origin dev the cookie may not flow).
+ * The header's icon actions. "Open" pops `/p/:id` (the canonical API-served
+ * URL) in a new tab. For password mode, opening the link triggers the
+ * browser's native Basic-auth dialog; for authed mode it 401s unless the
+ * page-session cookie still applies (works fine when the SPA is at the same
+ * origin as the API; in cross-origin dev the cookie may not flow).
  */
 function PageHeaderActions({
   id,
@@ -681,48 +697,49 @@ function PageHeaderActions({
   /** Feedback-overlay toggle; omitted when the page cannot take feedback. */
   feedback?: { on: boolean; onToggle: () => void };
 }) {
+  const [roomOpen, setRoomOpen] = useState(false);
   // The share link carries the same query as the iframe, so "Open" keeps
   // whatever filter, theme and mode the page is showing.
   const href = getPageHtmlUrl(id) + themedFrameQuery;
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex items-center gap-0.5">
       <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
       {feedback ? (
-        <Button
-          variant={feedback.on ? "default" : "outline"}
-          size="sm"
+        <HeaderIconButton
+          label="Feedback"
+          tooltip="Feedback: select elements on the page, comment on them, and send the comments to the swarm"
+          variant={feedback.on ? "default" : "ghost"}
           aria-pressed={feedback.on}
-          title="Select elements on the page, comment on them, and send the comments to the swarm"
           onClick={feedback.onToggle}
         >
-          <MessageSquarePlus className="size-3.5" />
-          Feedback
-        </Button>
+          <MessageSquarePlus className="size-4" />
+        </HeaderIconButton>
       ) : null}
-      <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
-        <a href={href} target="_blank" rel="noreferrer">
-          <ExternalLink className="size-3.5" />
-          Open
-          {authMode === "password" ? (
-            <span className="text-muted-foreground">(password required)</span>
-          ) : null}
-        </a>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Open a print-ready view and save as PDF"
-        onClick={onExportPdf}
+      <HeaderIconButton
+        asChild
+        label="Open"
+        tooltip={
+          authMode === "password"
+            ? "Open in a new tab (password required)"
+            : "Open the API-served URL in a new tab"
+        }
       >
-        <Printer className="size-3.5" />
-        Export PDF
-      </Button>
-      <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
+        <a href={href} target="_blank" rel="noreferrer">
+          <ExternalLink className="size-4" />
+        </a>
+      </HeaderIconButton>
+      <HeaderIconButton label="Export PDF" onClick={onExportPdf}>
+        <FileDown className="size-4" />
+      </HeaderIconButton>
+      <HeaderIconButton label="Saved room state" onClick={() => setRoomOpen(true)}>
+        <Database className="size-4" />
+      </HeaderIconButton>
+      <HeaderIconButton asChild label="Full screen">
         <Link to={pageRoute(id, frameQuery, true)}>
-          <Maximize2 className="size-3.5" />
-          Full
+          <Maximize2 className="size-4" />
         </Link>
-      </Button>
+      </HeaderIconButton>
+      <RoomInspectorDialog key={id} pageId={id} open={roomOpen} onOpenChange={setRoomOpen} />
     </div>
   );
 }

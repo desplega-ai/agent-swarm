@@ -1,5 +1,4 @@
 import { toast } from "sonner";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import type { GroupMenuActions } from "./group-menu";
 import type { TreeDialogState } from "./tree-dialogs";
 import type { TreeMoves } from "./use-tree-moves";
@@ -89,7 +88,6 @@ export function useGroupEdits({
         : phone
           ? `Group ${moves.labelOf(made.key)} created. Long-press sessions, then tap Move.`
           : `Group ${moves.labelOf(made.key)} created. Drag sessions onto it, or press M on a session.`,
-      { position: SESSIONS_TOAST_POSITION },
     );
   };
 
