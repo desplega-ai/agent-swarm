@@ -18,6 +18,7 @@ const ENV_KEYS = [
   "AGENT_FS_LINK_TARGET",
   "AGENT_FS_DEFAULT_ORG_ID",
   "AGENT_FS_DEFAULT_DRIVE_ID",
+  "AGENT_FS_PROXY",
 ] as const;
 const saved = new Map<string, string | undefined>();
 
@@ -28,6 +29,9 @@ beforeEach(() => {
   }
   process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
   process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
+  // The proxy defaults on with AGENT_FS_API_URL set. Off, the internal
+  // agent-fs host keeps Comb off unless COMB_ENABLED forces it.
+  process.env.AGENT_FS_PROXY = "false";
 });
 
 afterEach(() => {

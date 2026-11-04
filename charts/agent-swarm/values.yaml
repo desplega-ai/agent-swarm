@@ -325,8 +325,8 @@ agentFs:
   # -- Serve agent-fs through the API at `/agentfs` (`AGENT_FS_PROXY=true`), so
   # the browser reaches agent-fs with no agent-fs ingress. Needs
   # `PUBLIC_MCP_BASE_URL` (derived from `ingress.host`). Also exposes agent-fs's
-  # public `/share/*` and `/site/*` pages on the API origin. Off by default.
-  proxy: false
+  # public `/share/*` and `/site/*` pages on the API origin. On by default.
+  proxy: true
   # -- Bucket name for agent-fs's object storage backend (storageProvider=s3).
   bucket: ""
   resources: {}

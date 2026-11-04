@@ -301,6 +301,7 @@ export interface CombState {
  * `AGENT_FS_PROXY` is on and the public API URL is {@link isBrowserReachableUrl}
  * (the browser goes through the API), or, with no proxy, `AGENT_FS_API_URL` is
  * itself reachable. Otherwise the browser would land on a private host.
+ * The proxy defaults on when `AGENT_FS_API_URL` is set.
  * Reads `process.env` per call, so a config reload applies without a restart.
  */
 export function getCombState(): CombState {
@@ -340,10 +341,11 @@ export function isCombEnabled(): boolean {
 /**
  * `AGENT_FS_PROXY`: the API serves agent-fs at `/agentfs/*` (plus the public
  * `/share/*` and `/site/*` pages), and Comb uses `<public API URL>/agentfs`.
- * Read per request, so a config upsert applies without a restart. Off by default.
+ * Read per request, so a config upsert applies without a restart.
+ * Defaults on when `AGENT_FS_API_URL` is nonblank. An explicit flag wins.
  */
 export function isAgentFsProxyEnabled(): boolean {
-  return isEnvFlagEnabled("AGENT_FS_PROXY", false);
+  return isEnvFlagEnabled("AGENT_FS_PROXY", Boolean(process.env.AGENT_FS_API_URL?.trim()));
 }
 
 /**

@@ -7799,6 +7799,203 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fs/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ensure the current user's agent-fs account and shared membership */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account readiness */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /**
+                             * @description Account readiness in agent-fs.
+                             * @enum {string}
+                             */
+                            status: "ready" | "pending" | "off" | "unsupported";
+                            /** @description User ID in agent-fs when ready. */
+                            agentFsUserId?: string;
+                            /** @description Email of the swarm user, when available. */
+                            email?: string;
+                            /** @description Name of the swarm user when ready. */
+                            displayName?: string;
+                            /** @description Shared agent-fs org ID when configured. */
+                            orgId?: string;
+                            /** @description Shared agent-fs drive ID when configured. */
+                            driveId?: string;
+                            /** @description Reason the account is not ready. */
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fs/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a named agent-fs key for the current user
+         * @description The key is scoped to the shared org. The API returns it once and never stores it.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        label: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Named key returned once and never stored */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description Plaintext key returned once. The API never stores this key. */
+                            apiKey: string;
+                            keyId: string;
+                            label: string;
+                            agentFsUserId: string;
+                            orgId: string;
+                            driveId: string;
+                        };
+                    };
+                };
+                /** @description Invalid key label */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs account or membership is pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of five keys per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_too_old */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_not_configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fs/capabilities": {
         parameters: {
             query?: never;

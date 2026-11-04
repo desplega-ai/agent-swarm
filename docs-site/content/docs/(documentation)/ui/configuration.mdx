@@ -452,7 +452,7 @@ A model error moves on to the next model, then to the next provider. One title r
 
 `AGENT_FS_LINK_TARGET` (`dashboard`, `live`, or unset) picks where agents and task attachments link people for files. Unset keeps the automatic choice. `dashboard` opens Comb at `APP_URL`; workers need `APP_URL` in their own environment. `live` opens the agent-fs live app. See [Links to agent-fs files](/docs/ui/comb#links-to-agent-fs-files).
 
-`AGENT_FS_PROXY` (default `false`) makes the API serve agent-fs at `/agentfs`, plus the public share pages at `/share` and `/site`, so the browser reaches a bundled agent-fs with no public port. Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. An explicit `AGENT_FS_PUBLIC_URL` still wins. The API reads the flag on every request, so a saved value applies with no restart. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api).
+`AGENT_FS_PROXY` defaults on when `AGENT_FS_API_URL` is nonblank. Set `AGENT_FS_PROXY=false` to disable it. The API serves agent-fs at `/agentfs`, plus public pages at `/share` and `/site`. The browser can reach bundled agent-fs without a public port. Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. An explicit `AGENT_FS_PUBLIC_URL` still wins. The API reads the flag on every request, so a saved value applies with no restart. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api).
 
 ## Inline extension install
 
