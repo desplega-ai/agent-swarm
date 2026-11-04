@@ -41,6 +41,10 @@ import type {
   ChannelsResponse,
   ChatSdkStatusResponse,
   ChatSdkTelegramWebhookResponse,
+  ChecklistAddRequest,
+  ChecklistItem,
+  ChecklistResponse,
+  ChecklistUpdateRequest,
   ClaudeRuntimeConfig,
   CombReviewBatchInput,
   CombReviewBatchResult,
@@ -4221,6 +4225,38 @@ class ApiClient {
     });
     if (!res.ok) throw new Error(`registerAssetMapping: ${res.status}`);
     return res.json();
+  }
+
+  /** The post-onboarding checklist for the picked user (swarm items plus their own). */
+  async getChecklist(): Promise<ChecklistResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/checklist`, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getChecklist: ${res.status}`);
+    return res.json();
+  }
+
+  private async checklistWrite(
+    method: "POST" | "PATCH",
+    path: string,
+    body: unknown,
+  ): Promise<ChecklistItem> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method,
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Checklist update failed: ${res.status}`);
+    }
+    return ((await res.json()) as { item: ChecklistItem }).item;
+  }
+
+  addChecklistItem(body: ChecklistAddRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("POST", "/api/checklist/items", body);
+  }
+
+  updateChecklistItem(id: string, body: ChecklistUpdateRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("PATCH", `/api/checklist/items/${encodeURIComponent(id)}`, body);
   }
 
   async listFavorites(opts?: {

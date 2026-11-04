@@ -20,6 +20,7 @@
 import { AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { PostOnboardingChecklistCard } from "@/components/checklist/post-onboarding-checklist-card";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { MobileNow } from "@/components/dashboard/mobile-now";
@@ -45,9 +46,11 @@ export function UnifiedHome() {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* A column below `xl`, a row from `xl`: the setup checklist (only while
-          onboarding is open) becomes a right sidebar next to the main column. */}
+          onboarding is open for an admin) or else the post-onboarding
+          checklist becomes a right sidebar next to the main column. */}
       <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 xl:flex-row">
         <SetupChecklistCard />
+        <PostOnboardingChecklistCard className="flex-none xl:order-last xl:w-80 xl:self-start" />
         <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
           <DashboardNudges />
           {/* Below `md` the timeline cannot show a useful window, so phones

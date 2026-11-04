@@ -81,6 +81,7 @@ import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleChecklist } from "./checklist";
 import { handleCodexOAuthAccounts } from "./codex-oauth-accounts";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
@@ -418,6 +419,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
         () => handleUsers(req, res, pathSegments, queryParams),

@@ -4019,5 +4019,50 @@
     "updated_at": { "exempt": "timestamp" },
     "created_by": { "exempt": "audit principal foreign key" },
     "updated_by": { "exempt": "audit principal foreign key" }
+  },
+  "checklist_items": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum"
+    },
+    "label": "scrubbed",
+    "href": "scrubbed",
+    "meta": "scrubbed",
+    "status": {
+      "exempt": "enum"
+    },
+    "statusChangedAt": {
+      "exempt": "timestamp"
+    },
+    "statusChangedBy": {
+      "exempt": "identifier"
+    },
+    "statusReason": "scrubbed",
+    "nudgedAt": {
+      "exempt": "timestamp"
+    },
+    "nudgedTaskId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
   }
 }

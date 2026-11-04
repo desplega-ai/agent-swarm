@@ -1071,6 +1071,56 @@ export interface FavoriteSetResponse {
   row?: UserFavorite | null;
 }
 
+/** Post-onboarding checklist. Mirrors `ChecklistItemSchema` in `src/types.ts`. */
+export type ChecklistScope = "swarm" | "user";
+export type ChecklistKind = "channel" | "tool" | "use_case" | "custom";
+export type ChecklistStatus = "open" | "done" | "removed";
+export type ChecklistAction = "remove" | "restore" | "done" | "reorder";
+
+export interface ChecklistItem {
+  id: string;
+  scope: ChecklistScope;
+  userId: string | null;
+  kind: ChecklistKind;
+  label: string;
+  href: string | null;
+  meta: Record<string, unknown> | null;
+  sortOrder: number;
+  status: ChecklistStatus;
+  statusChangedAt: string | null;
+  statusChangedBy: string | null;
+  statusChangedByName: string | null;
+  statusReason: string | null;
+  nudgedAt: string | null;
+  nudgedTaskId: string | null;
+  /** Null for custom items: they have no signal. */
+  signal: boolean | null;
+  /** `status === "done"` or the signal is true. */
+  done: boolean;
+  editable: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface ChecklistResponse {
+  items: ChecklistItem[];
+  canEditSwarm: boolean;
+}
+
+export interface ChecklistAddRequest {
+  kind: ChecklistKind;
+  label: string;
+  scope: ChecklistScope;
+  href?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface ChecklistUpdateRequest {
+  action: ChecklistAction;
+  reason?: string;
+  sortOrder?: number;
+}
+
 /**
  * Task templates (Phase 6 ≥1.76.0). Mirrors `TaskTemplateSchema` in
  * `src/types.ts:289-300`. Powers the "To start" inbox bucket.

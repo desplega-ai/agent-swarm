@@ -292,6 +292,7 @@ export const LEGACY_POLICY = {
   "session.read.all": operatorOrUser,
   "task.progress.write": taskProgressWrite,
   "favorite.write.own": anyAuthenticated,
+  "checklist.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,
   "memory.write.consolidated": leadOnly,

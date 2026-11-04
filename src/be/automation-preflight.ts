@@ -456,3 +456,15 @@ export async function recordWorkflowPreflightFailure(input: {
     };
   });
 }
+
+/** Integration flags shared by onboarding and the checklist. */
+export function setupIntegrationFlags(setup: AutomationSetupStates) {
+  return {
+    slack: setup.slack === "configured",
+    github: Boolean(process.env.GITHUB_TOKEN?.trim()) || setup.github === "verified",
+    gitlab: Boolean(process.env.GITLAB_TOKEN?.trim()),
+    bitbucket: Boolean(process.env.BITBUCKET_TOKEN?.trim()),
+    linear: setup.linear === "verified",
+    jira: setup.jira === "verified",
+  };
+}
