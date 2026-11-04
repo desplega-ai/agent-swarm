@@ -115,7 +115,7 @@ export default function McpServerDetailPage() {
   };
 
   const handleDelete = () => {
-    deleteServer.mutate(server.id, { onSuccess: () => navigate("/mcp-servers") });
+    deleteServer.mutate(server.id, { onSuccess: () => navigate("/integrations/tools?tab=mcp") });
   };
 
   const envKeys = server.envConfigKeys ? server.envConfigKeys.split(",").map((k) => k.trim()) : [];
@@ -127,7 +127,7 @@ export default function McpServerDetailPage() {
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-3">
       <button
         type="button"
-        onClick={() => navigate("/mcp-servers")}
+        onClick={() => navigate("/integrations/tools?tab=mcp")}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
       >
         <ArrowLeft className="h-4 w-4" /> Back to MCP Servers

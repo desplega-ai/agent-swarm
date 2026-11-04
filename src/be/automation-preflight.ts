@@ -135,13 +135,13 @@ function automationUrl(input: AutomationPreflightInput): string {
 }
 
 const INTEGRATION_FIX_URL: Record<AutomationIntegrationId, string> = {
-  slack: "/settings/integrations/slack",
-  github: "/settings/integrations/github",
-  linear: "/settings/integrations/linear",
-  jira: "/settings/integrations/jira",
-  agentmail: "/settings/integrations/agentmail",
-  gsc: "/settings/integrations/gsc",
-  agentfs: "/settings/integrations/agentfs",
+  slack: "/integrations/slack",
+  github: "/integrations/github",
+  linear: "/integrations/linear",
+  jira: "/integrations/jira",
+  agentmail: "/integrations/agentmail",
+  gsc: "/integrations/gsc",
+  agentfs: "/integrations/agentfs",
 };
 
 // Requiring one of these bindings is the persisted signal that the v4 matrix

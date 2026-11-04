@@ -63,7 +63,7 @@ OAuth changes in Salesforce can take up to 30 minutes to propagate before the Ex
 
 ### 4. Paste the manual OAuth client into the swarm
 
-Salesforce's authorization server **does not advertise a `registration_endpoint`**, which means OAuth Dynamic Client Registration (DCR) is not available. Register the pre-created Salesforce OAuth client manually in Agent Swarm (Settings → MCP Servers → your Salesforce server → OAuth config).
+Salesforce's authorization server **does not advertise a `registration_endpoint`**, which means OAuth Dynamic Client Registration (DCR) is not available. Register the pre-created Salesforce OAuth client manually in Agent Swarm (Connect → Tools → MCP servers → your Salesforce server → OAuth config).
 
 Agent Swarm stores these manual-client fields:
 
@@ -117,7 +117,7 @@ If your `MCP_BASE_URL` must stay an internal/cluster address (split deploy), set
 
 ### 6. Complete the OAuth flow
 
-In the swarm dashboard, go to Settings → MCP Servers → your Salesforce server and click **Connect**. You'll be redirected to Salesforce's consent screen. After approving, the browser returns to your dashboard with `?oauth=success`.
+In the swarm dashboard, go to Connect → Tools → MCP servers → your Salesforce server and click **Connect**. You'll be redirected to Salesforce's consent screen. After approving, the browser returns to your dashboard with `?oauth=success`.
 
 ### 7. Verify
 

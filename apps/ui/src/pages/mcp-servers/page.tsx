@@ -1,6 +1,6 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -35,7 +34,7 @@ const TRANSPORT_VALUES = ["stdio", "http", "sse"] as const;
 
 /**
  * Minimal create dialog. Supports deep-link prefill via query params:
- * /mcp-servers?new=1&name=<name>&url=<url>&transport=http (used by the
+ * /integrations/tools?tab=mcp&new=1&name=<name>&url=<url>&transport=http (used by the
  * Connections page MCP guidance flow).
  */
 function AddMcpServerDialog({
@@ -82,7 +81,7 @@ function AddMcpServerDialog({
       });
       toast.success(`MCP server ${server.name} created`);
       onOpenChange(false);
-      void navigate(`/mcp-servers/${server.id}`);
+      void navigate(`/integrations/tools/mcp-servers/${server.id}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -220,7 +219,18 @@ function ScopeBadge({ scope }: { scope: string }) {
   );
 }
 
-export default function McpServersPage() {
+/**
+ * The MCP servers list: a toolbar row (search, filters, add) over the grid.
+ * Connect › Tools mounts it on its `mcp` tab and passes its tab strip as
+ * `leading`, so the tabs and the search share one row.
+ */
+export function McpServersPanel({
+  leading,
+  trailing,
+}: {
+  leading?: ReactNode;
+  trailing?: ReactNode;
+}) {
   const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
@@ -318,21 +328,20 @@ export default function McpServersPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<McpServer>) => {
-      if (event.data) void navigate(`/mcp-servers/${event.data.id}`);
+      if (event.data) void navigate(`/integrations/tools/mcp-servers/${event.data.id}`);
     },
     [navigate],
   );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="MCP Servers" className="shrink-0" />
-
-      <div className="flex items-center gap-3 shrink-0">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+        {leading}
         <Input
           placeholder="Search servers..."
           value={search}
           onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
-          className="max-w-xs"
+          className="w-full md:ml-auto md:w-64"
         />
         <Select
           value={transportFilter}
@@ -373,10 +382,11 @@ export default function McpServersPage() {
           </SelectContent>
         </Select>
         {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />
           Add server
         </Button>
+        {trailing}
       </div>
 
       <DataGrid

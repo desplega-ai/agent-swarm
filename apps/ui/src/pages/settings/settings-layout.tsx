@@ -2,7 +2,9 @@ import {
   Blocks,
   Boxes,
   Bug,
-  Cable,
+  Contact,
+  FileText,
+  FlaskConical,
   Key,
   KeyRound,
   ListChecks,
@@ -10,11 +12,11 @@ import {
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
+  Server,
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
@@ -35,6 +37,8 @@ interface SettingsNavItem {
   beta?: { tooltip: string };
   /** Shown to everyone: browser-local or per-person. The rest is admin-only. */
   everyone?: boolean;
+  /** Listed under the rail's "Advanced" label, after the other entries. */
+  advanced?: boolean;
 }
 
 // The first-run stepper lives outside the settings shell; the rail links to
@@ -43,13 +47,13 @@ const SETUP_PATH = "/setup";
 // Shown only while `useRuntimePoolsGate()` is open.
 const RUNTIME_POOLS_NAV_PATH = "/settings/runtime-pools";
 
+// Keep in step with the Settings flyout in `components/layout/app-sidebar.tsx`.
+// People and Templates live outside `/settings`: their links leave the shell.
 const SETTINGS_NAV: SettingsNavItem[] = [
-  { title: "Connections", path: "/settings/connections", icon: Cable, everyone: true },
+  { title: "Servers", path: "/settings/connections", icon: Server, everyone: true },
   { title: "Setup", path: SETUP_PATH, icon: ListChecks },
+  { title: "People", path: "/people", icon: Contact },
   { title: "Appearance", path: "/settings/appearance", icon: Palette, everyone: true },
-  { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
-  { title: "Provider keys", path: "/settings/api-keys", icon: Key },
-  { title: "Integrations", path: "/settings/integrations", icon: Plug },
   { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
   { title: "Extensions", path: "/settings/extensions", icon: Blocks },
   {
@@ -60,6 +64,20 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   },
   { title: "Repos", path: "/settings/repos", icon: SettingsIcon },
   { title: "Debug", path: "/settings/debug", icon: Bug },
+  { title: "Secrets", path: "/settings/secrets", icon: KeyRound, advanced: true },
+  { title: "Templates", path: "/templates", icon: FileText, advanced: true },
+  {
+    title: "Connection playground",
+    path: "/settings/connection-playground",
+    icon: FlaskConical,
+    advanced: true,
+  },
+  {
+    title: "Raw fetch credentials",
+    path: "/settings/fetch-credentials",
+    icon: Key,
+    advanced: true,
+  },
 ];
 
 const RAIL_COLLAPSED_KEY = "agent-swarm:settings-rail-collapsed";
@@ -119,7 +137,7 @@ export function SettingsLayout() {
   );
 
   // Match the active rail item by path prefix so deep links (e.g.
-  // /settings/integrations/slack) keep "Integrations" highlighted.
+  // /settings/extensions/<id>) keep their entry highlighted.
   const activeItem =
     navItems.find((item) => location.pathname.startsWith(item.path)) ?? navItems[0];
 
@@ -156,23 +174,29 @@ export function SettingsLayout() {
               <TooltipContent side="right">Collapse rail</TooltipContent>
             </Tooltip>
           </div>
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                )
-              }
-            >
-              <item.icon className="size-4 shrink-0" />
-              <span>{item.title}</span>
-              {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
-            </NavLink>
+          {navItems.map((item, index) => (
+            <Fragment key={item.path}>
+              {item.advanced && !navItems[index - 1]?.advanced ? (
+                <span className="mt-3 px-3 pb-1 text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                  Advanced
+                </span>
+              ) : null}
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )
+                }
+              >
+                <item.icon className="size-4 shrink-0" />
+                <span>{item.title}</span>
+                {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
+              </NavLink>
+            </Fragment>
           ))}
         </nav>
       </AnimatedReveal>

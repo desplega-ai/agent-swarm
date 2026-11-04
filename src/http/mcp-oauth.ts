@@ -51,7 +51,7 @@ function dashboardBase(): string {
 }
 
 function defaultFinalRedirect(mcpServerId: string): string {
-  return `${dashboardBase()}/mcp-servers/${mcpServerId}?oauth=success`;
+  return `${dashboardBase()}/integrations/tools/mcp-servers/${mcpServerId}?oauth=success`;
 }
 
 interface DiscoveryResult {

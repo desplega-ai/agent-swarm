@@ -9,8 +9,10 @@ import {
   ClipboardCheck,
   Clock,
   Contact,
+  Cpu,
   FileClock,
   FileText,
+  FlaskConical,
   FolderGit2,
   FolderOpen,
   Globe,
@@ -25,7 +27,6 @@ import {
   MessagesSquare,
   Network,
   Palette,
-  Plug,
   Plus,
   SlidersHorizontal,
   Store,
@@ -33,6 +34,7 @@ import {
   Users,
   Wallet,
   Workflow,
+  Wrench,
 } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import { Navigate, type RouteObject } from "react-router-dom";
@@ -44,6 +46,7 @@ import { AdminRoute, SettingsLayout } from "@/pages/settings/settings-layout";
 import { UsageLayout } from "@/pages/usage/usage-layout";
 // Relative, not `@/`: `routes.test.ts` loads this file under `bun test`.
 import { nav, unlisted } from "../lib/command-palette/route-meta";
+import { connectPagePath, type IntegrationCategory } from "../lib/integrations-catalog";
 import { RouteRedirect } from "./route-redirect";
 import { SessionsRoute as SessionsPage } from "./sessions-route";
 
@@ -69,14 +72,12 @@ const ExtensionCatalogPage = lazyRoute(() => import("@/pages/settings/extension-
 const RuntimePoolsPage = lazyRoute(() => import("@/pages/settings/runtime-pools-page"));
 const RuntimePoolDetailPage = lazyRoute(() => import("@/pages/settings/runtime-pool-detail-page"));
 const RuntimeControllersPage = lazyRoute(() => import("@/pages/settings/runtime-controllers-page"));
-const IntegrationsPage = lazyRoute(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazyRoute(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazyRoute(() => import("@/pages/repos/page"));
 const RepoDetailPage = lazyRoute(() => import("@/pages/repos/[id]/page"));
 const WorkflowsPage = lazyRoute(() => import("@/pages/workflows/page"));
 const WorkflowDetailPage = lazyRoute(() => import("@/pages/workflows/[id]/page"));
 const WorkflowRunDetailPage = lazyRoute(() => import("@/pages/workflow-runs/[id]/page"));
-const ScriptConnectionsPage = lazyRoute(() => import("@/pages/connections/page"));
 const ScriptConnectionDetailPage = lazyRoute(() => import("@/pages/connections/[id]/page"));
 const OAuthAppDetailPage = lazyRoute(() => import("@/pages/connections/oauth-apps/[id]/page"));
 const ScriptsPage = lazyRoute(() => import("@/pages/scripts/page"));
@@ -89,11 +90,16 @@ const TemplateVersionDetailPage = lazyRoute(
 );
 const ApprovalRequestsPage = lazyRoute(() => import("@/pages/approval-requests/page"));
 const ApprovalRequestDetailPage = lazyRoute(() => import("@/pages/approval-requests/[id]/page"));
-const McpServersPage = lazyRoute(() => import("@/pages/mcp-servers/page"));
 const McpServerDetailPage = lazyRoute(() => import("@/pages/mcp-servers/[id]/page"));
 const SkillsPage = lazyRoute(() => import("@/pages/skills/page"));
 const SkillDetailPage = lazyRoute(() => import("@/pages/skills/[id]/page"));
-const ApiKeysPage = lazyRoute(() => import("@/pages/api-keys/page"));
+const ChannelsPage = lazyRoute(() => import("@/pages/connect-pages/channels-page"));
+const ToolsPage = lazyRoute(() => import("@/pages/connect-pages/tools-page"));
+const AiProvidersPage = lazyRoute(() => import("@/pages/connect-pages/ai-page"));
+const ConnectionPlaygroundPage = lazyRoute(
+  () => import("@/pages/settings/connection-playground-page"),
+);
+const FetchCredentialsPage = lazyRoute(() => import("@/pages/settings/fetch-credentials-page"));
 const PeoplePage = lazyRoute(() => import("@/pages/people/page"));
 const PersonDetailPage = lazyRoute(() => import("@/pages/people/[id]/page"));
 const DebugPage = lazyRoute(() => import("@/pages/debug/page"));
@@ -133,35 +139,78 @@ function devRouteTable(): RouteObject[] {
 const devRoutes: RouteObject[] = devRouteTable();
 
 /**
- * Backward-compat redirect table — every old top-level URL that moved during
- * the sidebar-trim IA rework maps to its new location, so no old link 404s.
- * Simple (non-param) redirects live here; the param-aware `/integrations/:id`
- * case is handled separately via `RouteRedirect` below.
+ * Backward-compat redirect table: every old URL that moved maps to its new
+ * location, so no old link 404s. `RouteRedirect` keeps the query and the
+ * hash. Routes nested under a layout (`settings/*`) carry their own redirect
+ * entries next to their siblings.
  */
 const REDIRECTS: Record<string, string> = {
   dashboard: "/",
   budgets: "/usage/budgets",
   config: "/settings/connections",
-  keys: "/settings/api-keys",
-  integrations: "/settings/integrations",
+  keys: "/integrations/ai",
   repos: "/settings/repos",
   debug: "/settings/debug",
   metrics: "/usage/metrics",
   // The standalone script-runs list folded into the Scripts page's Runs tab.
   "script-runs": "/scripts?tab=runs",
+  // Connect owns `/integrations`; its first page is Tools.
+  integrations: "/integrations/tools",
+  "mcp-servers": "/integrations/tools?tab=mcp",
 };
 
 const REDIRECT = unlisted("redirect", { searchOptOut: "redirect" });
 
+/** Old `/connections?tab=` values: two moved to Settings › Advanced. */
+function connectionsRedirect(_params: unknown, location: { search: string }): string {
+  const tab = new URLSearchParams(location.search).get("tab");
+  if (tab === "playground") return "/settings/connection-playground";
+  if (tab === "bindings") return "/settings/fetch-credentials";
+  return `/integrations/tools?tab=${tab === "oauth-apps" ? "oauth-apps" : "connections"}`;
+}
+
+/** Old `/settings/integrations?category=`: channels and AI providers have their own pages. */
+function integrationsRedirect(_params: unknown, location: { search: string }): string {
+  const category = new URLSearchParams(location.search).get("category") ?? "";
+  return connectPagePath(category as IntegrationCategory);
+}
+
 const redirectRoutes: RouteObject[] = [
   ...Object.entries(REDIRECTS).map(([from, to]) => ({
     path: from,
-    element: <Navigate to={to} replace />,
+    element: <RouteRedirect to={to} />,
     handle: REDIRECT,
   })),
   {
+    path: "connections",
+    element: <RouteRedirect to={connectionsRedirect} drop={["tab"]} />,
+    handle: REDIRECT,
+  },
+  {
+    path: "connections/:id",
+    element: <RouteRedirect to={({ id }) => `/integrations/tools/connections/${id}`} />,
+  },
+  {
+    path: "connections/oauth-apps/:id",
+    element: <RouteRedirect to={({ id }) => `/integrations/tools/oauth-apps/${id}`} />,
+  },
+  {
+    path: "mcp-servers/:id",
+    element: <RouteRedirect to={({ id }) => `/integrations/tools/mcp-servers/${id}`} />,
+  },
+];
+
+/** Redirects for the Settings pages that moved to Connect. */
+const settingsRedirectRoutes: RouteObject[] = [
+  { path: "api-keys", element: <RouteRedirect to="/integrations/ai" />, handle: REDIRECT },
+  {
+    path: "integrations",
+    element: <RouteRedirect to={integrationsRedirect} drop={["category"]} />,
+    handle: REDIRECT,
+  },
+  {
     path: "integrations/:id",
-    element: <RouteRedirect to={({ id }) => `/settings/integrations/${id}`} />,
+    element: <RouteRedirect to={({ id }) => `/integrations/${id}`} />,
   },
 ];
 
@@ -285,21 +334,76 @@ export const appRoutes: RouteObject[] = [
       },
       { path: "workflows/:id", element: <WorkflowDetailPage /> },
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
+      // Connect: three pages, admin only. `/integrations` itself redirects to Tools.
       {
-        path: "connections",
-        element: <ScriptConnectionsPage />,
+        path: "integrations/channels",
+        element: admin(<ChannelsPage />),
+        handle: nav({
+          title: "Channels",
+          icon: MessagesSquare,
+          parent: "Connect",
+          keywords: ["slack", "telegram", "discord", "chat sdk"],
+          adminOnly: true,
+        }),
+      },
+      {
+        path: "integrations/tools",
+        element: admin(<ToolsPage />),
+        handle: nav({
+          title: "Tools",
+          icon: Wrench,
+          parent: "Connect",
+          keywords: ["integrations", "github", "linear", "jira", "oauth"],
+          adminOnly: true,
+        }),
+      },
+      {
+        path: "integrations/ai",
+        element: admin(<AiProvidersPage />),
+        handle: nav({
+          title: "AI providers",
+          icon: Cpu,
+          parent: "Connect",
+          keywords: ["llm", "provider keys", "api keys", "anthropic", "openai"],
+          adminOnly: true,
+        }),
+      },
+      // The Tools tabs as static paths, so Cmd+K and the breadcrumbs can name them.
+      {
+        path: "integrations/tools/connections",
+        element: <RouteRedirect to="/integrations/tools?tab=connections" />,
         handle: nav(
           {
-            title: "Connections",
+            title: "Script connections",
             icon: Link2,
-            keywords: ["script", "oauth", "api"],
+            parent: "Connect",
+            keywords: ["connections", "openapi", "graphql"],
             adminOnly: true,
           },
           { searchOptOut: "the script-connections API has no search yet" },
         ),
       },
-      { path: "connections/oauth-apps/:id", element: <OAuthAppDetailPage /> },
-      { path: "connections/:id", element: <ScriptConnectionDetailPage /> },
+      {
+        path: "integrations/tools/oauth-apps",
+        element: <RouteRedirect to="/integrations/tools?tab=oauth-apps" />,
+        handle: nav(
+          { title: "OAuth apps", icon: KeyRound, parent: "Connect", adminOnly: true },
+          { searchOptOut: "OAuth apps are few and listed on the page" },
+        ),
+      },
+      {
+        path: "integrations/tools/mcp-servers",
+        element: <RouteRedirect to="/integrations/tools?tab=mcp" />,
+        handle: nav(
+          { title: "MCP servers", icon: Cable, parent: "Connect", adminOnly: true },
+          { search: ["mcp-servers"] },
+        ),
+      },
+      // Static segments (`channels`, `tools`, `ai`) rank above `:id`.
+      { path: "integrations/:id", element: admin(<IntegrationDetailPage />) },
+      { path: "integrations/tools/connections/:id", element: <ScriptConnectionDetailPage /> },
+      { path: "integrations/tools/oauth-apps/:id", element: <OAuthAppDetailPage /> },
+      { path: "integrations/tools/mcp-servers/:id", element: <McpServerDetailPage /> },
       {
         path: "scripts",
         element: <ScriptsPage />,
@@ -366,7 +470,12 @@ export const appRoutes: RouteObject[] = [
           {
             path: "connections",
             element: <ConnectionsPage />,
-            handle: nav({ title: "Swarm connections", icon: Network, parent: "Settings" }),
+            handle: nav({
+              title: "Servers",
+              icon: Network,
+              parent: "Settings",
+              keywords: ["swarm connections", "api url"],
+            }),
           },
           {
             path: "appearance",
@@ -383,32 +492,29 @@ export const appRoutes: RouteObject[] = [
             element: admin(<SecretsPage />),
             handle: nav({ title: "Secrets", icon: KeyRound, parent: "Settings", adminOnly: true }),
           },
+          ...settingsRedirectRoutes,
           {
-            path: "api-keys",
-            element: admin(<ApiKeysPage />),
+            path: "connection-playground",
+            element: admin(<ConnectionPlaygroundPage />),
             handle: nav({
-              title: "Provider keys",
-              icon: Key,
+              title: "Connection playground",
+              icon: FlaskConical,
               parent: "Settings",
-              keywords: ["api keys"],
+              keywords: ["script connections", "try"],
               adminOnly: true,
             }),
           },
           {
-            path: "integrations",
-            element: admin(<IntegrationsPage />),
-            handle: nav(
-              {
-                title: "Integrations",
-                icon: Plug,
-                parent: "Settings",
-                keywords: ["slack", "github", "linear", "jira"],
-                adminOnly: true,
-              },
-              { searchOptOut: "a fixed catalog listed on the page" },
-            ),
+            path: "fetch-credentials",
+            element: admin(<FetchCredentialsPage />),
+            handle: nav({
+              title: "Raw fetch credentials",
+              icon: Key,
+              parent: "Settings",
+              keywords: ["credential bindings", "fetch"],
+              adminOnly: true,
+            }),
           },
-          { path: "integrations/:id", element: admin(<IntegrationDetailPage />) },
           {
             path: "configuration",
             element: admin(<ConfigurationPage />),
@@ -514,15 +620,6 @@ export const appRoutes: RouteObject[] = [
       { path: "templates/:id", element: <TemplateDetailPage /> },
       { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
       {
-        path: "mcp-servers",
-        element: <McpServersPage />,
-        handle: nav(
-          { title: "MCP servers", icon: Cable, adminOnly: true },
-          { search: ["mcp-servers"] },
-        ),
-      },
-      { path: "mcp-servers/:id", element: <McpServerDetailPage /> },
-      {
         path: "skills",
         element: <SkillsPage />,
         handle: nav({ title: "Skills", icon: BookOpen, adminOnly: true }, { search: ["skills"] }),
@@ -569,7 +666,7 @@ export const appRoutes: RouteObject[] = [
       {
         path: "apps",
         element: <AppsListingPage />,
-        handle: nav({ title: "Apps", icon: LayoutGrid, adminOnly: true }, { search: ["apps"] }),
+        handle: nav({ title: "Apps", icon: LayoutGrid }, { search: ["apps"] }),
       },
       { path: "apps/:id", element: <AppDetailPage /> },
       // A named page of a multi-page app. Same component as `apps/:id` (which

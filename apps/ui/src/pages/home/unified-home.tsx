@@ -22,7 +22,6 @@ import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
-import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
 import { MobileNow } from "@/components/dashboard/mobile-now";
 import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
 import { LocalNetworkHelp } from "@/components/shared/local-network-help";
@@ -51,7 +50,6 @@ export function UnifiedHome() {
         <SetupChecklistCard />
         <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
           <DashboardNudges />
-          <FleetBenchmarkCard />
           {/* Below `md` the timeline cannot show a useful window, so phones
               get the stacked "Now" view (approvals, running, failures). */}
           <div className={isMobile ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"}>
@@ -95,7 +93,7 @@ function TimelineRegion({
         {error?.message ? `${error.message}.` : "The health check failed."} Check your connection
         under{" "}
         <Link to="/settings/connections" className="underline underline-offset-2">
-          Settings → Connections
+          Settings → Servers
         </Link>
         .{/* `fetch` rejects with a TypeError when no response came back. */}
         {error instanceof TypeError ? <LocalNetworkHelp apiUrl={apiUrl} /> : null}

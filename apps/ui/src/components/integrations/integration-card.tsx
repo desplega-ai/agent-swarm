@@ -100,7 +100,7 @@ export function IntegrationCard({ def, status, className }: IntegrationCardProps
 
         <div className="flex items-center justify-end pt-1">
           <Button asChild size="sm" variant="outline" className="gap-1">
-            <Link to={`/settings/integrations/${def.id}`} aria-label={`Configure ${def.name}`}>
+            <Link to={`/integrations/${def.id}`} aria-label={`Configure ${def.name}`}>
               Configure →
             </Link>
           </Button>

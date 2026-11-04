@@ -78,6 +78,20 @@ export type IntegrationCategory =
   | "email"
   | "other";
 
+/** The Connect page that lists a category: channels, AI providers, or tools. */
+export function connectPagePath(category: IntegrationCategory): string {
+  if (category === "comm") return "/integrations/channels";
+  if (category === "llm") return "/integrations/ai";
+  return "/integrations/tools";
+}
+
+/** The name of `connectPagePath(category)`, as the sidebar shows it. */
+export function connectPageTitle(category: IntegrationCategory): string {
+  if (category === "comm") return "Channels";
+  if (category === "llm") return "AI providers";
+  return "Tools";
+}
+
 export type IntegrationSpecialFlow =
   | "linear-oauth"
   | "jira-oauth"

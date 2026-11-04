@@ -119,9 +119,12 @@ export function RootLayout() {
             >
               Skip to content
             </a>
-            <SidebarProvider className="h-dvh max-w-full overflow-hidden">
+            {/* Inset shell: the sidebar (`variant="floating"`) and the page are
+              two rounded panels on the canvas, 8px apart. Phones keep the
+              full-bleed page and the sheet. */}
+            <SidebarProvider className="h-dvh max-w-full overflow-hidden bg-canvas">
               <AppSidebar />
-              <SidebarInset className="min-w-0">
+              <SidebarInset className="min-w-0 md:my-2 md:mr-2 md:rounded-xl md:border md:border-border md:shadow-xs">
                 <AppHeader />
                 {/* The page's one `main` landmark (the inset is a div). Below lg
                 the main column is the scroll container so pages that flow
@@ -132,7 +135,7 @@ export function RootLayout() {
                   id="main-content"
                   tabIndex={-1}
                   className={cn(
-                    "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
+                    "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto max-lg:[scrollbar-gutter:stable] lg:overflow-hidden outline-none",
                     mainPadding,
                   )}
                 >
