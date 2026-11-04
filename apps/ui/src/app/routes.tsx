@@ -116,6 +116,7 @@ const admin = (element: ReactNode) => <AdminRoute>{element}</AdminRoute>;
 
 const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
 const ConnectPage = lazyRoute(() => import("@/pages/connect/page"));
+const FsContinuePage = lazyRoute(() => import("@/pages/fs-continue/page"));
 const JoinPage = lazyRoute(() => import("@/pages/join/page"));
 
 /**
@@ -682,6 +683,11 @@ export const appRoutes: RouteObject[] = [
         ),
       },
       { path: "file/~/:orgId/:driveId/*", element: <CombPage /> },
+      {
+        path: "fs/continue",
+        element: <FsContinuePage />,
+        handle: unlisted("agent-fs continue handoff"),
+      },
       ...devRoutes,
       ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },

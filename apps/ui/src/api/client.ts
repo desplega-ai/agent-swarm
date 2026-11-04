@@ -370,6 +370,17 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
   throw new Error(`${genericLabel}: ${res.status}`);
 }
 
+/** `POST /api/fs/continue` failed. `status` picks the message (400, 409, 501, ...). */
+export class FsContinueError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "FsContinueError";
+    this.status = status;
+  }
+}
+
 /**
  * "Send to swarm" failed. A 409 or 503 carries why each comment was left out
  * (an "already-sent" entry names its task when known).
@@ -1218,6 +1229,24 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * "Continue with your swarm": mint a named agent-fs key for the current user
+   * and get `returnTo` back with the key in its fragment. The API allows only
+   * the live agent-fs app as `returnTo`.
+   */
+  async fsContinue(data: { returnTo: string }): Promise<{ redirectUrl: string }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/fs/continue`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsContinueError(err.error || `Failed to continue: ${res.status}`, res.status);
     }
     return res.json();
   }

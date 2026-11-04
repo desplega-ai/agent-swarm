@@ -23,6 +23,7 @@ import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider
 import { getFileStorageProvider } from "../fs/registry";
 import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
+import { getAgentFsLiveUrl } from "../utils/constants";
 import { attachmentContentDisposition } from "../utils/content-disposition";
 import {
   authUser,
@@ -46,8 +47,11 @@ const SLOW_UPLOAD_LOG_MS = 3_000;
 
 const fsKeyRateLimit = createIpRateLimiter({ capacity: 5, refillPerMs: 5 / 60_000 });
 
+const fsContinueRateLimit = createIpRateLimiter({ capacity: 10, refillPerMs: 10 / 60_000 });
+
 export function _resetFsKeyRateLimitForTests(): void {
   fsKeyRateLimit.reset();
+  fsContinueRateLimit.reset();
 }
 
 const userAgentFsStateSchema = z.object({
@@ -106,6 +110,49 @@ const mintUserAgentFsKeyRoute = route({
     503: { description: "agent_fs_not_configured" },
   },
 });
+
+const continueToAgentFsRoute = route({
+  method: "post",
+  path: "/api/fs/continue",
+  pattern: ["api", "fs", "continue"],
+  summary: "Mint a named agent-fs key for the live agent-fs app and return the redirect URL",
+  description:
+    "Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.",
+  tags: ["FS"],
+  body: z.object({ returnTo: z.url().max(4096) }),
+  rbac: { permission: "fs.join.own" },
+  responses: {
+    200: {
+      description: "Redirect URL with the named key in the fragment",
+      schema: z.object({
+        redirectUrl: z.string().describe("`returnTo` with `#key=<af_...>` as its only fragment."),
+      }),
+    },
+    400: { description: "invalid_return_to: the origin is not the configured agent-fs app" },
+    401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    409: { description: "agent-fs account or membership is pending" },
+    429: { description: "Limit of ten continues per minute reached" },
+    501: { description: "agent_fs_too_old" },
+    502: { description: "agent-fs request failed" },
+    503: { description: "agent_fs_not_configured" },
+  },
+});
+
+/** Origins that may receive a key: the live agent-fs app and the configured `AGENT_FS_APP_URL`. */
+function allowedReturnOrigins(): Set<string> {
+  const origins = new Set<string>();
+  for (const raw of [getAgentFsLiveUrl(), process.env.AGENT_FS_APP_URL?.trim()]) {
+    if (!raw) continue;
+    try {
+      const { origin } = new URL(raw);
+      if (origin !== "null") origins.add(origin);
+    } catch {
+      // An unparseable URL allows nothing.
+    }
+  }
+  return origins;
+}
 
 const taskParams = z.object({ taskId: z.uuid() });
 const attachmentParams = z.object({ taskId: z.uuid(), attachmentId: z.uuid() });
@@ -372,6 +419,31 @@ async function resolveAgentFsUserId(req: IncomingMessage): Promise<string | null
   return user?.status === "active" ? user.id : null;
 }
 
+function respondMintFailure(
+  res: ServerResponse,
+  result: { status: "pending" | "unsupported" | "off"; reason: string },
+): void {
+  switch (result.status) {
+    case "pending":
+      jsonError(res, scrubSecrets(`agent-fs account pending: ${result.reason}`), 409);
+      break;
+    case "unsupported":
+      jsonError(res, "agent_fs_too_old", 501);
+      break;
+    case "off":
+      jsonError(res, "agent_fs_not_configured", 503);
+      break;
+  }
+}
+
+function respondMintError(res: ServerResponse, error: unknown): void {
+  jsonError(
+    res,
+    scrubSecrets(error instanceof Error ? error.message : String(error)),
+    error instanceof AgentFsKeyValidationError ? 400 : 502,
+  );
+}
+
 export async function handleFs(
   req: IncomingMessage,
   res: ServerResponse,
@@ -422,29 +494,64 @@ export async function handleFs(
     }
     try {
       const result = await mintUserAgentFsKey(userId, parsed.body.label);
-      switch (result.status) {
-        case "minted": {
-          res.setHeader("Cache-Control", "no-store");
-          const { status: _, ...key } = result;
-          mintUserAgentFsKeyRoute.respond(res, 201, key);
-          break;
-        }
-        case "pending":
-          jsonError(res, scrubSecrets(`agent-fs account pending: ${result.reason}`), 409);
-          break;
-        case "unsupported":
-          jsonError(res, "agent_fs_too_old", 501);
-          break;
-        case "off":
-          jsonError(res, "agent_fs_not_configured", 503);
-          break;
+      if (result.status === "minted") {
+        res.setHeader("Cache-Control", "no-store");
+        const { status: _, ...key } = result;
+        mintUserAgentFsKeyRoute.respond(res, 201, key);
+      } else {
+        respondMintFailure(res, result);
       }
     } catch (error) {
-      jsonError(
-        res,
-        scrubSecrets(error instanceof Error ? error.message : String(error)),
-        error instanceof AgentFsKeyValidationError ? 400 : 502,
-      );
+      respondMintError(res, error);
+    }
+    return true;
+  }
+
+  if (continueToAgentFsRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const parsed = await continueToAgentFsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const principal = await requestPrincipal(req, myAgentId);
+    if (!principal) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const decision = can({
+      principal,
+      verb: "fs.join.own",
+      resource: { kind: "none" },
+      source: "http",
+    });
+    if (!decision.allow) {
+      jsonError(res, decision.reason, 403);
+      return true;
+    }
+    const target = new URL(parsed.body.returnTo);
+    if (!allowedReturnOrigins().has(target.origin)) {
+      jsonError(res, "invalid_return_to", 400);
+      return true;
+    }
+    if (!fsContinueRateLimit.take(userId)) {
+      jsonError(res, "Limit of ten continues per minute reached", 429);
+      return true;
+    }
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      const result = await mintUserAgentFsKey(userId, `${target.host} · ${date}`);
+      if (result.status === "minted") {
+        // The fragment never reaches a server. The live app stores the key and strips it.
+        target.hash = `key=${encodeURIComponent(result.apiKey)}`;
+        res.setHeader("Cache-Control", "no-store");
+        continueToAgentFsRoute.respond(res, 200, { redirectUrl: target.toString() });
+      } else {
+        respondMintFailure(res, result);
+      }
+    } catch (error) {
+      respondMintError(res, error);
     }
     return true;
   }

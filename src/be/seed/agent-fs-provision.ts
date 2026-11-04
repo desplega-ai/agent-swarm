@@ -265,6 +265,39 @@ export async function resolveAgentFsSharedContext(): Promise<{
 }
 
 /**
+ * Tell agent-fs which swarm the shared org trusts, so the live app can offer
+ * "Continue with <swarm>" (`PATCH /orgs/{orgId}` with `{ swarmUrl }`). Runs
+ * once per boot, after the seeders. It only acts when the shared org is
+ * already provisioned and never provisions it. An agent-fs without the route
+ * (404 or 405, for example 0.18.17) is "unsupported", not an error.
+ */
+export async function syncAgentFsOrgSwarmUrl(
+  swarmUrl: string,
+): Promise<"set" | "unsupported" | "skipped"> {
+  const apiUrl = await resolveApiUrl();
+  const apiKey =
+    (await getConfigValue(API_KEY_CONFIG)) ||
+    process.env.API_AGENT_FS_API_KEY ||
+    process.env.AGENT_FS_API_KEY;
+  const orgId =
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) || process.env.AGENT_FS_DEFAULT_ORG_ID;
+  if (!apiUrl || !apiKey || !orgId) return "skipped";
+  try {
+    await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${apiKey}` },
+      body: { swarmUrl },
+    });
+    return "set";
+  } catch (error) {
+    if (error instanceof AgentFsRequestError && (error.status === 404 || error.status === 405)) {
+      return "unsupported";
+    }
+    throw error;
+  }
+}
+
+/**
  * Invite an external (non-agent) member into the shared org using the
  * API-owned bootstrap credentials. Powers `POST /api/fs/members/invite` so
  * callers holding the tenant API key (e.g. the cloud control plane's

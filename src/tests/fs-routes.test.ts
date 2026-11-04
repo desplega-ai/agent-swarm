@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -467,7 +476,14 @@ describe("personal agent-fs identity and keys", () => {
     "AGENT_FS_DEFAULT_ORG_ID",
     "AGENT_FS_DEFAULT_DRIVE_ID",
   ];
-  const envKeys = [...configKeys, "AGENT_FS_API_URL", "RBAC_ENABLED", "PAGE_SESSION_SECRET"];
+  const envKeys = [
+    ...configKeys,
+    "AGENT_FS_API_URL",
+    "AGENT_FS_LIVE_URL",
+    "AGENT_FS_APP_URL",
+    "RBAC_ENABLED",
+    "PAGE_SESSION_SECRET",
+  ];
   let originalEnv: Record<string, string | undefined>;
   let upstream: ReturnType<typeof Bun.serve> | undefined;
   let userId: string;
@@ -561,6 +577,8 @@ describe("personal agent-fs identity and keys", () => {
     process.env.AGENT_FS_DEFAULT_DRIVE_ID = driveId;
     process.env.RBAC_ENABLED = "false";
     process.env.PAGE_SESSION_SECRET = "example-personal-fs-page-secret";
+    delete process.env.AGENT_FS_LIVE_URL;
+    delete process.env.AGENT_FS_APP_URL;
     for (const [key, value] of [
       ["API_AGENT_FS_API_KEY", bootstrapKey],
       ["AGENT_FS_DEFAULT_ORG_ID", orgId],
@@ -596,6 +614,103 @@ describe("personal agent-fs identity and keys", () => {
       body: JSON.stringify({ label }),
     });
   }
+
+  function continueTo(returnTo: unknown, headers: Record<string, string> = {}): Promise<Response> {
+    return personal("/api/fs/continue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ returnTo }),
+    });
+  }
+
+  test("continue returns the live URL with the named key as its only fragment", async () => {
+    const logged: string[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        logged.push(args.map(String).join(" "));
+      }),
+    );
+    let response: Response;
+    try {
+      response = await continueTo(
+        `https://live.agent-fs.dev/file/~/${orgId}/${driveId}/x.md?view=raw#old=1`,
+      );
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      redirectUrl: `https://live.agent-fs.dev/file/~/${orgId}/${driveId}/x.md?view=raw#key=${mintedKey}`,
+    });
+    const keyRequest = requests.find((request) => request.path.endsWith("/keys"));
+    expect(keyRequest?.body).toEqual({
+      label: `live.agent-fs.dev · ${new Date().toISOString().slice(0, 10)}`,
+    });
+    expect(logged.some((line) => line.includes(mintedKey))).toBe(false);
+  });
+
+  test("continue only accepts the live app and AGENT_FS_APP_URL origins", async () => {
+    for (const rejected of [
+      "https://live.agent-fs.dev.evil.test/file/x.md",
+      "https://evil.test/",
+      "http://live.agent-fs.dev/file/x.md",
+      "https://live.agent-fs.dev:8443/file/x.md",
+      "javascript:alert(1)",
+    ]) {
+      const response = await continueTo(rejected);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_return_to" });
+    }
+    for (const invalid of ["not a url", 42, null])
+      expect((await continueTo(invalid)).status).toBe(400);
+    expect(requests).toHaveLength(0);
+
+    process.env.AGENT_FS_LIVE_URL = "https://files.acme.test/";
+    process.env.AGENT_FS_APP_URL = "http://localhost:7433";
+    expect((await continueTo("https://live.agent-fs.dev/file/x.md")).status).toBe(400);
+    const live = await continueTo("https://files.acme.test/file/x.md");
+    expect(live.status).toBe(200);
+    expect(await live.json()).toEqual({
+      redirectUrl: `https://files.acme.test/file/x.md#key=${mintedKey}`,
+    });
+    expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(200);
+  });
+
+  test("continue needs a user, fs.join.own, a ready account, and a new agent-fs", async () => {
+    const target = "https://live.agent-fs.dev/file/x.md";
+    expect(
+      (
+        await operatorFetch("/api/fs/continue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ returnTo: target }),
+        })
+      ).status,
+    ).toBe(401);
+    expect(requests).toHaveLength(0);
+    mode = "pending";
+    expect((await continueTo(target)).status).toBe(409);
+    mode = "unsupported";
+    const old = await continueTo(target);
+    expect(old.status).toBe(501);
+    expect(await old.json()).toEqual({ error: "agent_fs_too_old" });
+    delete process.env.AGENT_FS_API_URL;
+    expect((await continueTo(target)).status).toBe(503);
+    process.env.RBAC_ENABLED = "true";
+    await getDbClient().run(
+      "DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?",
+      [userId],
+    );
+    expect((await continueTo(target)).status).toBe(403);
+  });
+
+  test("the eleventh continue per minute is limited per user", async () => {
+    const target = "https://live.agent-fs.dev/file/x.md";
+    for (let i = 0; i < 10; i++) expect((await continueTo(target)).status).toBe(200);
+    expect((await continueTo(target)).status).toBe(429);
+    expect((await createKey()).status).toBe(201);
+  });
 
   test("the user token determines identity despite a different dashboard header", async () => {
     const other = await createUser({ name: "Other", email: "other-fs@example.com" });
