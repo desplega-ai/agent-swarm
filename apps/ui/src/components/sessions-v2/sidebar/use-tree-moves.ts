@@ -18,14 +18,14 @@ import {
   restoreKey,
   sourceOfGroupKey,
 } from "@/lib/session-groups";
-import { plural, SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
+import { plural } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { ownerFoldId, sourceFoldId } from "./tree-rows";
 
 /** An Undo toast stays long enough to reach (UX review R9 P0). */
 const UNDO_TOAST_MS = 5200;
 
-const say = (message: string) => toast(message, { position: SESSIONS_TOAST_POSITION });
+const say = (message: string) => toast(message);
 
 /** A toast names one session in one line: a long title is cut (SPEC R10.3). */
 function toastTitle(session: SessionListItem): string {
@@ -184,7 +184,6 @@ export function useTreeMoves({
         : plural(movedSessions.length, "session");
     const undo = undoFor(movedSessions);
     toast(`Moved ${what} to ${labelOf(key)}.${skippedText(result.skipped)}`, {
-      position: SESSIONS_TOAST_POSITION,
       duration: UNDO_TOAST_MS,
       action: undo ? { label: "Undo", onClick: undo } : undefined,
     });

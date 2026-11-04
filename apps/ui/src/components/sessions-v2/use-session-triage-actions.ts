@@ -2,7 +2,6 @@ import { toast } from "sonner";
 import { type TriageTarget, useSessionTriage } from "@/api/hooks/use-session-triage";
 import type { SessionListItem } from "@/api/types";
 import { askNotifyPermission, notificationsBlocked } from "@/hooks/use-later-notifier";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import type { RowMenuActions } from "./sidebar/row-menu";
 import { wakePhrase } from "./sidebar/snooze-times";
 
@@ -60,7 +59,6 @@ export function useSessionTriageActions({
   };
   const undoToast = (message: string, sessions: SessionListItem[]) =>
     toast(message, {
-      position: SESSIONS_TOAST_POSITION,
       duration: UNDO_TOAST_MS,
       action: { label: "Undo", onClick: () => restore(sessions) },
     });
