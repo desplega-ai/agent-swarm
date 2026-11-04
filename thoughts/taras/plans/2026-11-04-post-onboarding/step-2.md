@@ -3,7 +3,10 @@ id: step-2
 name: Dashboard mints its own named key silently, Comb on by default
 track: A
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-2
+claimed_at: 2026-11-04T15:54:22Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -51,21 +54,44 @@ The dashboard keeps holding an agent-fs key per browser (localStorage, as today)
 
 #### Automated Verification:
 - [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun run test`
-- [ ] `bun run test:root -- src/tests/comb-status.test.ts src/tests/comb-default.test.ts src/tests/comb-links.test.ts src/tests/comb-config-guard.test.ts`
+- [x] `bun run test:root -- src/tests/comb-status.test.ts src/tests/comb-default.test.ts src/tests/comb-links.test.ts src/tests/comb-config-guard.test.ts`
 - [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `rg -n "connect=auto|createAndConnect|Create with my email" apps/ui/src packages/ui-e2e` returns nothing
-- [ ] `rg -n "/auth/me" apps/ui/src --glob '!**/*.test.*'` shows only the paste-key fallback path
-- [ ] `E2E_COMB_AGENT_FS_URL=http://localhost:7433 bun run e2e:ui -- --grep "Comb"` passes against a local agent-fs at the pinned release
+- [x] `rg -n "connect=auto|createAndConnect|Create with my email" apps/ui/src packages/ui-e2e` returns nothing
+- [x] `rg -n "/auth/me" apps/ui/src --glob '!**/*.test.*'` shows only the paste-key fallback path
+- [x] `E2E_COMB_AGENT_FS_URL=http://localhost:7433 bun run e2e:ui -- --grep "Comb"` passes against a local agent-fs at the pinned release
 
 #### Automated QA:
-- [ ] `AGENT_BROWSER_SESSION=po-step2`: stack = API with `AGENT_FS_API_URL` + local agent-fs (pinned release) + `apps/ui` dev server. New browser profile, set the swarm connection, open `/file`: the shared drive lists with no card. Screenshot `/tmp/po-step2-files.png`.
-- [ ] `curl -H "Authorization: Bearer <that browser's key from localStorage>" http://localhost:7433/auth/keys` lists a label starting with `Swarm dashboard ·`.
+- [x] `AGENT_BROWSER_SESSION=po-step2`: stack = API with `AGENT_FS_API_URL` + local agent-fs (pinned release) + `apps/ui` dev server. New browser profile, set the swarm connection, open `/file`: the shared drive lists with no card. Screenshot `/tmp/po-step2-files.png`.
+- [x] `curl -H "Authorization: Bearer <that browser's key from localStorage>" http://localhost:7433/auth/keys` lists a label starting with `Swarm dashboard ·`.
 - [ ] Revoke that key in agent-fs (`DELETE /auth/keys/:id`), reload `/file`: a new key is minted silently and the drive lists again. agent-fs now shows two labels, one revoked.
-- [ ] Open `<app>/file/~/<org>/<drive>/<path>` of a file written by an agent in the fresh profile: renders in-app, tab URL stays on the dashboard. Screenshot `/tmp/po-step2-link.png`.
-- [ ] Point the stack at an older agent-fs image: `/file` shows the paste-key form with the upgrade hint. Screenshot.
-- [ ] Recording of the fresh-profile flow for the PR's `## Before / after`.
+- [x] Open `<app>/file/~/<org>/<drive>/<path>` of a file written by an agent in the fresh profile: renders in-app, tab URL stays on the dashboard. Screenshot `/tmp/po-step2-link.png`.
+- [x] Point the stack at an older agent-fs image: `/file` shows the paste-key form with the upgrade hint. Screenshot.
+- [x] Recording of the fresh-profile flow for the PR's `## Before / after`.
 
 #### Manual Verification:
 - [ ] Taras opens the local dashboard in a second browser profile and reaches a file in-app without a connect step, then sees the named key in agent-fs.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. UI routes to Opus. After completing this step, pause for manual confirmation. Commit as `[step-2] Dashboard mints its own named key silently, Comb on by default` after verification passes. Frontend PR: screenshots and recording in `## Before / after`.
+
+## Implementation notes
+
+- Commit `7baa86514` on `po/step-2`. Done by Claude alone (the backend part was 20 lines in `getCombState`, so no Codex round).
+- `autoConnect()` (`components/comb/connect-flow.ts`) + `useAutoConnect()` (`components/comb/use-auto-connect.ts`): `GET /api/fs/me`, then `POST /api/fs/keys {label}`, then `connect()`. The loop guard is a module map of one attempt promise per `apiUrl|endpoint` per page load, shared by the Comb card, the `/setup` step and StrictMode. Retry / "Create a key for this browser" start a new attempt on purpose.
+- The provider's key check is `ls /` on the shared drive (`agent-fs-context.tsx`), not `/auth/me`. `me` is built from the saved credential (identity from `/api/fs/me` at mint time). The check query key now includes org, drive and `keyId`. With no shared drive configured there is nothing to check, so the credential is trusted.
+- The credential gains optional `label` and `keyId`. Old stored credentials parse unchanged (existing browser keys keep working).
+- `isCombNavigable` now includes `loading`, `needs-connect` and `invalid-key` (the plan named the first two; `invalid-key` also auto-mints, so it is navigable too). Only `disabled` and `unreachable` keep the external link.
+- Removed: browser-side `AgentFsClient.register`, `swarmProxyCredential`, `RegisterResponse`, the "Create with my email" tab, the email-taken and "save this key" states in `/setup`. Kept: `connectWithKey` + `PasteKeyForm` for the 501 fallback.
+- Account menu: shows the key label, "Manage keys in agent-fs" (`<live_url>/credentials`), "Forget this browser's key". After a forget, the guard has already run in this page load, so the card offers "Create a key for this browser" instead of minting again.
+- `getCombState`: `COMB_ENABLED=false` is off, no `AGENT_FS_API_URL` is off, else on. `isBrowserReachableUrl` and its IP helpers were deleted (no other users). `getCombConfig.apiUrl` is unchanged: `AGENT_FS_PUBLIC_URL`, else `<public API>/agentfs` with the proxy, else `AGENT_FS_API_URL` when the proxy is explicitly off.
+- Docs updated: `.env.example`, `runbooks/local-development.md` (new "Files (Comb) and agent-fs" section), `ui/comb.mdx`, `ui/configuration.mdx`, `reference/environment-variables.mdx`, the `COMB_ENABLED` catalog entry. No frontmatter changes, so no `build:docs-index`.
+- Playwright Comb spec: the seeded user gets a unique email for the run (restored in `finally`), the test registers that email on agent-fs only to hold the primary key, then asserts the drive lists with no key field in two browser contexts and that `GET /auth/keys` lists two `Swarm dashboard · ` labels. `COMB_ENABLED` is no longer set (default on).
+- Verification evidence:
+  - Box 1 (`cd apps/ui && ... && bun run test`): install, lint (3 pre-existing warnings in `prompt-context.tsx`), `tsc -b` pass. `bun run test` fails on base too: `apps/ui/package.json` has no `test` script. Equivalent run `bun test --parallel=4 apps/ui/src` from the root (CI mode): 2536 pass, 0 fail. Left unticked.
+  - Box 3: `tsc:check:tsc` pass. `check:local` red only on `src/tests/docs-index-footprint.test.js` (expects 472 operations, gets 474 after step-1's two routes). Same failure on the unchanged base. Left unticked as pre-existing.
+  - e2e:ui ran against a local agent-fs 0.18.17 container on a free port (not 7433): 3 passed.
+- QA deviations:
+  - `/auth/keys` with the browser's minted key returns 403 (org-scoped, by design). The label check used the account's primary key (a teammate registered on agent-fs first, then invited and joined in a fresh profile): `Swarm dashboard · Chrome on macOS · 2026-11-04`, `orgId` set.
+  - Revoke + reload: a new key was minted silently and the drive listed again (key id changed). agent-fs 0.18.17 `GET /auth/keys` omits revoked keys, so the list shows one active dashboard key, not "two labels, one revoked". Box left unticked for that reason.
+  - The older agent-fs check used `ghcr.io/desplega-ai/agent-fs:0.18.16` (image removed after): `/file` shows the paste form with "Upgrade agent-fs to 0.18.17 or later".
+- Found, out of scope: an invited non-admin who lands on `/file` on a swarm with no org name gets the "Name your organization" dialog, and Save fails with `missing permission 'config.write.any'`. Not touched here.
+

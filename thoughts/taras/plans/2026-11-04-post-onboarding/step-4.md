@@ -4,7 +4,10 @@ name: "Continue with your swarm" swarm endpoint
 track: A
 depends_on: [step-1, step-5]
 external_deps: ["agent-fs release with org swarm_url + live SPA accepting #key= (Track B plan)"]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-4
+claimed_at: 2026-11-04T15:54:22Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -40,19 +43,34 @@ Blocker to settle in the Track B plan: admin-minted keys are **org-scoped** (age
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/fs-routes.test.ts src/tests/agent-fs-provision-seeder.test.ts`
+- [x] `bun run test:root -- src/tests/fs-routes.test.ts src/tests/agent-fs-provision-seeder.test.ts`
 - [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- fs-continue`
-- [ ] `bun run e2e --strict`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] `bun run e2e --strict`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
 - [ ] `bun run check:local && bun run tsc:check:tsc`
 
 #### Automated QA:
-- [ ] Local agent-fs at the Track B release: `curl -sS -X POST -H "Authorization: Bearer <aswt_>" -H 'content-type: application/json' -d '{"returnTo":"<AGENT_FS_LIVE_URL>/file/~/<org>/<drive>/x.md"}' <api>/api/fs/continue` returns a `redirectUrl` ending in `#key=af_...`; `curl -H "Authorization: Bearer <that key>" <agent-fs>/auth/me` returns the user; `GET /auth/keys` lists `live.agent-fs.dev · <date>`.
-- [ ] Same call with `returnTo: "https://evil.test/"` returns 400.
+- [x] Local agent-fs at the Track B release: `curl -sS -X POST -H "Authorization: Bearer <aswt_>" -H 'content-type: application/json' -d '{"returnTo":"<AGENT_FS_LIVE_URL>/file/~/<org>/<drive>/x.md"}' <api>/api/fs/continue` returns a `redirectUrl` ending in `#key=af_...`; `curl -H "Authorization: Bearer <that key>" <agent-fs>/auth/me` returns the user; `GET /auth/keys` lists `live.agent-fs.dev · <date>`.
+- [x] Same call with `returnTo: "https://evil.test/"` returns 400.
 - [ ] `AGENT_BROWSER_SESSION=po-step4`: open `<app>/fs/continue?return_to=<live>/file/~/<org>/<drive>/x.md` in a profile with the swarm session: the tab ends on the live URL with the fragment stripped and the file shown (needs the Track B SPA change; otherwise assert the final URL only). Screenshot.
-- [ ] Grep the API log for the key value: zero hits.
+- [x] Grep the API log for the key value: zero hits.
 
 #### Manual Verification:
 - [ ] Taras tries the full round trip from live.agent-fs.dev once the agent-fs plan is deployed.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own against a local agent-fs at the Track B release. If that release is not out when the wave starts, leave this step `ready` and run the others. Commit as `[step-4] Continue with your swarm swarm endpoint` after verification passes.
+
+## Implementation notes
+
+Commit `f1b21f26d` on `po/step-4` (2026-11-04). Done by Claude alone (small backend, no Codex round).
+
+- **Blocker resolved**: agent-fs 0.18.17 answers `GET /auth/me` for org-scoped keys with 200 (contract option 1, verified by step-1 QA and again here with the fragment key). No SPA org-scoped mode is needed.
+- **Route**: `POST /api/fs/continue` reuses the step-1 checks of `POST /api/fs/keys` (user identity, `fs.join.own`) and its status mapping (now `respondMintFailure` / `respondMintError` in `src/http/fs.ts`). Order: 401, 400 body, 403, 400 `invalid_return_to`, 429 (own limiter, 10/min per user), then mint. 200 sends `Cache-Control: no-store`.
+- **Allowlist**: exact origin match against `getAgentFsLiveUrl()` and `AGENT_FS_APP_URL`. Scheme and port count (`http://live...` and `:8443` are rejected). A set `AGENT_FS_LIVE_URL` replaces the default `live.agent-fs.dev`.
+- **Label**: `<return_to host> · <YYYY-MM-DD>`, so the default is `live.agent-fs.dev · 2026-11-04` and a self-hosted live app gets its own host.
+- **Swarm URL deviation**: the provision seeder applies only when its hash changes, so a PATCH inside it would not run on every boot. `syncAgentFsOrgSwarmUrl(getAppUrl())` lives in `agent-fs-provision.ts` and runs after listen in `src/http/index.ts`, not awaited (like Chat SDK start). It uses the configured bootstrap key and org only and never provisions. 404 or 405 is `unsupported` (silent), other errors log one scrubbed warning. Real 0.18.17 answered the PATCH with 404 on both QA boots and the API logged nothing.
+- **Page**: under `RootLayout`, `unlisted("agent-fs continue handoff")`, one lazy import plus one route entry in `routes.tsx`. A ref guard mints one key per visit (StrictMode). Errors map 400/403/409/429/501/503 to short messages with an "Open files here" link to `/file`.
+- **UI test command**: `apps/ui` has no `test` script (same as step-5). Ran `bun test src/pages/fs-continue` from `apps/ui` (4 pass) and `bun test apps/ui/src --parallel=4` (2536 pass, 0 fail). A serial `bun test apps/ui/src` has 112 fails with or without the new file (mock.module leaks, pre-existing). The page test mocks `@/api/client` and the card, button and callout primitives, like `join/page.test.tsx`, because the `@/` alias does not resolve under bun test.
+- **check:local**: 2 fails, both not from this step. `docs-index-footprint.test.js` expects 472 operations, and the base already has 474 (it fails the same way in the orchestrator worktree). `slack-mode-lifecycle.test.ts` timed out under load and passes alone.
+- **Browser QA**: the live SPA does not yet read `#key=`. Real `live.agent-fs.dev` sends a key-less deep link to `/credentials` and drops the fragment. With `live.agent-fs.dev` stubbed in agent-browser, the tab ended on exactly `return_to` plus `#key=af_...`. The fragment strip and the file view need Track B.
+

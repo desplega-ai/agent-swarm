@@ -3,7 +3,10 @@ id: step-7
 name: "Connect › AI providers: LLMs tab, unified list, Add provider panel"
 track: C
 depends_on: [step-5, step-16]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-7
+claimed_at: 2026-11-04T15:54:22Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -41,19 +44,36 @@ working, then transitions `status` to `done` (success) or back to `ready` (retry
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- ai-providers providers`
+- [x] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- ai-providers providers`
 - [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `bun run e2e:ui -- --grep "@smoke"`
+- [x] `bun run e2e:ui -- --grep "@smoke"`
 - [ ] `rg -n "settings/api-keys" apps/ui/src --glob '!**/routes.tsx'` returns nothing
 
 #### Automated QA:
-- [ ] `AGENT_BROWSER_SESSION=po-step7`: on `/integrations/ai`, open Add provider → OpenRouter, save a fake key: the panel shows the rejection inline (screenshot). Save a real test key from the local env if one is available: the row appears with its status (key masked). Compare with `mockups/post-onboarding/shots/r5-ai-providers-1440-light.png`.
-- [ ] Expand a provider row, rename a key, clear its rate limit; `GET /api/keys/status` reflects the new name.
-- [ ] Remove a key with the confirm dialog; `GET /api/config/pool-keys` no longer lists it.
-- [ ] Open the Codex subscription panel: a device code and verification link appear (do not complete the sign-in in QA). Screenshot.
-- [ ] Recording of the add-provider flow for the PR.
+- [x] `AGENT_BROWSER_SESSION=po-step7`: on `/integrations/ai`, open Add provider → OpenRouter, save a fake key: the panel shows the rejection inline (screenshot). Save a real test key from the local env if one is available: the row appears with its status (key masked). Compare with `mockups/post-onboarding/shots/r5-ai-providers-1440-light.png`.
+- [x] Expand a provider row, rename a key, clear its rate limit; `GET /api/keys/status` reflects the new name.
+- [x] Remove a key with the confirm dialog; `GET /api/config/pool-keys` no longer lists it.
+- [x] Open the Codex subscription panel: a device code and verification link appear (do not complete the sign-in in QA). Screenshot.
+- [x] Recording of the add-provider flow for the PR.
 
 #### Manual Verification:
 - [ ] Taras completes one Codex device sign-in on the local stack and sees the account listed.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. UI routes to Opus. After completing this step, pause for manual confirmation. Commit as `[step-7] Connect › AI providers: LLMs tab` after verification passes. Frontend PR: screenshots and recording in `## Before / after`.
+
+## Implementation notes
+
+Commit `5158fc324` on `po/step-7`.
+
+- **Verification.** apps/ui has no `test` script: the tests ran as `bun test src/lib/ai-providers.test.ts src/components/providers` (16 pass). `bun run check:local` fails on one pre-existing test, `src/tests/docs-index-footprint.test.js` (expects 472 operations, gets 474). It fails the same way on the unchanged base `e93c39161`. `bun run tsc:check:tsc` passes. The `rg settings/api-keys` check returns only step-5's two redirect tests (`routes.test.tsx:78`, `route-redirect.test.tsx:84`). No source link is left, so the box stays unticked only because of the literal "returns nothing".
+- **opencode and Codex.** `src/providers/opencode-adapter.ts` has no ChatGPT sign-in (no `CODEX_OAUTH` or `codex_oauth` use). Only `codex-adapter.ts` and `pi-mono-adapter.ts` read it. The panel says the subscription serves the codex and pi harnesses. Derail: opencode could read the Codex OAuth pool later.
+- **Add flow.** Pool fields in the panel reuse `PoolKeysList`: its inline "Add key" runs the live check ("Checking the key…"), shows a 422 inline and lists the saved keys. There is no separate footer "Test and add" button as in the mockup. Plain config fields (region, IDs, base URLs, the gateway URL) save together with one Save through `useUpsertConfigsBatch`. Bedrock and Claude Managed Agents also link "All settings" to their old detail pages, which hold more fields.
+- **Rename, Set plan, Clear rate limit** need the key's `api_key_status` row. A key that no check or run has touched yet shows only Remove in its menu.
+- **Today and 7 days** come from `GET /api/session-costs/summary?groupBy=both` (`byCredential`) with a UTC `startDate` of today and of 6 days ago. Footer totals add up the rows.
+- **Dots.** The sidebar dot and the LLMs tab dot both use `isUnhealthyKey` (`lib/ai-providers.ts`) over `GET /api/keys/status`. Shared-file edit: `app-sidebar.tsx`, one import and one line. A Codex account that needs a new sign-in fails its row, but it does not light the dots, because the sidebar does not read the accounts.
+- **List layout.** The approved design has expandable rows, so the list is a CSS-grid list, not `DataGrid`. AG Grid community has no master/detail rows. On phones, the rows stack.
+- **Panel state** is in the URL (`?add=<provider id>`). step-17 can open the panel with `setParam("add", id)` and can add host entries to the registry.
+- **Placeholder tabs.** System One shows one line with a link to Settings › Configuration. Embeddings and Transcription mount today's `memory` and `transcription` integration cards.
+- **Refactors.** `hooks/use-codex-device-flow.ts` (from the setup Codex card), `components/providers/codex-device-code.tsx` (from the card's `DeviceCodePanel`) and `components/shared/copy-icon-button.tsx` (from `pages/setup/steps/ai/fields.tsx`). `/setup` step 3 uses the moved code and does not change. `pages/api-keys/page.tsx` is deleted, because nothing imports it.
+- The full `apps/ui` `bun test` run has 111 failures before and after this change. They come from cross-file mock leaks in other files, and the set of failing tests is the same.
+

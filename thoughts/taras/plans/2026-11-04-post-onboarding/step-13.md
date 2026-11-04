@@ -3,7 +3,10 @@ id: step-13
 name: "Post-onboarding checklist (state, signals, edit, Home widget)"
 track: E
 depends_on: [step-5, step-9]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-13
+claimed_at: 2026-11-04T15:54:22Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -51,22 +54,41 @@ Index on `(scope, userId, status)`. `status='done'` is the manual done (custom i
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/checklist.test.ts src/tests/rbac-admission.test.ts`
-- [ ] `bun run e2e --strict`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] `bash scripts/check-migration-conflicts.sh && bash scripts/check-audit-columns.sh && bash scripts/check-db-boundary.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `bun run test:root -- src/tests/checklist.test.ts src/tests/rbac-admission.test.ts`
+- [x] `bun run e2e --strict`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] `bash scripts/check-migration-conflicts.sh && bash scripts/check-audit-columns.sh && bash scripts/check-db-boundary.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 - [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- checklist`
-- [ ] `bun run e2e:ui -- --grep "home"`
-- [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] Existing DB upgrade: copy a pre-plan DB (`cp agent-swarm-db.sqlite /tmp/po-s13.sqlite`), boot with `DATABASE_PATH=/tmp/po-s13.sqlite`, `curl <api>/api/checklist` returns 3 seeded items with `done` reflecting the swarm's real integrations.
+- [x] `bun run e2e:ui -- --grep "home"`
+- [x] `bun run check:local && bun run tsc:check:tsc`
+- [x] Existing DB upgrade: copy a pre-plan DB (`cp agent-swarm-db.sqlite /tmp/po-s13.sqlite`), boot with `DATABASE_PATH=/tmp/po-s13.sqlite`, `curl <api>/api/checklist` returns 3 seeded items with `done` reflecting the swarm's real integrations.
 
 #### Automated QA:
-- [ ] Local API: `GET /api/checklist` as the owner returns 3 items. `PUT /api/config` with a Chat SDK Telegram adapter enabled (or `SLACK_BOT_TOKEN`+`SLACK_APP_TOKEN`) → the channel item shows `done: true, signal: true`.
-- [ ] As a Requester-role user (`aswt_`): `PATCH /api/checklist/items/<swarm item>` with `remove` → 403; `PATCH` on their own `use_case` item with `{"action":"remove","reason":"not now"}` → 200 and the row shows `statusChangedBy` = that user, `statusReason` = "not now". As admin: remove the swarm `tool` item → 200, then `restore` → 200.
-- [ ] Run the step-9 walkthrough (schedule under `shared/po-qa/` by the owner) and open one task in the group in the UI → `use_case` flips to `done: true`.
-- [ ] `AGENT_BROWSER_SESSION=po-step13`: Home shows the card with three rows; remove one with a reason; "Show removed (1)" lists who and why; restore. Mark all done → the card collapses to one line. Screenshots `/tmp/po-step13-*.png` and a recording.
+- [x] Local API: `GET /api/checklist` as the owner returns 3 items. `PUT /api/config` with a Chat SDK Telegram adapter enabled (or `SLACK_BOT_TOKEN`+`SLACK_APP_TOKEN`) → the channel item shows `done: true, signal: true`.
+- [x] As a Requester-role user (`aswt_`): `PATCH /api/checklist/items/<swarm item>` with `remove` → 403; `PATCH` on their own `use_case` item with `{"action":"remove","reason":"not now"}` → 200 and the row shows `statusChangedBy` = that user, `statusReason` = "not now". As admin: remove the swarm `tool` item → 200, then `restore` → 200.
+- [x] Run the step-9 walkthrough (schedule under `shared/po-qa/` by the owner) and open one task in the group in the UI → `use_case` flips to `done: true`.
+- [x] `AGENT_BROWSER_SESSION=po-step13`: Home shows the card with three rows; remove one with a reason; "Show removed (1)" lists who and why; restore. Mark all done → the card collapses to one line. Screenshots `/tmp/po-step13-*.png` and a recording.
 
 #### Manual Verification:
 - [ ] Taras judges the default labels, the "Open" targets and the remove-reason prompt.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. Backend to Codex `gpt-6.1-sol` (high), the Home card to Opus. After completing this step, pause for manual confirmation. Commit as `[step-13] Post-onboarding checklist (state, signals, edit, Home widget)` after verification passes. Frontend PR: screenshots and recording in `## Before / after`.
+
+## Implementation notes
+
+Commit `beef5beee` on `po/step-13` (2026-11-04). Backend by Codex gpt-6.1-sol (high), reviewed and adjusted. UI by Opus.
+
+- **UI test box stays unticked**: `apps/ui` has no `test` script. The equivalent passed: `cd apps/ui && bun run lint && bunx tsc -b && bun test checklist` (7 pass) and `bun run check:tokens`.
+- **Open links** point at the step-5 routes (`/integrations/channels`, `/integrations/tools`), not `?tab=`. The use case links to `/sessions` (the New session tab).
+- **Card visibility**: shown when setup is not open for this user (finished OR dismissed), and at once for non-admins. The plan said "finished"; a dismissed setup would otherwise leave an admin with no card. Mounted in the setup card slot (`xl:order-last xl:w-80`); the two never show together. `PostOnboardingChecklistCard` takes a `className`, so step-15 can mount it in its grid. An API without the route (404) hides the card.
+- **Members** see swarm items without Open or a menu (Connect pages are admin only). They edit their own items.
+- **Mark not done** (restore from `done`) added next to Mark done; Mark done only for custom items, as planned.
+- **Channel signal** uses a new local-only helper `healthyChatSdkAdapters()` (`src/integrations/chat-sdk/status.ts`), same rule as `getChatSdkStatus` but no Discord guild fetch, so step-14 can call `firstOpenItem` inside the poll transaction without a network call.
+- **use_case signal** reads `created_by` on `scheduled_tasks`, `pages`, `workflows` (at most the 100 newest keys). `apps` has no creator column, so apps do not count.
+- **Found in QA**: a schedule created over the operator key with `X-Swarm-User-Id` gets `created_by = NULL` (pre-existing audit behavior), so it never counts for the use case. Lead-created schedules (step-9 path) and `aswt_` users are credited. QA used the owner's `aswt_` token.
+- **PATCH ids are URL-decoded** in the handler (the route layer passes raw segments, and the dashboard encodes `swarm:tool`). E2E and unit tests cover the encoded form.
+- **href** must be an in-app path (`/...`, not `//`), max 500. Label, href, meta and reason are scrubbed with `scrubSecrets`; `.text-columns.json` classifies the new columns.
+- **Other edits outside the plan list**: `src/tests/docs-index-footprint.test.js` operation count 472 to 477 (it was already red on the base at 474), `src/tests/rbac-roles.test.ts` and `rbac-engine.test.ts` verb lists, `src/be/rbac-roles.ts` (viewer and requester get `checklist.write.own`).
+- **Existing DB upgrade**: a copy of an Oct 19 dev DB migrated 228 to 284 cleanly. Its encrypted config and OAuth rows did not decrypt with any local key, so the copy had those rows deleted before boot. Then `GET /api/checklist` returned 3 seeded items.
+- **check:local** was green on the final run. Two earlier runs had different single flaky files (`config-internal-keys.test.ts`, HTML from a port under parallel load); each passes alone.
+
