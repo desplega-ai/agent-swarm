@@ -272,9 +272,11 @@ describe("learnings-report", () => {
   });
 
   test("counts promote / keep / drop and hands lane B its rows", async () => {
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t1', 'lead-1')");
     const out: any = await dreamingLearnings(
       {
         mode: "report",
+        leadAgentId: "lead-1",
         plan,
         triage: triage([
           {
@@ -333,6 +335,33 @@ describe("learnings-report", () => {
     expect(out.promotedIds).toEqual(["l1"]);
     expect(out.cursor.to).toMatchObject({ id: "l4", at: "2026-11-04T03:30:00.000Z" });
     expect(out.markdown).toContain("1 promoted, 2 kept, 1 dropped");
+  });
+
+  test("a batch another agent ran is untrusted: no drops, no promotions, the cursor holds", async () => {
+    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t1', 'pool-worker')");
+    const drop = {
+      id: "l2",
+      decision: "drop",
+      dropWhy: "noise",
+      path: "/inbox/l2",
+      kind: "inbox",
+      action: "delete",
+      reason: "status echo",
+    };
+    const wrongAuthor: any = await dreamingLearnings(
+      { mode: "report", leadAgentId: "lead-1", plan, triage: triage([drop]) },
+      ctx() as any,
+    );
+    const noLead: any = await dreamingLearnings(
+      { mode: "report", plan, triage: triage([drop]) },
+      ctx() as any,
+    );
+    for (const out of [wrongAuthor, noLead]) {
+      expect(out.drops).toEqual([]);
+      expect(out.promotedIds).toEqual([]);
+      expect(out.cursor.to).toMatchObject({ id: "", createdAt: "" });
+    }
+    expect(wrongAuthor.markdown).toContain("untrusted-author");
   });
 
   test("a failed batch decides nothing and holds the cursor", async () => {
@@ -571,6 +600,92 @@ describe("memtax-create with the learnings triage", () => {
     });
     expect(out.markdown).toContain("Learnings triage (applied)");
     expect(out.counts.written).toBe(0); // drops are not /longterm writes
+  });
+
+  test("drops over the cap or with a failed delete are carried to the next live night, not lost to the cursor", async () => {
+    learning(1, "2026-10-27T00:00:00.000Z");
+    learning(3, "2026-10-27T02:00:00.000Z");
+    learning(4, "2026-10-27T03:00:00.000Z");
+    const plan: any = dropPlan();
+    plan.learnings.drops = [3, 1, 4].map((n) => ({
+      id: uuid(n),
+      name: `learning ${n}`,
+      contentHash: `hash-${n}`,
+      dropWhy: "noise",
+      reason: "status echo",
+    }));
+    const failing = () => {
+      const c: any = ctx();
+      const del = c.swarm.memory_delete;
+      c.swarm.memory_delete = async (x: { id: string }) =>
+        x.id === uuid(3) ? { data: { success: false, message: "busy" } } : del(x);
+      return c;
+    };
+    const night1: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        maxLearningDrops: 2,
+        plan,
+      },
+      failing(),
+    );
+    // uuid(3) failed, uuid(4) was over the cap: both carried; the cursor still moves past the batch.
+    expect(deleted).toEqual([uuid(1)]);
+    expect(night1.learnings).toMatchObject({ dropsDeleted: 1, dropsLeft: 1, dropsPending: 2 });
+    expect((kv.get("learnings:pending-drops") as any).drops.map((d: any) => d.id).sort()).toEqual(
+      [uuid(3), uuid(4)].sort(),
+    );
+    expect(kv.has("learnings:cursor")).toBe(true);
+
+    // Night 2 has no triage of its own: the carried drops are retried and deleted.
+    const night2: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r2",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        plan: { entities: [], clusters: [], memberNames: {} },
+      },
+      ctx() as any,
+    );
+    expect(deleted.slice(1).sort()).toEqual([uuid(3), uuid(4)].sort());
+    expect(night2.learnings).toMatchObject({ dropsCarried: 2, dropsDeleted: 2, dropsPending: 0 });
+    expect((kv.get("learnings:pending-drops") as any).drops).toEqual([]);
+  });
+
+  test("a delete that keeps failing is retried a bounded number of nights", async () => {
+    learning(3, "2026-10-27T02:00:00.000Z");
+    kv.set("learnings:pending-drops", {
+      drops: [
+        {
+          id: uuid(3),
+          name: "learning 3",
+          contentHash: "hash-3",
+          dropWhy: "noise",
+          reason: "x",
+          tries: 4,
+        },
+      ],
+    });
+    const c: any = ctx();
+    c.swarm.memory_delete = async () => ({ data: { success: false, message: "busy" } });
+    const out: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        plan: { entities: [], clusters: [], memberNames: {} },
+      },
+      c,
+    );
+    expect(out.learnings).toMatchObject({ dropsCarried: 1, dropsDeleted: 0, dropsPending: 0 });
   });
 
   test("dry run and v3Writes off delete nothing and leave the cursor", async () => {

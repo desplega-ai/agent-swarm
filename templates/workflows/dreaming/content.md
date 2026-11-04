@@ -1888,7 +1888,7 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
         "body": {
           "type": "agent-task",
           "config": {
-            "agentId": "{{writer}}",
+            "agentId": "{{lead}}",
             "modelTier": "smol",
             "tags": [
               "dreaming-v2",
@@ -1960,7 +1960,7 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
         "catalog": "learnings-plan.result.catalog",
         "runId": "run.id",
         "dryRun": "gather.result.dryRun",
-        "writer": "gather.result.writerAgentId"
+        "lead": "gather.result.leadAgentId"
       }
     },
     {
@@ -1976,7 +1976,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
           "runId": "{{runId}}",
           "dryRun": "{{dryRun}}",
           "plan": "{{p}}",
-          "triage": "{{t}}"
+          "triage": "{{t}}",
+          "leadAgentId": "{{lead}}"
         }
       },
       "next": "memtax-create-plan",
@@ -1984,7 +1985,8 @@ Trim backups and heartbeat drafts use the assigned worker's default agent-fs dri
         "runId": "run.id",
         "dryRun": "gather.result.dryRun",
         "p": "learnings-plan.result",
-        "t": "learnings-triage"
+        "t": "learnings-triage",
+        "lead": "gather.result.leadAgentId"
       }
     },
     {

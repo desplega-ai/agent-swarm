@@ -75,6 +75,10 @@ export const argsSchema = z.object({
 
 const NS = "dreaming-v2";
 const LEARNINGS_CURSOR_KEY = "learnings:cursor"; // dreaming-learnings CURSOR_KEY: plan reads it, only this apply writes it
+// Drops a live night could not delete (cap, write budget, a failed delete), retried first on the next live night.
+export const LEARNINGS_PENDING_KEY = "learnings:pending-drops";
+const LEARNINGS_PENDING_MAX = 600;
+const LEARNINGS_PENDING_TRIES = 5;
 const MAX_DOC = 1950;
 const TAGS = ["dreaming-v2", "longterm"]; // never "memtax": B1's read-only control counts memtax-tagged writes
 
@@ -1155,8 +1159,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     // Learnings triage carried by the plan: drops to delete (capped) and the cursor to commit.
     const ltPlan: any = pl.learnings && typeof pl.learnings === "object" ? pl.learnings : null;
     const allDrops: any[] = Array.isArray(ltPlan?.drops) ? ltPlan.drops.filter((d: any) => d && typeof d.id === "string") : [];
-    const learningDrops = allDrops.slice(0, a.maxLearningDrops);
+    let learningDrops = allDrops.slice(0, a.maxLearningDrops);
     let dropsLeft = allDrops.length - learningDrops.length;
+    let dropsCarried = 0;
+    let dropsPending: number | null = null;
     let cursorState = !ltPlan ? "none (no triage tonight)" : runDry ? "not committed (dry run)" : "not committed (v3Writes off)";
     // Writes (live only).
     const writes: any[] = [];
@@ -1232,11 +1238,31 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       }
       // Learnings-triage drops: delete each /learnings row after the /longterm writes, inside the same write budget.
       // Re-checked live: still a /learnings row, one chunk, unchanged since the triage read it. A drop the cap or the
-      // budget leaves stays on its TTL.
+      // budget leaves, or whose delete fails, is carried to the next live night in learnings:pending-drops: the cursor
+      // moves past the row either way, so the carry is what retries the decision. Earlier carried drops go first.
+      let carried: any[] = [];
+      try {
+        const v: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key: LEARNINGS_PENDING_KEY }))?.value;
+        carried = Array.isArray(v?.drops) ? v.drops.filter((d: any) => d && typeof d.id === "string") : [];
+      } catch (e: any) {
+        errors.push(`learnings pending drops read: ${String(e?.message ?? e).slice(0, 200)}`);
+      }
+      const merged = new Map<string, any>();
+      for (const d of [...carried, ...allDrops]) if (!merged.has(d.id)) merged.set(d.id, d);
+      const queue = [...merged.values()];
+      dropsCarried = carried.length;
+      learningDrops = queue.slice(0, a.maxLearningDrops);
+      dropsLeft = queue.length - learningDrops.length;
+      const pending: any[] = queue.slice(learningDrops.length);
+      const retry = (dr: any) => {
+        const tries = Number(dr.tries ?? 0) + 1;
+        if (tries < LEARNINGS_PENDING_TRIES) pending.push({ ...dr, tries });
+      };
       for (const [i, dr] of learningDrops.entries()) {
         if (Date.now() - t0 > (a.writeBudgetMs ?? 90000)) {
           dropsLeft += learningDrops.length - i;
-          errors.push(`write budget reached; ${learningDrops.length - i} learning drops left to the TTL`);
+          pending.push(...learningDrops.slice(i));
+          errors.push(`write budget reached; ${learningDrops.length - i} learning drops carried to the next night`);
           break;
         }
         const actionId = `LT${i + 1}`;
@@ -1251,14 +1277,26 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           const res: any = await ctx.swarm.memory_delete({ id: dr.id });
           if (res?.data?.success === false) {
             writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200), preimageKey });
+            retry(dr);
             continue;
           }
           const back = await q("post-drop", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [dr.id]);
           writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: String(cur[0].name ?? ""), key: cur[0].key, beforeSha: cur[0].contentHash, afterSha: null, preimageKey, why: `${dr.dropWhy}: ${String(dr.reason ?? "").slice(0, 120)}`, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
           ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: String(cur[0].name ?? ""), memoryIds: [dr.id] }, preimageKey });
+          if (Number(back[0]?.n) !== 0) retry(dr);
         } catch (e: any) {
           writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "failed", why: String(e?.message ?? e).slice(0, 200) });
+          retry(dr);
         }
+      }
+      // A skipped drop (gone, multi-chunk, or edited since triage, so the decision no longer matches the row) is final.
+      // The carry list is bounded; a row whose delete failed LEARNINGS_PENDING_TRIES nights in a row is left to its TTL.
+      try {
+        const keep = pending.slice(0, LEARNINGS_PENDING_MAX);
+        await ctx.swarm.kv_set({ namespace: NS, key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
+        dropsPending = keep.length;
+      } catch (e: any) {
+        errors.push(`learnings pending drops write: ${String(e?.message ?? e).slice(0, 200)}`);
       }
       // Write log for rollback + ledger items for the next night's dreaming-verify survival check. verify already
       // wrote ledger:<runId> earlier in this run (verify -> learn -> memtax), so this read-append-write has no racer.
@@ -1354,7 +1392,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const verifiedNames = new Set(writes.filter((w) => w.status === "verified" && w.kind !== "learning").map((w) => w.name));
     const cites = (xs: Prop[]) => new Set(xs.flatMap((x) => x.sources).filter((id) => promotedSet.has(id))).size;
     const ltc: any = ltPlan?.counts ?? {};
-    const learnings = ltPlan
+    const learnings = ltPlan || dropsCarried
       ? {
           read: Number(ltc.read ?? 0),
           promoted: Number(ltc.promoted ?? 0),
@@ -1366,6 +1404,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           dropsDeleted: writes.filter((w) => w.kind === "learning" && w.status === "verified").length,
           dropsSkipped: writes.filter((w) => w.kind === "learning" && w.status === "skipped").length,
           dropsLeft,
+          dropsCarried,
+          dropsPending,
           cursor: cursorState,
         }
       : null;
@@ -1392,7 +1432,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       L.push(
         `**Learnings triage (applied)**: ${learnings.read} read, ${learnings.promoted} promoted, ${learnings.kept} kept, ${learnings.dropped} dropped · ` +
           (live ? `${learnings.promotedWritten} promoted learnings cited by verified /longterm writes · ${learnings.dropsDeleted} of ${learnings.dropsPlanned} drops deleted` : `${learnings.promotedPlanned} promoted learnings cited by planned /longterm writes · ${learnings.dropsPlanned} drops would be deleted`) +
-          `${learnings.dropsLeft ? `, ${learnings.dropsLeft} left to the TTL (cap ${a.maxLearningDrops} or write budget)` : ""} · cursor ${learnings.cursor}.`,
+          `${learnings.dropsCarried ? ` (${learnings.dropsCarried} carried from earlier nights)` : ""}${learnings.dropsLeft ? `, ${learnings.dropsLeft} over the cap ${a.maxLearningDrops} or the write budget` : ""}${learnings.dropsPending != null ? `, ${learnings.dropsPending} carried to the next live night` : ""} · cursor ${learnings.cursor}.`,
       );
     }
     const nd = (x: any) => `\`${x.from}\` -> \`${x.to ?? x.twin}\` (${x.why}, cos ${x.cos})`;

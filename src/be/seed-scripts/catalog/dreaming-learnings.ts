@@ -22,6 +22,7 @@ export const argsSchema = z.object({
   generatedAt: z.string().optional(), // gather.result.generatedAt
   budget: z.unknown().optional(), // gather.result.budget
   memtax: z.string().optional(), // workflow input kill switch for lane B: "off" skips this step too
+  leadAgentId: z.string().optional(), // gather.result.leadAgentId: report trusts only triage tasks this agent ran
   batchSize: z.number().int().min(5).max(60).default(40),
   // 6 x 40 = 240 new learnings a night against ~115 written a day: the backlog shrinks by ~125 a night.
   maxBatches: z.number().int().min(0).max(12).default(6),
@@ -294,7 +295,20 @@ export default async function (args: unknown, ctx: ScriptContext) {
     }
     const meta = new Map<string, any>();
     for (const b of planned) for (const d of b?.docs ?? []) meta.set(String(d.id), { ...d, batchId: b.batchId, batchKind: b.kind });
+    // A drop becomes a delete with Lead authority, so only a batch the Lead ran is trusted (as lane B trusts only
+    // Lead-run distill tasks). A batch any other agent ran (a pool worker) decides nothing and holds the cursor.
     const parsed = parseTriage(a.triage);
+    const leadId = String(a.leadAgentId ?? "").trim();
+    const runIds = [...new Set(parsed.map((x) => x.taskId).filter((x): x is string => !!x))];
+    const authors = new Map<string, string>();
+    if (leadId && runIds.length) for (const r of await q("triage-authors", `SELECT id, agentId FROM agent_tasks WHERE id IN (${runIds.map(() => "?").join(",")})`, runIds)) authors.set(String(r.id), String(r.agentId ?? ""));
+    for (const x of parsed) {
+      if (x.status === "completed" && (!leadId || !x.taskId || authors.get(x.taskId) !== leadId)) {
+        x.status = "untrusted-author";
+        x.items = null;
+        x.error = !leadId ? "no leadAgentId to check the triage task against" : `triage task ${x.taskId ?? "(none)"} was not run by the lead`;
+      }
+    }
     const byBatch = new Map(parsed.map((x) => [x.batchId, x]));
     const okBatchIds = new Set(parsed.filter((x) => x.status === "completed").map((x) => x.batchId));
     const failedBatches = planned
