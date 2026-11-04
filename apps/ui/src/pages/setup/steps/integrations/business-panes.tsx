@@ -104,7 +104,11 @@ function OpenConnections({ note }: { note: string }) {
       <p className="text-sm text-muted-foreground">{note}</p>
       <Button asChild variant="outline" size="sm">
         {/* A new tab keeps setup open in this one. */}
-        <Link to={setupExitHref("/connections")} target="_blank" rel="noopener noreferrer">
+        <Link
+          to={setupExitHref("/integrations/tools?tab=connections")}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           Open Connections
           <ExternalLink />
         </Link>

@@ -1,7 +1,8 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ForwardRefExoticComponent, MouseEvent, ReactNode, RefAttributes } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { useApiKeyStatuses } from "@/api/hooks/use-api-keys";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useMetrics } from "@/api/hooks/use-metrics";
@@ -9,23 +10,21 @@ import { useUsers } from "@/api/hooks/use-users";
 import { useStatusContext } from "@/app/status-context";
 import { BookOpenIcon } from "@/components/icons/book-open";
 import { BrainIcon } from "@/components/icons/brain";
-import { CableIcon } from "@/components/icons/cable";
 import { ChartColumnIcon } from "@/components/icons/chart-column";
-import { ClipboardCheckIcon } from "@/components/icons/clipboard-check";
 import { ClockIcon } from "@/components/icons/clock";
-import { ContactIcon } from "@/components/icons/contact";
+import { CpuIcon } from "@/components/icons/cpu";
 import { FileClockIcon } from "@/components/icons/file-clock";
-import { FileTextIcon } from "@/components/icons/file-text";
 import { FolderOpenIcon } from "@/components/icons/folder-open";
 import { GlobeIcon } from "@/components/icons/globe";
 import { HomeIcon } from "@/components/icons/home";
 import { LayoutGridIcon } from "@/components/icons/layout-grid";
-import { Link2Icon } from "@/components/icons/link-2";
 import { ListTodoIcon } from "@/components/icons/list-todo";
+import { MessageCircleIcon } from "@/components/icons/message-circle";
 import { MessageSquareIcon } from "@/components/icons/message-square";
 import { SettingsIcon } from "@/components/icons/settings";
 import { UsersIcon } from "@/components/icons/users";
 import { WorkflowIcon } from "@/components/icons/workflow";
+import { WrenchIcon } from "@/components/icons/wrench";
 import { UserSwitcher } from "@/components/identity/user-switcher";
 import { BetaTag, NewTag } from "@/components/shared/beta-tag";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
@@ -51,6 +50,7 @@ import { navRequirementMet } from "@/lib/agent-fs/state";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
+import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
 import { useIsAdmin } from "@/lib/use-can";
 import { cn, formatCompactNumber } from "@/lib/utils";
@@ -103,6 +103,8 @@ interface NavGroup {
   id: string;
   label: string;
   items: NavItem[];
+  /** Open on a first visit (no stored state). Defaults to true. */
+  defaultOpen?: boolean;
 }
 
 /** A sub-route entry surfaced in a footer item's hover flyout. */
@@ -113,6 +115,10 @@ interface FlyoutEntry {
   end?: boolean;
   /** Hidden unless `useIsAdmin()`; see `NavItem.adminOnly`. */
   adminOnly?: boolean;
+  /** Listed under the flyout's "Advanced" label, after the other entries. */
+  advanced?: boolean;
+  /** Shown only while `useRuntimePoolsGate()` is open. */
+  requires?: "runtime-pools";
 }
 
 /** Footer destination: optionally carrying a hover flyout of sub-routes. */
@@ -126,7 +132,6 @@ const navGroups: NavGroup[] = [
     label: "WORK",
     items: [
       { title: "Home", path: "/", icon: HomeIcon },
-      { title: "Tasks", path: "/tasks", icon: ListTodoIcon },
       {
         title: "Sessions",
         path: "/sessions",
@@ -138,47 +143,56 @@ const navGroups: NavGroup[] = [
         },
       },
       {
-        title: "Pages",
-        path: "/pages",
-        icon: GlobeIcon,
-        gate: { minVersion: "1.79.0" },
-      },
-      { title: "Apps", path: "/apps", icon: LayoutGridIcon, adminOnly: true },
-      {
         title: "Files",
         path: "/file",
         icon: FolderOpenIcon,
         requires: "comb",
       },
-      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },
+      {
+        title: "Pages",
+        path: "/pages",
+        icon: GlobeIcon,
+        gate: { minVersion: "1.79.0" },
+      },
+      // Everyone sees Apps: the page gates create and edit, and the server
+      // RBAC is the real gate.
+      { title: "Apps", path: "/apps", icon: LayoutGridIcon },
     ],
   },
   {
-    id: "swarm",
-    label: "SWARM",
+    id: "automate",
+    label: "AUTOMATE",
     items: [
-      { title: "Agents", path: "/agents", icon: UsersIcon },
+      { title: "Schedules", path: "/schedules", icon: ClockIcon, adminOnly: true },
+      { title: "Workflows", path: "/workflows", icon: WorkflowIcon, adminOnly: true },
+    ],
+  },
+  {
+    id: "connect",
+    label: "CONNECT",
+    items: [
       {
-        title: "People",
-        path: "/people",
-        icon: ContactIcon,
-        gate: { minVersion: "1.80.0" },
+        title: "Channels",
+        path: "/integrations/channels",
+        icon: MessageCircleIcon,
         adminOnly: true,
       },
-      { title: "Workflows", path: "/workflows", icon: WorkflowIcon, adminOnly: true },
-      { title: "Scripts", path: "/scripts", icon: FileClockIcon, adminOnly: true },
-      { title: "Schedules", path: "/schedules", icon: ClockIcon, adminOnly: true },
+      { title: "Tools", path: "/integrations/tools", icon: WrenchIcon, adminOnly: true },
+      { title: "AI providers", path: "/integrations/ai", icon: CpuIcon, adminOnly: true },
     ],
   },
   {
-    id: "resources",
-    label: "RESOURCES",
+    // Collapsed on a first visit. A new id, so a stored state from the old
+    // groups cannot pin it open.
+    id: "build",
+    label: "BUILD",
+    defaultOpen: false,
     items: [
+      { title: "Agents", path: "/agents", icon: UsersIcon },
+      { title: "Tasks", path: "/tasks", icon: ListTodoIcon },
       { title: "Skills", path: "/skills", icon: BookOpenIcon, adminOnly: true },
-      { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon, adminOnly: true },
-      { title: "Connections", path: "/connections", icon: Link2Icon, adminOnly: true },
       { title: "Memory", path: "/memory", icon: BrainIcon, adminOnly: true },
-      { title: "Templates", path: "/templates", icon: FileTextIcon, adminOnly: true },
+      { title: "Scripts", path: "/scripts", icon: FileClockIcon, adminOnly: true },
     ],
   },
 ];
@@ -189,6 +203,8 @@ const navGroups: NavGroup[] = [
  * the item itself still navigates to its default route. The collapse and
  * expand buttons live in the header (`SidebarBrandRow`); the SidebarRail
  * divider and the keyboard shortcut toggle the sidebar too.
+ * Keep the Settings entries in step with `SETTINGS_NAV` in
+ * `pages/settings/settings-layout.tsx`.
  */
 const footerNav: FooterItem[] = [
   {
@@ -196,15 +212,33 @@ const footerNav: FooterItem[] = [
     path: "/settings",
     icon: SettingsIcon,
     flyout: [
-      { title: "Connections", path: "/settings/connections" },
+      { title: "Servers", path: "/settings/connections" },
+      { title: "People", path: "/people", adminOnly: true },
       { title: "Appearance", path: "/settings/appearance" },
-      { title: "Secrets", path: "/settings/secrets", adminOnly: true },
-      { title: "Provider keys", path: "/settings/api-keys", adminOnly: true },
-      { title: "Integrations", path: "/settings/integrations", adminOnly: true },
       { title: "Configuration", path: "/settings/configuration", adminOnly: true },
       { title: "Extensions", path: "/settings/extensions", adminOnly: true },
+      {
+        title: "Runtime pools",
+        path: "/settings/runtime-pools",
+        adminOnly: true,
+        requires: "runtime-pools",
+      },
       { title: "Repos", path: "/settings/repos", adminOnly: true },
       { title: "Debug", path: "/settings/debug", adminOnly: true },
+      { title: "Secrets", path: "/settings/secrets", adminOnly: true, advanced: true },
+      { title: "Templates", path: "/templates", adminOnly: true, advanced: true },
+      {
+        title: "Connection playground",
+        path: "/settings/connection-playground",
+        adminOnly: true,
+        advanced: true,
+      },
+      {
+        title: "Raw fetch credentials",
+        path: "/settings/fetch-credentials",
+        adminOnly: true,
+        advanced: true,
+      },
     ],
   },
   {
@@ -274,6 +308,8 @@ interface FooterNavItemProps {
    * resolved; `undefined` means render no badge.
    */
   badge?: ReactNode;
+  /** Live counts on flyout entries, keyed by entry path (People's user count). */
+  entryBadges?: Record<string, ReactNode>;
 }
 
 /**
@@ -282,7 +318,7 @@ interface FooterNavItemProps {
  * right of the sidebar; the trigger itself remains a NavLink so a click still
  * navigates. Items without a flyout render a plain link.
  */
-function FooterNavItem({ item, isActive, badge }: FooterNavItemProps) {
+function FooterNavItem({ item, isActive, badge, entryBadges = {} }: FooterNavItemProps) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -332,30 +368,41 @@ function FooterNavItem({ item, isActive, badge }: FooterNavItemProps) {
           side="right"
           align="start"
           sideOffset={8}
-          className="w-48 p-1"
+          className="w-56 p-1"
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           // Hover-driven: don't steal focus from the page on open.
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <div className="flex flex-col gap-0.5">
-            {item.flyout.map((entry) => (
-              <NavLink
-                key={entry.path}
-                to={entry.path}
-                end={entry.end}
-                onClick={() => setOpen(false)}
-                className={({ isActive: entryActive }) =>
-                  cn(
-                    "rounded-sm px-2 py-1.5 text-sm transition-colors hover-linger",
-                    entryActive
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                  )
-                }
-              >
-                {entry.title}
-              </NavLink>
+            {item.flyout.map((entry, index) => (
+              <Fragment key={entry.path}>
+                {entry.advanced && !item.flyout?.[index - 1]?.advanced ? (
+                  <div className="mt-1 border-t border-border px-2 pt-2 pb-1 text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                    Advanced
+                  </div>
+                ) : null}
+                <NavLink
+                  to={entry.path}
+                  end={entry.end}
+                  onClick={() => setOpen(false)}
+                  className={({ isActive: entryActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors hover-linger",
+                      entryActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    )
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                  {entryBadges[entry.path] != null ? (
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                      {entryBadges[entry.path]}
+                    </span>
+                  ) : null}
+                </NavLink>
+              </Fragment>
             ))}
           </div>
         </PopoverContent>
@@ -599,7 +646,7 @@ export function AppSidebar() {
   const gates: Record<string, ReturnType<typeof useFeatureGate>> = {
     "1.76.0": useFeatureGate("1.76.0"), // Sessions
     "1.79.0": useFeatureGate("1.79.0"), // Pages
-    "1.80.0": useFeatureGate("1.80.0"), // People
+    "1.80.0": useFeatureGate("1.80.0"), // People (users count)
     "1.82.0": useFeatureGate("1.82.0"), // Live nav-item counts
     [SESSIONS_V2_MIN_VERSION]: useFeatureGate(SESSIONS_V2_MIN_VERSION), // Sessions "NEW" tag
   };
@@ -617,6 +664,9 @@ export function AppSidebar() {
   const { data: metrics } = useMetrics({ enabled: countsEnabled });
   const { data: dashboardCosts } = useDashboardCosts({ enabled: countsEnabled });
   const { data: users } = useUsers();
+  const runtimePools = useRuntimePoolsGate();
+  // The AI providers dot: any pooled key rate-limited or rejected.
+  const { data: apiKeys } = useApiKeyStatuses(undefined, { enabled: countsEnabled && isAdmin });
 
   // Map of `nav path -> resolved badge string`. An entry is present only when
   // the value is loaded and worth showing; absence means "no badge".
@@ -627,8 +677,20 @@ export function AppSidebar() {
     if (typeof runningTasks === "number" && runningTasks > 0) {
       badges["/tasks"] = formatCompactNumber(runningTasks);
     }
-    if (Array.isArray(users)) {
+    if (Array.isArray(users) && gates["1.80.0"].supported) {
       badges["/people"] = formatCompactNumber(users.length);
+    }
+    const failingKeys = (apiKeys ?? []).filter(
+      (key) => key.status === "rate_limited" || key.lastValidationFailedAt != null,
+    ).length;
+    if (failingKeys > 0) {
+      badges["/integrations/ai"] = (
+        <span
+          role="img"
+          aria-label={`${failingKeys} provider ${failingKeys === 1 ? "key is" : "keys are"} rate limited or failing`}
+          className="size-1.5 rounded-full bg-status-warning"
+        />
+      );
     }
     const costToday = dashboardCosts?.costToday;
     if (typeof costToday === "number") {
@@ -648,7 +710,7 @@ export function AppSidebar() {
   const brandColor = status?.identity.brand_color ?? null;
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" variant="floating">
       <SidebarHeader className="border-b border-sidebar-border">
         <SidebarBrandRow name={identityName} logo={identityLogo} brandColor={brandColor} />
         <div className="group-data-[collapsible=icon]:hidden">
@@ -662,14 +724,18 @@ export function AppSidebar() {
           const items = group.items.filter((item) => !isHidden(item));
           if (items.length === 0) return null;
           return (
-            <SidebarGroup key={group.id}>
+            // No right padding: the content keeps an 8px scrollbar gutter
+            // (`scrollbar-gutter: stable`), and that gutter is the right
+            // inset, so a row keeps its width when the scrollbar shows. The
+            // icon rail hides its scrollbar, so it keeps the padding.
+            <SidebarGroup key={group.id} className="pr-0 group-data-[collapsible=icon]:pr-2">
               {/* Section title is hidden in icon-collapsed mode: the items
                   themselves stay so you still get the navigation, just
                   without the truncated "WOR / SWA / RES…" labels. */}
               <div className="group-data-[collapsible=icon]:hidden">
                 <CollapsibleSection
                   title={group.label}
-                  defaultOpen
+                  defaultOpen={group.defaultOpen ?? true}
                   persistKey={`agent-swarm:sidebar-group:${group.id}`}
                 >
                   <SidebarGroupContent>
@@ -738,13 +804,18 @@ export function AppSidebar() {
         <SidebarMenu>
           {footerNav.map((item) => {
             if (isGated(item)) return null;
-            const flyout = item.flyout?.filter((entry) => isAdmin || !entry.adminOnly);
+            const flyout = item.flyout?.filter(
+              (entry) =>
+                (isAdmin || !entry.adminOnly) &&
+                (entry.requires !== "runtime-pools" || runtimePools.open),
+            );
             return (
               <FooterNavItem
                 key={item.path}
                 item={{ ...item, flyout }}
                 isActive={location.pathname.startsWith(item.path)}
                 badge={badges[item.path]}
+                entryBadges={{ "/people": badges["/people"] }}
               />
             );
           })}

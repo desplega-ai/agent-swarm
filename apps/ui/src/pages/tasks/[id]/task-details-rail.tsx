@@ -750,7 +750,7 @@ export function TaskDetailsRail({
           {task.credentialKeySuffix ? (
             <RailRow label="API key" mono>
               <Link
-                to="/settings/api-keys"
+                to="/integrations/ai"
                 className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
               >
                 {API_KEY_LABELS[task.credentialKeyType ?? ""] ?? task.credentialKeyType ?? "Key"} …

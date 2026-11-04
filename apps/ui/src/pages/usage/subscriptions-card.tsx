@@ -217,8 +217,8 @@ export function SubscriptionsCard({
 
         <p className="text-xs text-muted-foreground">
           {catalog ? `List prices checked ${formatDay(catalog.checkedAt, true)}. ` : null}
-          <Link to="/settings/api-keys" className="text-primary hover:underline">
-            Rename credentials on the Provider keys page
+          <Link to="/integrations/ai" className="text-primary hover:underline">
+            Rename credentials on the AI providers page
           </Link>
           .
         </p>

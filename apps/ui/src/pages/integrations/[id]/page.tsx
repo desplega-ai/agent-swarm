@@ -77,6 +77,8 @@ import {
   SECRET_MASK_SENTINEL,
 } from "@/lib/integration-form-state";
 import {
+  connectPagePath,
+  connectPageTitle,
   getIntegrationFields,
   getPresenceKeys,
   INTEGRATIONS,
@@ -147,7 +149,7 @@ export default function IntegrationDetailPage() {
           description={`No integration matches "${id ?? ""}".`}
           action={
             <Button asChild size="sm" variant="outline">
-              <Link to="/settings/integrations">← Back to integrations</Link>
+              <Link to="/integrations/tools">← Back to Connect</Link>
             </Button>
           }
         />
@@ -362,7 +364,7 @@ function IntegrationDetailInner({
       {/* Header */}
       <div className="flex flex-col gap-2">
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
-          <Link to="/settings/integrations">← All integrations</Link>
+          <Link to={connectPagePath(def.category)}>← All {connectPageTitle(def.category)}</Link>
         </Button>
         <PageHeader
           title={

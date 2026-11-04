@@ -45,6 +45,11 @@ function render() {
   );
 }
 
+/** The bare `<span>` labels of the rail links, in order. */
+function railLabels(html: string): string[] {
+  return [...html.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1] ?? "");
+}
+
 describe("SettingsLayout", () => {
   afterEach(() => {
     isAdmin = true;
@@ -62,10 +67,33 @@ describe("SettingsLayout", () => {
     expect(html).toContain("Configuration");
   });
 
-  test("a non-admin sees only Appearance and Connections", () => {
+  test("a non-admin sees only Servers and Appearance", () => {
     isAdmin = false;
     const html = render();
-    const labels = [...html.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1]);
-    expect(labels).toEqual(["Connections", "Appearance"]);
+    expect(railLabels(html)).toEqual(["Servers", "Appearance"]);
+    expect(html).not.toContain(">Advanced<");
+  });
+
+  test("an admin sees the rail in flyout order, with the Advanced group last", () => {
+    const html = render();
+    // The mobile tab strip repeats the labels; read the desktop rail only.
+    const rail = html.slice(html.indexOf('aria-label="Settings" class="flex flex-col'));
+    expect(railLabels(rail)).toEqual([
+      "Servers",
+      "People",
+      "Appearance",
+      "Configuration",
+      "Extensions",
+      "Repos",
+      "Debug",
+      "Secrets",
+      "Templates",
+      "Connection playground",
+      "Raw fetch credentials",
+    ]);
+    expect(rail.indexOf(">Advanced<")).toBeLessThan(rail.indexOf("Secrets"));
+    expect(rail.indexOf(">Advanced<")).toBeGreaterThan(rail.indexOf("Debug"));
+    expect(html).not.toContain("Provider keys");
+    expect(html).not.toContain("Integrations");
   });
 });

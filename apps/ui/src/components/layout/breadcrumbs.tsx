@@ -66,7 +66,10 @@ const routeLabels: Record<string, string> = {
   templates: "Templates",
   history: "History",
   debug: "Debug",
-  integrations: "Integrations",
+  integrations: "Connect",
+  channels: "Channels",
+  tools: "Tools",
+  ai: "AI providers",
   keys: "Provider keys",
   lineage: "Lineage",
   "api-keys": "Provider keys",
@@ -88,8 +91,28 @@ const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
 const routeRedirects: Record<string, string> = {
   "workflow-runs": "/workflows",
   "script-runs": "/scripts?tab=runs",
-  "oauth-apps": "/connections?tab=oauth-apps",
 };
+
+/** Labels and links for whole paths, where a segment name alone is ambiguous. */
+const pathLabels: Record<string, string> = {
+  "/settings/connections": "Servers",
+  "/integrations/tools/connections": "Script connections",
+  "/settings/connection-playground": "Connection playground",
+  "/settings/fetch-credentials": "Raw fetch credentials",
+};
+const pathLinks: Record<string, string> = {
+  "/integrations/tools/connections": "/integrations/tools?tab=connections",
+  "/integrations/tools/oauth-apps": "/integrations/tools?tab=oauth-apps",
+  "/integrations/tools/mcp-servers": "/integrations/tools?tab=mcp",
+};
+
+/**
+ * Connect › Tools lists sit one level down (`/integrations/tools/<list>/:id`),
+ * so their entity id is segment 3, not 1.
+ */
+function detailBase(segments: string[]): number {
+  return segments[0] === "integrations" && segments[1] === "tools" ? 2 : 0;
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Pages use 32-char random-hex IDs (`lower(hex(randomblob(16)))`), not UUIDs.
@@ -149,13 +172,18 @@ export function Breadcrumbs() {
 
   // Detail routes (/<parent>/:id[/...]) get a contextual leaf name fetched
   // from the matching single-entity hook instead of the truncated raw id.
-  // The id segment is always `segments[1]` under a known `segments[0]`
-  // parent. We compute one id-or-empty value per entity type and call every
+  // The id segment follows a known parent: `segments[1]` under
+  // `segments[0]`, or `segments[3]` under a Connect › Tools list
+  // (`detailBase`). We compute one id-or-empty value per entity type and call every
   // hook unconditionally (empty string → query disabled) so hook order stays
   // stable across renders (React rules of hooks).
-  const parent = segments[0];
+  const base = detailBase(segments);
+  const parent = segments[base];
+  const detailIndex = base + 1;
   const detailId =
-    segments.length >= 2 && isEntityId(segments[1]) ? (segments[1] as string) : undefined;
+    segments.length > detailIndex && isEntityId(segments[detailIndex])
+      ? (segments[detailIndex] as string)
+      : undefined;
   const idFor = (route: string): string => (parent === route && detailId ? detailId : "");
 
   // `usePage` / `useUser` / `useSession` accept `string | undefined`; the rest
@@ -262,12 +290,12 @@ export function Breadcrumbs() {
   const crumbs = segments
     .map((segment, index) => {
       const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
-      const path = routeRedirects[segment] ?? defaultPath;
-      let label = formatSegment(segment, segments[index - 1]);
+      const path = pathLinks[defaultPath] ?? routeRedirects[segment] ?? defaultPath;
+      let label = pathLabels[defaultPath] ?? formatSegment(segment, segments[index - 1]);
       // Pretty-print the detail-id leaf with the resolved entity name. Only the
-      // id segment at index 1 is replaced — other path segments keep their
+      // id segment (`detailIndex`) is replaced. Other path segments keep their
       // routeLabels behavior.
-      if (index === 1 && segment === detailId && contextualName) {
+      if (index === detailIndex && segment === detailId && contextualName) {
         label = contextualName.trim();
       }
       const mono = index === 1 && segment === detailId && !!taskCrumb;

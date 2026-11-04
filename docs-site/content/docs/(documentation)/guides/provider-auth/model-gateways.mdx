@@ -258,7 +258,7 @@ Set the variable on both API and worker processes if every OpenRouter call must 
 - **API server** — the debounced global-config reload re-injects the row over the server process environment, so model refreshes and internal summarizers pick it up within seconds.
 - **Workers** — each worker fetches `GET /api/config/resolved` before it starts a task and passes the merged environment into the harness adapter, so the next task on that worker uses the new gateway.
 
-A task already running keeps the gateway it started with. The gateway credential itself stays out of this page: put `OPENROUTER_API_KEY` on the Secrets/Integrations pages or in the worker environment.
+A task already running keeps the gateway it started with. The gateway credential itself stays out of this page: put `OPENROUTER_API_KEY` on the Secrets page, on Connect → AI providers, or in the worker environment.
 
 ### OpenCode through a gateway
 

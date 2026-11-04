@@ -40,7 +40,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -219,7 +218,16 @@ function ModelLimitBadges({ modelLimits }: { modelLimits: ApiKeyStatus["modelLim
   );
 }
 
-export default function ApiKeysPage() {
+/**
+ * The pooled provider keys: summary panels, filters and the key grid.
+ * Connect › AI providers mounts it below the LLM provider cards.
+ */
+export function ProviderKeysPanel({
+  hideSearch = false,
+}: {
+  /** The host page owns the `?search` input (Connect › AI providers). */
+  hideSearch?: boolean;
+}) {
   const { data: keys, isLoading } = useApiKeyStatuses();
   const { data: costs } = useApiKeyCosts();
   const setKeyName = useSetApiKeyName();
@@ -566,8 +574,6 @@ export default function ApiKeysPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Provider keys" />
-
       {/* Summary cards */}
       <div
         className={cn(
@@ -613,15 +619,17 @@ export default function ApiKeysPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search by name, suffix, type…"
-            value={search}
-            onChange={(e) => setParam("search", e.target.value, { reset: ["apiKeysPage"] })}
-            className="pl-9"
-          />
-        </div>
+        {hideSearch ? null : (
+          <div className="relative flex-1 min-w-48 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by name, suffix, type…"
+              value={search}
+              onChange={(e) => setParam("search", e.target.value, { reset: ["apiKeysPage"] })}
+              className="pl-9"
+            />
+          </div>
+        )}
         <Select
           value={providerFilter}
           onValueChange={(value) =>
