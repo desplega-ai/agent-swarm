@@ -22,7 +22,7 @@
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName } from "../types";
-import { resolveAgentFsLinkBase } from "../utils/constants";
+import { agentFsFileLinkQuery, resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -251,10 +251,10 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   // agent-fs CLI needs a local environment with AGENT_FS_API_URL set.
   if (hasMcp && serverHasCapability("pages", true)) {
     const agentFsConfigured = hasLocalEnv && Boolean(process.env.AGENT_FS_API_URL);
+    const fileLinkBase = resolveAgentFsLinkBase("prompt");
     const outputsResult = await resolveTemplateAsync(
       agentFsConfigured ? "system.agent.outputs" : "system.agent.outputs.no_agent_fs",
-      // Unset AGENT_FS_LINK_TARGET keeps the literal the agent expands in its shell.
-      { fileLinkBase: resolveAgentFsLinkBase("prompt") ?? `\${AGENT_FS_LIVE_URL}` },
+      { fileLinkBase, fileLinkQuery: agentFsFileLinkQuery(fileLinkBase) },
     );
     prompt += outputsResult.text;
   }

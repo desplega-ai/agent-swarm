@@ -36,6 +36,7 @@ const ENV_KEYS = [
   "AGENT_FS_API_URL",
   "AGENT_FS_LINK_TARGET",
   "AGENT_FS_LIVE_URL",
+  "AGENT_FS_PUBLIC_URL",
   "APP_URL",
   "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
@@ -488,26 +489,48 @@ describe("getBasePrompt: outputs section", () => {
   const AGENT_FS_LINE = "agent-fs is the shared drive between agents";
   const NO_AGENT_FS_LINE = "agent-fs is not configured here.";
 
+  const linkLine = (base: string) =>
+    `Link files as \`${base}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`;
+
   test("uses the agent-fs variant when a local environment has AGENT_FS_API_URL", async () => {
     process.env.AGENT_FS_API_URL = "http://localhost:8787";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toContain("## Outputs");
     expect(result).toContain(AGENT_FS_LINE);
-    expect(result).toContain(
-      `Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`,
-    );
+    // No APP_URL: the default live host.
+    expect(result).toContain(linkLine("https://live.agent-fs.dev"));
     expect(result).not.toContain(NO_AGENT_FS_LINE);
   });
 
-  test("AGENT_FS_LINK_TARGET=dashboard with APP_URL links people to <APP_URL>/file/~/", async () => {
+  test("files-first delivery: results under the asset key, a Page only when asked", async () => {
     process.env.AGENT_FS_API_URL = "http://localhost:8787";
-    process.env.AGENT_FS_LINK_TARGET = "dashboard";
-    process.env.APP_URL = "http://localhost:5274/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain("Deliver results as files.");
+    expect(result).toContain("The drive path equals the key string");
+    expect(result).toContain("make a Page only when the requester asks for one");
+    expect(result.match(/## Outputs/g)).toHaveLength(1);
+    expect(result.match(/The drive path equals the key string/g)).toHaveLength(1);
+  });
+
+  test("APP_URL set and no AGENT_FS_LINK_TARGET: links point at the dashboard", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.APP_URL = "https://app.example.test/";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain(linkLine("https://app.example.test"));
+    expect(result).not.toContain("live.agent-fs.dev");
+  });
+
+  test("a live link carries ?apiUrl= when AGENT_FS_PUBLIC_URL is set", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.test";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toContain(
-      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+      "`https://live.agent-fs.dev/file/~/<org>/<drive>/<path>?apiUrl=https%3A%2F%2Ffs.example.test`",
     );
-    expect(result).not.toContain("AGENT_FS_LIVE_URL}/file/~/");
+    process.env.APP_URL = "https://app.example.test";
+    const dashboard = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(dashboard).toContain(linkLine("https://app.example.test"));
+    expect(dashboard).not.toContain("apiUrl=");
   });
 
   test("AGENT_FS_LINK_TARGET=dashboard without APP_URL falls back to the live base", async () => {
@@ -515,9 +538,7 @@ describe("getBasePrompt: outputs section", () => {
     process.env.AGENT_FS_LINK_TARGET = "dashboard";
     process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
-    expect(result).toContain(
-      "Give people the live app link `https://live.example.test/file/~/<org>/<drive>/<path>`.",
-    );
+    expect(result).toContain(linkLine("https://live.example.test"));
   });
 
   test("AGENT_FS_LINK_TARGET=live uses the default live host", async () => {
@@ -525,19 +546,15 @@ describe("getBasePrompt: outputs section", () => {
     process.env.AGENT_FS_LINK_TARGET = "live";
     process.env.APP_URL = "http://localhost:5274";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
-    expect(result).toContain(
-      "Give people the live app link `https://live.agent-fs.dev/file/~/<org>/<drive>/<path>`.",
-    );
+    expect(result).toContain(linkLine("https://live.agent-fs.dev"));
   });
 
-  test("an invalid AGENT_FS_LINK_TARGET keeps the exact old sentence", async () => {
+  test("an invalid AGENT_FS_LINK_TARGET counts as unset", async () => {
     process.env.AGENT_FS_API_URL = "http://localhost:8787";
     process.env.AGENT_FS_LINK_TARGET = "Dashboard2";
     process.env.APP_URL = "http://localhost:5274";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
-    expect(result).toContain(
-      `Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.`,
-    );
+    expect(result).toContain(linkLine("http://localhost:5274"));
   });
 
   test("uses the no_agent_fs variant when AGENT_FS_API_URL is unset", async () => {

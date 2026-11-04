@@ -255,14 +255,23 @@ describe("Session templates: MUST pointers", () => {
     const definition = getAllTemplateDefinitions().find(
       (d) => d.eventType === "system.agent.outputs",
     );
-    expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase"]);
+    expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase", "fileLinkQuery"]);
     const result = resolveTemplate("system.agent.outputs", {
       fileLinkBase: "http://localhost:5274",
+      fileLinkQuery: "",
     });
     expect(result.text).toContain(
-      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+      "Link files as `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
     );
+    expect(result.text).toContain("The drive path equals the key string");
+    expect(result.text).toContain("make a Page only when the requester asks for one");
     expect(result.unresolved).toEqual([]);
+  });
+
+  test("the no-agent-fs outputs block keeps the Page rule", () => {
+    const result = resolveTemplate("system.agent.outputs.no_agent_fs", {});
+    expect(result.text).toContain("make a Page only when the requester asks for one");
+    expect(result.text).not.toContain("drive path");
   });
 });
 

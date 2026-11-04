@@ -1241,6 +1241,8 @@ export async function provisionAgentFsAfterRegistration(opts: {
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
  * - SWARM_ORG_NAME — read per telemetry event for org identity.
  * - AGENT_FS_LINK_TARGET — read by the prompt builder for the file-link base.
+ * - APP_URL: read by the prompt builder for the file-link base (the dashboard
+ *   by default when set).
  *
  * CLAUDE_TRANSPORT stays in the per-session environment. Caching a scoped
  * value here would prevent deletion from restoring the configured default.
@@ -1261,6 +1263,7 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
   "AGENT_FS_LINK_TARGET",
+  "APP_URL",
   // Gate the public-ranking `ranking.usage` emit, so clearing the website or
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",

@@ -212,17 +212,23 @@ registerTemplate({
 ## Outputs
 
 Short answers: inline in the task output.
-agent-fs is the shared drive between agents and people. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
-Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
+agent-fs is the shared drive between agents and people. Deliver results as files. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
+Use-case results go under the task's asset key (\`key\` in \`get-task-details\`) in the shared drive. The drive path equals the key string, for example \`shared/<slug>/report-<YYYY-MM-DD>.md\`. Later runs read the earlier reports in that folder and compare.
+Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
-Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. Report missing variables.
-Give people the live app link \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
+Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
+Link files as \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>{{fileLinkQuery}}\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
   variables: [
     {
       name: "fileLinkBase",
       description:
-        "Base URL of people-facing file links (AGENT_FS_LINK_TARGET); the literal AGENT_FS_LIVE_URL shell reference when unset",
+        "Base URL of people-facing file links: APP_URL by default when set, else the agent-fs live app (AGENT_FS_LINK_TARGET overrides)",
+    },
+    {
+      name: "fileLinkQuery",
+      description:
+        "Query string for live-app file links (?apiUrl=<AGENT_FS_PUBLIC_URL>); empty for dashboard links",
     },
   ],
   category: "system",
@@ -236,7 +242,7 @@ registerTemplate({
 
 Short answers: inline in the task output.
 Documents: Markdown task attachments; agent-fs is not configured here.
-Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
+Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
 `,

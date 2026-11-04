@@ -239,17 +239,23 @@ With `change-stream`, the header shows **Live**. Agent edits, new files, and new
 
 With Comb on, agent-fs links in the dashboard open in Comb while you are connected. This covers task attachments, citations, attachment links in prompts, and links inside Comb files. Session logs and task outputs keep the link safety prompt and open agent-fs.
 
-When `APP_URL` is set, Slack attachment links and the lead's follow-up prompts point at `APP_URL/file/~/<org>/<drive>/<path>`. Without `APP_URL`, they keep the agent-fs link.
+When `APP_URL` (or the deprecated `DASHBOARD_URL`) is set, file links open in the dashboard by default: Slack attachment links, the lead's follow-up prompts, and the links that agents give people point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links also need Comb on. Without `APP_URL`, they keep the agent-fs live app link.
 
-`AGENT_FS_LINK_TARGET` overrides this automatic choice for task attachment links and for the file links that agents give people:
+`AGENT_FS_LINK_TARGET` overrides this default for task attachment links and for the file links that agents give people:
 
 | Value | Effect |
 | --- | --- |
-| unset | The automatic choice above. Agents are told to link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`. |
-| `dashboard` | Links point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links need Comb on and an explicit `APP_URL` (or `DASHBOARD_URL`); otherwise they use the live app. The agent prompt uses the worker's own `APP_URL`, so set `APP_URL` in each worker's environment: a saved `APP_URL` config row does not reach workers. |
+| unset | The default above: `dashboard` when `APP_URL` is set, else `live`. |
+| `dashboard` | Links point at `APP_URL/file/~/<org>/<drive>/<path>`. Attachment links need Comb on and an explicit `APP_URL`; otherwise they use the live app. |
 | `live` | Links point at the agent-fs live app (`AGENT_FS_LIVE_URL`, default `https://live.agent-fs.dev`). |
 
-Citations and the context preamble always use the live app link. A saved value reaches running workers at their next poll.
+The agent prompt uses the worker's own `APP_URL`. A saved `APP_URL` or `AGENT_FS_LINK_TARGET` (Settings, Configuration) reaches running workers at their next poll. The deployment env stays the fallback.
+
+When `AGENT_FS_PUBLIC_URL` is set, a link to the live app carries `?apiUrl=<AGENT_FS_PUBLIC_URL>`, so a browser with no agent-fs key knows which agent-fs to sign in to. Dashboard links never carry it.
+
+Citations and the context preamble always use the live app link.
+
+Agents deliver results as Markdown files, not Pages. They make a Page only when the requester asks for one. A use case keeps its results under its asset key in the shared drive: the drive path equals the key string (for example `shared/<slug>/report-<YYYY-MM-DD>.md`), so later runs can read earlier reports in the same folder.
 
 ## Turn off Comb
 

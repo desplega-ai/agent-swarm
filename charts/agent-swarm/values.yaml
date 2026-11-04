@@ -96,8 +96,10 @@ config:
   githubEmail: ""
   # -- Git author name used by agents for commits.
   githubName: ""
-  # -- Public dashboard URL referenced in Slack message links. Leave blank
-  # to omit dashboard links from Slack notifications.
+  # -- Public dashboard URL (`APP_URL` on the API and every pool). Used in
+  # Slack message links, and agents link files to Files in the dashboard by
+  # default when it is set. Leave blank to omit dashboard links from Slack
+  # notifications and keep file links on the agent-fs live app.
   appUrl: ""
   # -- Public, browser/externally-reachable API origin for OAuth redirect URIs + registered webhooks.
   # Leave blank to derive from ingress.host when ingress is enabled, otherwise

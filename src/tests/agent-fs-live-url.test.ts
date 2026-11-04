@@ -38,3 +38,18 @@ describe("buildAgentFsLiveUrl path encoding", () => {
     );
   });
 });
+
+describe("buildAgentFsLiveUrl with AGENT_FS_PUBLIC_URL", () => {
+  afterEach(() => {
+    delete process.env.AGENT_FS_PUBLIC_URL;
+  });
+
+  test("appends ?apiUrl= after the encoded path", () => {
+    process.env.AGENT_FS_PUBLIC_URL = "https://api.example.test/agentfs/";
+    expect(
+      buildAgentFsLiveUrl({ path: "/reports/café #1?.md", orgId: "org-1", driveId: "drive-1" }),
+    ).toBe(
+      "https://files.example.test/file/~/org-1/drive-1/reports/caf%C3%A9%20%231%3F.md?apiUrl=https%3A%2F%2Fapi.example.test%2Fagentfs",
+    );
+  });
+});

@@ -112,30 +112,40 @@ export function getAgentFsLiveUrl(): string {
 export type AgentFsLinkTarget = "dashboard" | "live";
 
 /**
- * The operator's `AGENT_FS_LINK_TARGET` choice (trimmed, lowercased). Null when
- * unset, blank, or invalid: every surface then keeps its automatic behavior.
+ * Where people-facing file links point. An explicit `AGENT_FS_LINK_TARGET`
+ * (trimmed, lowercased) wins. Unset, blank, or invalid: `dashboard` when an
+ * `APP_URL` / `DASHBOARD_URL` is configured (not the hosted fallback), else `live`.
  */
-export function readAgentFsLinkTarget(): AgentFsLinkTarget | null {
+export function readAgentFsLinkTarget(): AgentFsLinkTarget {
   const raw = process.env.AGENT_FS_LINK_TARGET?.trim().toLowerCase();
-  return raw === "dashboard" || raw === "live" ? raw : null;
+  if (raw === "dashboard" || raw === "live") return raw;
+  return getConfiguredAppUrls().length > 0 ? "dashboard" : "live";
 }
 
 /**
  * The base URL (no trailing slash) that a people-facing file link starts with,
  * per {@link readAgentFsLinkTarget}. `dashboard` uses `APP_URL` when one is
- * configured (and, for attachments, Comb is on), else the live app. Null when
- * no target is set: the caller keeps its current code path.
+ * configured (and, for attachments, Comb is on), else the live app.
  *
- * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`,
- * and an explicit `dashboard` is the operator's choice.
+ * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`.
  */
-export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string | null {
-  const target = readAgentFsLinkTarget();
-  if (target === null) return null;
-  if (target === "dashboard" && getConfiguredAppUrls().length > 0) {
+export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string {
+  if (readAgentFsLinkTarget() === "dashboard" && getConfiguredAppUrls().length > 0) {
     if (surface === "prompt" || isCombEnabled()) return getAppUrl();
   }
   return getAgentFsLiveUrl();
+}
+
+/**
+ * The query string for a file link that starts with `base`. A live-app link
+ * gets `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set, so a browser with
+ * no agent-fs key knows which agent-fs to sign in to (the agent-fs invite link
+ * convention). Empty for a dashboard link or with no public agent-fs URL.
+ */
+export function agentFsFileLinkQuery(base: string): string {
+  if (base !== getAgentFsLiveUrl()) return "";
+  const publicUrl = process.env.AGENT_FS_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  return publicUrl ? `?apiUrl=${encodeURIComponent(publicUrl)}` : "";
 }
 
 /**
@@ -199,11 +209,12 @@ export function agentFsFileRoute(opts: AgentFsFileRef): string | null {
  * when that route is null; callers fall back to the raw `agent-fs:<path>`
  * display instead.
  *
- * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
+ * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>[?apiUrl=<AGENT_FS_PUBLIC_URL>]
  */
 export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
   const route = agentFsFileRoute(opts);
-  return route ? `${getAgentFsLiveUrl()}/file/~/${route}` : null;
+  const live = getAgentFsLiveUrl();
+  return route ? `${live}/file/~/${route}${agentFsFileLinkQuery(live)}` : null;
 }
 
 export interface CombState {
@@ -250,18 +261,4 @@ export function isCombEnabled(): boolean {
  */
 export function isAgentFsProxyEnabled(): boolean {
   return isEnvFlagEnabled("AGENT_FS_PROXY", Boolean(process.env.AGENT_FS_API_URL?.trim()));
-}
-
-/**
- * The dashboard (Comb) URL for an agent-fs file, same id and encoding rules as
- * {@link buildAgentFsLiveUrl}. Null unless Comb is on AND an explicit
- * `APP_URL` / `DASHBOARD_URL` is set: the hosted default dashboard cannot open
- * a self-hosted swarm's files.
- *
- * Shape:  ${appUrl}/file/~/<orgId>/<driveId>/<normalized-path>
- */
-export function buildCombFileUrl(opts: AgentFsFileRef): string | null {
-  if (!isCombEnabled() || getConfiguredAppUrls().length === 0) return null;
-  const route = agentFsFileRoute(opts);
-  return route ? `${getAppUrl()}/file/~/${route}` : null;
 }
