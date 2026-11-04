@@ -584,7 +584,7 @@ describe("/longterm is the curated tier", () => {
     );
     // The purge reads candidates in this order, so this id lands in batch 2.
     const ordered = await getDbClient().query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
     );
     expect(ordered.length).toBeGreaterThan(500);
     const curatedId = ordered[500]!.id;

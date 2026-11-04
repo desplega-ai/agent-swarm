@@ -1,9 +1,13 @@
 import {
+  AppWindow,
   Bot,
   CalendarClock,
   CircleDot,
   Code,
   Cog,
+  FileCode,
+  FileText,
+  Folder,
   type LucideIcon,
   Mail,
   MessageSquare,
@@ -51,9 +55,13 @@ const SOURCE_LOGOS: Record<string, string> = {
   jira: "/integration-logos/jira.svg",
 };
 
-/** Icons for the sources that have no brand mark. */
+/** Icons for the sources that have no brand mark, and for the resource session sections. */
 const SOURCE_ICONS: Record<string, LucideIcon> = {
   agentmail: Mail,
+  app: AppWindow,
+  fs: Folder,
+  page: FileText,
+  script: FileCode,
   api: Code,
   chat: MessageSquare,
   comb: MessagesSquare,

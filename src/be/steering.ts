@@ -83,11 +83,17 @@ export interface TaskSteeringFields {
 
 type SteeringAgent = Pick<Agent, "isLead" | "provider" | "harnessProvider">;
 
+function supportedModesForTask(task: AgentTask, provider: ProviderName): SteerMode[] {
+  return provider === "claude" && task.providerMeta?.transport === "sdk"
+    ? ["steer", "queue"]
+    : PROVIDER_STEER_CAPABILITIES[provider];
+}
+
 function steeringFieldsFor(task: AgentTask, agent: SteeringAgent | null): TaskSteeringFields {
   const provider = agent?.harnessProvider ?? agent?.provider ?? task.provider;
   return {
     isLeadTask: agent?.isLead ?? false,
-    supportedSteerModes: provider ? PROVIDER_STEER_CAPABILITIES[provider] : [],
+    supportedSteerModes: provider ? supportedModesForTask(task, provider) : [],
   };
 }
 
@@ -339,7 +345,7 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
   const currentTask = await getTaskById(args.taskId);
   if (!currentTask) throw new SteeringRequestError("Task not found", 404);
   const provider = await providerForTask(currentTask);
-  const supportedModes = PROVIDER_STEER_CAPABILITIES[provider];
+  const supportedModes = supportedModesForTask(currentTask, provider);
 
   if (onUnsupported === "fail" && !supportedModes.includes(requestedMode)) {
     const supported = supportedModes.length > 0 ? supportedModes.join(", ") : "none";

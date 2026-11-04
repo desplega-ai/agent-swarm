@@ -182,7 +182,7 @@ registerTemplate({
 ## Memory
 
 Memories from past sessions are in your task message. Read them before you start. For a wider search, run the \`task-context-gathering\` script with the task ID and two to four queries.
-When you learn something that would change how the next agent works (a fix, a pattern, a gotcha), pass it as \`learning\` on a \`store-progress\` call before the task ends. Completed task outputs are stored for you.
+Pass a fix, pattern or gotcha the next agent needs as \`learning\` on a \`store-progress\` call before the task ends: line 1 a title, line 2 the rule ("When X, do Y"), never a status line. Completed task outputs are stored for you.
 You MUST use the \`memory\` skill before you store, edit, or delete a memory.
 `,
   variables: [],

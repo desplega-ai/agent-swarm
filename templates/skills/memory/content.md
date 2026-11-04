@@ -40,6 +40,14 @@ Seed scripts (`script-run` with `name` and `args`):
 - A searchable `name`: "Linear API rejects issue updates without teamId", not "notes".
 - Under 2,000 characters stores as one chunk. Longer content splits on headings, one memory per chunk.
 
+## A lesson from a task: `learning` on `store-progress`
+
+Pass a lesson as `learning` on a `store-progress` call, on or before the completing call. It is stored at `/learnings/<workstream>/<slug>` and tied to the task.
+
+- Line 1: the title. Line 2: the rule, as "When X, do Y". Evidence after. Recall shows only the first 300 characters, so a rule further down is never seen.
+- Not a learning: a status or pass/fail line, a restatement of the progress or output, text already in a skill, a claim you did not verify.
+- Text under 80 characters, or text contained in the same call's `progress` or `output`, is rejected. The progress write still succeeds.
+
 Skip what a tool returns on demand (paths, tool lists, task status), what the repo already records (README, CLAUDE.md, git history), and what only mattered for this one task.
 
 A memory must not contain a token, password, key, or connection string. Remove the value and keep the reference ("the Linear token lives in config key LINEAR_API_KEY").

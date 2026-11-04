@@ -172,6 +172,9 @@ export interface AgentAvatarLucide {
 }
 export type AgentAvatar = AgentAvatarLucide;
 
+/** Apps reuse the agent avatar shape for their dashboard icon. */
+export type AppIcon = AgentAvatar;
+
 /** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
 export type AgentSlackIcon =
   | { type: "emoji"; emoji: string }
@@ -4051,6 +4054,8 @@ export interface AppDefinition {
    * reserved `$theme` user-config value overrides it per-user.
    */
   theme?: string;
+  /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
+  icon?: AppIcon;
 }
 
 /**
@@ -4072,6 +4077,8 @@ export interface AppListItem {
   id: string;
   name: string;
   description?: string | null;
+  /** Projected from `definition.icon`. Missing or unrecognized falls back to a generic icon. */
+  icon?: AppIcon | null;
   createdAt: string;
   updatedAt: string;
 }

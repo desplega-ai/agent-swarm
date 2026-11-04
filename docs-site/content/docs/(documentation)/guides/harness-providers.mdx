@@ -244,14 +244,39 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 | `claude-managed` | `steer`, `queue` | `steered` | Sends ordered `user.message` events. |
 | `opencode` | `queue` | `queued` | `promptAsync` can add input at a turn boundary; abort-and-re-prompt is not advertised because live E2E found it undeliverable. |
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
-| `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
+| `claude` (CLI) | `queue` | `queued` | Raw CLI stream-json can queue only. |
+| `claude` (SDK) | `steer`, `queue` | `steered` | Interrupts the active turn, then delivers the redirect in the same session. |
 | `codex` | `steer`, `queue` | `steered` or `queued` | The per-task app-server receives native `turn/steer`. Queued input starts after the active turn ends. See below. |
 | `cursor` | `steer`, `queue` | `steered` or `queued` | `run.steer()` reaches the in-flight run; a message the SDK reverts to a follow-up, and every queued one, starts the next run on the same agent. |
 | `fx` | `steer` | `steered` | A second `session/prompt` with `_meta.fx.steer: true`, applied at the next tool boundary without cancelling the turn. Only an `absorbed` answer counts as delivered; any other answer is undeliverable and becomes a follow-up. See [fx](/docs/guides/provider-auth/fx#steering-resume-and-cancel). |
 | `amp` | `queue` | `queued` | No interrupt primitive. Queued input is appended to the next tool result; see [Amp](#amp-amp). |
 | `acp` | none | n/a | ACP exposes a single in-flight `session/prompt`; the only interrupt is `session/cancel` (a full abort), so no steering mode is advertised. |
 
-The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
+The static `PROVIDER_STEER_CAPABILITIES` map supplies the default modes. For Claude tasks whose recorded `providerMeta.transport` is `sdk`, task responses and `onUnsupported: "fail"` admission additionally allow `steer`. Changing an agent’s transport configuration does not change a running task’s modes. Before session initialization records the transport, Claude advertises queue only. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
+
+#### Claude SDK redirect
+
+SDK `queue` sends input without stopping the current turn. SDK `steer` calls
+`query.interrupt()`, waits for its response and the interrupted turn's result,
+then sends the steering envelope. It keeps the task, session, transcript,
+accumulated cost, context tracking and background heartbeat alive. An idle
+session accepts the redirect without an interrupt. Cancellation closes input
+and shuts down the process tree instead of starting another turn.
+
+Concurrent deliveries are serialized. Input UUIDs keep an earlier result from
+closing a session with unanswered messages, including messages coalesced into
+one turn. A result that echoes only `user_message_uuid` answers every input
+enqueued through that id, because the id is the last message merged into the
+turn. Older executables without UUID echoes retain their existing
+`queued_turn_count` completion behavior. Interrupts keep already queued input;
+they never resend it. `delivered` still means the SDK accepted the envelope;
+only the agent's `accept-steer` call marks its Swarm message ID `handled`.
+A rejected or timed-out interrupt reports the redirect as undeliverable so the
+normal follow-up promotion applies. Delivery-report retries reuse the worker's
+cached outcome and do not repeat the interrupt.
+
+Both SDK modes honor `CLAUDE_QUEUE_STEERING=false`. Effective bridges remain
+incompatible with SDK transport. CLI behavior is unchanged.
 
 #### Claude queue-steering gate
 
@@ -469,7 +494,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1793682830-gad461e`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1793764839-g19a5bc`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.

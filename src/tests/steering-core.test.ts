@@ -26,9 +26,11 @@ import {
   markSteeringHandled,
   pauseTask,
   startTask,
+  updateTaskClaudeSessionId,
 } from "../be/db";
 import {
   getTaskSteeringFields,
+  getTaskSteeringFieldsForTasks,
   markSteeringUndeliverable,
   requestSteering,
   SteeringRequestError,
@@ -644,6 +646,44 @@ describe("task steering core", () => {
       effectiveMode: "queue",
       degradedFrom: "steer",
     });
+  });
+
+  test("SDK transport enables strict redirect in task reads and requests without changing CLI", async () => {
+    const task = await runningTask("claude", "SDK redirect");
+    const sdkTask = await updateTaskClaudeSessionId(task.id, crypto.randomUUID(), "claude", {
+      transport: "sdk",
+    });
+    expect(sdkTask).not.toBeNull();
+    const read = await fetch(`${baseUrl}/api/tasks/${task.id}`);
+    expect(read.status).toBe(200);
+    expect((await read.json()).supportedSteerModes).toEqual(["steer", "queue"]);
+    const batch = await getTaskSteeringFieldsForTasks([sdkTask!]);
+    expect(batch.get(task.id)?.supportedSteerModes).toEqual(["steer", "queue"]);
+    const response = await fetch(`${baseUrl}/api/tasks/${task.id}/steer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Agent-ID": agentIds.get("lead")! },
+      body: JSON.stringify({ message: "redirect SDK", mode: "steer", onUnsupported: "fail" }),
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result).toMatchObject({ outcome: "steered", effectiveMode: "steer" });
+    expect(result.degradedFrom).toBeUndefined();
+    expect(await getSteeringMessageById(result.steeringMessageId)).toMatchObject({
+      mode: "steer",
+      status: "pending",
+    });
+    await updateTaskClaudeSessionId(task.id, crypto.randomUUID(), "claude", { transport: "cli" });
+    expect(
+      (await getTaskSteeringFields((await getTaskById(task.id))!)).supportedSteerModes,
+    ).toEqual(["queue"]);
+    await expect(
+      requestSteering({
+        taskId: task.id,
+        message: "CLI unchanged",
+        mode: "steer",
+        onUnsupported: "fail",
+      }),
+    ).rejects.toThrow("does not support");
   });
 
   test("task read steering fields match provider capabilities", async () => {

@@ -747,6 +747,12 @@ export interface paths {
                                 id: string;
                                 name: string;
                                 description?: string;
+                                icon?: {
+                                    /** @enum {string} */
+                                    type: "lucide";
+                                    icon: string;
+                                    color?: string;
+                                };
                                 createdAt: string;
                                 updatedAt: string;
                             }[];

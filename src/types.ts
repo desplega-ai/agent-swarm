@@ -1328,6 +1328,14 @@ export const AgentAvatarSchema = z.discriminatedUnion("type", [
 ]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
+/**
+ * Apps reuse the same avatar shape as agents (lucide icon + optional hex
+ * color) for their dashboard tile icon. A distinct export name keeps app call
+ * sites self-documenting.
+ */
+export const AppIconSchema = AgentAvatarSchema;
+export type AppIcon = AgentAvatar;
+
 // Separate from `avatar` so an agent can keep its lucide disc and still post
 // to Slack with its own emoji or image.
 export const AgentSlackIconSchema = z

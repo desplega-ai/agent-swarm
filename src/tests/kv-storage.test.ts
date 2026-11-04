@@ -211,6 +211,39 @@ describe("kv-storage helpers", () => {
     expect(yields).toBe(2);
   });
 
+  test.each([
+    [undefined, 50],
+    [500, 50],
+    [-1, 1],
+    [0, 1],
+  ])("prefix sweep bounds each DELETE (requested: %s)", async (batchSize, expectedBatchSize) => {
+    const now = Date.now();
+    for (let i = 0; i < 101; i++) {
+      await upsertKv({
+        namespace: "mcp:overflow:batch-cap",
+        key: `expired-${i}`,
+        value: "expired",
+        valueType: "string",
+        expiresAt: now,
+      });
+    }
+    const client = getDbClient();
+    const originalRun = client.run.bind(client);
+    const run = spyOn(client, "run").mockImplementation(async (sql, params) => {
+      // Fail before SQLite runs an unlimited DELETE or the sweep loops forever.
+      expect(params?.[3]).toBe(expectedBatchSize);
+      return originalRun(sql, params);
+    });
+    let calls: (typeof run.mock.calls)[number][];
+    try {
+      expect(await sweepExpiredKvPrefix("mcp:overflow:batch-cap", now, batchSize)).toBe(101);
+      calls = [...run.mock.calls];
+    } finally {
+      run.mockRestore();
+    }
+    expect(calls).toHaveLength(Math.floor(101 / expectedBatchSize) + 1);
+  });
+
   test("integer value type stores as number", async () => {
     await upsertKv({ namespace: NS, key: "n", value: 42, valueType: "integer" });
     expect((await getKv(NS, "n"))?.value).toBe(42);

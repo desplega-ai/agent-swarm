@@ -300,14 +300,30 @@ const storeProgressBlockedWaitingNudge = (r: SwarmToolResult): string | undefine
   return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — keep working if you can, and if the wait is genuinely long, defer-task is one way to resume later instead of polling.`;
 };
 
+/** One steer per noise-floor rule (src/be/memory/task-learning.ts), each naming the fix. */
+const LEARNING_NOISE_FLOOR_NUDGES: Record<string, string> = {
+  "too-short":
+    'That learning was too short to hold a lesson; resend it as a title line, then the rule as "When X, do Y", or drop it if it is only status.',
+  "repeats-progress":
+    'That learning restates this call\'s progress or output; resend only the rule the next agent should follow ("When X, do Y"), or drop it.',
+};
+
 const storeProgressNudge = (r: SwarmToolResult): string | undefined => {
-  const learning = (r.data as { learning?: { status?: unknown; memoryId?: unknown } } | undefined)
-    ?.learning;
-  // nudgeMiddleware permits exactly one steer: the duplicate-learning steer
-  // names a concrete next call, so it wins over the blocked-waiting reminder.
+  const learning = (
+    r.data as
+      | { learning?: { status?: unknown; memoryId?: unknown; noiseFloor?: unknown } }
+      | undefined
+  )?.learning;
+  // nudgeMiddleware permits exactly one steer: the learning steers name a
+  // concrete fix, so they win over the blocked-waiting reminder, duplicate first.
   if (r.ok && learning?.status === "duplicate" && typeof learning.memoryId === "string") {
     return `That learning repeats memory ${learning.memoryId}; if your text adds something, memory-edit that memory instead of storing a new one.`;
   }
+  const noiseSteer =
+    r.ok && learning?.status === "failed" && typeof learning.noiseFloor === "string"
+      ? LEARNING_NOISE_FLOOR_NUDGES[learning.noiseFloor]
+      : undefined;
+  if (noiseSteer) return noiseSteer;
   return storeProgressBlockedWaitingNudge(r);
 };
 
