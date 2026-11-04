@@ -558,8 +558,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-alpha.3
-ARG DSH_SHA512=7df574e9f3a088e78824e980dc480f8fe53a6b326bb0b0028ac70b8fdb7e01f33ba7da75e1b33312b591860782f278b3053c90d9c93190f42d8f83eaa27f261b
+ARG DSH_VERSION=0.2.2-rc.1
+ARG DSH_SHA512=8a347d504558906d7943f43bf49cefccb07340e41f73add52ebf67e9f969c073e1af920a9f6531b619d2a2da3f3fd97ba8677ba4fbc8d516ba4d6ecb1f7a0aa6
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793764839-g19a5bc
-ARG AMP_SHA512_AMD64=a8fae24f8f8ce379baaebc11c8889040fb83e69e7dfe807f1fc6e664c2f5f3e8c26a7def61c2cde339ebc0dd2f78a4f7c8c483e73e95d07a3f20cc317a26fa21
-ARG AMP_SHA512_ARM64=d8b81267827bc6e02438a75f40cb5b796af9daae1dd88b02008f9855b33b44e157aa2538c04f2b17cda638bdff2f1dbc2bcf2ab617219ebb6182b7c3b5a27f86
+ARG AMP_VERSION=0.0.1793804260-g12625e
+ARG AMP_SHA512_AMD64=315a9862e8838d25b5da2496e42dc15de33221b9661bb785e768ff7039e8a8be20d07e3e5f1d9fb14b3c8ae878cd000815958ae385fd28847a402177c1557f8a
+ARG AMP_SHA512_ARM64=743b2a02a4aca6dceaa79903640971fbd412fb766d12fc0ea6deb87dfacd2fbee37edf9781214c9b7c3e62b9a68c137d8594c1e1ccc1b0dac2bf734f2b8f95eb
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
