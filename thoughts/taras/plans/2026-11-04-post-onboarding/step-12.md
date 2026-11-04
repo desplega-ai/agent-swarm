@@ -3,7 +3,8 @@ id: step-12
 name: "Lead prompts: use-case planning, steering, channel thread"
 track: D
 depends_on: [step-10]
-status: claimed
+status: done
+completed_at: 2026-11-04
 assignee: po-orch-step-12
 claimed_at: 2026-11-04T19:30:00Z
 ---
