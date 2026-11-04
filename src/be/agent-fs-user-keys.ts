@@ -70,6 +70,21 @@ export async function ensureUserAgentFsAccount(userId: string): Promise<AccountS
   if (!member?.userId || roleRank(member.role) < roleRank(role)) {
     return pending("The agent-fs org membership is not ready");
   }
+  // The swarm assigns only viewer and editor, so an editor whose grant dropped
+  // to viewer is lowered before a key is minted. An agent-fs admin is managed
+  // in agent-fs (it can be the owner of the bootstrap key) and keeps its role.
+  if (member.role !== "admin" && roleRank(member.role) > roleRank(role)) {
+    try {
+      await agentFsRequest(
+        shared.apiUrl,
+        `/orgs/${encodeURIComponent(shared.orgId)}/members/${encodeURIComponent(member.userId)}`,
+        { method: "PATCH", headers: shared.authHeaders, body: { role } },
+      );
+    } catch (error) {
+      if (!(error instanceof AgentFsRequestError) || error.status >= 500) throw error;
+      return pending(`The agent-fs org role could not be lowered to ${role}`);
+    }
+  }
   return {
     status: "ready",
     agentFsUserId: member.userId,

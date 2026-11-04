@@ -427,6 +427,33 @@ test("prefix rename moves key favorites under the group and keeps a star already
   expect(await ids("operator")).toEqual(["shared/faved-not/", "shared/faved/a/", "shared/favsx/"]);
 });
 
+test("stars stay while sessions are left under the old key and follow on a retry", async () => {
+  await session("shared/stay/a/");
+  const blocked = await session("shared/stay/b/", other);
+  await share(blocked.root, "write");
+  await setFavorite({
+    favoriteScope: `user:${owner}`,
+    itemType: "key",
+    itemId: "shared/stay/",
+    favorite: true,
+  });
+  const ids = async () =>
+    (await listFavorites({ favoriteScope: `user:${owner}`, itemType: "key" }))
+      .map((f) => f.itemId)
+      .filter((id) => /^shared\/(stay|went)\//.test(id));
+
+  const partial = await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" });
+  expect(partial.body.moved).toHaveLength(1);
+  expect(partial.body.skipped).toHaveLength(1);
+  expect(await ids()).toEqual(["shared/stay/"]);
+
+  // The other owner moves their session away. The retry moves nothing, but the group is empty.
+  await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" }, other);
+  const retry = await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" });
+  expect(retry.body).toEqual({ moved: [], skipped: [], remaining: 0 });
+  expect(await ids()).toEqual(["shared/went/"]);
+});
+
 test("user prefix moves exclude ownerless roots and report only visible roots owned by others", async () => {
   for (const from of ["shared/requester/", `personal/${other}/requester/`]) {
     const own = await session(`${from}nested/`);

@@ -187,6 +187,24 @@ describe("autoConnect", () => {
     expect(connected).toHaveLength(0);
   });
 
+  test("a 403 (no fs.join.own) explains the missing access and mints nothing", async () => {
+    const message = "Your role cannot open files on this swarm. Ask a swarm admin for access.";
+    const denied = fakeDeps({
+      fsMe: async () => {
+        throw apiError(403, "missing permission 'fs.join.own'");
+      },
+    });
+    expect(await autoConnect(denied.deps, LABEL)).toEqual({ kind: "failed", message });
+    expect(denied.calls.mint).toEqual([]);
+    const mintDenied = fakeDeps({
+      mintKey: async () => {
+        throw apiError(403, "missing permission 'fs.join.own'");
+      },
+    });
+    expect(await autoConnect(mintDenied.deps, LABEL)).toEqual({ kind: "failed", message });
+    expect(mintDenied.connected).toHaveLength(0);
+  });
+
   test("other failures keep the message", async () => {
     const offline = fakeDeps({
       fsMe: async () => {

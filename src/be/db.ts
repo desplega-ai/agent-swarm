@@ -12954,8 +12954,8 @@ export async function setFavorite(opts: {
   favorite: boolean;
   actorId?: string | null;
 }): Promise<UserFavorite | null> {
-  // A `key` favorite is a Sessions group: store its normalized asset key.
-  const itemId = opts.itemType === "key" ? normalizeAssetKey(opts.itemId) : opts.itemId;
+  // A `key` item id arrives normalized: `PUT /api/favorites` normalizes it and answers 400.
+  const itemId = opts.itemId;
   if (!opts.favorite) {
     await getDbClient().run(
       "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",

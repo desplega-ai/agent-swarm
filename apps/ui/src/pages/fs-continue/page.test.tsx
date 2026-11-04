@@ -91,10 +91,11 @@ const live = "https://live.agent-fs.dev/file/~/org/drive/x.md";
 
 describe("FsContinuePage", () => {
   test("mints once and replaces the location with the fragment URL", async () => {
-    stubApi(async () => ({ redirectUrl: `${live}#key=af_example` }));
+    const redirectUrl = `${live}#key=af_example&apiUrl=${encodeURIComponent("https://swarm.example.test/agentfs")}`;
+    stubApi(async () => ({ redirectUrl }));
     const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
     expect(calls).toEqual([live]);
-    expect(replaced).toEqual([`${live}#key=af_example`]);
+    expect(replaced).toEqual([redirectUrl]);
     expect(view.textContent).toContain("Continuing to live.agent-fs.dev");
   });
 

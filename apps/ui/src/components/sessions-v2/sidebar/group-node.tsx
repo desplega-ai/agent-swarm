@@ -44,7 +44,7 @@ import {
   TipKey,
   TreeRow,
 } from "./tree-row";
-import type { ListSelectState, TreeRow as TreeRowModel } from "./tree-rows";
+import { groupStarKey, type ListSelectState, type TreeRow as TreeRowModel } from "./tree-rows";
 import { useGroupDroppable } from "./use-row-drag";
 
 export const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
@@ -275,12 +275,14 @@ function RowAction({
   label,
   shortcut,
   keyName,
+  disabled,
   onClick,
   children,
 }: {
   label: string;
   shortcut?: string;
   keyName?: string;
+  disabled?: boolean;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
@@ -292,12 +294,13 @@ function RowAction({
           tabIndex={-1}
           aria-label={label}
           aria-keyshortcuts={keyName}
+          disabled={disabled}
           onMouseDown={keepTreeFocus}
           onClick={(event) => {
             event.stopPropagation();
             onClick(event);
           }}
-          className="grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted"
+          className="grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted disabled:opacity-50"
         >
           {children}
         </button>
@@ -357,8 +360,8 @@ function GroupNodeView({
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
-  // Every group can be starred (a use case), read-only source groups too.
-  const starKey = row.type === "group" && !renaming ? row.node.key : null;
+  // Every group can be starred (a use case), read-only source groups too. Threads cannot.
+  const starKey = renaming ? null : groupStarKey(row);
   const star = useKeyFavorite(starKey);
   const actionCount = renaming
     ? 0
@@ -520,6 +523,7 @@ function GroupNodeView({
             {starKey !== null ? (
               <RowAction
                 label={star.favorite ? GROUP_STAR_LABELS.remove : GROUP_STAR_LABELS.add}
+                disabled={star.disabled}
                 onClick={star.toggle}
               >
                 <Star

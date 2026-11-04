@@ -70,8 +70,8 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
       mine: true,
       showSource: ["comb", "ui"],
     };
-    expect(await countSessions(opts)).toBe(0);
-    const relaxed = { ...opts, includeScheduleRuns: true };
+    // A user group view relaxes the filters for schedule runs by itself.
+    const relaxed = opts;
     expect((await listRecentSessions(relaxed)).map((row) => row.root.id)).toEqual([run.id]);
     expect(await countSessions(relaxed)).toBe(1);
     expect(

@@ -153,6 +153,17 @@ async function storeProvisionHash(value: string): Promise<void> {
   });
 }
 
+/** The API-owned bootstrap key: stored config, then env, then the legacy shared key. Empty when none. */
+async function resolveSharedApiKey(): Promise<string> {
+  return (
+    (await getConfigValue(API_KEY_CONFIG)) ||
+    process.env.API_AGENT_FS_API_KEY ||
+    process.env.AGENT_FS_API_KEY ||
+    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG)) ||
+    ""
+  );
+}
+
 export async function ensureAgentFsSharedProvisioning(options?: {
   apiUrl?: string;
   registerEmail?: string;
@@ -167,12 +178,7 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   if (!apiUrl) throw new Error("AGENT_FS_API_URL is not configured");
 
   const registerEmail = options?.registerEmail ?? (await resolveRegisterEmail());
-  let apiKey =
-    (await getConfigValue(API_KEY_CONFIG)) ||
-    process.env.API_AGENT_FS_API_KEY ||
-    process.env.AGENT_FS_API_KEY ||
-    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG)) ||
-    "";
+  let apiKey = await resolveSharedApiKey();
 
   if (!apiKey) {
     const registered = await agentFsRequest<{
@@ -246,11 +252,7 @@ export async function resolveAgentFsSharedContext(): Promise<{
 } | null> {
   const apiUrl = await resolveApiUrl();
   if (!apiUrl) return null;
-  const apiKey =
-    (await getConfigValue(API_KEY_CONFIG)) ||
-    process.env.API_AGENT_FS_API_KEY ||
-    process.env.AGENT_FS_API_KEY ||
-    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG));
+  const apiKey = await resolveSharedApiKey();
   const orgId =
     (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) ||
     process.env.AGENT_FS_DEFAULT_ORG_ID ||

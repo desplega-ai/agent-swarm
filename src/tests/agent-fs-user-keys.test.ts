@@ -46,6 +46,7 @@ let registerResponse: Response | undefined;
 let inviteResponse: Response | undefined;
 let keyResponse: Response | undefined;
 let membersResponse: Response | undefined;
+let roleUpdateResponse: Response | undefined;
 
 async function configSnapshot() {
   return getDbClient().query("SELECT * FROM swarm_config ORDER BY id");
@@ -75,13 +76,14 @@ beforeEach(async () => {
   inviteResponse = undefined;
   keyResponse = undefined;
   membersResponse = undefined;
+  roleUpdateResponse = undefined;
   server = undefined;
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
-      const body = request.method === "POST" ? await request.json() : null;
+      const body = request.method === "GET" ? null : await request.json();
       records.push({
         method: request.method,
         path,
@@ -108,6 +110,13 @@ beforeEach(async () => {
           orgRole: body.role,
           drives: [],
         });
+      }
+      if (request.method === "PATCH" && path === `${MEMBERS_PATH}/${AFS_USER_ID}`) {
+        if (roleUpdateResponse) return roleUpdateResponse;
+        members = members.map((member) =>
+          member.userId === AFS_USER_ID ? { ...member, role: body.role } : member,
+        );
+        return Response.json({ ok: true });
       }
       if (request.method === "POST" && path === KEYS_PATH) {
         return (
@@ -282,6 +291,49 @@ describe("user agent-fs keys", () => {
     members[0]!.role = role;
     expect((await mintUserAgentFsKey(userId, "Laptop")).status).toBe("minted");
     expect(records.some((record) => record.path === `${MEMBERS_PATH}/invite`)).toBe(false);
+  });
+
+  test("lowers an editor member to viewer when the grant dropped before minting", async () => {
+    await createUser(`admin-${crypto.randomUUID()}@example.test`);
+    await setUserRoles(userId, ["viewer"], null);
+    expect((await mintUserAgentFsKey(userId, "Laptop")).status).toBe("minted");
+    const patch = records.find((record) => record.method === "PATCH");
+    expect(patch).toEqual({
+      method: "PATCH",
+      path: `${MEMBERS_PATH}/${AFS_USER_ID}`,
+      authorization: `Bearer ${BOOTSTRAP_KEY}`,
+      body: { role: "viewer" },
+    });
+    const paths = records.map((record) => `${record.method} ${record.path}`);
+    expect(paths.indexOf(`PATCH ${MEMBERS_PATH}/${AFS_USER_ID}`)).toBeLessThan(
+      paths.indexOf(`POST ${KEYS_PATH}`),
+    );
+    expect(members[0]?.role).toBe("viewer");
+  });
+
+  test("keeps an agent-fs admin role for a viewer grant", async () => {
+    await createUser(`admin-${crypto.randomUUID()}@example.test`);
+    await setUserRoles(userId, ["viewer"], null);
+    members[0]!.role = "admin";
+    expect((await mintUserAgentFsKey(userId, "Laptop")).status).toBe("minted");
+    expect(records.some((record) => record.method === "PATCH")).toBe(false);
+  });
+
+  test("refuses to mint when the higher role cannot be lowered", async () => {
+    await createUser(`admin-${crypto.randomUUID()}@example.test`);
+    await setUserRoles(userId, ["viewer"], null);
+    roleUpdateResponse = Response.json(
+      { error: "BAD_REQUEST", message: "Member not found in org" },
+      { status: 400 },
+    );
+    const result = await mintUserAgentFsKey(userId, "Laptop");
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: "pending",
+        reason: "The agent-fs org role could not be lowered to viewer",
+      }),
+    );
+    expect(records.some((record) => record.path === KEYS_PATH)).toBe(false);
   });
 
   test.each([

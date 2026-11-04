@@ -51,6 +51,10 @@ function errorMessage(err: unknown, fallback: string): string {
 
 const PENDING_PREFIX = "agent-fs account pending: ";
 
+/** A 403 from the swarm: the person's role does not hold `fs.join.own`. */
+const NO_ACCESS_MESSAGE =
+  "Your role cannot open files on this swarm. Ask a swarm admin for access.";
+
 /**
  * Get this browser its own named agent-fs key through the swarm, then save
  * it. The identity comes from the swarm (`fsMe`), not from agent-fs
@@ -64,6 +68,7 @@ export async function autoConnect(
   try {
     me = await deps.fsMe();
   } catch (err) {
+    if (apiStatus(err) === 403) return { kind: "failed", message: NO_ACCESS_MESSAGE };
     return { kind: "failed", message: errorMessage(err, "Could not reach the swarm API.") };
   }
   if (me.status === "pending") {
@@ -80,6 +85,7 @@ export async function autoConnect(
   } catch (err) {
     const status = apiStatus(err);
     if (status === 501) return { kind: "unsupported" };
+    if (status === 403) return { kind: "failed", message: NO_ACCESS_MESSAGE };
     if (status === 409) {
       const message = errorMessage(err, "Your files account is not ready yet.");
       return {

@@ -1288,6 +1288,7 @@ export async function handleUsers(
         jsonError(res, "code_invalid", 404);
         return true;
       }
+      // No transaction is open here, so afterCommit only defers the call (fire and forget).
       getDbClient().afterCommit(async () => {
         try {
           await ensureUserAgentFsAccount(result.userId);

@@ -131,6 +131,19 @@ export const platformbFsContinue: Scenario = {
         200,
       );
       expect(ready, "The personal filesystem never became ready");
+      // The config reload (debounced) gives the dashboard its browser-facing agent-fs URL.
+      let browserApiUrl = "";
+      const reachable = await pollUntil(
+        async () => {
+          const status = await ctx.api("GET", "/status", { apiKey: token });
+          const apiUrl = asRecord(asRecord(asRecord(status.json).agent_fs).comb).api_url;
+          browserApiUrl = typeof apiUrl === "string" ? apiUrl : "";
+          return browserApiUrl !== "";
+        },
+        15_000,
+        200,
+      );
+      expect(reachable, "The dashboard never got a browser-facing agent-fs URL");
 
       for (const rejected of ["https://live.agent-fs.dev.evil.test/x.md", "https://evil.test/"]) {
         const response = await ctx.api("POST", "/api/fs/continue", {
@@ -150,9 +163,11 @@ export const platformbFsContinue: Scenario = {
         body: { returnTo: `${returnTo}#stale` },
       });
       expectStatus(continued, [200], "continue to the live app");
+      // The fragment names the same browser-facing agent-fs URL as the dashboard.
       expect(
-        asRecord(continued.json).redirectUrl === `${returnTo}#key=${liveKey}`,
-        "The redirect URL does not carry the key as its only fragment",
+        asRecord(continued.json).redirectUrl ===
+          `${returnTo}#key=${liveKey}&apiUrl=${encodeURIComponent(browserApiUrl)}`,
+        "The redirect URL fragment differs from key plus apiUrl",
       );
       expect(continued.headers.get("cache-control") === "no-store", "The redirect is cacheable");
       expect(!continued.text.includes(bootstrapKey), "The response exposed the bootstrap key");

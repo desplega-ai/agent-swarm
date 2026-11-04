@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { isGroupKey } from "../assets/key";
+import { sourceOfKey } from "../assets/source-key";
 import { authUserId, getRequestAuth } from "../utils/request-auth-context";
 import { getAgentCurrentTask, getTaskById } from "./db";
 import { findUserByExternalId } from "./users";
@@ -16,13 +17,16 @@ async function resolveCallerTask(
   return task?.agentId === callerAgentId ? task : null;
 }
 
-/** Return the calling task's group key, excluding namespace roots and resource leaves. */
+/**
+ * Return the calling task's group key, excluding namespace roots, resource
+ * leaves and source groups (a Slack channel or chat thread is not a user group).
+ */
 export async function resolveTaskGroupKey(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
 ): Promise<string | undefined> {
   const task = await resolveCallerTask(sourceTaskId, callerAgentId);
-  return task && isGroupKey(task.key) ? task.key : undefined;
+  return task && isGroupKey(task.key) && !sourceOfKey(task.key) ? task.key : undefined;
 }
 
 /**

@@ -120,6 +120,8 @@ describe("create_page MCP tool", () => {
     { name: "source group", taskKey: "shared/research/", inherited: true },
     { name: "current task group", taskKey: "shared/research/", current: true, inherited: true },
     { name: "resource leaf", taskKey: "shared/task:abc/" },
+    { name: "chat source group", taskKey: "shared/slack/c1/" },
+    { name: "chat source thread", taskKey: "shared/slack/c1/thread:1/" },
     { name: "namespace root", taskKey: "shared/" },
     { name: "personal root", taskKey: "personal-root" },
     { name: "explicit override", taskKey: "shared/research/", key: "shared/override/" },

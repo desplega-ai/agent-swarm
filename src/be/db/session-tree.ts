@@ -68,8 +68,10 @@ export interface SessionFilters {
   /** For user viewers: only human-started roots of the viewer and shares (the "Mine" view). */
   mine?: boolean;
   /**
-   * Include schedule runs despite Mine, shown-source, and tree owner filters.
-   * Set only for a user group view ({@link showsScheduleRuns}).
+   * Include every schedule run despite Mine, shown-source, and tree owner
+   * filters. Only `getSessionTree` sets it, and it applies the rule per row.
+   * A `groupKey` of a user group ({@link showsScheduleRuns}) turns it on by
+   * itself, so the list and its bulk triage agree.
    */
   includeScheduleRuns?: boolean;
   /** Match exactly this root (one session's summary, e.g. its read state). */
@@ -311,9 +313,11 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     conditions.push(fragment.sql);
     params.push(...fragment.params);
   };
+  const scheduleRuns =
+    opts.includeScheduleRuns || (!!opts.groupKey && showsScheduleRuns(opts.groupKey));
   const includeScheduled = (fragment: SqlFragment): SqlFragment => ({
     ...fragment,
-    sql: opts.includeScheduleRuns ? `(${fragment.sql} OR r.scheduleId IS NOT NULL)` : fragment.sql,
+    sql: scheduleRuns ? `(${fragment.sql} OR r.scheduleId IS NOT NULL)` : fragment.sql,
   });
   if (opts.rootId) add({ sql: "r.id = ?", params: [opts.rootId] });
   const sources = opts.source?.filter(Boolean) ?? [];
@@ -816,6 +820,9 @@ export async function getSessionTree(
     const resource = sessionResourceGroupOf(key);
     if (resource) resourceGroups.add(key).add(resource.resourceKey);
     if (hidden.has(source) || (shown && !shown.has(source) && !groupedSchedule)) continue;
+    // The relaxation is for the group count only. Inbox, Later and Done lists keep
+    // the owner, Mine and shown-source rules, so their counts do too.
+    const sectionVisible = !!row.defaultVisible && (!shown || shown.has(source));
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
     let group: SessionTreeGroup | undefined;
@@ -827,11 +834,13 @@ export async function getSessionTree(
       }
       if (row.lastActivityAt > group.lastActivityAt) group.lastActivityAt = row.lastActivityAt;
     }
-    if (row.readState === "later" || row.readState === "done") add(result[row.readState], row);
-    else {
+    if (row.readState === "later" || row.readState === "done") {
+      if (sectionVisible) add(result[row.readState], row);
+    } else {
       // A session filed into a group shows under it only (`inboxScopeCondition`).
       const viewer = actor.kind === "user" ? actor.userId : null;
-      if (noGroup || sourceOfKey(key) || inResourceScope(row.key, viewer)) add(result.inbox, row);
+      const inInbox = noGroup || sourceOfKey(key) || inResourceScope(row.key, viewer);
+      if (sectionVisible && inInbox) add(result.inbox, row);
       if (noGroup) add(result.noGroup, row);
       else if (group) add(group, row);
     }
