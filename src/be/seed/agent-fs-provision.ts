@@ -38,6 +38,7 @@ type InviteTarget = {
 };
 
 type OrgMember = {
+  userId?: string;
   email?: string | null;
   role?: string | null;
   user?: { email?: string | null } | null;
@@ -45,10 +46,11 @@ type OrgMember = {
 
 type FetchLike = typeof fetch;
 
-class AgentFsRequestError extends Error {
+export class AgentFsRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: string,
   ) {
     super(message);
   }
@@ -235,6 +237,33 @@ export type SharedOrgInviteResult = {
   acceptUrl?: string;
 };
 
+/** Use complete shared credentials without writes. Provision missing credentials otherwise. */
+export async function resolveAgentFsSharedContext(): Promise<{
+  apiUrl: string;
+  orgId: string;
+  driveId: string;
+  authHeaders: Record<string, string>;
+} | null> {
+  const apiUrl = await resolveApiUrl();
+  if (!apiUrl) return null;
+  const apiKey =
+    (await getConfigValue(API_KEY_CONFIG)) ||
+    process.env.API_AGENT_FS_API_KEY ||
+    process.env.AGENT_FS_API_KEY ||
+    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG));
+  const orgId =
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) ||
+    process.env.AGENT_FS_DEFAULT_ORG_ID ||
+    (await getConfigValue("AGENT_FS_SHARED_ORG_ID")) ||
+    process.env.AGENT_FS_SHARED_ORG_ID;
+  const driveId =
+    (await getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID")) || process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+  if (apiKey && orgId && driveId) {
+    return { apiUrl, orgId, driveId, authHeaders: { authorization: `Bearer ${apiKey}` } };
+  }
+  return ensureAgentFsSharedProvisioning({ apiUrl });
+}
+
 /**
  * Invite an external (non-agent) member into the shared org using the
  * API-owned bootstrap credentials. Powers `POST /api/fs/members/invite` so
@@ -251,7 +280,8 @@ export async function inviteEmailToSharedOrg(
   email: string,
   role: Role,
 ): Promise<SharedOrgInviteResult> {
-  const shared = await ensureAgentFsSharedProvisioning();
+  const shared = await resolveAgentFsSharedContext();
+  if (!shared) throw new Error("AGENT_FS_API_URL is not configured");
   const currentRoles = await getCurrentOrgMemberRoles(
     shared.apiUrl,
     shared.authHeaders,
@@ -480,20 +510,29 @@ async function getCurrentOrgMemberRoles(
   headers: Record<string, string>,
   orgId: string,
 ): Promise<Map<string, Role>> {
+  const roles = new Map<string, Role>();
+  for (const member of await getCurrentOrgMembers(apiUrl, headers, orgId)) {
+    roles.set(member.email, member.role);
+  }
+
+  return roles;
+}
+
+export async function getCurrentOrgMembers(
+  apiUrl: string,
+  headers: Record<string, string>,
+  orgId: string,
+): Promise<Array<{ userId?: string; email: string; role: Role }>> {
   const response = await agentFsRequest<{ members?: OrgMember[] }>(
     apiUrl,
     `/orgs/${encodeURIComponent(orgId)}/members`,
     { headers },
   );
-  const roles = new Map<string, Role>();
-
-  for (const member of response.members ?? []) {
+  return (response.members ?? []).flatMap((member) => {
     const email = (member.email ?? member.user?.email ?? "").trim().toLowerCase();
     const role = normalizeRole(member.role);
-    if (email && role) roles.set(email, role);
-  }
-
-  return roles;
+    return email && role ? [{ userId: member.userId, email, role }] : [];
+  });
 }
 
 function normalizeRole(role: string | null | undefined): Role | null {
@@ -501,11 +540,11 @@ function normalizeRole(role: string | null | undefined): Role | null {
   return null;
 }
 
-function roleRank(role: Role): number {
+export function roleRank(role: Role): number {
   return { viewer: 0, editor: 1, admin: 2 }[role];
 }
 
-async function agentFsRequest<T = unknown>(
+export async function agentFsRequest<T = unknown>(
   apiUrl: string,
   path: string,
   options: {
@@ -528,15 +567,18 @@ async function agentFsRequest<T = unknown>(
   if (!response.ok && !(options.allowConflict && response.status === 409)) {
     const text = await response.text().catch(() => "");
     throw new AgentFsRequestError(
-      `agent-fs ${options.method ?? "GET"} ${path} failed: HTTP ${response.status}${text ? ` ${text}` : ""}`,
+      scrubSecrets(
+        `agent-fs ${options.method ?? "GET"} ${path} failed: HTTP ${response.status}${text ? ` ${text}` : ""}`,
+      ),
       response.status,
+      text,
     );
   }
 
   return (await response.json().catch(() => ({}))) as T;
 }
 
-async function resolveApiUrl(): Promise<string> {
+export async function resolveApiUrl(): Promise<string> {
   const raw = process.env.AGENT_FS_API_URL || (await getConfigValue("AGENT_FS_API_URL")) || "";
   return raw.trim().replace(/\/+$/, "");
 }

@@ -1477,9 +1477,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_PROXY",
         label: "Serve agent-fs through the API",
         description:
-          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Files then uses <public API URL>/agentfs.",
+          "Serve agent-fs through the swarm API at /agentfs. Defaults on when AGENT_FS_API_URL is set. Files then uses <public API URL>/agentfs.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/agent-fs-co-deployment`,
       },
     ],

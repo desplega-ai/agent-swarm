@@ -1,5 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import {
+  AgentFsKeyValidationError,
+  ensureUserAgentFsAccount,
+  mintUserAgentFsKey,
+} from "../be/agent-fs-user-keys";
 import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
 import { appendDraftTaskText } from "../be/db/tasks/draft-text";
 import { getUserGrant } from "../be/rbac-roles";
@@ -13,14 +18,23 @@ import {
   recordTaskAttachmentUpload,
   scopeFromAttachment,
 } from "../be/task-attachment-store";
+import { findUserById } from "../be/users";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
-import { authUser, getCurrentRequestUserId, getRequestAuth } from "../utils/request-auth-context";
+import {
+  authUser,
+  authUserId,
+  getCurrentRequestUserId,
+  getRequestAuth,
+  isOperatorAuth,
+} from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { transcribeAudioNotes } from "../utils/transcription";
+import { dashboardUserIdHeader } from "./favorite-owner";
+import { createIpRateLimiter } from "./ip-rate-limit";
 import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { canReadSession, SESSION_READ_DENIED } from "./session-access";
@@ -29,6 +43,69 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 // Upload wall-clock past which the provider round-trip is worth a log line.
 // Attachment stalls were invisible before: this path had no timing at all.
 const SLOW_UPLOAD_LOG_MS = 3_000;
+
+const fsKeyRateLimit = createIpRateLimiter({ capacity: 5, refillPerMs: 5 / 60_000 });
+
+export function _resetFsKeyRateLimitForTests(): void {
+  fsKeyRateLimit.reset();
+}
+
+const userAgentFsStateSchema = z.object({
+  status: z
+    .enum(["ready", "pending", "off", "unsupported"])
+    .describe("Account readiness in agent-fs."),
+  agentFsUserId: z.string().optional().describe("User ID in agent-fs when ready."),
+  email: z.string().optional().describe("Email of the swarm user, when available."),
+  displayName: z.string().optional().describe("Name of the swarm user when ready."),
+  orgId: z.string().optional().describe("Shared agent-fs org ID when configured."),
+  driveId: z.string().optional().describe("Shared agent-fs drive ID when configured."),
+  reason: z.string().optional().describe("Reason the account is not ready."),
+});
+
+const userAgentFsMeRoute = route({
+  method: "get",
+  path: "/api/fs/me",
+  pattern: ["api", "fs", "me"],
+  summary: "Ensure the current user's agent-fs account and shared membership",
+  tags: ["FS"],
+  responses: {
+    200: { description: "Account readiness", schema: userAgentFsStateSchema },
+    401: { description: "User identity required" },
+    502: { description: "agent-fs request failed" },
+  },
+});
+
+const mintUserAgentFsKeyRoute = route({
+  method: "post",
+  path: "/api/fs/keys",
+  pattern: ["api", "fs", "keys"],
+  summary: "Mint a named agent-fs key for the current user",
+  description: "The key is scoped to the shared org. The API returns it once and never stores it.",
+  tags: ["FS"],
+  body: z.object({ label: z.string().min(1).max(100) }),
+  rbac: { permission: "fs.join.own" },
+  responses: {
+    201: {
+      description: "Named key returned once and never stored",
+      schema: z.object({
+        apiKey: z.string().describe("Plaintext key returned once. The API never stores this key."),
+        keyId: z.string(),
+        label: z.string(),
+        agentFsUserId: z.string(),
+        orgId: z.string(),
+        driveId: z.string(),
+      }),
+    },
+    400: { description: "Invalid key label" },
+    401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    409: { description: "agent-fs account or membership is pending" },
+    429: { description: "Limit of five keys per minute reached" },
+    501: { description: "agent_fs_too_old" },
+    502: { description: "agent-fs request failed" },
+    503: { description: "agent_fs_not_configured" },
+  },
+});
 
 const taskParams = z.object({ taskId: z.uuid() });
 const attachmentParams = z.object({ taskId: z.uuid(), attachmentId: z.uuid() });
@@ -283,6 +360,18 @@ async function resolveInvite(
   return { email: ownEmail, role: grant.verbs.has("task.fs.mutate") ? "editor" : "viewer" };
 }
 
+async function resolveAgentFsUserId(req: IncomingMessage): Promise<string | null> {
+  const auth = getRequestAuth(req);
+  if (auth?.page) return null;
+  const userId = authUserId(auth);
+  if (userId) return userId;
+  if (!isOperatorAuth(auth) || req.headers["x-agent-id"] !== undefined) return null;
+  const pickedUserId = dashboardUserIdHeader(req);
+  if (!pickedUserId) return null;
+  const user = await findUserById(pickedUserId);
+  return user?.status === "active" ? user.id : null;
+}
+
 export async function handleFs(
   req: IncomingMessage,
   res: ServerResponse,
@@ -290,6 +379,76 @@ export async function handleFs(
   queryParams: URLSearchParams,
   myAgentId?: string,
 ): Promise<boolean> {
+  if (userAgentFsMeRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    try {
+      userAgentFsMeRoute.respond(res, 200, await ensureUserAgentFsAccount(userId));
+    } catch (error) {
+      jsonError(res, scrubSecrets(error instanceof Error ? error.message : String(error)), 502);
+    }
+    return true;
+  }
+
+  if (mintUserAgentFsKeyRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const parsed = await mintUserAgentFsKeyRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const principal = await requestPrincipal(req, myAgentId);
+    if (!principal) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const decision = can({
+      principal,
+      verb: "fs.join.own",
+      resource: { kind: "none" },
+      source: "http",
+    });
+    if (!decision.allow) {
+      jsonError(res, decision.reason, 403);
+      return true;
+    }
+    if (!fsKeyRateLimit.take(userId)) {
+      jsonError(res, "Limit of five keys per minute reached", 429);
+      return true;
+    }
+    try {
+      const result = await mintUserAgentFsKey(userId, parsed.body.label);
+      switch (result.status) {
+        case "minted": {
+          res.setHeader("Cache-Control", "no-store");
+          const { status: _, ...key } = result;
+          mintUserAgentFsKeyRoute.respond(res, 201, key);
+          break;
+        }
+        case "pending":
+          jsonError(res, scrubSecrets(`agent-fs account pending: ${result.reason}`), 409);
+          break;
+        case "unsupported":
+          jsonError(res, "agent_fs_too_old", 501);
+          break;
+        case "off":
+          jsonError(res, "agent_fs_not_configured", 503);
+          break;
+      }
+    } catch (error) {
+      jsonError(
+        res,
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+        error instanceof AgentFsKeyValidationError ? 400 : 502,
+      );
+    }
+    return true;
+  }
+
   if (ensureAgentCredentialsRoute.match(req.method, pathSegments)) {
     const parsed = await ensureAgentCredentialsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

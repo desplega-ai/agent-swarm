@@ -63,7 +63,7 @@ Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned boots
 
 ## Bundled agent-fs behind the swarm API
 
-Set `AGENT_FS_PROXY=true` on the API to serve agent-fs through it. agent-fs then needs no public port and no second tunnel: the browser reaches it at `<public API URL>/agentfs`.
+The API enables the proxy by default when `AGENT_FS_API_URL` is nonblank. Set `AGENT_FS_PROXY=false` to disable it. The browser reaches agent-fs at `<public API URL>/agentfs`, without another public port or tunnel.
 
 | Path on the API | Goes to agent-fs | Auth |
 | --- | --- | --- |
@@ -92,6 +92,11 @@ AGENT_FS_PUBLIC_URL=https://swarm.example.com/agentfs
 <Callout type="warn">
 agent-fs `POST /auth/register` is public, and agent-fs does not check that the caller owns the email. The swarm invites its users' emails to the shared drive, so an account made first with a teammate's email would get that teammate's seat. The proxy therefore asks for a swarm credential on `POST /agentfs/auth/register`: the operator API key can register any email, and a user token (`aswt_`) can register only the user's own email or an alias. The API also limits that route to 5 requests per minute per client IP. An agent-fs that is reachable without the proxy keeps the public route, so keep it on a private network.
 </Callout>
+
+The swarm API also provides these routes for authenticated users:
+
+- `GET /api/fs/me` returns the user identity and membership state for agent-fs.
+- `POST /api/fs/keys` accepts a `label` and creates a named key scoped to the organization. The response returns the key once. The swarm never stores the key.
 
 ## New installs: onboard bundle
 

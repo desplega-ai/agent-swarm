@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { getCombConfig } from "../comb/config";
-import { getCombState, isBrowserReachableUrl, isCombEnabled } from "../utils/constants";
+import {
+  getCombState,
+  isAgentFsProxyEnabled,
+  isBrowserReachableUrl,
+  isCombEnabled,
+} from "../utils/constants";
 
 const ENV_KEYS = [
   "COMB_ENABLED",
@@ -95,6 +100,21 @@ describe("isBrowserReachableUrl", () => {
   });
 });
 
+describe("isAgentFsProxyEnabled", () => {
+  test("defaults on only with a nonblank agent-fs URL", () => {
+    expect(isAgentFsProxyEnabled()).toBe(false);
+    process.env.AGENT_FS_API_URL = "  ";
+    expect(isAgentFsProxyEnabled()).toBe(false);
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    expect(isAgentFsProxyEnabled()).toBe(true);
+    process.env.AGENT_FS_PROXY = "false";
+    expect(isAgentFsProxyEnabled()).toBe(false);
+    delete process.env.AGENT_FS_API_URL;
+    process.env.AGENT_FS_PROXY = "true";
+    expect(isAgentFsProxyEnabled()).toBe(true);
+  });
+});
+
 describe("getCombState", () => {
   test("nothing set: off, agent-fs missing", () => {
     expect(getCombState()).toEqual({
@@ -121,10 +141,8 @@ describe("getCombState", () => {
 
   test("unset: the reachable-URL conditions decide", () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
-    expect(isCombEnabled()).toBe(false);
-    process.env.AGENT_FS_PROXY = "true";
     expect(getCombState()).toMatchObject({ enabled: true, explicit: false });
-    delete process.env.AGENT_FS_PROXY;
+    process.env.AGENT_FS_PROXY = "false";
     process.env.AGENT_FS_PUBLIC_URL = "  ";
     expect(isCombEnabled()).toBe(false);
     process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
@@ -151,6 +169,7 @@ describe("getCombState", () => {
 
   test("an unrecognized COMB_ENABLED counts as unset", () => {
     process.env.COMB_ENABLED = "treu";
+    process.env.AGENT_FS_PROXY = "false";
     process.env.AGENT_FS_API_URL = "http://localhost:7433";
     expect(getCombState()).toMatchObject({ enabled: true, explicit: false });
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";

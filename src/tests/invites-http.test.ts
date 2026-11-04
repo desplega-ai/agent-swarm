@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -6,6 +15,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import * as agentFsUserKeys from "../be/agent-fs-user-keys";
 import { createConnectorCode, INVITE_CODE_TTL_MS } from "../be/connector-codes";
 import { closeDb, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { ensureRbacSeedsSynced, listUserRoles, setUserRoles } from "../be/rbac-roles";
@@ -460,5 +470,138 @@ describe("POST /api/invites/exchange", () => {
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBe("6");
     expect((await exchange("other-ip", { "X-Forwarded-For": "203.0.113.10" })).status).toBe(404);
+  });
+});
+
+describe("invite exchange with agent-fs", () => {
+  const orgId = crypto.randomUUID();
+  const driveId = crypto.randomUUID();
+  const keys = [
+    "AGENT_FS_API_URL",
+    "API_AGENT_FS_API_KEY",
+    "AGENT_FS_DEFAULT_ORG_ID",
+    "AGENT_FS_DEFAULT_DRIVE_ID",
+  ];
+  let originalEnv: Record<string, string | undefined>;
+  let upstream: ReturnType<typeof Bun.serve> | undefined;
+  let fail = false;
+  const seen: string[] = [];
+  let ensureStarted = false;
+  let ensureCompleted = false;
+  let restoreEnsureSpy: (() => void) | undefined;
+
+  beforeEach(async () => {
+    upstream = undefined;
+    originalEnv = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    seen.length = 0;
+    fail = false;
+    ensureStarted = false;
+    ensureCompleted = false;
+    const realEnsure = agentFsUserKeys.ensureUserAgentFsAccount;
+    const ensureSpy = spyOn(agentFsUserKeys, "ensureUserAgentFsAccount").mockImplementation(
+      async (userId) => {
+        ensureStarted = true;
+        try {
+          return await realEnsure(userId);
+        } finally {
+          ensureCompleted = true;
+        }
+      },
+    );
+    restoreEnsureSpy = () => ensureSpy.mockRestore();
+    upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        seen.push(path);
+        if (fail) return Response.json({ error: "unavailable" }, { status: 503 });
+        if (path === `/orgs/${orgId}/members`) return Response.json({ members: [] });
+        if (path === "/auth/register") {
+          expect(request.headers.get("authorization")).toBeNull();
+          return Response.json({
+            apiKey: `af_${"d".repeat(64)}`,
+            userId: crypto.randomUUID(),
+            orgId,
+          });
+        }
+        if (path === `/orgs/${orgId}/members/invite`)
+          return Response.json({
+            ok: true,
+            status: "added",
+            userId: crypto.randomUUID(),
+            email: "fs-exchange@example.com",
+            orgRole: "editor",
+            drives: [],
+          });
+        return Response.json(
+          { error: "NOT_FOUND", message: `Org not found: ${orgId}` },
+          { status: 404 },
+        );
+      },
+    });
+    const config: Record<string, string> = {
+      AGENT_FS_API_URL: `http://127.0.0.1:${upstream.port}`,
+      API_AGENT_FS_API_KEY: `af_${"e".repeat(64)}`,
+      AGENT_FS_DEFAULT_ORG_ID: orgId,
+      AGENT_FS_DEFAULT_DRIVE_ID: driveId,
+    };
+    for (const [key, value] of Object.entries(config)) {
+      process.env[key] = value;
+      await upsertSwarmConfig({ scope: "global", key, value });
+    }
+  });
+
+  afterEach(async () => {
+    try {
+      if (ensureStarted) await waitForAgentFsEnsure();
+    } finally {
+      restoreEnsureSpy?.();
+      await upstream?.stop(true);
+      for (const key of keys) {
+        await getDbClient().run("DELETE FROM swarm_config WHERE scope = 'global' AND key = ?", [
+          key,
+        ]);
+        const value = originalEnv[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  async function waitForAgentFsEnsure(): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!ensureCompleted && Date.now() < deadline) await Bun.sleep(10);
+    expect(ensureCompleted).toBe(true);
+    expect(seen.length).toBeGreaterThan(0);
+  }
+
+  test("exchange ensures personal membership after activating the user", async () => {
+    const created = await invite({ email: "fs-exchange@example.com" });
+    const response = await exchange(codeOf(created.inviteUrl));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      userId: created.user.id,
+      token: expect.stringMatching(/^aswt_/),
+    });
+    await waitForAgentFsEnsure();
+    expect(
+      seen.some((path) => path === `/orgs/${orgId}/members` || path === "/auth/register"),
+    ).toBe(true);
+  });
+
+  test("an upstream failure leaves exchange successful and the token usable", async () => {
+    fail = true;
+    const created = await invite({ email: "fs-exchange-failure@example.com" });
+    const response = await exchange(codeOf(created.inviteUrl));
+    expect(response.status).toBe(200);
+    const result = (await response.json()) as { token: string; userId: string };
+    expect(result.userId).toBe(created.user.id);
+    const whoami = await fetch(url("/api/whoami"), {
+      headers: { Authorization: `Bearer ${result.token}` },
+    });
+    expect(whoami.status).toBe(200);
+    await waitForAgentFsEnsure();
+    expect(await tokenCount(created.user.id)).toBe(1);
   });
 });

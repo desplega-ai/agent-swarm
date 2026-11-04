@@ -30,6 +30,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { ensureUserAgentFsAccount } from "../be/agent-fs-user-keys";
 import {
   createConnectorCode,
   DEFAULT_CONNECTOR_CODE_LABEL,
@@ -77,6 +78,7 @@ import { UserCommsPrefsSchema, UserSchema } from "../types";
 import { DEFAULT_APP_URL } from "../utils/constants";
 import { assertUrlSafe } from "../utils/egress-guard";
 import { authUser, getRequestAuth } from "../utils/request-auth-context";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
@@ -1286,6 +1288,17 @@ export async function handleUsers(
         jsonError(res, "code_invalid", 404);
         return true;
       }
+      getDbClient().afterCommit(async () => {
+        try {
+          await ensureUserAgentFsAccount(result.userId);
+        } catch (error) {
+          console.warn(
+            scrubSecrets(
+              `[agent-fs] invite account ensure failed: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        }
+      });
       exchangeInviteCodeRoute.respond(res, 200, result);
     } catch {
       jsonError(res, "Failed to exchange code", 500);

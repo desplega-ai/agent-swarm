@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -10,17 +10,24 @@ import { dirname, join } from "node:path";
 import {
   closeDb,
   createAgent,
+  createPage,
   createTaskExtended,
+  createUser,
+  getDbClient,
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
+  upsertSwarmConfig,
 } from "../be/db";
+import { ensureRbacSeedsSynced, setUserRoles } from "../be/rbac-roles";
+import { mintToken } from "../be/users";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { handleCore } from "../http/core";
-import { handleFs } from "../http/fs";
+import { _resetFsKeyRateLimitForTests, handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { formatAttachmentsBlockForSlack } from "../slack/blocks";
 import { attachmentContentDisposition } from "../utils/content-disposition";
+import { signPageSession } from "../utils/page-session";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
@@ -446,5 +453,307 @@ describe("/api/fs REST", () => {
       resetFileStorageProviderForTests();
       await new Promise<void>((resolve) => stalled.close(() => resolve()));
     }
+  });
+});
+
+describe("personal agent-fs identity and keys", () => {
+  const orgId = crypto.randomUUID();
+  const driveId = crypto.randomUUID();
+  const agentFsUserId = crypto.randomUUID();
+  const bootstrapKey = `af_${"b".repeat(64)}`;
+  const mintedKey = `af_${"c".repeat(64)}`;
+  const configKeys = [
+    "API_AGENT_FS_API_KEY",
+    "AGENT_FS_DEFAULT_ORG_ID",
+    "AGENT_FS_DEFAULT_DRIVE_ID",
+  ];
+  const envKeys = [...configKeys, "AGENT_FS_API_URL", "RBAC_ENABLED", "PAGE_SESSION_SECRET"];
+  let originalEnv: Record<string, string | undefined>;
+  let upstream: ReturnType<typeof Bun.serve> | undefined;
+  let userId: string;
+  let email: string;
+  let token: string;
+  let mode: "ready" | "pending" | "missing-member" | "unsupported" = "ready";
+  const requests: Array<{
+    path: string;
+    method: string;
+    authorization: string | null;
+    body: unknown;
+  }> = [];
+
+  beforeAll(async () => {
+    ensureRbacSeedsSynced({ quiet: true });
+    await createUser({ name: "Filesystem Fixture Admin" });
+  });
+
+  beforeEach(async () => {
+    upstream = undefined;
+    originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    ensureRbacSeedsSynced({ quiet: true });
+    _resetFsKeyRateLimitForTests();
+    mode = "ready";
+    requests.length = 0;
+    email = `fs-${crypto.randomUUID()}@example.com`;
+    const user = await createUser({ name: "Filesystem User", email });
+    userId = user.id;
+    await setUserRoles(userId, ["requester"], null);
+    token = (await mintToken(userId, "fs routes", { kind: "operator", id: "fs-tests" })).plaintext;
+    upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        const body = request.method === "POST" ? await request.json() : undefined;
+        requests.push({
+          path,
+          method: request.method,
+          authorization: request.headers.get("authorization"),
+          body,
+        });
+        if (path === `/orgs/${orgId}/members`)
+          return Response.json({
+            members: mode === "pending" ? [] : [{ userId: agentFsUserId, email, role: "editor" }],
+          });
+        if (path === "/auth/register")
+          return Response.json(
+            {
+              error: "REGISTRATION_DOMAIN_NOT_ALLOWED",
+              message: "Registration is not open for this email domain",
+            },
+            { status: 403 },
+          );
+        if (path === `/orgs/${orgId}/members/invite`)
+          return Response.json({
+            ok: true,
+            status: "pending",
+            inviteId: "invite-test",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            token: "example-pending-invite-token",
+          });
+        if (path === `/orgs/${orgId}/members/${agentFsUserId}/keys`) {
+          if (mode === "unsupported") return new Response("404 Not Found", { status: 404 });
+          if (mode === "missing-member")
+            return Response.json(
+              { error: "NOT_FOUND", message: `Org not found: ${orgId}` },
+              { status: 404 },
+            );
+          return Response.json(
+            {
+              apiKey: mintedKey,
+              id: "personal-key",
+              label: (body as { label: string }).label,
+              createdAt: new Date().toISOString(),
+              userId: agentFsUserId,
+              orgId,
+            },
+            { status: 201 },
+          );
+        }
+        return Response.json(
+          { error: "NOT_FOUND", message: `Org not found: ${orgId}` },
+          { status: 404 },
+        );
+      },
+    });
+    process.env.AGENT_FS_API_URL = `http://127.0.0.1:${upstream.port}`;
+    process.env.API_AGENT_FS_API_KEY = bootstrapKey;
+    process.env.AGENT_FS_DEFAULT_ORG_ID = orgId;
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = driveId;
+    process.env.RBAC_ENABLED = "false";
+    process.env.PAGE_SESSION_SECRET = "example-personal-fs-page-secret";
+    for (const [key, value] of [
+      ["API_AGENT_FS_API_KEY", bootstrapKey],
+      ["AGENT_FS_DEFAULT_ORG_ID", orgId],
+      ["AGENT_FS_DEFAULT_DRIVE_ID", driveId],
+    ]) {
+      await upsertSwarmConfig({ scope: "global", key: key!, value: value! });
+    }
+  });
+
+  afterEach(async () => {
+    await upstream?.stop(true);
+    for (const key of configKeys)
+      await getDbClient().run("DELETE FROM swarm_config WHERE scope = 'global' AND key = ?", [key]);
+    for (const key of envKeys) {
+      const value = originalEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetFileStorageProviderForTests();
+  });
+
+  function personal(path: string, init: RequestInit = {}): Promise<Response> {
+    return fetch(url(path), {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, ...init.headers },
+    });
+  }
+
+  function createKey(label: unknown = "laptop"): Promise<Response> {
+    return personal("/api/fs/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+  }
+
+  test("the user token determines identity despite a different dashboard header", async () => {
+    const other = await createUser({ name: "Other", email: "other-fs@example.com" });
+    const response = await personal("/api/fs/me", { headers: { "X-Swarm-User-Id": other.id } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "ready",
+      email,
+      agentFsUserId,
+      orgId,
+      driveId,
+    });
+    expect(requests.some((request) => request.path === `/orgs/${orgId}/members`)).toBe(true);
+    expect(requests.every((request) => request.authorization === `Bearer ${bootstrapKey}`)).toBe(
+      true,
+    );
+  });
+
+  test("the operator can identify an active dashboard user", async () => {
+    const response = await operatorFetch("/api/fs/me", { headers: { "X-Swarm-User-Id": userId } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "ready", email, agentFsUserId });
+    const key = await operatorFetch("/api/fs/keys", {
+      method: "POST",
+      headers: { "X-Swarm-User-Id": userId, "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "dashboard key" }),
+    });
+    expect(key.status).toBe(201);
+    expect(key.headers.get("cache-control")).toBe("no-store");
+    expect(await key.json()).toMatchObject({ apiKey: mintedKey, agentFsUserId, orgId, driveId });
+  });
+
+  test("missing identity, a worker, and inactive dashboard users receive 401", async () => {
+    expect((await operatorFetch("/api/fs/me")).status).toBe(401);
+    expect((await fetch(url("/api/fs/me"))).status).toBe(401);
+    const keyBody = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "missing identity" }),
+    };
+    expect((await operatorFetch("/api/fs/keys", keyBody)).status).toBe(401);
+    expect(
+      (
+        await authedFetch("/api/fs/keys", {
+          ...keyBody,
+          headers: { ...keyBody.headers, "X-Swarm-User-Id": userId },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await authedFetch("/api/fs/me", { headers: { "X-Swarm-User-Id": userId } })).status,
+    ).toBe(401);
+    for (const status of ["invited", "suspended"] as const) {
+      const inactive = await createUser({ name: status, status });
+      expect(
+        (await operatorFetch("/api/fs/me", { headers: { "X-Swarm-User-Id": inactive.id } })).status,
+      ).toBe(401);
+    }
+    expect(
+      (await operatorFetch("/api/fs/me", { headers: { "X-Swarm-User-Id": "missing-user" } }))
+        .status,
+    ).toBe(401);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("page sessions cannot access personal filesystem identity or keys", async () => {
+    const page = await createPage({
+      agentId,
+      slug: `fs-page-${crypto.randomUUID()}`,
+      title: "FS page",
+      contentType: "text/html",
+      body: "<p>test</p>",
+    });
+    for (const identity of [{ op: true as const }, { uid: userId }]) {
+      const session = await signPageSession({
+        pageId: page.id,
+        exp: Math.floor(Date.now() / 1000) + 60,
+        ...identity,
+      });
+      const headers = {
+        "X-Page-Session": session,
+        "X-Page-Id": page.id,
+        "X-Swarm-User-Id": userId,
+      };
+      expect((await operatorFetch("/api/fs/me", { headers })).status).toBe(401);
+      expect(
+        (
+          await operatorFetch("/api/fs/keys", {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ label: "page key" }),
+          })
+        ).status,
+      ).toBe(401);
+    }
+    expect(requests).toHaveLength(0);
+  });
+
+  test("a personal key returns once with no-store and no bootstrap credential", async () => {
+    const response = await createKey();
+    expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      apiKey: mintedKey,
+      keyId: "personal-key",
+      label: "laptop",
+      agentFsUserId,
+      orgId,
+      driveId,
+    });
+    const keyRequest = requests.find((request) => request.path.endsWith("/keys"));
+    expect(keyRequest?.body).toMatchObject({ label: "laptop" });
+    expect(keyRequest?.authorization).toBe(`Bearer ${bootstrapKey}`);
+  });
+
+  test("invalid labels fail before upstream work", async () => {
+    for (const label of ["", "x".repeat(101), 42, null])
+      expect((await createKey(label)).status).toBe(400);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("pending membership returns 409 and an old server returns 501", async () => {
+    mode = "pending";
+    expect((await createKey()).status).toBe(409);
+    mode = "missing-member";
+    expect((await createKey()).status).toBe(409);
+    mode = "unsupported";
+    const response = await createKey();
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: "agent_fs_too_old" });
+  });
+
+  test("disabled agent-fs returns 503", async () => {
+    delete process.env.AGENT_FS_API_URL;
+    expect((await createKey()).status).toBe(503);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("keys require fs.join.own permission", async () => {
+    process.env.RBAC_ENABLED = "true";
+    await getDbClient().run(
+      "DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?",
+      [userId],
+    );
+    const response = await createKey();
+    expect(response.status).toBe(403);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("the sixth key per minute is limited per user", async () => {
+    for (let i = 0; i < 5; i++) expect((await createKey(`key-${i}`)).status).toBe(201);
+    const count = requests.filter((request) => request.path.endsWith("/keys")).length;
+    const response = await createKey("sixth");
+    expect(response.status).toBe(429);
+    expect(requests.filter((request) => request.path.endsWith("/keys"))).toHaveLength(count);
+    email = `other-fs-${crypto.randomUUID()}@example.com`;
+    const other = await createUser({ name: "Other key user", email });
+    token = (await mintToken(other.id, "other", { kind: "operator", id: "fs-tests" })).plaintext;
+    expect((await createKey()).status).toBe(201);
   });
 });
