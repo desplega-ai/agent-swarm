@@ -661,12 +661,13 @@ RUN case "$TARGETARCH" in \
     && rm -rf /tmp/goose.tgz /tmp/goose-home
 # Kiro CLI, the `kiro` ACP target (`kiro-cli acp`). The headless tarball from
 # the versioned download path, verified against the SHA-256 the stable channel
-# manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
-# the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
-# pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.37.1
-ARG KIRO_CLI_SHA256_AMD64=cf6c7438934a169781b3d564e81bcdfccac901c5d659f35235ac19e0d01192a3
-ARG KIRO_CLI_SHA256_ARM64=10f0318a379b27ba9bbfb2a06b33db2abaedcde2ea0c10f46e3cffbce86368aa
+# manifest lists. Since 3.0.0 the tarball ships a single `kiro-cli` binary
+# (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
+# KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
+# licence before publishing.
+ARG KIRO_CLI_VERSION=3.0.0
+ARG KIRO_CLI_SHA256_AMD64=2ebb8688b84765e4baf46d6e28b3e79780e7724e198591c22d0528d03a88a282
+ARG KIRO_CLI_SHA256_ARM64=ee719fcf8d1166a44eb543e9acada6e2766cf13765787612336d0a43f3903766
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -674,7 +675,7 @@ RUN case "$TARGETARCH" in \
     esac \
     && curl -fsSL "https://prod.download.cli.kiro.dev/stable/${KIRO_CLI_VERSION}/kirocli-${kiro_arch}-linux.tar.gz" -o /tmp/kiro.tgz \
     && echo "${kiro_sha256}  /tmp/kiro.tgz" | sha256sum -c - \
-    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli kirocli/bin/kiro-cli-chat \
+    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli \
     && test "$(HOME=/tmp/kiro-home /usr/local/bin/kiro-cli --version)" = "kiro-cli ${KIRO_CLI_VERSION}" \
     && rm -rf /tmp/kiro.tgz /tmp/kiro-home
 
