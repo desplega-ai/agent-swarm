@@ -1,4 +1,5 @@
 import type { Workflow, WorkflowSnapshot } from "../../types";
+import { getWorkflow } from "../db";
 import { computeContentHash } from "./context-versions";
 import { getDbClient } from "./runtime";
 
@@ -90,6 +91,23 @@ export function mergePinnedDefinition(live: Workflow, pinned: PinnedWorkflowDefi
   const merged: Record<string, unknown> = { ...live };
   for (const key of PINNED_WORKFLOW_KEYS) merged[key] = pinned[key];
   return merged as Workflow;
+}
+
+/**
+ * The workflow a run executes: the definition it started with (migration 282)
+ * on top of the live row. Live fields (`enabled`, `key`, `createdByAgentId`,
+ * row metadata) come from the row. A run with no pin (created before 282, or
+ * a preflight failure) gets the live row unchanged. Null when the workflow is
+ * gone. Use this, not `getWorkflow`, for every read made on behalf of a run.
+ */
+export async function getRunWorkflow(run: {
+  id: string;
+  workflowId: string;
+}): Promise<Workflow | null> {
+  const live = await getWorkflow(run.workflowId);
+  if (!live) return null;
+  const pinned = await getPinnedRunDefinition(run.id);
+  return pinned ? mergePinnedDefinition(live, pinned) : live;
 }
 
 /** Remove snapshots no run references any more. Call after deleting runs. */

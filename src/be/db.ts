@@ -232,11 +232,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
-import {
-  deleteOrphanedRunDefinitions,
-  getPinnedRunDefinition,
-  mergePinnedDefinition,
-} from "./db/workflow-run-definitions";
+import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
   emitChildRunFinished,
   emitRunFinished,
@@ -333,6 +329,7 @@ export {
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
 export {
+  getRunWorkflow,
   PINNED_WORKFLOW_KEYS,
   type PinnedWorkflowDefinition,
   pinWorkflowDefinition,
@@ -7746,23 +7743,6 @@ export async function createWorkflow(
 export async function getWorkflow(id: string): Promise<Workflow | null> {
   const row = await getDbClient().get<WorkflowRow>("SELECT * FROM workflows WHERE id = ?", [id]);
   return row ? rowToWorkflow(row) : null;
-}
-
-/**
- * The workflow a run executes: the definition it started with (migration 282)
- * on top of the live row. Live fields (`enabled`, `key`, `createdByAgentId`,
- * row metadata) come from the row. A run with no pin (created before 282, or
- * a preflight failure) gets the live row unchanged. Null when the workflow is
- * gone. Use this, not `getWorkflow`, for every read made on behalf of a run.
- */
-export async function getRunWorkflow(run: {
-  id: string;
-  workflowId: string;
-}): Promise<Workflow | null> {
-  const live = await getWorkflow(run.workflowId);
-  if (!live) return null;
-  const pinned = await getPinnedRunDefinition(run.id);
-  return pinned ? mergePinnedDefinition(live, pinned) : live;
 }
 
 /**
