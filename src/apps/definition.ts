@@ -4,6 +4,7 @@ import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import { APPS_JSON_COLUMN_MAX_BYTES_BOUNDS } from "../be/swarm-config-guard";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
+import { AppIconSchema } from "../types";
 import catalog from "./catalog.generated.json";
 import {
   crossPageDefinitionIssues,
@@ -467,6 +468,13 @@ export const AppDefinitionSchema = z
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
     theme: AppThemeIdSchema.optional(),
+    /**
+     * Icon shown for the app on the dashboard Apps page (lucide icon name +
+     * optional hex color). The server validates shape only; the dashboard owns
+     * the curated icon catalog and falls back to a generic icon when the name
+     * is unknown (`AVATAR_ICON_CATALOG` in `apps/ui/src/lib/agent-icon.ts`).
+     */
+    icon: AppIconSchema.optional(),
   })
   .superRefine((definition, ctx) => {
     if (!Object.hasOwn(definition.pages, definition.defaultPage)) {
@@ -626,6 +634,7 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "defaultPage",
   "schemaVersion",
   "theme",
+  "icon",
 ]);
 
 const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
@@ -634,6 +643,8 @@ const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
   themes: "theme",
   appearance: "theme",
   styling: "theme",
+  avatar: "icon",
+  emoji: "icon",
 };
 
 export type AppDefinitionPatchResult =

@@ -65,7 +65,7 @@ import {
 import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
 import type { RbacResource } from "../rbac";
 import { can } from "../rbac";
-import { AgentTaskStatusSchema } from "../types";
+import { AgentTaskStatusSchema, AppIconSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
@@ -139,6 +139,8 @@ const AppSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
+  /** Projected from `definition.icon` (see `extractIcon` in `src/apps/store.ts`). */
+  icon: AppIconSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
