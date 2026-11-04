@@ -62,7 +62,8 @@ import { runStepValidation, type ValidationRunResult } from "./validation";
 // `process.env`, so a module-level const would permanently ignore DB-saved
 // limits. Functions let a config reload take effect without a restart.
 function maxIterations(): number {
-  return Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
+  const value = Number(process.env.WORKFLOW_MAX_ITERATIONS);
+  return Number.isInteger(value) && value > 0 ? value : 100;
 }
 
 export interface WorkflowExecutionOptions {

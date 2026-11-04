@@ -543,27 +543,50 @@ describe("workflow foreach", () => {
     expect(await stepByNodeId(runId, "after")).toBeUndefined();
   });
 
-  test("foreach fails before dispatch when its children exceed the run step limit", async () => {
-    const originalLimit = process.env.WORKFLOW_MAX_STEPS_PER_RUN;
-    process.env.WORKFLOW_MAX_STEPS_PER_RUN = "3";
-    try {
-      const { registry } = createRegistry(false);
-      const workflow = await makeWorkflow(foreachDefinition());
-      const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
+  for (const [value, limit] of [
+    [undefined, 500],
+    ["", 500],
+    [" ", 500],
+    ["Infinity", 500],
+    ["-Infinity", 500],
+    ["NaN", 500],
+    ["invalid", 500],
+    ["0", 500],
+    ["-1", 500],
+    ["1.5", 500],
+    ["1", 1],
+    ["3", 3],
+    ["501", 501],
+  ] as const) {
+    test(`WORKFLOW_MAX_STEPS_PER_RUN=${value} refuses dispatch beyond ${limit} steps`, async () => {
+      const originalLimit = process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+      if (value === undefined) delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+      else process.env.WORKFLOW_MAX_STEPS_PER_RUN = value;
 
-      expect((await getWorkflowRun(runId))?.status).toBe("failed");
-      expect((await stepByNodeId(runId, "reflect"))?.status).toBe("failed");
-      expect((await stepByNodeId(runId, "reflect"))?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
-      expect(await foreachChildren(runId)).toHaveLength(0);
-      expect(await taskCountForForeachChildren(runId)).toBe(0);
-    } finally {
-      if (originalLimit === undefined) {
-        delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
-      } else {
-        process.env.WORKFLOW_MAX_STEPS_PER_RUN = originalLimit;
+      try {
+        const { registry } = createRegistry(false);
+        const definition = foreachDefinition();
+        definition.nodes[0]!.config.itemKey = "name";
+        const workflow = await makeWorkflow(definition);
+        const items = Array.from({ length: limit }, (_, i) => ({
+          id: agentItems[0]!.id,
+          name: `item-${i}`,
+        }));
+        const runId = await startWorkflowExecution(workflow, { items }, registry);
+
+        expect((await getWorkflowRun(runId))?.status).toBe("failed");
+        expect((await stepByNodeId(runId, "reflect"))?.status).toBe("failed");
+        expect((await stepByNodeId(runId, "reflect"))?.error).toContain(
+          `foreach would reach ${limit} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
+        );
+        expect(await foreachChildren(runId)).toHaveLength(0);
+        expect(await taskCountForForeachChildren(runId)).toBe(0);
+      } finally {
+        if (originalLimit === undefined) delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+        else process.env.WORKFLOW_MAX_STEPS_PER_RUN = originalLimit;
       }
-    }
-  });
+    });
+  }
 
   test("foreach rejects a fan-out that lands exactly on the step cap when reaching it", async () => {
     // 1 existing (parent) + 3 children == cap of 4. Admitting this would spend all
