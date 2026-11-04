@@ -6,7 +6,7 @@ import {
   type BudgetRefusalContext,
   emitBudgetRefusalSideEffects,
 } from "../be/budget-refusal-notify";
-import { firstOpenItem, markNudged } from "../be/checklist";
+import { firstOpenItem, markNudged, userGrantCanEditSwarm } from "../be/checklist";
 import {
   claimMentions,
   claimOfferedTask,
@@ -34,7 +34,6 @@ import {
 } from "../be/model-tier-resolution";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
-import { getUserGrant } from "../be/rbac-roles";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
@@ -229,8 +228,8 @@ async function buildChecklistNudge(task: AgentTask, agent: Agent) {
   }
   try {
     return await getDbClient().transaction(async () => {
-      const grant = await getUserGrant(userId);
-      const canEditSwarm = grant.grantsAll || grant.verbs.has("config.write.any");
+      // RBAC off: the legacy policy lets the Lead edit swarm items.
+      const canEditSwarm = (await userGrantCanEditSwarm(userId)) ?? true;
       const item = await firstOpenItem(userId, canEditSwarm);
       if (!item) return undefined;
       await markNudged(item.id, task.id, userId);

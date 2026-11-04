@@ -1,8 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { ChecklistError, listChecklist, mutateChecklist } from "../be/checklist";
-import { getUserGrant } from "../be/rbac-roles";
-import { can, isRbacEnabled } from "../rbac";
+import {
+  ChecklistError,
+  listChecklist,
+  mutateChecklist,
+  userGrantCanEditSwarm,
+} from "../be/checklist";
+import { can } from "../rbac";
 import { ChecklistItemSchema } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { resolveRequestPrincipal } from "./request-principal";
@@ -125,15 +129,13 @@ export async function handleChecklist(
   }
   // The dashboard's selected user has the same grants as that user's token.
   // Role rows count only with RBAC on; off, the legacy policy decides.
-  const grant =
-    principal.kind !== "agent" && owner.userId && isRbacEnabled()
-      ? await getUserGrant(owner.userId)
-      : null;
-  const canEditSwarm = grant
-    ? grant.grantsAll || grant.verbs.has("config.write.any")
-    : principal.kind === "operator" ||
+  const grantAllows =
+    principal.kind !== "agent" && owner.userId ? await userGrantCanEditSwarm(owner.userId) : null;
+  const canEditSwarm =
+    grantAllows ??
+    (principal.kind === "operator" ||
       can({ principal, verb: "config.write.any", resource: { kind: "none" }, source: "http" })
-        .allow;
+        .allow);
   const actor = {
     id: principal.kind === "agent" ? `lead:${principal.agentId}` : owner.actorId,
     userId: owner.userId,

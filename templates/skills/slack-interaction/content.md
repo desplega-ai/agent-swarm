@@ -50,7 +50,7 @@ A task without `requestedByUserId` came from a Slack user the swarm does not kno
 
 A use case (a schedule and its runs under one key, see the `scheduling` skill) can post a summary of each run to one Slack thread.
 
-1. In the planning session, after the first run, read `kv-get { namespace: "usecase:<key>", key: "thread" }`. A stored value means that you offered before: do not offer again.
+1. When you handle the follow-up of the first run (the planning session has usually ended by then), read `kv-get { namespace: "usecase:<key>", key: "thread" }`. A stored value means that you offered before: do not offer again.
 2. Offer once: "Do you want a summary of each run in a Slack channel? Tell me the channel."
 3. On no: `kv-set { namespace: "usecase:<key>", key: "thread", value: { declined: true } }`.
 4. On yes: `slack-start-thread { channelId, message }` with a one-line title, for example "Competitor watch: one summary per run". Then `kv-set { namespace: "usecase:<key>", key: "thread", value: { adapter: "slack", channelId, threadTs: "<ts from slack-start-thread>" } }`.

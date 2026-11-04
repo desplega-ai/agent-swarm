@@ -132,7 +132,8 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const endpoint = combEndpoint(comb);
 
   // The credential belongs to the dashboard user: switching users never reuses
-  // another user's key. A tab with no user keeps the legacy (user-less) key.
+  // another user's key. A tab with no resolved user (pending or needs-pick)
+  // has no credential and never reads the legacy (user-less) key.
   const currentUser = useCurrentUser();
   const ownerId = currentUser.userId;
   const ownerEmail = currentUser.user?.email ?? null;
@@ -148,7 +149,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
     [apiUrl, endpoint, owner],
   );
   const getSnapshot = useMemo(
-    () => (endpoint ? credentialSnapshot(apiUrl, endpoint, owner) : () => null),
+    () => (endpoint && owner ? credentialSnapshot(apiUrl, endpoint, owner) : () => null),
     [apiUrl, endpoint, owner],
   );
   const saved = useSyncExternalStore(subscribe, getSnapshot);
@@ -189,7 +190,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(
     (next: AgentFsCredential) => {
-      if (!endpoint) return;
+      if (!endpoint || !owner) return;
       // Drop results cached under an older key for the same user (a reset key
       // would otherwise keep its 401).
       queryClient.removeQueries({ queryKey: ["agent-fs", endpoint] });
@@ -199,7 +200,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   );
 
   const disconnect = useCallback(() => {
-    if (endpoint) clearCredential(apiUrl, endpoint, owner);
+    if (endpoint && owner) clearCredential(apiUrl, endpoint, owner);
     queryClient.removeQueries({ queryKey: ["agent-fs"] });
   }, [apiUrl, endpoint, owner, queryClient]);
 

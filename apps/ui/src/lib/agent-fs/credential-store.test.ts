@@ -131,6 +131,15 @@ describe("credential owner (dashboard user)", () => {
     expect(readCredential(API, FS, { userId: "u-x", email: null }, storage)).toBeNull();
   });
 
+  test("an owned legacy credential moves to the owner's key on first read", () => {
+    const storage = memoryStorage();
+    writeCredential(API, FS, null, credential, storage);
+    expect(readCredential(API, FS, alice, storage)).toEqual(credential);
+    expect(storage.map.has(credentialStorageKey(API, FS))).toBe(false);
+    expect(storage.map.has(credentialStorageKey(API, FS, alice))).toBe(true);
+    expect(readCredential(API, FS, alice, storage)).toEqual(credential);
+  });
+
   test("the owner's own key wins over the legacy one", () => {
     const storage = memoryStorage();
     storage.map.set(credentialStorageKey(API, FS), JSON.stringify(credential));

@@ -171,12 +171,12 @@ function ConfigFields({ fields }: { fields: AiProviderField[] }) {
     if (!dirty || pending) return;
     setResult(null);
     try {
-      const results = [
-        ...(changes.length > 0 ? [await upsert.mutateAsync(changes)] : []),
-        ...(cleared.length > 0
-          ? [await remove.mutateAsync({ configs: configs ?? [], keys: cleared })]
-          : []),
-      ];
+      const results = [];
+      if (changes.length > 0) results.push(await upsert.mutateAsync(changes));
+      // A partly failed upsert must not be followed by deletes.
+      if (!results.some((res) => res.failureCount > 0) && cleared.length > 0) {
+        results.push(await remove.mutateAsync({ configs: configs ?? [], keys: cleared }));
+      }
       const failed = results.find((res) => res.failureCount > 0);
       if (failed) {
         setResult({ ok: false, text: failed.errors[0]?.message ?? "Could not save." });

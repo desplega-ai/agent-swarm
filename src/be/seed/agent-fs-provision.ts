@@ -289,10 +289,10 @@ export async function syncAgentFsOrgSwarmUrl(
   if (!apiUrl || !apiKey || !orgId) return "skipped";
   const orgPath = `/orgs/${encodeURIComponent(orgId)}`;
   const headers = { authorization: `Bearer ${apiKey}` };
-  const org = await agentFsRequest<{ swarmUrl?: unknown }>(apiUrl, orgPath, { headers });
-  // agent-fs drops the trailing slash when it stores the value.
-  if (org?.swarmUrl === swarmUrl.replace(/\/+$/, "")) return "unchanged";
   try {
+    const org = await agentFsRequest<{ swarmUrl?: unknown }>(apiUrl, orgPath, { headers });
+    // agent-fs drops the trailing slash when it stores the value.
+    if (org?.swarmUrl === swarmUrl.replace(/\/+$/, "")) return "unchanged";
     await agentFsRequest(apiUrl, orgPath, { method: "PATCH", headers, body: { swarmUrl } });
     return "set";
   } catch (error) {

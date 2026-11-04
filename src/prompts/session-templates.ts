@@ -110,7 +110,7 @@ A use case is work that repeats or continues, for example a report twice a week.
 - In a use-case session, a request for one time only is a normal task in the key. A request that changes the future runs is an \`update-schedule\` call with the new \`taskTemplate\`. After that call, show the old and the new template as a \`diff\` block in your reply, and ask the requester to confirm it.
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
-A task needs a tool that is not connected (GitHub, Linear, Jira, Gmail, ...): say so and link \`APP_URL\` + \`/integrations/tools\`. Do not work around it.
+A task needs a tool that is not connected (GitHub, Linear, Jira, Gmail, ...): say so and link {{appUrl}}/integrations/tools. Do not work around it.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
 `,
   variables: [
@@ -122,16 +122,17 @@ Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`upda
   category: "system",
 });
 
-// Lead-only, appended by base-prompt when Slack or a Chat SDK adapter is
-// connected. All posting tools (slack-start-thread, slack-post, chat-post) are
-// lead-only, so workers never get this rule. The skills hold the steps.
+// Lead-only, appended by base-prompt when the Slack prompt tools are on or the
+// server has the chat-sdk capability (not when an adapter is connected). All
+// posting tools (slack-start-thread, slack-post, chat-post) are lead-only, so
+// workers never get this rule. The skills hold the steps.
 registerTemplate({
   eventType: "system.agent.lead.channel_thread",
   header: "",
   defaultBody: `
 ## Use-case channel thread
 
-In the planning session, after the first run of a use case, offer once to post a summary of each run to a channel thread. Before you offer, read \`kv-get\` with namespace \`usecase:<key>\` and key \`thread\`. A stored value means that you offered before. Do not offer again.
+When you handle the follow-up of the first run of a use case (the planning session has usually ended by then), offer once to post a summary of each run to a channel thread. Before you offer, read \`kv-get\` with namespace \`usecase:<key>\` and key \`thread\`. A stored value means that you offered before. Do not offer again.
 When you finish or review a run of a use case that has a stored thread, post the run summary in that thread.
 The \`slack-interaction\` skill (Slack) and the \`chat-sdk\` skill (Telegram, Discord, Teams) give the steps.
 `,
