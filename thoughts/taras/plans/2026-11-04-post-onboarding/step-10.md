@@ -3,7 +3,9 @@ id: step-10
 name: "Use-case Overview tab (next run, schedules, outputs, Ask the Lead)"
 track: D
 depends_on: [step-9, step-2, step-16]
-status: ready
+status: claimed
+assignee: po-orch-step-10
+claimed_at: 2026-11-04T16:59:57Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -48,19 +50,40 @@ Layout (from the approved mockup): a next-run bar across the top (next run time,
 
 #### Automated Verification:
 - [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- overview`
-- [ ] `bun run e2e:ui -- --grep "overview"`
-- [ ] `bun run check:local && bun run tsc:check:tsc`
+- [x] `bun run e2e:ui -- --grep "overview"`
+- [x] `bun run check:local && bun run tsc:check:tsc`
 
 #### Automated QA:
-- [ ] `AGENT_BROWSER_SESSION=po-step10`, local stack with agent-fs: seed as in step-9's walkthrough, write `shared/po-qa/report-2026-11-04.md` to the shared drive with the agent-fs CLI, open `/sessions?view=shared/po-qa/`. Screenshots at 1440 light and dark next to `mockups/post-onboarding/shots/r3-overview-1440-light.png` (`/tmp/po-step10-*.png`).
-- [ ] Seed 50 schedules under the key via the API; the Schedules widget shows search and scrolls without the row width changing. Screenshot.
-- [ ] Click Run now → switch to the list tab → the run row appears within the poll interval; screenshot.
-- [ ] Type in Ask the Lead and send → a new session tab opens; `GET /api/tasks/<id>` shows `key: "shared/po-qa/"`.
-- [ ] A thread group with no schedule and no files opens on the list tab with no Overview tab. Screenshot.
-- [ ] Phone viewport (390×844) screenshots of Overview and list tabs.
-- [ ] Recording of Run now + preview + Ask the Lead for the PR.
+- [x] `AGENT_BROWSER_SESSION=po-step10`, local stack with agent-fs: seed as in step-9's walkthrough, write `shared/po-qa/report-2026-11-04.md` to the shared drive with the agent-fs CLI, open `/sessions?view=shared/po-qa/`. Screenshots at 1440 light and dark next to `mockups/post-onboarding/shots/r3-overview-1440-light.png` (`/tmp/po-step10-*.png`).
+- [x] Seed 50 schedules under the key via the API; the Schedules widget shows search and scrolls without the row width changing. Screenshot.
+- [x] Click Run now → switch to the list tab → the run row appears within the poll interval; screenshot.
+- [x] Type in Ask the Lead and send → a new session tab opens; `GET /api/tasks/<id>` shows `key: "shared/po-qa/"`.
+- [x] A thread group with no schedule and no files opens on the list tab with no Overview tab. Screenshot.
+- [x] Phone viewport (390×844) screenshots of Overview and list tabs.
+- [x] Recording of Run now + preview + Ask the Lead for the PR.
 
 #### Manual Verification:
 - [ ] Taras compares the built Overview tab with the approved mockup.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. UI routes to Opus. After completing this step, pause for manual confirmation. Commit as `[step-10] Use-case Overview tab` after verification passes. Frontend PR: screenshots and recording in `## Before / after`.
+
+## Implementation notes
+
+- Commit `726720556` on `po/step-10`. All by Opus (UI only, no backend change, no Codex round).
+- Tab model: the Overview is a virtual tab (`OVERVIEW_TAB = "overview"` in `lib/sessions-v2.ts`). It never goes in `?tabs=` or the split. The shell shows it before the tabs while the group tab is open and the group qualifies. `?tab=overview|list` picks the face (`focusGroupPane` in `use-sessions-url-state.ts`). A new `?view=` and closing the list tab drop `?tab=`. With no `?tab=`, the group tab waits (skeleton) until it knows whether the group qualifies, so the list never flashes before the Overview. Pinned: a pin glyph, no close button, Delete and middle-click do nothing. The status bar tab count includes it (as in the mockup).
+- Qualification: `canHaveOverview` mirrors the server's `showsScheduleRuns` (user groups only; sections, namespace roots, source groups and resource groups never qualify). Then at least one schedule (a `keyPrefix` read cut to schedules whose `groupKeyOf(key)` is the group) or at least one file in `ls /<key>` on the shared drive. A missing folder, Comb off, or a key that cannot be minted counts as "no files".
+- `useAutoConnect` gained `{ enabled }`. The Overview mints this browser's agent-fs key (step-2 flow) only while a user group is open, not on every Sessions view.
+- "New schedule": `ScheduleDialog` and the create mapping moved from `pages/schedules/page.tsx` to `components/schedules/schedule-dialog.tsx` (a move, plus `initialKey`). The Overview opens it in place with Start in = the group key.
+- Run now: `useRunScheduleNow` now also invalidates `["sessions"]` and `SESSION_TREE_KEY` (all callers benefit). A paused schedule's Run now is `aria-disabled` with a tooltip ("Turn the schedule on to run it now."); any server error toasts its message.
+- Last run in the bar = newest `source=schedule` root in the group (as planned), not per schedule.
+- Cadence: `compactCron` gives "Mon, Thu 09:00", "Daily 07:30", else cronstrue. A schedule zone other than the browser's is named ("Mon, Thu 09:00 UTC"), because the next-run time is shown in local time.
+- Outputs: authors through Comb's `useAuthorLabel` (member name or email, "Swarm" for the service account). The "new" dot compares `modifiedAt` with this browser's last visit to that group's Overview (localStorage, per connection and key). First visit marks none.
+- Preview footer: "<writer> wrote it in <session>" when one of the group's 5 newest sessions has an agent-fs attachment with that path (new client call `fetchTaskFiles`, `GET /api/fs/tasks/{id}/files`). Else "<author> wrote it".
+- Ask the Lead: "attach the open file" appends `About the file \`<path>\` in the shared drive.` to the task text (no attachment row). Its two "Lead replies" are the newest `source=ui` sessions in the group, showing the session preview or title. The box stays grown while it holds text: a shrink on blur moved Send under the pointer and swallowed the first click (found in QA).
+- Deviations: widget lists are compact `ul` lists, not `DataGrid` (mockup density; same as Home widgets). Phone: underline tabs Overview / Sessions under the existing top bar (the bar still says "Sessions", not the group name). QA files were written through the agent-fs ops API with the human's key, not the agent-fs CLI. No sidebar click opens a group with 10 or fewer sessions ("View all" shows above 10 only), so the recording opens the group by URL.
+- Verification:
+  - Box 1 left unticked: `bun run lint` pass (3 pre-existing warnings), `bunx tsc -b` pass, but `bun run test -- overview` is a no-op that exits 0 (apps/ui has no `test` script, same as steps 2, 9, 11). Equivalent `cd apps/ui && bun test overview`: 21 pass (`lib/use-case-overview.test.ts` 14, `overview/overview-widgets.test.tsx` 7). Also `bun test --parallel=4 apps/ui/src/components/sessions-v2 apps/ui/src/lib`: 1672 pass.
+  - `bun run e2e:ui -- --grep "overview"`: 2 passed. Regression run of `sessions-v2`, `favorites`, `smoke` specs: 48 passed.
+  - `bun run check:local`: first run had 1 fail in `src/tests/mcp-input-caps.test.ts` (10 s timeout under load; 8/8 pass alone; no backend file changed), rerun green. `tsc:check:tsc` pass.
+- QA artifacts (`/tmp/po-step-10-*`): overview-1440-light, overview-1440-dark, overview-50-schedules-light (search "pricing" 48 of 50, template open, row hover; row width 483 px before scroll, after scroll and after filtering), run-now-list-light, ask-lead-new-tab-light (task key `shared/po-qa/`, source `ui`), plain-group-light, phone-overview-light, phone-overview-scrolled-light, phone-list-light, phone-overview-dark, new-schedule-dialog-dark, recording overview-flow.webm (23 s).
+- Follow-ups: a sidebar entry that opens a group's Overview for small groups (today only "View all" above 10 sessions, or a link such as a Home favorite); show the group name in the phone top bar.

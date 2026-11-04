@@ -3,7 +3,9 @@ id: step-3
 name: In-app file links by default + files-first delivery prompt
 track: A
 depends_on: [step-2]
-status: ready
+status: claimed
+assignee: po-orch-step-3
+claimed_at: 2026-11-04T16:59:57Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -39,18 +41,33 @@ Agents link files to the dashboard by default whenever `APP_URL` (or `DASHBOARD_
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/comb-links.test.ts src/tests/agent-fs-live-url.test.ts` plus the prompt test file touched
-- [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `bun run build:skill-md && bun run check:skill-md && bun run check:skill-sources && git diff --exit-code templates/`
+- [x] `bun run test:root -- src/tests/comb-links.test.ts src/tests/agent-fs-live-url.test.ts` plus the prompt test file touched
+- [x] `bun run check:local && bun run tsc:check:tsc`
+- [x] `bun run build:skill-md && bun run check:skill-md && bun run check:skill-sources && git diff --exit-code templates/`
 - [ ] `rg -n 'AGENT_FS_LIVE_URL\}/file' templates src/prompts` returns nothing
 
 #### Automated QA:
-- [ ] Render the lead prompt in a one-off script: `APP_URL=https://app.example.test AGENT_FS_API_URL=http://localhost:7433 bun -e 'import {getBasePrompt} from "./src/prompts/base-prompt"; ...'` (follow the signature in `src/prompts/base-prompt.ts`) and assert the output contains `https://app.example.test/file/~/` and the files-first sentence, and does not contain `live.agent-fs.dev`.
-- [ ] Same render with `APP_URL` unset contains `live.agent-fs.dev`.
-- [ ] `docker compose -f docker-compose.example.yml config | rg -n APP_URL` shows the var on the lead and worker services.
-- [ ] `PUT /api/config` with a global `APP_URL`, then the resolved-env fetch a worker performs (harness in `src/tests/fetch-resolved-env.test.ts`) returns that value; a rendered worker prompt uses it as the link base.
+- [x] Render the lead prompt in a one-off script: `APP_URL=https://app.example.test AGENT_FS_API_URL=http://localhost:7433 bun -e 'import {getBasePrompt} from "./src/prompts/base-prompt"; ...'` (follow the signature in `src/prompts/base-prompt.ts`) and assert the output contains `https://app.example.test/file/~/` and the files-first sentence, and does not contain `live.agent-fs.dev`.
+- [x] Same render with `APP_URL` unset contains `live.agent-fs.dev`.
+- [x] `docker compose -f docker-compose.example.yml config | rg -n APP_URL` shows the var on the lead and worker services.
+- [x] `PUT /api/config` with a global `APP_URL`, then the resolved-env fetch a worker performs (harness in `src/tests/fetch-resolved-env.test.ts`) returns that value; a rendered worker prompt uses it as the link base.
 
 #### Manual Verification:
 - [ ] Taras reads the new outputs paragraph once for tone (STE rules: short sentences, no hedging).
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. After completing this step, pause for manual confirmation. Commit as `[step-3] In-app file links by default + files-first delivery prompt` after verification passes.
+
+## Implementation notes
+
+- Commit `61e053a94` on `po/step-3`. Done by Claude alone (small backend, no Codex round).
+- `readAgentFsLinkTarget()` never returns null now: explicit value, else `dashboard` with a configured `APP_URL` / `DASHBOARD_URL`, else `live`. `resolveAgentFsLinkBase()` always returns a base, so the prompt no longer carries the `${AGENT_FS_LIVE_URL}` shell literal (without `APP_URL` it shows the resolved live URL, `https://live.agent-fs.dev` by default). The prompt surface still skips the Comb check, as before.
+- `buildCombFileUrl` was dead after the default flip (the attachment path always gets a base), so it is removed. Attachment output is unchanged for every old case; tests cover it.
+- Track B input: new `agentFsFileLinkQuery(base)` adds `?apiUrl=<AGENT_FS_PUBLIC_URL>` to live-app links only (prompt link, `buildAgentFsLiveUrl`, attachment links incl. citations and the context preamble). Dashboard links never get it. Only `AGENT_FS_PUBLIC_URL` counts as "public": the proxy URL `<public API>/agentfs` sends no CORS grant to the live app origin, so it is not used. Workers see the query only when `AGENT_FS_PUBLIC_URL` is in their own env (it is not in the reloadable set). The memory link-resolver regex stops at `?`, and the UI `liveUrlToCombPath` parses with `URL`, so both ignore the query.
+- Outputs template gets a second variable `fileLinkQuery`. Text is static per deployment (no per-task values), so the system prompt stays cache-stable. The task key pointer is `key` in `get-task-details` (the task prompt does not carry the key today; step-12 may add more).
+- `APP_URL` validator accepts blank or a comma-separated list of http(s) URLs (no query or fragment), not https only: local stacks use `http://localhost:5274`, and the invite dialog already saves `window.location.origin` as a global `APP_URL`. The catalog entry sits in Branding & URLs next to `DASHBOARD_URL`, now labeled deprecated (a saved `DASHBOARD_URL` is not reloadable and does not reach workers).
+- Helm: no template change needed. `config.appUrl` already reaches every pool through the shared `-config` configmap (`envFrom` in `pool-statefulset.yaml`). Only the values comment changed. `helm` is not installed here, so no `helm template` run.
+- Compose example: `APP_URL=${APP_URL:-}` added to the lead and all 11 worker services.
+- Skills: `agent-browser`, `work-on-task`, the showreel template (SKILL.md, PLAYBOOK.md and its docs page), and the dreaming workflow now say "the file link from the Outputs section of your system prompt (the dashboard when configured)". Not changed: `templates/skills/qa/content.md` is vendored from ai-toolbox and pinned by SHA-256 (`templates/ai-toolbox.manifest.json`), so a local edit fails `check:ai-toolbox-skills`. That is why the `rg` box stays unticked: its only hit is qa line 97. Fix belongs upstream in ai-toolbox, then a re-pin. Also not changed (out of the step's rg scope): `plugin/commands/create-pr.md` (Swarm provenance link convention).
+- Verification evidence: touched tests 232 pass. `check:local` exit 0 (4724 tests pass). `tsc:check:tsc`, `lint`, `lint:slop`, apps/ui `lint` + `tsc -b`, `check:skill-md`, `check:skill-sources`, `check:seed-skill-files`, `check:ai-toolbox-skills` pass. `git diff --exit-code templates/` clean after the commit.
+- QA: lead prompt render with `APP_URL=https://app.example.test`: 1 `https://app.example.test/file/~/`, 0 `live.agent-fs.dev`, `## Outputs` and the files-first sentences each exactly once. Without `APP_URL`: the live host. With `AGENT_FS_PUBLIC_URL` and no `APP_URL`: `...<path>?apiUrl=https%3A%2F%2Ffs.example.test`. Live API on a free port with a fresh DB: `PUT /api/config` global `APP_URL` 200 (an invalid value 400), real `fetchResolvedEnv` returned it, `applyResolvedEnvToProcessEnv` changed `APP_URL`, and the rendered worker prompt linked `https://app.example.test/file/~/...`. Compose config with `APP_URL` set shows it on api, lead and 11 workers.
+

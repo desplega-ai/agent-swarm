@@ -3,7 +3,9 @@ id: step-14
 name: "Lead nudges from checklist (one-shot)"
 track: E
 depends_on: [step-13]
-status: ready
+status: claimed
+assignee: po-orch-step-14
+claimed_at: 2026-11-04T16:59:57Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -35,18 +37,34 @@ The Lead proposes the next open checklist item to the requester at a natural mom
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/http-api-integration.test.ts src/tests/task-session-prompts.test.ts src/tests/checklist.test.ts`
-- [ ] `bun run e2e --strict`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] `bash scripts/check-db-boundary.sh` (runner and prompts stay DB-free)
-- [ ] `bun run check:local && bun run tsc:check:tsc`
+- [x] `bun run test:root -- src/tests/http-api-integration.test.ts src/tests/task-session-prompts.test.ts src/tests/checklist.test.ts`
+- [x] `bun run e2e --strict`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] `bash scripts/check-db-boundary.sh` (runner and prompts stay DB-free)
+- [x] `bun run check:local && bun run tsc:check:tsc`
 
 #### Automated QA:
-- [ ] Local API + e2e agent-sim (see `scripts/e2e/README.md`): create two UI tasks as the owner; the first poll response carries `checklistNudge` for "Connect a chat channel", the second carries `checklistNudge` for the next item or nothing; `GET /api/checklist` shows `nudgedAt` set.
-- [ ] Host-run lead: start one task from the UI; the session log's task prompt contains the nudge paragraph once; `grep -c "has not finished setting up" <system prompt dump>` is 0.
-- [ ] Remove the item on Home, create a new task: no nudge for it.
+- [x] Local API + e2e agent-sim (see `scripts/e2e/README.md`): create two UI tasks as the owner; the first poll response carries `checklistNudge` for "Connect a chat channel", the second carries `checklistNudge` for the next item or nothing; `GET /api/checklist` shows `nudgedAt` set.
+- [x] Host-run lead: start one task from the UI; the session log's task prompt contains the nudge paragraph once; `grep -c "has not finished setting up" <system prompt dump>` is 0.
+- [x] Remove the item on Home, create a new task: no nudge for it.
 
 #### Manual Verification:
 - [ ] Taras reads one real lead reply that carries the nudge and judges whether it feels natural or naggy.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. Backend to Codex `gpt-6.1-sol` (medium); the template text stays in Claude. After completing this step, pause for manual confirmation. Commit as `[step-14] Lead nudges from checklist (one-shot)` after verification passes.
+
+## Implementation notes
+
+Commit `6682f383b` on `po/step-14` (2026-11-04). Server side by Codex gpt-6.1-sol (high), reviewed by Claude. Template, runner and prompt tests by Claude.
+
+- **Swarm items go only to requesters who can edit them.** `firstOpenItem(userId, canEditSwarm)` now also requires `editable`. The poll derives `canEditSwarm` from `getUserGrant` (`grantsAll` or `config.write.any`), the same rule as `GET /api/checklist`. Reason: members cannot open the Connect pages, and `nudgedAt` on swarm items is global. Result: each swarm item is nudged once per swarm, to an admin. Members get only their own items.
+- **Gate**: lead, `requestedByUserId` set, `source` in `ui | slack | chat | comb`, pending path (`task_assigned`) only. Heartbeat and follow-ups are `system`, schedule runs are `schedule`, so they never carry a nudge. The pool-claim and `task_offered` paths are not touched (leads do not claim from the pool).
+- **Cost**: `listChecklist` runs only when a lead receives a human-sourced task with a requester, not per poll. It runs in a SAVEPOINT inside the poll transaction, with `markNudged`. A failure logs a scrubbed warning and hands out the task with no nudge.
+- **href** is absolute when `APP_URL` resolves (`resolveAppUrl`), otherwise the in-app path.
+- **Static line** in `system.agent.lead` points at `APP_URL` + `/integrations/tools` (step-13 routes, not `?tab=tools`). No template variable, so the system prompt stays per-agent. The fresh-lead size ceiling in `base-prompt.test.ts` moved from 6,100 to 6,250 (the line adds about 150 chars; the base was already near 6,100).
+- **Tests**: the poll cases live in a new `src/tests/checklist-nudge.test.ts` (direct `handlePoll`, `listenOnFreePort`), not `http-api-integration.test.ts`. E2E extends `platform-checklist` with an agent-sim lead and two `ui` tasks from a member.
+- **Docs**: row for `task.checklist.nudge` in the harness-providers per-task context table.
+- **QA**: manual polls gave `swarm:channel`, then `swarm:tool`, with `nudgedAt` and `nudgedTaskId` set. After the use-case item was removed, no nudge. `schedule` and `system` tasks got none. A host-run lead task prompt had the paragraph once. The system prompt had it 0 times and the second task 0 times. Artifacts: `/tmp/po-step-14-task-prompt-with-nudge.txt`, `/tmp/po-step-14-lead-system-prompt.txt`.
+- **No real lead reply yet**: CLIProxy answered `503 auth_unavailable` (Claude refresh token expired), so the manual check needs a working Claude auth.
+- **Flake**: `claude-routes-e2e.test.ts` failed 1 of 3 local runs with `EPERM` from `kill()` in `src/utils/process-group.ts` (not touched here). It was not reproduced on the base in 4 runs. The final `check:local` was green.
+

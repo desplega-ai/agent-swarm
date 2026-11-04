@@ -3,7 +3,9 @@ id: step-15
 name: "Home command center + Needs-you badge"
 track: E
 depends_on: [step-5, step-11, step-13, step-16]
-status: ready
+status: claimed
+assignee: po-orch-step-15
+claimed_at: 2026-11-04T16:59:57Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -46,14 +48,14 @@ Home becomes the command center: **Needs you** (pending approvals, sessions that
 
 #### Automated Verification:
 - [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- home needs-you in-progress favorites app-sidebar`
-- [ ] `bun run e2e:ui -- --grep "home"`
+- [x] `bun run e2e:ui -- --grep "home"`
 - [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `rg -n "MobileNow" apps/ui/src` returns nothing (or only the retained `SectionQuery` helper module)
+- [x] `rg -n "MobileNow" apps/ui/src` returns nothing (or only the retained `SectionQuery` helper module)
 
 #### Automated QA:
-- [ ] `AGENT_BROWSER_SESSION=po-step15`, local stack: seed one pending approval, one running task under `shared/po-qa/`, one failed task, star `shared/po-qa/`. Home screenshots at 1440 and 390 wide (`/tmp/po-step15-*.png`), compared with `mockups/post-onboarding/shots/r3-home-1440-light.png`: Needs you lists the approval and the failed task; In progress lists `po-qa · 1 running`; Favorites shows the starred group; the checklist card is present; the timeline sits below.
-- [ ] Sidebar Home badge shows the count; approve the approval → the badge decrements on the next poll. Recording.
-- [ ] Non-admin (`aswt_` for a Requester): Home shows their own checklist items and their sessions, no `DashboardNudges`. Screenshot.
+- [x] `AGENT_BROWSER_SESSION=po-step15`, local stack: seed one pending approval, one running task under `shared/po-qa/`, one failed task, star `shared/po-qa/`. Home screenshots at 1440 and 390 wide (`/tmp/po-step15-*.png`), compared with `mockups/post-onboarding/shots/r3-home-1440-light.png`: Needs you lists the approval and the failed task; In progress lists `po-qa · 1 running`; Favorites shows the starred group; the checklist card is present; the timeline sits below.
+- [x] Sidebar Home badge shows the count; approve the approval → the badge decrements on the next poll. Recording.
+- [x] Non-admin (`aswt_` for a Requester): Home shows their own checklist items and their sessions, no `DashboardNudges`. Screenshot.
 
 #### Manual Verification:
 - [ ] Taras compares the built Home with the approved mockup on his screen.
@@ -63,3 +65,21 @@ Home becomes the command center: **Needs you** (pending approvals, sessions that
 ### QA Spec (optional):
 
 End-of-plan cross-track QA is covered by `root.md § Global Verification`. If the orchestrator wants a separate evidence doc, generate it with `desplega:qa` at `thoughts/taras/qa/2026-11-04-post-onboarding.md`.
+
+## Implementation notes
+
+Commit `4e58e9d86` on `po/step-15` (2026-11-04). All UI, by Opus. No Codex round.
+
+- **Badge formula (deviation)**: the plan's `treeCount(tree, "needsYou") + credentials` plus the `inbox` section is wrong twice. The `inbox` counts overlap No group and the groups (`session-tree.ts` adds a row to both), so adding it double counts. And the tree only sees approvals with a `sourceTaskId` in a visible session, so a standalone or workflow approval (the Playwright fixture's kind) reads 0. The badge now is the Needs-you pill: `useNeedsYou()` (`hooks/use-needs-you.ts`) reads pending approval summaries, `GET /api/sessions?status=needs&scope=tree` and credential-blocked agents, and `needsYouItems()` (`lib/needs-you.ts`) dedupes. A session drops out when its root is an approval source, or when only a pending approval explains its `needsYou` (not an unread failure), because every pending approval is listed. Failures of the last 24h are listed but not counted (they would hold the badge up for a day). Gated on `1.82.0` like the other badges; the sessions query also waits for the sessions v2 gate (an older server ignores `status=needs`).
+- **Cost**: the sidebar now polls approvals (5s), the needs page and credential status (10s) on every page. They share caches with Home.
+- **In progress** shows the group rows (`<label> · N` from the tree) and, as in the approved mockup, up to 3 running sessions under each group (one page of `status=running`). "No group" comes last. A starred group gets the filled star.
+- **Favorites**: one `useFavorites` per type, rows resolve their names with `usePage` / `useWorkflow` / `useScheduledTask`. A key with no group reads "No sessions"; a missing page, workflow or schedule reads "... not found". `agent-fs-path` lists only the dashboard favorites, not agent-fs stars held in agent-fs (`useCombFavorites`); follow-up if wanted. No "Manage" action (nothing to manage it with).
+- **HomeWidget** (`components/home/home-widget.tsx`) is the chrome of all five widgets. The checklist card and the timeline now render through it (timeline title "Swarm activity", count hidden on phones so "Activity" keeps its room). `SetupChecklistCard` takes a `className` and sits in the checklist slot. Grid: two `xl` columns via `display: contents` columns plus `order-*`, so below `xl` the order is Needs you, checklist, In progress, Favorites. Home scrolls itself; the timeline is `h-80 md:h-[28rem]`.
+- **MobileNow** and its test are deleted. Its read-state helpers live in `components/home/section-state.tsx`.
+- **Fleet benchmark**: `offStateAllowed` is now just "telemetry off" (the card is on Usage). Two card tests rewritten for that.
+- **Hooks**: `useApprovalRequestSummaries` and `useCredentialMissingAgents` take `{ enabled }`; the stale line ref in the credential hook comment is fixed.
+- **UI test box stays unticked**: `apps/ui` has no `test` script. Equivalent passed: `bun run lint`, `bunx tsc -b`, `bun run check:tokens`, `bun test home needs-you in-progress favorites app-sidebar` (35 pass, there is no app-sidebar test; the badge count is covered by `lib/needs-you.test.ts`), and `bun test apps/ui/src --parallel=4` (2611 pass).
+- **check:local box stays unticked**: Biome and `bun check` passed; the tests failed only on `src/tests/claude-routes-e2e.test.ts` (foundry route, `kill() EPERM`), which fails the same way on the unchanged base `948617832`. `tsc:check:tsc`, `lint:slop`, `e2e:ui:tsc` passed.
+- **Playwright**: new home test seeds a running task under a fresh key on its own agent, a key favorite, then a standalone approval. It checks the badge equals the pill, then answers the approval and checks both drop by one. Full suite `bun run e2e:ui -- --retries 0`: 146 passed, 28 skipped. Home specs repeated 3x with no retries: green.
+- **QA**: seeded the failed task under `shared/po-qa/` too, and the server queued a follow-up in that chain, so In progress read `po-qa · 2 running` (the session is honestly running). Requester (`aswt_`): no nudges, own `churn-review` session, checklist without Open on swarm items, no badge; every Home read answered 200.
+
