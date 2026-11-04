@@ -23,7 +23,7 @@ import {
   SquareCheckBig,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useChatSdkStatus } from "@/api/hooks/use-chat-sdk";
 import {
@@ -39,6 +39,7 @@ import {
 import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
+import { ChannelStatusChip } from "@/components/integrations/channel-status-chip";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
@@ -68,6 +69,8 @@ import {
   Relationships,
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
+import { adapterChannelState, CHANNEL_DEFS } from "@/lib/channel-cards";
+import { CHAT_SDK_ADAPTER_DEFS } from "@/lib/chat-sdk-fields";
 import {
   buildInitialState,
   computeDirtyEntries,
@@ -206,6 +209,14 @@ function IntegrationDetailInner({
   const status = deriveIntegrationStatus(def, configs, envPresence, {
     chatSdkEnabled: chatSdkStatus.data?.enabled,
   });
+  // `?adapter=` (from Connect › Channels): one Chat SDK adapter, with its own header.
+  const [searchParams] = useSearchParams();
+  const adapterParam = searchParams.get("adapter");
+  const adapter =
+    def.id === "chat-sdk"
+      ? CHAT_SDK_ADAPTER_DEFS.find((candidate) => candidate.name === adapterParam)?.name
+      : undefined;
+  const channel = adapter ? CHANNEL_DEFS.find((c) => c.adapter === adapter) : undefined;
   const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);
@@ -371,12 +382,24 @@ function IntegrationDetailInner({
             /* Integration name lives in the breadcrumb. Logo + blurb here. */
             <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
-                {logo}
+                {channel?.logoSrc ? (
+                  <BrandLogo src={channel.logoSrc} className="size-6 text-foreground" />
+                ) : (
+                  logo
+                )}
               </div>
-              <p className="min-w-0 text-sm text-muted-foreground">{def.description}</p>
+              <p className="min-w-0 text-sm text-muted-foreground">
+                {channel ? `${channel.name}: ${channel.description}` : def.description}
+              </p>
             </div>
           }
-          action={<IntegrationStatusBadge status={status} />}
+          action={
+            adapter ? (
+              <ChannelStatusChip chip={adapterChannelState(chatSdkStatus.data, adapter).chip} />
+            ) : (
+              <IntegrationStatusBadge status={status} />
+            )
+          }
         />
       </div>
 
@@ -432,6 +455,7 @@ function IntegrationDetailInner({
                 configs={configs}
                 envPresence={envPresence}
                 envPresenceRevision={envPresenceRevision}
+                adapter={adapter}
               />
             )}
 

@@ -24305,6 +24305,9 @@
                               "incomplete"
                             ]
                           },
+                          "connected": {
+                            "type": "boolean"
+                          },
                           "error": {
                             "type": "string"
                           },
@@ -24362,6 +24365,7 @@
                           "configured",
                           "enabled",
                           "health",
+                          "connected",
                           "webhookUrl"
                         ]
                       }

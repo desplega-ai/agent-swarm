@@ -9049,6 +9049,7 @@ export interface paths {
                                 enabled: boolean;
                                 /** @enum {string} */
                                 health: "ok" | "error" | "disabled" | "incomplete";
+                                connected: boolean;
                                 error?: string;
                                 webhookUrl: string;
                                 mode?: string;

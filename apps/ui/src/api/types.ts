@@ -742,6 +742,8 @@ export interface ChatSdkAdapterStatus {
   enabled: boolean;
   /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
   health: "ok" | "error" | "disabled" | "incomplete";
+  /** `configured && enabled && health === "ok"`. Absent from APIs before Connect › Channels. */
+  connected?: boolean;
   error?: string;
   webhookUrl: string;
   mode?: string;
