@@ -13,6 +13,7 @@
  */
 
 import { join } from "node:path";
+import { getMaxSkillChars } from "./codex-skill-resolver";
 import type { ProviderEvent } from "./types";
 
 /**
@@ -23,8 +24,6 @@ import type { ProviderEvent } from "./types";
  * - Optional trailing args captured greedily in group 2
  */
 const SKILL_COMMAND_REGEX = /^@skills:([a-z0-9:_-]+)(?:\s+(.*))?$/;
-
-const MAX_SKILL_CHARS = Number(process.env.MAX_SKILL_CHARS) || 100_000;
 
 /**
  * Default skills directory — `plugin/pi-skills/` relative to the project root.
@@ -97,12 +96,13 @@ export async function resolveDevinPrompt(
     return prompt;
   }
 
-  if (skillContent.length > MAX_SKILL_CHARS) {
+  const maxSkillChars = getMaxSkillChars();
+  if (skillContent.length > maxSkillChars) {
     emit?.({
       type: "raw_stderr",
-      content: `[devin] skill resolver: SKILL.md for @skills:${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
+      content: `[devin] skill resolver: SKILL.md for @skills:${commandName} exceeds ${maxSkillChars} chars (${skillContent.length}), truncating\n`,
     });
-    skillContent = skillContent.slice(0, MAX_SKILL_CHARS);
+    skillContent = skillContent.slice(0, maxSkillChars);
   }
 
   // Assemble the user-request body: trailing args from the @skills: line (if any),
