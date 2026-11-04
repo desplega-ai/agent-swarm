@@ -4,6 +4,7 @@
     "deployment",
     "one-click-deploy",
     "kubernetes",
+    "worker-recovery-decision",
     "podman-rootless",
     "published-artifacts",
     "asset-namespaces",

@@ -62,6 +62,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
+- [Worker Recovery: What Happens to Running Work When a Worker Stops](https://docs.agent-swarm.dev/docs/guides/worker-recovery-decision). Reference.
 - [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless). When: Someone wants to run Agent Swarm under rootless Podman.
 - [Published Artifacts](https://docs.agent-swarm.dev/docs/guides/published-artifacts). Reference.
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.

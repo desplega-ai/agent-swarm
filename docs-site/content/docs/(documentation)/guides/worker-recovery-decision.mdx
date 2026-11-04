@@ -1,0 +1,67 @@
+---
+title: "Worker Recovery: What Happens to Running Work When a Worker Stops"
+description: Agent Swarm pauses in-progress tasks when a worker stops, resumes them on the same agent, and has the Lead reroute work only when that agent never returns.
+---
+
+Agent Swarm pauses in-progress tasks when a worker stops. It does not fail them. Each paused task is then resumed on the same agent that was running it. If that agent does not come back, the Lead decides which agent takes the work next.
+
+## Limits
+
+A resume starts a new agent session. Native session resume is deprecated, so continuity comes from a bounded context preamble built from the task's saved progress, not from the old conversation.
+
+If the original agent does not return, recovery escalates to the Lead, which re-delegates to an agent it chooses. The work never goes back to the open pool.
+
+Repeated resume failures end the task as `failed`. The cap is `HEARTBEAT_MAX_RESUME_GENERATIONS`, default `3` in `src/heartbeat/heartbeat.ts`, so a task that keeps flapping cannot retry forever.
+
+## Graceful shutdown and resume
+
+When a worker container receives SIGTERM, it waits for its active tasks inside a grace period, `SHUTDOWN_TIMEOUT`, default 30 seconds. Any task still running when the grace period ends is marked `paused`, and its progress is saved to the database. On restart, the worker looks for paused tasks assigned to its own agent id, which survives the restart, and resumes each one.
+
+The deployment guide also covers an optional API drain, which is off by default. With drain enabled, the API keeps serving after SIGTERM but hands out no new work, tells workers it is draining, and lets a worker hand off its in-flight task while the API is still up to receive the handoff. Enable it only where the API and the workers stop together, because an API-only restart with drain on would make every live worker drop its in-flight work.
+
+## Stalled-task remediation
+
+A task can also stall without a clean shutdown: it stays `in_progress` while its worker is offline and no progress arrives. The heartbeat sweep detects that case and can reassign or fail the task. When the Lead starts up, it triggers an immediate sweep, which catches tasks that stalled while the swarm itself was down.
+
+## Crash recovery and original-agent pinning
+
+A crashed task, and a gracefully paused one, is pinned back to the agent that was running it rather than released to the unassigned pool. Agent rows survive a restart, so the resume waits for that same agent, and a worker with the wrong specialization cannot pick it up in the meantime.
+
+## Lead fallback
+
+A pinned resume does not wait forever. When the agent has not returned, the resume sits `pending` for `HEARTBEAT_RESUME_PIN_GRACE_MIN`, default 10 minutes measured from the moment the crash was detected. After that a reaper escalates the task to a Lead-owned reroute decision, and the Lead re-delegates through `send-task` to an explicitly chosen agent. The task is never dropped into the pool as a fallback.
+
+## Routing affinity
+
+Some interrupted tasks do return to the pool, for example a resume that falls off its pin because the agent is offline or at capacity. Those carry a routing affinity snapshot taken from the original agent: its role, its capabilities, and a `leadOnly` flag when the task was Lead-only. An agent qualifies if it is the original agent, or if its role matches exactly and its capabilities are a superset of the snapshot. Missing role data on either side means ineligible, so there is no fail-open to whichever worker happens to be idle. A Lead-only task keeps its Lead-only boundary, and a child task inherits it. If no registered agent qualifies, the task escalates to the Lead after `POOL_AFFINITY_ESCALATION_MIN`, default 15 minutes.
+
+## Durable script-workflow step replay
+
+A one-off [script workflow run](/docs/guides/script-workflow-runs) journals every `ctx.step.*` call by label. If the process restarts or the source is re-executed from the top, a step that already completed replays its recorded result instead of running again. Long multi-step jobs therefore continue from the step that was in flight, not from the first line of the source.
+
+## Resumes automatically vs needs Lead action
+
+| Outcome | Case |
+| --- | --- |
+| Resumes automatically | Graceful pause, then same-agent resume on the next start |
+| Resumes automatically | Crash resume, when the original agent returns inside the grace window |
+| Resumes automatically | Workflow step replay for completed steps of a durable run |
+| Needs Lead action | The original agent never returns and the pin is reaped |
+| Needs Lead action | An affinity-tagged task has no eligible agent |
+| Terminal | The resume cap is reached and the task is marked `failed` |
+
+## Operator checks
+
+- Set an explicit, stable `AGENT_ID` on every worker, so paused tasks find their way back.
+- Keep the container stop grace period above the shutdown grace period plus a buffer. The compose example in the [deployment guide](/docs/guides/deployment) uses 60 seconds.
+- Have long tasks call `store-progress` often, because that saved progress is what the context preamble is built from.
+- Turn the API drain on only where the API and workers stop together, and leave it off for API-only rollouts.
+- Leave `HEARTBEAT_PIN_CRASH_RESUME` and `HEARTBEAT_PIN_GRACEFUL_RESUME` at their defaults, which pin recovery to the original agent.
+- Test a deploy in staging and confirm the paused tasks come back before you rely on it in production.
+
+## Related
+
+- [Task Lifecycle](/docs/concepts/task-lifecycle) for the full task state model, including how affinity and escalation are enforced.
+- [Deployment Guide](/docs/guides/deployment) for shutdown, drain and compose settings.
+- [One-off Script Workflow Runs](/docs/guides/script-workflow-runs) for the journal and step replay contract.
+- [Kubernetes and Helm](/docs/guides/kubernetes) for running workers under a scheduler that sends SIGTERM on every rollout.
