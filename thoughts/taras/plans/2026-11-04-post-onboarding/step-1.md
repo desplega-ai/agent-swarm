@@ -4,7 +4,10 @@ name: Named agent-fs keys minted on demand + proxy on by default
 track: A
 depends_on: []
 external_deps: ["agent-fs v0.18.17 (PR #153 merged 2026-11-04 13:06 BCN, released 13:10 BCN): POST /orgs/{orgId}/members/{userId}/keys, GET /auth/me for org-scoped keys, keys UI in live. Docker image publish was still running at 13:10 BCN; confirm the image tag exists before bumping pins."]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-1
+claimed_at: 2026-11-04T15:11:02Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -58,20 +61,35 @@ Decision (Taras, review 2026-11-04): no server-held key table. On-demand named k
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/agent-fs-user-keys.test.ts src/tests/fs-routes.test.ts src/tests/invites-http.test.ts src/tests/agentfs-proxy.test.ts src/tests/agent-fs-provision-seeder.test.ts`
-- [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `bun run e2e --strict`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
+- [x] `bun run test:root -- src/tests/agent-fs-user-keys.test.ts src/tests/fs-routes.test.ts src/tests/invites-http.test.ts src/tests/agentfs-proxy.test.ts src/tests/agent-fs-provision-seeder.test.ts`
+- [x] `bun run check:local && bun run tsc:check:tsc`
+- [x] `bun run e2e --strict`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json && bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
 
 #### Automated QA:
-- [ ] Against a local agent-fs built from `feat/multi-api-keys` or the released tag (`AGENT_FS_API_URL=http://localhost:7433`): create a user, mint an `aswt_` token (invite + exchange, see `scripts/e2e/scenarios/invites.ts`), then `curl -sS -X POST -H "Authorization: Bearer <aswt_>" -H 'content-type: application/json' -d '{"label":"qa · curl · 2026-11-04"}' <api>/api/fs/keys` returns an `af_` key. `curl -H "Authorization: Bearer <that key>" -X POST http://localhost:7433/orgs/<shared org>/ops -d '{"op":"ls","path":"/"}'` succeeds. `curl -H "Authorization: Bearer <that key>" http://localhost:7433/auth/me` returns 403 (org-scoped, expected).
-- [ ] With the user's primary key: `GET /auth/keys` lists the label with `orgId` set.
-- [ ] Repeat the mint: a second key appears; the first still works (multi-key, not reset).
-- [ ] An email the agent-fs server refuses to register (`AGENT_FS_REGISTER_ALLOWED_DOMAINS` set to another domain): `GET /api/fs/me` returns `pending` with a reason, `POST /api/fs/keys` returns 409.
-- [ ] `rg -c 'af_[0-9a-f]{64}' <api log>` is 0.
+- [x] Against a local agent-fs built from `feat/multi-api-keys` or the released tag (`AGENT_FS_API_URL=http://localhost:7433`): create a user, mint an `aswt_` token (invite + exchange, see `scripts/e2e/scenarios/invites.ts`), then `curl -sS -X POST -H "Authorization: Bearer <aswt_>" -H 'content-type: application/json' -d '{"label":"qa · curl · 2026-11-04"}' <api>/api/fs/keys` returns an `af_` key. `curl -H "Authorization: Bearer <that key>" -X POST http://localhost:7433/orgs/<shared org>/ops -d '{"op":"ls","path":"/"}'` succeeds. `curl -H "Authorization: Bearer <that key>" http://localhost:7433/auth/me` returns 403 (org-scoped, expected).
+- [x] With the user's primary key: `GET /auth/keys` lists the label with `orgId` set.
+- [x] Repeat the mint: a second key appears; the first still works (multi-key, not reset).
+- [x] An email the agent-fs server refuses to register (`AGENT_FS_REGISTER_ALLOWED_DOMAINS` set to another domain): `GET /api/fs/me` returns `pending` with a reason, `POST /api/fs/keys` returns 409.
+- [x] `rg -c 'af_[0-9a-f]{64}' <api log>` is 0.
 
 #### Manual Verification:
 - [ ] The agent-fs v0.18.17 Docker image exists (`docker manifest inspect ghcr.io/desplega-ai/agent-fs:0.18.17` or the registry the pins use) before the pins move.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own through curl. Backend routes to Codex `gpt-6.1-sol` (high). After completing this step, pause for manual confirmation. Commit as `[step-1] Named agent-fs keys minted on demand + proxy on by default` after verification passes.
+
+## Implementation notes
+
+- Commit `d11682e9c` on `po/step-1`. Backend by Codex gpt-6.1-sol (high), reviewed and finished by Claude.
+- External dep: agent-fs **v0.18.17** (image `ghcr.io/desplega-ai/agent-fs:0.18.17` confirmed with `docker manifest inspect`). The pins in compose, chart, worker image and `src/commands/onboard/agent-fs-version.ts` were already 0.18.17 on main, so change 5 was a no-op.
+- Deviation: the account flow registers before it invites (members list, then `POST /auth/register`, then `inviteEmailToSharedOrg`). Inviting first leaves a dangling pending invite in agent-fs, because register does not accept pending invites.
+- Deviation: a mint always returns a named, org-scoped key. The primary key from a register is discarded, never returned or stored. Reason: a browser must never hold an unscoped key, and every browser key stays revocable by name.
+- Fact: at v0.18.17, `GET /auth/me` answers org-scoped keys with 200 (Track B item 3 landed in the same release). Other `/auth/*` routes (for example `GET /auth/keys`) return 403. QA checked both.
+- `register` returns 200 (not 201) in agent-fs. An old agent-fs is detected by a plain-text 404 on the keys route. A JSON `NOT_FOUND` there means the member is gone, and maps to `pending`.
+- New `resolveAgentFsSharedContext()` in `agent-fs-provision.ts`: it uses the configured bootstrap key, org and drive with no agent-fs calls and no config writes, and falls back to `ensureAgentFsSharedProvisioning()`. `inviteEmailToSharedOrg` now uses it too, so the invite route no longer rewrites 5 config rows and resets the file provider on every call.
+- Status mapping for `POST /api/fs/keys`: 400 bad label, 401 no user identity (agent callers and page sessions are refused), 403 RBAC, 409 pending, 429 rate limit (5/min per user), 501 `agent_fs_too_old`, 502 agent-fs failure, 503 `agent_fs_not_configured`. 201 has `Cache-Control: no-store`. The minted key is registered with `registerVolatileSecret`.
+- The proxy default flip also changes Comb: with `AGENT_FS_API_URL` set and a browser-reachable API URL, Comb is now on with no other setting. `src/tests/comb-links.test.ts` pins `AGENT_FS_PROXY=false` to keep its premise.
+- Helm: `agentFs.proxy` defaults to `true`, and the template always emits `AGENT_FS_PROXY` with the value, so `proxy: false` opts out.
+- QA ran against a real agent-fs 0.18.17 container (`AGENT_FS_REGISTER_ALLOWED_DOMAINS=example.com,swarm.local`). The invite hook was proved by a direct register returning 409 after an exchange.
+

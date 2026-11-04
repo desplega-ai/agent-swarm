@@ -3,7 +3,10 @@ id: step-5
 name: Sidebar WORK/AUTOMATE/CONNECT/BUILD + Connect page shells + redirects
 track: C
 depends_on: [step-16]
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-5
+claimed_at: 2026-11-04T15:11:02Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -80,19 +83,38 @@ The dashboard gets its new information architecture in one change: an inset side
 
 #### Automated Verification:
 - [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun run test`
-- [ ] `bun run test:root -- src/be/automation-preflight.test.ts` plus the MCP OAuth test that covers `defaultFinalRedirect` (`rg -l defaultFinalRedirect src/tests`)
-- [ ] `bun run check:local && bun run tsc:check:tsc`
-- [ ] `bun run e2e:ui -- --grep "@smoke"` (includes `redirects.spec.ts` and the new Connect routes)
-- [ ] `rg -n '"/connections|/settings/integrations|/mcp-servers|/settings/api-keys' apps/ui/src src --glob '!**/routes.tsx' --glob '!**/*.test.*'` returns only redirect-table entries
+- [x] `bun run test:root -- src/be/automation-preflight.test.ts` plus the MCP OAuth test that covers `defaultFinalRedirect` (`rg -l defaultFinalRedirect src/tests`)
+- [x] `bun run check:local && bun run tsc:check:tsc`
+- [x] `bun run e2e:ui -- --grep "@smoke"` (includes `redirects.spec.ts` and the new Connect routes)
+- [x] `rg -n '"/connections|/settings/integrations|/mcp-servers|/settings/api-keys' apps/ui/src src --glob '!**/routes.tsx' --glob '!**/*.test.*'` returns only redirect-table entries
 
 #### Automated QA:
-- [ ] `AGENT_BROWSER_SESSION=po-step5` against `apps/ui` dev + API: screenshots of the inset sidebar expanded (BUILD collapsed), BUILD expanded, icon-collapsed, phone sheet, the Settings flyout with Advanced, and each Connect page (`/tmp/po-step5-*.png`). Compare side by side with `mockups/post-onboarding/shots/r3-sidebar-1440-light.png`.
-- [ ] Scrollbar check: expand BUILD until the sidebar scrolls; `agent-browser` eval of a nav row's `getBoundingClientRect().width` is equal with and without the scrollbar.
-- [ ] Redirect walk with recording: `/connections?tab=oauth-apps`, `/connections?tab=playground`, `/settings/integrations/slack?search=x`, `/settings/integrations?category=llm`, `/mcp-servers?new=1&name=foo&url=https://x`, `/mcp-servers/<id>?oauth=success`, `/settings/api-keys`; assert each final URL via `agent-browser` eval of `location.href`.
-- [ ] Home no longer shows the fleet benchmark card; Usage shows it at the top. Screenshots of both.
-- [ ] Cmd+K: "Channels", "Tools", "AI providers", "MCP servers", "Templates" resolve to the new paths. Screenshot of the palette.
+- [x] `AGENT_BROWSER_SESSION=po-step5` against `apps/ui` dev + API: screenshots of the inset sidebar expanded (BUILD collapsed), BUILD expanded, icon-collapsed, phone sheet, the Settings flyout with Advanced, and each Connect page (`/tmp/po-step5-*.png`). Compare side by side with `mockups/post-onboarding/shots/r3-sidebar-1440-light.png`.
+- [x] Scrollbar check: expand BUILD until the sidebar scrolls; `agent-browser` eval of a nav row's `getBoundingClientRect().width` is equal with and without the scrollbar.
+- [x] Redirect walk with recording: `/connections?tab=oauth-apps`, `/connections?tab=playground`, `/settings/integrations/slack?search=x`, `/settings/integrations?category=llm`, `/mcp-servers?new=1&name=foo&url=https://x`, `/mcp-servers/<id>?oauth=success`, `/settings/api-keys`; assert each final URL via `agent-browser` eval of `location.href`.
+- [x] Home no longer shows the fleet benchmark card; Usage shows it at the top. Screenshots of both.
+- [x] Cmd+K: "Channels", "Tools", "AI providers", "MCP servers", "Templates" resolve to the new paths. Screenshot of the palette.
 
 #### Manual Verification:
 - [ ] Taras compares the built sidebar and Connect shells with the approved mockups once in the dev server.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. UI implementation routes to Opus per `desplega:delegate-work`. After completing this step, pause for manual confirmation. Commit as `[step-5] Sidebar WORK/AUTOMATE/CONNECT/BUILD + Connect page shells + redirects` after verification passes. Frontend PR: screenshots and the redirect recording in `## Before / after`.
+
+## Implementation notes
+
+Commit `b8d0691a1` on `po/step-5` (2026-11-04).
+
+- **Verification box 1 stays unticked**: `apps/ui` has no `test` script, so the literal command fails at `bun run test`. The equivalent passed: `bun run lint` and `bunx tsc -b` in `apps/ui`, and `bun test apps/ui/src --parallel=4` (2529 pass, 0 fail). `check:local` ran the frozen install.
+- **`rg` box**: every hit is an API path (`/api/mcp-servers`), a module import (`./mcp-servers`), or a new `/integrations/tools/mcp-servers` route. No old dashboard route is left outside `routes.tsx`.
+- **Full UI E2E** (not only `@smoke`): 143 pass, 28 skipped. `home.spec.ts` and `invites.spec.ts` now check the `Home` link, because Tasks moved into the collapsed BUILD group.
+- **Inset**: `Sidebar variant="floating"` (the inner panel is now `rounded-xl`, has the `border` color and no shadow) plus `md:my-2 md:mr-2 rounded-xl border shadow-xs` on `SidebarInset`. A new token `--color-canvas` sits in `globals.css` (light `oklch(0.955 0.003 286)`, dark `oklch(0.105 0.004 286)`). It is not in `BASE_SCOPE_VARS`, because no preset overrides it.
+- **Scrollbar**: the base layer already gave `scrollbar-gutter: stable` to `overflow-y-auto`. Sidebar groups drop their right padding (`pr-0`, the gutter is the inset). The icon rail keeps `pr-2`. The track is transparent and the thumb uses `muted-foreground` at 40%, as in the r3 kit. `main` gets `max-lg:[scrollbar-gutter:stable]`. Firefox on macOS uses overlay scrollbars (gutter 0), so there the rows touch the right edge by 8px less. This is a known trade-off of the mockup's gutter-as-padding rule.
+- **Icons**: vendored lucide-animated `message-circle` (Channels), `wrench` (Tools) and `cpu` (AI providers) into `components/icons/`.
+- **Settings rail** keeps the **Setup** entry (rail only, shown while `/api/onboarding` answers), so `/setup` stays reachable. The flyout has no Setup entry, as before. People has no `1.80.0` version gate in the flyout or the rail. People's users count moved to its flyout entry.
+- **Cmd+K**: the static routes `/integrations/tools/{connections,oauth-apps,mcp-servers}` redirect to the matching `?tab=` and carry palette entries ("Script connections", "OAuth apps", "MCP servers", parent "Connect"). "MCP servers" keeps the `mcp-servers` search provider. Apps dropped `adminOnly` in the palette too.
+- **Redirects**: `RouteRedirect` merges per key. Target params win, incoming params fill the rest, and the incoming hash is used when the target has none. A `drop` list removes replaced params (`tab` on `/connections`, `category` on `/settings/integrations`). The redirect table lives in `routes.tsx`. The settings-nested redirects (`api-keys`, `integrations`, `integrations/:id`) sit in `settingsRedirectRoutes`. `connectPagePath(category)` (in `lib/integrations-catalog.ts`) maps a category to its Connect page. The redirect and the integration detail back link use it.
+- **Shells**: shared helpers live in `pages/connect-pages/connect-shell.tsx` (`IntegrationCardGrid`, `ConnectSearch`, `AddIntegrationMenu`, `ConnectPhoneTitle`). The primary action is an "Add channel / tool / provider" dropdown that links to `/integrations/<id>`. `ScriptConnectionsPanel` (was the default `ConnectionsPage`), `McpServersPanel` and `ProviderKeysPanel` are named exports that take `leading` / `trailing` toolbar nodes, so the Tools tab strip and the search share one row. `pages/integrations/page.tsx` (the old list with its legend) is deleted. On the Script connections tab at 1440px, the filters wrap to a second row because the tabs, search, two selects, the columns menu, + and Advanced do not fit in one row. step-6 rebuilds that tab.
+- **Fleet benchmark**: moved to the top of `UsageContent` (above the toolbar). The card still hides its "telemetry off" state while the Home telemetry banner would ask (`bannerAsks`). The banner (`DashboardNudges`) stays on Home. With telemetry off and the banner up, Usage shows only the Slack Connect perk. step-15 may want to drop that coupling now that they are on different pages.
+- **Not visually verified**: the AI providers warning dot. The seed has no rate-limited or rejected key. The code reads `useApiKeyStatuses` (new `enabled` option), gated on `1.82.0` and admin.
+
+Manual verification pending: Taras compares the sidebar and the Connect shells with the mockups.

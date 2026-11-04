@@ -3,7 +3,10 @@ id: step-9
 name: "Key plumbing: schedule + page inherit key, runs visible in group"
 track: D
 depends_on: []
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-9
+claimed_at: 2026-11-04T15:11:02Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -39,18 +42,30 @@ A use case becomes one Sessions group by data alone. `create-schedule` and `crea
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/asset-key-invariants.test.ts src/tests/sessions-tree.test.ts src/tests/sessions.test.ts src/tests/session-source-keys.test.ts` plus the tool test files touched
-- [ ] `bun run e2e --strict`
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- schedules`
+- [x] `bun run test:root -- src/tests/asset-key-invariants.test.ts src/tests/sessions-tree.test.ts src/tests/sessions.test.ts src/tests/session-source-keys.test.ts` plus the tool test files touched
+- [x] `bun run e2e --strict`
+- [x] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- schedules`
 - [ ] `bun run check:local && bun run tsc:check:tsc && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] `bun run check:skill-md && bun run check:skill-sources`
+- [x] `bun run check:skill-md && bun run check:skill-sources`
 
 #### Automated QA:
-- [ ] API walkthrough on a local API (`DESPLEGA_TELEMETRY_ENV=test`): `POST /api/tasks` with `key: "shared/po-qa/"` and `requestedByUserId`; as the assigned agent call the `create-schedule` MCP tool with no `key` (use the e2e agent-sim or `curl` to the MCP endpoint); `GET /api/schedules?key=shared/po-qa/` returns it; `POST /api/schedules/{id}/run`; `GET /api/sessions?scope=tree&groupKey=shared/po-qa/` lists the run; `GET /api/session-tree` shows the group with `total >= 2`.
-- [ ] Same walkthrough with a task whose key is the default `shared/task:<id>/`: the schedule keeps `shared/schedule:<id>/`.
-- [ ] `GET /api/sessions?scope=tree` (Inbox, no groupKey) does not list the run.
+- [x] API walkthrough on a local API (`DESPLEGA_TELEMETRY_ENV=test`): `POST /api/tasks` with `key: "shared/po-qa/"` and `requestedByUserId`; as the assigned agent call the `create-schedule` MCP tool with no `key` (use the e2e agent-sim or `curl` to the MCP endpoint); `GET /api/schedules?key=shared/po-qa/` returns it; `POST /api/schedules/{id}/run`; `GET /api/sessions?scope=tree&groupKey=shared/po-qa/` lists the run; `GET /api/session-tree` shows the group with `total >= 2`.
+- [x] Same walkthrough with a task whose key is the default `shared/task:<id>/`: the schedule keeps `shared/schedule:<id>/`.
+- [x] `GET /api/sessions?scope=tree` (Inbox, no groupKey) does not list the run.
 
 #### Manual Verification:
 - [ ] None. The UI header that exposes this is step-10.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own through the API and the existing Sessions group view. Backend-heavy: routes to Codex `gpt-6.1-sol` (high) per `desplega:delegate-work`, with the UI dialog part to Opus. After completing this step, pause for manual confirmation. Commit as `[step-9] Key plumbing: schedule + page inherit key, runs visible in group` after verification passes.
+
+## Implementation notes
+
+- Backend by Codex gpt-6.1-sol (high), reviewed and adjusted. UI by Opus.
+- `isGroupKey` in `src/assets/key.ts`. `resolveTaskGroupKey` in `src/be/audit-user.ts` shares one caller-task lookup with `resolveTaskAuditUserId` (same ownership rule).
+- An inherited key goes through `authorizeAssetKeyWrite` like an explicit one. An inherited `personal/<other>/...` key fails the tool call (same error as an explicit mismatch). It does not fall back silently.
+- Narrowed vs the plan: `includeScheduleRuns` is set only when `groupKey` is a user group (`showsScheduleRuns` in `session-tree.ts`: not a namespace root, a resource group like `shared/schedule:<id>/`, or a source group). The tree uses the same predicate, so list and sidebar counts agree. Resource and source group views keep today's filters.
+- `getSessionTree` queries with the relaxation and computes `defaultVisible` (owner + Mine predicates only) per row. Rows outside user groups still need it. Inbox (no groupKey) is unchanged, covered by tests and the QA walkthrough.
+- UI: the create dialog has a Start in row (`StartInPicker` + `useMyGroups`), hint "Its runs show in this Sessions group." The edit dialog shows the key read-only. Deviation: the hint does not say "move it in Sessions", because Sessions moves (`/api/session-moves*`) move sessions only, not schedules. Copy used: "Its runs show in this Sessions group. This dialog cannot change it."
+- `cd apps/ui && bun run test -- schedules` is a no-op (apps/ui has no `test` script). Ran `bun test apps/ui/src/lib/schedule-format.test.tsx` from the root instead: 3 pass.
+- `bun run check:local`: everything green except `src/tests/claude-routes-e2e.test.ts` (real CLI, `process.kill(-pid)` EPERM, a different provider leg fails each run). Same failure on the unchanged base `4777d44ae`: pre-existing, environment.
+

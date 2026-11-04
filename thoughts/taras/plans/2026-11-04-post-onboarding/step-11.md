@@ -3,7 +3,10 @@ id: step-11
 name: "Favorite a use case (key favorite type)"
 track: D
 depends_on: []
-status: ready
+status: done
+completed_at: 2026-11-04
+assignee: po-orch-step-11
+claimed_at: 2026-11-04T15:11:02Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -39,20 +42,31 @@ Users can star a Sessions group (a use case). `user_favorites` gains the `key` i
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/favorites*.test.ts src/tests/sessions-move.test.ts`
-- [ ] `bun run e2e --strict`
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- group-tab favorites`
-- [ ] `bun run e2e:ui -- --grep "favorites"`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] `bash scripts/check-migration-conflicts.sh && bash scripts/check-audit-columns.sh && bun run check:local && bun run tsc:check:tsc`
-- [ ] Existing DB upgrade keeps rows: copy a pre-plan DB, boot, `sqlite3 <db> "select count(*) from user_favorites"` unchanged.
+- [x] `bun run test:root -- src/tests/favorites*.test.ts src/tests/sessions-move.test.ts`
+- [x] `bun run e2e --strict`
+- [x] `cd apps/ui && bun run lint && bunx tsc -b && bun run test -- group-tab favorites`
+- [x] `bun run e2e:ui -- --grep "favorites"`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] `bash scripts/check-migration-conflicts.sh && bash scripts/check-audit-columns.sh && bun run check:local && bun run tsc:check:tsc`
+- [x] Existing DB upgrade keeps rows: copy a pre-plan DB, boot, `sqlite3 <db> "select count(*) from user_favorites"` unchanged.
 
 #### Automated QA:
-- [ ] `curl -X PUT -H "Authorization: Bearer <aswt_>" -d '{"itemType":"key","itemId":"shared/po-qa/","favorite":true}' <api>/api/favorites` then `GET /api/favorites?itemType=key` lists it.
-- [ ] `AGENT_BROWSER_SESSION=po-step11`: open `/sessions?view=shared/po-qa/`, click the star, reload: still starred. Screenshot `/tmp/po-step11-star.png`.
-- [ ] Rename the group via the UI (or `POST /api/session-moves/prefix`): `GET /api/favorites?itemType=key` shows the new key.
+- [x] `curl -X PUT -H "Authorization: Bearer <aswt_>" -d '{"itemType":"key","itemId":"shared/po-qa/","favorite":true}' <api>/api/favorites` then `GET /api/favorites?itemType=key` lists it.
+- [x] `AGENT_BROWSER_SESSION=po-step11`: open `/sessions?view=shared/po-qa/`, click the star, reload: still starred. Screenshot `/tmp/po-step11-star.png`.
+- [x] Rename the group via the UI (or `POST /api/session-moves/prefix`): `GET /api/favorites?itemType=key` shows the new key.
 
 #### Manual Verification:
 - [ ] None.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. Backend to Codex `gpt-6.1-sol` (medium), star UI to Opus. After completing this step, pause for manual confirmation. Commit as `[step-11] Favorite a use case (key favorite type)` after verification passes. Frontend PR: screenshot in `## Before / after`.
+
+## Implementation notes
+
+- Commit `37edb723e` on `po/step-11`. All done by Opus, no Codex round (small step).
+- `setFavorite` normalizes a `key` item id (`normalizeAssetKey`). The PUT handler normalizes first and answers 400 with the `AssetKeyError` message, and echoes the normalized id (`Shared/X` is stored as `shared/x/`).
+- Rename hook: `moveSessionChains` runs one transaction per root, so there is no single "same transaction". `moveKeyFavorites` (`src/be/db/session-moves.ts`) runs its own transaction after the moves, only when `to` is not null and at least one root moved. It uses `UPDATE OR IGNORE` + `DELETE` so a principal who already starred the new key keeps one row. It moves favorites of every scope (the group key is shared). A group delete (`to: null`) leaves the stars in place (step-15: Home may show a starred key with no sessions).
+- UI: `useKeyFavorite(groupKey)` in `use-favorites.ts` reads one shared `useFavorites("key")` list (no `itemIds`), so the sidebar rows and the tab share one request. The star shows the pending state of an in-flight toggle and toasts on failure. Title row star lives in `group-tab-star.tsx` (outside the `h2`, so the heading name stays the group name). Sidebar: star hover action on every `group` row (also read-only source groups and threads), before the menu and "+".
+- `cd apps/ui && bun run test -- ...` does not work: apps/ui has no `test` script (bun runs the shell `test` builtin). Ran `cd apps/ui && bun test group-tab favorites` instead (12 pass). The UI test file is `group-tab-star.test.tsx` (SSR render of `GroupTabStar`), not `group-tab.test.tsx`: `GroupTab` pulls ag-grid and many aliased modules.
+- `src/tests/script-connections.test.ts` (migration-112 fixture) needed 283 in its skip list, the same as 192 and 205.
+- QA used the operator API key with the picked user, not an `aswt_` token. The UI stores the star under `user:<id>`, verified with `X-Swarm-User-Id`.
+
