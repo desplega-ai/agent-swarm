@@ -151,7 +151,10 @@ test("page viewer forwards its query params to the page body", async ({
   const frame = page.locator("iframe[title='e2e public page']");
   // The viewer appends its dark mode after the forwarded params.
   const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed&__swarm-mode=dark$`);
-  await expect(frame).toHaveAttribute("src", forwarded);
+  const frameUrl = new RegExp(
+    `/p/${id}\\?target=pr-1373&status=failed&__swarm-mode=dark&__swarm_revision=.+$`,
+  );
+  await expect(frame).toHaveAttribute("src", frameUrl);
   await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
     "href",
     forwarded,
@@ -163,7 +166,7 @@ test("page viewer forwards its query params to the page body", async ({
   // Toggling full mode keeps the forwarded params on both the route and the body.
   await page.getByRole("link", { name: "Full" }).click();
   await expect(page).toHaveURL(`/pages/${id}?target=pr-1373&status=failed&mode=full`);
-  await expect(page.locator("iframe[title='e2e public page']")).toHaveAttribute("src", forwarded);
+  await expect(page.locator("iframe[title='e2e public page']")).toHaveAttribute("src", frameUrl);
   await expect(page.getByRole("link", { name: "Exit full" })).toHaveAttribute(
     "href",
     `/pages/${id}?target=pr-1373&status=failed`,
@@ -171,6 +174,51 @@ test("page viewer forwards its query params to the page body", async ({
 
   await clean.assertClean();
 });
+
+for (const authMode of ["authed", "password"] as const) {
+  test(`page refresh preserves ${authMode} access`, async ({ page, seed, swarm }) => {
+    test.skip(!seed, "remote run without seed");
+    const headers = {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "X-Agent-ID": seed!.agents.lead,
+    };
+    const title = `refresh ${authMode}`;
+    const createdResponse = await page.request.post(`${swarm.apiUrl}/api/pages`, {
+      headers,
+      data: {
+        title,
+        contentType: "text/html",
+        authMode,
+        ...(authMode === "password" ? { password: "e2e-password" } : {}),
+        body: "<h1>First version</h1>",
+      },
+    });
+    expect(createdResponse.status()).toBe(201);
+    const { id } = (await createdResponse.json()) as { id: string };
+    try {
+      await page.goto(`/pages/${id}`);
+      if (authMode === "password") {
+        await page.getByLabel("Password").fill("e2e-password");
+        await page.getByRole("button", { name: "Unlock" }).click();
+      }
+      const frame = page.frameLocator("main iframe");
+      await expect(frame.getByRole("heading", { name: "First version" })).toBeVisible();
+      const update = await page.request.put(`${swarm.apiUrl}/api/pages/${id}`, {
+        headers,
+        data: { body: "<h1>Second version</h1>" },
+      });
+      expect(update.status()).toBe(200);
+      await expect(page.getByText("A new version is available.")).toBeVisible({ timeout: 20_000 });
+      await expect(frame.getByRole("heading", { name: "First version" })).toBeVisible();
+      await page.getByRole("button", { name: "Load new version" }).click();
+      await expect(frame.getByRole("heading", { name: "Second version" })).toBeVisible();
+      await expect(page.getByLabel("Password")).toHaveCount(0);
+    } finally {
+      const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${id}`, { headers });
+      expect(removed.status()).toBe(204);
+    }
+  });
+}
 
 test("saved room inspector decodes persisted state without creating a missing room", async ({
   api,

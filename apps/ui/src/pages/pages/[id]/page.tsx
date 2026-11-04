@@ -35,15 +35,16 @@ import {
   Minimize2,
   Printer,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { usePage } from "@/api/hooks/use-pages";
-import type { PageMetadata } from "@/api/types";
+import type { PageListItem, PageMetadata } from "@/api/types";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { VersionUpdateNotice } from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,7 +52,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { getConfig } from "@/lib/config";
 import { getPageContext } from "@/lib/page-context";
 import { DEFAULT_THEME_ID } from "@/lib/themes";
@@ -151,6 +154,19 @@ function isFeedbackOn(searchParams: URLSearchParams): boolean {
   return value !== null && value.toLowerCase() !== "0" && value.toLowerCase() !== "false";
 }
 
+/** Compare page content while ignoring view counts and viewer-specific metadata. */
+function pageContentRevision(page: PageListItem): string {
+  const ignored = new Set([
+    "viewCount",
+    "favorite",
+    "updatedAt",
+    "createdAt",
+    "api_url",
+    "app_url",
+  ]);
+  return JSON.stringify(Object.entries(page).filter(([key]) => !ignored.has(key)));
+}
+
 /** SPA route for the page, keeping the forwarded params and toggling `mode=full`. */
 function pageRoute(id: string, frameQuery: string, full: boolean): string {
   const params = new URLSearchParams(frameQuery);
@@ -219,25 +235,30 @@ interface FrameProps {
    */
   frameQuery: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  revision?: string;
 }
 
 function PageIframe({
   src,
   title,
   iframeRef,
+  revision,
 }: {
   src: string;
   title: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  revision?: string;
 }) {
+  const frameUrl = new URL(src);
+  if (revision) frameUrl.searchParams.set("__swarm_revision", revision);
   return (
     <iframe
       // A new src (a theme or mode switch, a param change) mounts a new
       // frame. Changing the src of a loaded frame would add a browser
       // history entry, so Back would step through old frame URLs.
-      key={src}
+      key={`${src}:${revision ?? ""}`}
       ref={iframeRef}
-      src={src}
+      src={frameUrl.toString()}
       title={title}
       // `allow-same-origin` is required for the Browser SDK (`window.swarm`)
       // to function — it makes XHR/fetch calls to `/@swarm/api/*` from
@@ -255,9 +276,9 @@ function PageIframe({
   );
 }
 
-function PublicHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PublicHtmlFrame({ id, title, frameQuery, iframeRef, revision }: FrameProps) {
   const src = getPageHtmlUrl(id) + frameQuery;
-  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
+  return <PageIframe src={src} title={title} iframeRef={iframeRef} revision={revision} />;
 }
 
 async function assertAuthedPageBodyReady(
@@ -285,11 +306,13 @@ async function assertAuthedPageBodyReady(
   throw new Error(`page body ${id}: ${res.status}`);
 }
 
-function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function AuthedHtmlFrame({ id, title, frameQuery, iframeRef, revision }: FrameProps) {
   const [frameState, setFrameState] = useState<
     { status: "loading" } | { status: "ready"; src: string } | { status: "error"; message: string }
   >({ status: "loading" });
 
+  // Reissue the page session when the accepted revision reloads the iframe.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision intentionally restarts the session
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -333,7 +356,7 @@ function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
       active = false;
       controller.abort();
     };
-  }, [id, frameQuery]);
+  }, [id, frameQuery, revision]);
 
   if (frameState.status === "loading") {
     return <Skeleton className="h-[calc(100vh-6rem)] w-full rounded-md" />;
@@ -343,10 +366,12 @@ function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
     return <ArtifactPageError message={frameState.message} />;
   }
 
-  return <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} />;
+  return (
+    <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} revision={revision} />
+  );
 }
 
-function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PasswordHtmlFrame({ id, title, frameQuery, iframeRef, revision }: FrameProps) {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
 
@@ -361,6 +386,7 @@ function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
         src={`${getPageHtmlUrl(id)}?${params.toString()}`}
         title={title}
         iframeRef={iframeRef}
+        revision={revision}
       />
     );
   }
@@ -470,9 +496,23 @@ export default function ArtifactPage() {
     iframeRef,
   });
   const { data: pageRow } = usePage(pageId);
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const pageRevision = useMemo(() => pageRow && pageContentRevision(pageRow), [pageRow]);
+  const pageVersion = useVersionedValue(pageId, pageRow, pageRevision, autoReload);
+  const displayedRevision = useMemo(
+    () => pageVersion.value && pageContentRevision(pageVersion.value),
+    [pageVersion.value],
+  );
+  const [frameRevision, setFrameRevision] = useState(0);
+  const [frameInstance] = useState(() => String(Date.now()));
   const favoriteToggle = useFavoriteToggle("page");
 
-  const { data, error, isLoading } = useQuery({
+  const {
+    data,
+    error,
+    isLoading,
+    refetch: refetchMetadata,
+  } = useQuery({
     queryKey: ["page-metadata", pageId],
     queryFn: () => fetchPageMetadataWithLaunchRetry(pageId ?? ""),
     enabled: !!pageId,
@@ -480,10 +520,25 @@ export default function ArtifactPage() {
     // refetch + re-render the iframe while the user is interacting with it
     // (and for password mode this would re-trigger the unlock flow).
     staleTime: Infinity,
+    refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
   });
+
+  const reloadFrame = useCallback(async () => {
+    const result = await refetchMetadata();
+    if (!result.isError) setFrameRevision((version) => version + 1);
+  }, [refetchMetadata]);
+  const lastRevision = useRef<{ id: string; revision: string } | null>(null);
+  useEffect(() => {
+    if (!pageId || !displayedRevision) return;
+    const previous = lastRevision.current;
+    lastRevision.current = { id: pageId, revision: displayedRevision };
+    if (previous?.id === pageId && previous.revision !== displayedRevision) {
+      void reloadFrame();
+    }
+  }, [pageId, displayedRevision, reloadFrame]);
 
   // Open the page in a new tab with `?print=1` so it self-prints in the
   // user's own browser. The agent-authored HTML (or formatted JSON) prints —
@@ -517,7 +572,7 @@ export default function ArtifactPage() {
     return <ArtifactPageError message={msg} />;
   }
   if (isLoading) return <ArtifactPageSkeleton />;
-  if (error || !data) {
+  if (!data) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return <ArtifactPageError message={msg} />;
   }
@@ -542,6 +597,7 @@ export default function ArtifactPage() {
             title={data.title}
             frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
+            revision={`${frameInstance}-${frameRevision}`}
           />
         );
         break;
@@ -552,6 +608,7 @@ export default function ArtifactPage() {
             title={data.title}
             frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
+            revision={`${frameInstance}-${frameRevision}`}
           />
         );
         break;
@@ -562,6 +619,7 @@ export default function ArtifactPage() {
             title={data.title}
             frameQuery={themedFrameQuery}
             iframeRef={iframeRef}
+            revision={`${frameInstance}-${frameRevision}`}
           />
         );
         break;
@@ -574,7 +632,7 @@ export default function ArtifactPage() {
     // sits above the body, not overlapping — so iframe / JSON content gets
     // the full remaining viewport.
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div ref={pageVersion.scopeRef} className="fixed inset-0 z-50 flex flex-col bg-background">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate text-sm font-medium">{data.title}</span>
@@ -587,6 +645,19 @@ export default function ArtifactPage() {
             </Link>
           </Button>
         </div>
+        {error && data && (
+          <AlertCallout
+            tone="error"
+            action={
+              <Button size="sm" variant="outline" onClick={() => void reloadFrame()}>
+                Retry
+              </Button>
+            }
+          >
+            Could not load the new page version.
+          </AlertCallout>
+        )}
+        {pageVersion.pending && <VersionUpdateNotice onApply={pageVersion.apply} />}
         <div className="flex-1 min-h-0 overflow-auto p-4">{body}</div>
         <FeedbackConfirmDialog bridge={feedbackBridge} />
       </div>
@@ -594,7 +665,7 @@ export default function ArtifactPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 gap-4">
+    <div ref={pageVersion.scopeRef} className="flex flex-1 flex-col min-h-0 gap-4">
       <PageHeader
         // Below sm the actions take their own row under a full-width
         // description; side by side they squeezed it to one word per line.
@@ -624,6 +695,19 @@ export default function ArtifactPage() {
           />
         }
       />
+      {error && data && (
+        <AlertCallout
+          tone="error"
+          action={
+            <Button size="sm" variant="outline" onClick={() => void reloadFrame()}>
+              Retry
+            </Button>
+          }
+        >
+          Could not load the new page version.
+        </AlertCallout>
+      )}
+      {pageVersion.pending && <VersionUpdateNotice onApply={pageVersion.apply} />}
       <PageSlugLine id={pageId!} />
       <RoomInspector key={pageId} pageId={pageId!} />
       {body}
