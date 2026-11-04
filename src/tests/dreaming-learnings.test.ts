@@ -14,7 +14,7 @@ CREATE TABLE agent_memory (id TEXT PRIMARY KEY, name TEXT, key TEXT, agentId TEX
 CREATE TABLE memory_retrieval (id TEXT, taskId TEXT, agentId TEXT, memoryId TEXT, retrievedAt TEXT, intent TEXT);
 CREATE TABLE memory_rating (id TEXT, memoryId TEXT, taskId TEXT, source TEXT, signal REAL, createdAt TEXT);
 CREATE TABLE memory_link (sourceId TEXT, targetId TEXT);
-CREATE TABLE agent_tasks (id TEXT PRIMARY KEY, agentId TEXT, tags TEXT, status TEXT);
+CREATE TABLE agent_tasks (id TEXT PRIMARY KEY, agentId TEXT, tags TEXT, status TEXT, task TEXT);
 CREATE TABLE session_costs (taskId TEXT, totalCostUsd REAL, inputTokens INTEGER, outputTokens INTEGER, cacheReadTokens INTEGER, model TEXT, createdAt TEXT);
 CREATE TABLE users (id TEXT, name TEXT, email TEXT, role TEXT, status TEXT, timezone TEXT, preferredChannel TEXT, metadata TEXT, notes TEXT);
 CREATE TABLE user_external_ids (userId TEXT, kind TEXT);
@@ -27,17 +27,22 @@ CREATE TABLE scripts (name TEXT, description TEXT, scope TEXT, isScratch INTEGER
 let db: Database;
 let kv: Map<string, unknown>;
 let deleted: string[];
+// dreaming-v2 keys are stored bare; any other namespace is prefixed, so a test can tell the two apart.
+const kvKey = (namespace: string, key: string) =>
+  namespace === "dreaming-v2" ? key : `${namespace}/${key}`;
+const PENDING = "task:agent:lead-1/dreaming-v2:learnings:pending-drops";
 const ctx = () => ({
   swarm: {
     async db_query({ sql, params }: { sql: string; params?: unknown[] }) {
       const stmt = db.query(sql);
       return { columns: stmt.columnNames, rows: stmt.values(...((params ?? []) as any[])) };
     },
-    async kv_getOrNull({ key }: { key: string }) {
-      return kv.has(key) ? { key, value: kv.get(key) } : null;
+    async kv_getOrNull({ namespace, key }: { namespace: string; key: string }) {
+      const k = kvKey(namespace, key);
+      return kv.has(k) ? { key, value: kv.get(k) } : null;
     },
-    async kv_set({ key, value }: { key: string; value: unknown }) {
-      kv.set(key, value);
+    async kv_set({ namespace, key, value }: { namespace: string; key: string; value: unknown }) {
+      kv.set(kvKey(namespace, key), value);
       return {};
     },
     async memory_delete({ id }: { id: string }) {
@@ -272,10 +277,13 @@ describe("learnings-report", () => {
   });
 
   test("counts promote / keep / drop and hands lane B its rows", async () => {
-    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t1', 'lead-1')");
+    db.run("INSERT INTO agent_tasks (id, agentId, task) VALUES ('t1', 'lead-1', ?)", [
+      "dreaming-v2 run r1: learnings triage, batch b1 (new). DECIDE ONLY.",
+    ]);
     const out: any = await dreamingLearnings(
       {
         mode: "report",
+        runId: "r1",
         leadAgentId: "lead-1",
         plan,
         triage: triage([
@@ -338,7 +346,13 @@ describe("learnings-report", () => {
   });
 
   test("a batch another agent ran is untrusted: no drops, no promotions, the cursor holds", async () => {
-    db.run("INSERT INTO agent_tasks (id, agentId) VALUES ('t1', 'pool-worker')");
+    db.run("INSERT INTO agent_tasks (id, agentId, task) VALUES ('t1', 'pool-worker', ?)", [
+      "dreaming-v2 run r1: learnings triage, batch b1 (new). DECIDE ONLY.",
+    ]);
+    // A Lead task from another workflow, attached to this batch: authored by the lead, but not this batch's task.
+    db.run("INSERT INTO agent_tasks (id, agentId, task) VALUES ('t2', 'lead-1', ?)", [
+      "dreaming-v2 run r0: long-term memory lane B, distill job j1.",
+    ]);
     const drop = {
       id: "l2",
       decision: "drop",
@@ -349,14 +363,20 @@ describe("learnings-report", () => {
       reason: "status echo",
     };
     const wrongAuthor: any = await dreamingLearnings(
-      { mode: "report", leadAgentId: "lead-1", plan, triage: triage([drop]) },
+      { mode: "report", runId: "r1", leadAgentId: "lead-1", plan, triage: triage([drop]) },
+      ctx() as any,
+    );
+    const borrowed = triage([drop]);
+    borrowed.results[0]!.output.taskId = "t2";
+    const wrongTask: any = await dreamingLearnings(
+      { mode: "report", runId: "r1", leadAgentId: "lead-1", plan, triage: borrowed },
       ctx() as any,
     );
     const noLead: any = await dreamingLearnings(
       { mode: "report", plan, triage: triage([drop]) },
       ctx() as any,
     );
-    for (const out of [wrongAuthor, noLead]) {
+    for (const out of [wrongAuthor, noLead, wrongTask]) {
       expect(out.drops).toEqual([]);
       expect(out.promotedIds).toEqual([]);
       expect(out.cursor.to).toMatchObject({ id: "", createdAt: "" });
@@ -636,7 +656,7 @@ describe("memtax-create with the learnings triage", () => {
     // uuid(3) failed, uuid(4) was over the cap: both carried; the cursor still moves past the batch.
     expect(deleted).toEqual([uuid(1)]);
     expect(night1.learnings).toMatchObject({ dropsDeleted: 1, dropsLeft: 1, dropsPending: 2 });
-    expect((kv.get("learnings:pending-drops") as any).drops.map((d: any) => d.id).sort()).toEqual(
+    expect((kv.get(PENDING) as any).drops.map((d: any) => d.id).sort()).toEqual(
       [uuid(3), uuid(4)].sort(),
     );
     expect(kv.has("learnings:cursor")).toBe(true);
@@ -655,12 +675,12 @@ describe("memtax-create with the learnings triage", () => {
     );
     expect(deleted.slice(1).sort()).toEqual([uuid(3), uuid(4)].sort());
     expect(night2.learnings).toMatchObject({ dropsCarried: 2, dropsDeleted: 2, dropsPending: 0 });
-    expect((kv.get("learnings:pending-drops") as any).drops).toEqual([]);
+    expect((kv.get(PENDING) as any).drops).toEqual([]);
   });
 
   test("a delete that keeps failing is retried a bounded number of nights", async () => {
     learning(3, "2026-10-27T02:00:00.000Z");
-    kv.set("learnings:pending-drops", {
+    kv.set(PENDING, {
       drops: [
         {
           id: uuid(3),
@@ -686,6 +706,44 @@ describe("memtax-create with the learnings triage", () => {
       c,
     );
     expect(out.learnings).toMatchObject({ dropsCarried: 1, dropsDeleted: 0, dropsPending: 0 });
+  });
+
+  test("pending drops anyone can write (dreaming-v2 namespace, or no content hash) delete nothing", async () => {
+    learning(3, "2026-10-27T02:00:00.000Z");
+    learning(4, "2026-10-27T03:00:00.000Z");
+    // Forged in the shared namespace: never read.
+    kv.set("dreaming-v2:learnings:pending-drops", {
+      drops: [
+        { id: uuid(3), name: "learning 3", contentHash: "hash-3", dropWhy: "noise", reason: "x" },
+      ],
+    });
+    kv.set("learnings:pending-drops", {
+      drops: [
+        { id: uuid(3), name: "learning 3", contentHash: "hash-3", dropWhy: "noise", reason: "x" },
+      ],
+    });
+    // In the Lead namespace but with no content hash: refused.
+    kv.set(PENDING, {
+      drops: [{ id: uuid(4), name: "learning 4", dropWhy: "noise", reason: "x" }],
+    });
+    const out: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r1",
+        dryRun: false,
+        v3Writes: "on",
+        leadAgentId: lead,
+        plan: { entities: [], clusters: [], memberNames: {} },
+      },
+      ctx() as any,
+    );
+    expect(deleted).toEqual([]);
+    expect(out.learnings).toMatchObject({
+      dropsCarried: 1,
+      dropsDeleted: 0,
+      dropsSkipped: 1,
+      dropsPending: 0,
+    });
   });
 
   test("dry run and v3Writes off delete nothing and leave the cursor", async () => {

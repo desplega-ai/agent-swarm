@@ -296,17 +296,29 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const meta = new Map<string, any>();
     for (const b of planned) for (const d of b?.docs ?? []) meta.set(String(d.id), { ...d, batchId: b.batchId, batchKind: b.kind });
     // A drop becomes a delete with Lead authority, so only a batch the Lead ran is trusted (as lane B trusts only
-    // Lead-run distill tasks). A batch any other agent ran (a pool worker) decides nothing and holds the cursor.
+    // Lead-run distill tasks). The task must also be this run's triage task for this batch (its prompt starts with
+    // the run id and batch id) and back exactly one batch. Anything else decides nothing and holds the cursor.
     const parsed = parseTriage(a.triage);
     const leadId = String(a.leadAgentId ?? "").trim();
     const runIds = [...new Set(parsed.map((x) => x.taskId).filter((x): x is string => !!x))];
-    const authors = new Map<string, string>();
-    if (leadId && runIds.length) for (const r of await q("triage-authors", `SELECT id, agentId FROM agent_tasks WHERE id IN (${runIds.map(() => "?").join(",")})`, runIds)) authors.set(String(r.id), String(r.agentId ?? ""));
+    const tasks = new Map<string, { agentId: string; task: string }>();
+    if (leadId && runIds.length) for (const r of await q("triage-authors", `SELECT id, agentId, substr(task, 1, 300) task FROM agent_tasks WHERE id IN (${runIds.map(() => "?").join(",")})`, runIds)) tasks.set(String(r.id), { agentId: String(r.agentId ?? ""), task: String(r.task ?? "") });
+    const uses = new Map<string, number>();
+    for (const x of parsed) if (x.taskId) uses.set(x.taskId, (uses.get(x.taskId) ?? 0) + 1);
     for (const x of parsed) {
-      if (x.status === "completed" && (!leadId || !x.taskId || authors.get(x.taskId) !== leadId)) {
+      if (x.status !== "completed") continue;
+      const t = x.taskId ? tasks.get(x.taskId) : undefined;
+      const why = !leadId
+        ? "no leadAgentId to check the triage task against"
+        : !x.taskId || !t || t.agentId !== leadId
+          ? `triage task ${x.taskId ?? "(none)"} was not run by the lead`
+          : !runId || !t.task.startsWith(`dreaming-v2 run ${runId}: learnings triage, batch ${x.batchId} (`) || uses.get(x.taskId) !== 1
+            ? `triage task ${x.taskId} is not this run's task for batch ${x.batchId}`
+            : null;
+      if (why) {
         x.status = "untrusted-author";
         x.items = null;
-        x.error = !leadId ? "no leadAgentId to check the triage task against" : `triage task ${x.taskId ?? "(none)"} was not run by the lead`;
+        x.error = why;
       }
     }
     const byBatch = new Map(parsed.map((x) => [x.batchId, x]));

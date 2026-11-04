@@ -76,7 +76,10 @@ export const argsSchema = z.object({
 const NS = "dreaming-v2";
 const LEARNINGS_CURSOR_KEY = "learnings:cursor"; // dreaming-learnings CURSOR_KEY: plan reads it, only this apply writes it
 // Drops a live night could not delete (cap, write budget, a failed delete), retried first on the next live night.
-export const LEARNINGS_PENDING_KEY = "learnings:pending-drops";
+// They drive Lead deletes, so they live in the Lead's own agent namespace: any agent can write dreaming-v2, but only
+// the Lead can write task:agent:<leadId>.
+export const LEARNINGS_PENDING_KEY = "dreaming-v2:learnings:pending-drops";
+export const pendingDropsNs = (leadId: string) => `task:agent:${leadId}`;
 const LEARNINGS_PENDING_MAX = 600;
 const LEARNINGS_PENDING_TRIES = 5;
 const MAX_DOC = 1950;
@@ -1242,7 +1245,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // moves past the row either way, so the carry is what retries the decision. Earlier carried drops go first.
       let carried: any[] = [];
       try {
-        const v: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key: LEARNINGS_PENDING_KEY }))?.value;
+        const v: any = leadId ? (await ctx.swarm.kv_getOrNull({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY }))?.value : null;
         carried = Array.isArray(v?.drops) ? v.drops.filter((d: any) => d && typeof d.id === "string") : [];
       } catch (e: any) {
         errors.push(`learnings pending drops read: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -1268,8 +1271,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const actionId = `LT${i + 1}`;
         try {
           const cur = await q("pre-drop", `SELECT id, name, key, tags, content, contentHash, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [dr.id]);
-          if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || (dr.contentHash && cur[0].contentHash !== dr.contentHash) || Number(cur[0].totalChunks) !== 1) {
-            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, or changed since triage" });
+          if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || !dr.contentHash || cur[0].contentHash !== dr.contentHash || Number(cur[0].totalChunks) !== 1) {
+            writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, no content hash, or changed since triage" });
             continue;
           }
           const preimageKey = `memtax-create:pre:${runId}:${dr.id}`;
@@ -1293,7 +1296,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // The carry list is bounded; a row whose delete failed LEARNINGS_PENDING_TRIES nights in a row is left to its TTL.
       try {
         const keep = pending.slice(0, LEARNINGS_PENDING_MAX);
-        await ctx.swarm.kv_set({ namespace: NS, key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
+        if (!leadId) throw new Error("no leadAgentId: undeleted drops are left to their TTL");
+        await ctx.swarm.kv_set({ namespace: pendingDropsNs(leadId), key: LEARNINGS_PENDING_KEY, value: { drops: keep, runId, at: new Date().toISOString() } as any });
         dropsPending = keep.length;
       } catch (e: any) {
         errors.push(`learnings pending drops write: ${String(e?.message ?? e).slice(0, 200)}`);
