@@ -16,8 +16,8 @@ Users can star a Sessions group (a use case). `user_favorites` gains the `key` i
 
 ## Changes Required:
 
-#### 1. Migration 279
-**File**: `src/be/migrations/279_favorites_key_type.sql` (new)
+#### 1. Migration 283
+**File**: `src/be/migrations/283_favorites_key_type.sql` (new)
 **Changes**: Rebuild `user_favorites` as in `192_favorites_agent_fs_path.sql:6-17` with `CHECK (itemType IN ('page','workflow','schedule','agent-fs-path','key'))`, copying rows and recreating the three indexes and the UNIQUE. Re-check the ordinal with `scripts/check-migration-conflicts.sh`.
 
 #### 2. Type enumerations

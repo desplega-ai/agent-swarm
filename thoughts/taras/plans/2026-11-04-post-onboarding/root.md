@@ -3,7 +3,7 @@ date: 2026-11-04T10:42:51+01:00
 author: Claude (with Taras)
 plan_type: dag
 status: in-progress
-autonomy: critical
+autonomy: autopilot
 commit_per_step: true
 last_updated: 2026-11-04
 last_updated_by: Claude
@@ -88,7 +88,7 @@ Facts verified on `fd6131322` (4 Nov 2026). Full detail with line refs lives in 
 - Home (E3) is last. It reads favorites (D3), the checklist (E1) and the new navigation (C1).
 - Each prompt change ships with the feature it references: files-first delivery in A3, use-case planning and channel threads in D4, nudges in E2.
 - External dependencies: A1 needs agent-fs PR #153 merged and released; A4 needs the Track B agent-fs release (org `swarm_url`, SPA `#key=` handling, org-scoped `/auth/me`). Both steps pin the version in `Pre-flight`.
-- Migrations are pre-assigned: `279` (D3 favorites `key` type), `280` (E1 `checklist_items`). Re-check against `main` and open PRs at kickoff (`scripts/check-migration-conflicts.sh`).
+- Migrations are pre-assigned: `283` (D3 favorites `key` type), `284` (E1 `checklist_items`). Renumbered at kickoff 2026-11-04: main took 279 and 281, open PR #2458 holds 282. Re-check against `main` and open PRs at kickoff (`scripts/check-migration-conflicts.sh`).
 
 ## Quick Verification Reference
 

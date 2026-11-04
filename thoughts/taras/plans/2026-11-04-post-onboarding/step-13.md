@@ -18,8 +18,8 @@ One checklist that outlives `/setup`: default items "Connect a chat channel" and
 
 ## Changes Required:
 
-#### 1. Migration 280
-**File**: `src/be/migrations/280_checklist_items.sql` (new)
+#### 1. Migration 284
+**File**: `src/be/migrations/284_checklist_items.sql` (new)
 **Changes**: Table `checklist_items`:
 - identity: `id TEXT PRIMARY KEY`, `scope TEXT NOT NULL CHECK (scope IN ('swarm','user'))`, `userId TEXT` (null for swarm), `kind TEXT NOT NULL CHECK (kind IN ('channel','tool','use_case','custom'))`, `label TEXT NOT NULL`, `href TEXT`, `meta TEXT` (JSON, e.g. `{"adapter":"telegram"}` for a repeated channel), `sortOrder INTEGER NOT NULL`
 - status: `status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','removed'))`, `statusChangedAt TEXT`, `statusChangedBy TEXT` (swarm user id, or `lead:<agentId>` when the Lead acted on request), `statusReason TEXT` (free text, optional; the UI asks "Why?" on remove, the Lead passes the user's words)
