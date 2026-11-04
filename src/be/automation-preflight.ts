@@ -4,7 +4,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 import { emitRunFinished } from "./db/workflow-runs";
-import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
+import { getOAuthApp, hasOAuthTokens } from "./db-queries/oauth";
 import { scrubJsonValue } from "./scrub-json";
 
 export type AutomationKind = "schedule" | "workflow";
@@ -263,8 +263,8 @@ function present(value: string | undefined): boolean {
 /** Shared integration truth used by both runtime preflight and GET /status. */
 export async function getAutomationSetupStates(): Promise<AutomationSetupStates> {
   const [linearTokens, jiraTokens, jiraApp] = await Promise.all([
-    getOAuthTokens("linear"),
-    getOAuthTokens("jira"),
+    hasOAuthTokens("linear"),
+    hasOAuthTokens("jira"),
     getOAuthApp("jira"),
   ]);
   let jiraCloudId = false;

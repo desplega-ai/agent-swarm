@@ -22891,6 +22891,13 @@
                   },
                   "meta": {
                     "type": "object",
+                    "properties": {
+                      "adapter": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
                     "additionalProperties": {}
                   }
                 },
@@ -22934,6 +22941,16 @@
           },
           "403": {
             "description": "The caller cannot edit swarm items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An open channel item for the same adapter already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -23358,7 +23375,7 @@
             }
           },
           "400": {
-            "description": "invalid_return_to: the origin is not the configured agent-fs app",
+            "description": "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL)",
             "content": {
               "application/json": {
                 "schema": {

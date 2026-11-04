@@ -139,7 +139,9 @@ const continueToAgentFsRoute = route({
           ),
       }),
     },
-    400: { description: "invalid_return_to: the origin is not the configured agent-fs app" },
+    400: {
+      description: "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL)",
+    },
     401: { description: "User identity required" },
     403: { description: "Caller cannot join the shared org" },
     409: { description: "agent-fs account or membership is pending" },
@@ -150,19 +152,19 @@ const continueToAgentFsRoute = route({
   },
 });
 
-/** Origins that may receive a key: the live agent-fs app and the configured `AGENT_FS_APP_URL`. */
-function allowedReturnOrigins(): Set<string> {
-  const origins = new Set<string>();
-  for (const raw of [getAgentFsLiveUrl(), process.env.AGENT_FS_APP_URL?.trim()]) {
-    if (!raw) continue;
-    try {
-      const { origin } = new URL(raw);
-      if (origin !== "null") origins.add(origin);
-    } catch {
-      // An unparseable URL allows nothing.
-    }
+/**
+ * The one origin that may receive a key: the live agent-fs app
+ * (`AGENT_FS_LIVE_URL`). `AGENT_FS_APP_URL` names the dashboard that agent-fs
+ * links open, so it is not a key target.
+ */
+function allowedReturnOrigin(): string | null {
+  try {
+    const { origin } = new URL(getAgentFsLiveUrl());
+    return origin === "null" ? null : origin;
+  } catch {
+    // An unparseable URL allows nothing.
+    return null;
   }
-  return origins;
 }
 
 const taskParams = z.object({ taskId: z.uuid() });
@@ -552,7 +554,7 @@ export async function handleFs(
       return true;
     }
     const target = new URL(parsed.body.returnTo);
-    if (!allowedReturnOrigins().has(target.origin)) {
+    if (target.origin !== allowedReturnOrigin()) {
       jsonError(res, "invalid_return_to", 400);
       return true;
     }

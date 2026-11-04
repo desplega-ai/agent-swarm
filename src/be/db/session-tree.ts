@@ -51,6 +51,8 @@ export interface SessionFilters {
   viewer?: SessionViewer;
   /** Match roots under this literal canonical asset key prefix. */
   keyPrefix?: string;
+  /** Match roots under any of these prefixes, one indexed range each. */
+  keyPrefixes?: string[];
   /** Match this exact group and its direct resource leaves. */
   groupKey?: string;
   /** Match shared and viewer-personal namespace roots and direct leaves. */
@@ -371,6 +373,13 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
     add({ sql: 'r."key" >= ? AND r."key" < ?', params: [lo, hi] });
   }
+  if (opts.keyPrefixes?.length) {
+    const ranges = opts.keyPrefixes.map(keyPrefixRange);
+    add({
+      sql: `(${ranges.map(() => '(r."key" >= ? AND r."key" < ?)').join(" OR ")})`,
+      params: ranges.flatMap(({ lo, hi }) => [lo, hi]),
+    });
+  }
   if (opts.groupKey) add(groupCondition(normalizeAssetKey(opts.groupKey)));
   if (opts.noGroup) add(noGroupCondition(opts.viewer?.userId));
   if (opts.triage === "inbox") add(inboxScopeCondition(opts.viewer?.userId));
@@ -392,7 +401,10 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
 }
 
 function excludesTriaged(opts: SessionFilters): boolean {
-  return !!(opts.viewer?.userId && (opts.groupKey || opts.keyPrefix || opts.noGroup));
+  return !!(
+    opts.viewer?.userId &&
+    (opts.groupKey || opts.keyPrefix || opts.keyPrefixes?.length || opts.noGroup)
+  );
 }
 
 function hasSessionChainFilter(opts: SessionFilters): boolean {

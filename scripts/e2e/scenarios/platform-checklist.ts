@@ -105,6 +105,22 @@ export const platformChecklist: Scenario = {
         ?.status === "done",
       "Completion persisted",
     );
+    const channel = {
+      scope: "swarm",
+      kind: "channel",
+      label: "Connect Telegram",
+      meta: { adapter: "telegram" },
+    };
+    expectStatus(
+      await ctx.api("POST", "/api/checklist/items", { body: channel }),
+      [201],
+      "operator adds a Telegram channel item",
+    );
+    expectStatus(
+      await ctx.api("POST", "/api/checklist/items", { body: channel }),
+      [409],
+      "a second open item for the same adapter is refused",
+    );
 
     const useCaseId = `user:${userId}:use_case`;
     expectStatus(

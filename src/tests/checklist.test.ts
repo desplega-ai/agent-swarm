@@ -166,30 +166,39 @@ afterAll(async () => {
 });
 
 describe("checklist defaults and signals", () => {
-  test("seeds concurrently on a populated database, preserves changes, and seeds only the reading user", async () => {
+  test("reads merge the defaults without writing, writes store them, and changes are kept", async () => {
     await asset("pages", "shared/existing/");
     const other = await createUser({ name: "Unread checklist" });
-    const results = await Promise.all([
-      listChecklist(userId),
-      listChecklist(userId),
-      listChecklist(null),
-    ]);
+    const run = spyOn(getDbClient(), "run");
+    const transaction = spyOn(getDbClient(), "transaction");
+    let results: ChecklistItem[][];
+    try {
+      results = await Promise.all([
+        listChecklist(userId),
+        listChecklist(userId),
+        listChecklist(null),
+        firstOpenItem(userId, true).then((first) => (first ? [first] : [])),
+      ]);
+      expect(run).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    } finally {
+      run.mockRestore();
+      transaction.mockRestore();
+    }
     expect(results[0].map((row) => row.id)).toEqual([
       "swarm:channel",
       "swarm:tool",
       `user:${userId}:use_case`,
     ]);
     expect(results[2]).toHaveLength(2);
-    expect(
-      await getDbClient().get("SELECT id FROM checklist_items WHERE userId = ?", [other.id]),
-    ).toBeNull();
+    expect(await getDbClient().get("SELECT COUNT(*) AS n FROM checklist_items")).toEqual({ n: 0 });
     await mutateChecklist(actor, { action: "remove", id: "swarm:tool", reason: "Later" });
     expect((await item("tool")).status).toBe("removed");
     expect(await listChecklist(userId)).toHaveLength(3);
     expect((await listChecklist(other.id)).filter((row) => row.scope === "user")).toHaveLength(1);
   });
 
-  test("migration 284 applies to a populated database and seeds on its first read", async () => {
+  test("migration 284 applies to a populated database and lists the defaults on its first read", async () => {
     const pageId = await asset("pages", "shared/pre-checklist/");
     await getDbClient().run("DROP TABLE checklist_items");
     await getDbClient().run("DELETE FROM _migrations WHERE version = 284");
@@ -304,6 +313,40 @@ describe("checklist defaults and signals", () => {
     expect((await item("use_case")).signal).toBe(false);
   });
 
+  test("one read group counts behind 100 newer non-group keys, and done items skip the check", async () => {
+    const key = `shared/checklist-${crypto.randomUUID()}/`;
+    await asset("pages", key);
+    await root(`${key}task:${crypto.randomUUID()}/`, true);
+    await getDbClient().run("UPDATE pages SET createdAt = '2000-01-01T00:00:00.000Z'");
+    for (let i = 0; i < 101; i++) await asset("pages", `shared/page:${crypto.randomUUID()}/`);
+    expect((await item("use_case")).signal).toBe(true);
+    const actorItem = `user:${userId}:use_case`;
+    await mutateChecklist(actor, { action: "done", id: actorItem });
+    const query = spyOn(getDbClient(), "query");
+    try {
+      expect(await item("use_case")).toMatchObject({ status: "done", done: true, signal: null });
+      // Only the checklist rows are read: no asset scan for a done use case.
+      expect(query).toHaveBeenCalledTimes(1);
+    } finally {
+      query.mockRestore();
+    }
+  });
+
+  test("a stored meta that is not a JSON object reads as no meta", async () => {
+    for (const [index, raw] of ["{not json", "[1,2]", '"text"'].entries()) {
+      await getDbClient().run(
+        `INSERT INTO checklist_items (id, scope, kind, label, meta, sortOrder)
+         VALUES (?, 'swarm', 'channel', 'Broken', ?, ?)`,
+        [`broken-${index}`, raw, 10 + index],
+      );
+    }
+    const response = await api("GET");
+    expect(response.status).toBe(200);
+    expect(
+      response.body.items.filter((row) => row.id.startsWith("broken-")).map((row) => row.meta),
+    ).toEqual([null, null, null]);
+  });
+
   test("namespace roots and resource leaves do not count as group keys", async () => {
     for (const key of ["shared/", `shared/page:${crypto.randomUUID()}/`]) {
       await asset("pages", key);
@@ -413,11 +456,14 @@ describe("checklist ownership and mutations", () => {
 
   test("other users cannot edit user items even as admins, and unknown ids return 404", async () => {
     const other = await createUser({ name: "Other owner" });
-    await listChecklist(other.id);
-    expect(
-      (await api("PATCH", `/api/checklist/items/user:${other.id}:use_case`, { action: "remove" }))
-        .status,
-    ).toBe(403);
+    const otherItem = `/api/checklist/items/user:${other.id}:use_case`;
+    // Not stored yet: another user's default reads as unknown.
+    expect((await api("PATCH", otherItem, { action: "remove" })).status).toBe(404);
+    await mutateChecklist(
+      { id: other.id, userId: other.id, canEditSwarm: false },
+      { action: "restore", id: `user:${other.id}:use_case` },
+    );
+    expect((await api("PATCH", otherItem, { action: "remove" })).status).toBe(403);
     expect(
       (await api("PATCH", `/api/checklist/items/${crypto.randomUUID()}`, { action: "done" }))
         .status,
@@ -476,6 +522,39 @@ describe("checklist ownership and mutations", () => {
     ).toBe(400);
   });
 
+  test("a second open item for the same adapter is refused, and meta is capped", async () => {
+    const telegram = {
+      scope: "swarm",
+      kind: "channel",
+      label: "Connect Telegram",
+      meta: { adapter: "telegram" },
+    };
+    const first = await api("POST", "/api/checklist/items", telegram);
+    expect(first.status).toBe(201);
+    const second = await api("POST", "/api/checklist/items", telegram);
+    expect(second.status).toBe(409);
+    expect(second.body.error).toContain("telegram");
+    expect(
+      (await api("POST", "/api/checklist/items", { ...telegram, meta: { adapter: "discord" } }))
+        .status,
+    ).toBe(201);
+    await api("PATCH", `/api/checklist/items/${first.body.item.id}`, { action: "remove" });
+    expect((await api("POST", "/api/checklist/items", telegram)).status).toBe(201);
+    for (const meta of [{ adapter: 42 }, { note: "x".repeat(1100) }]) {
+      expect((await api("POST", "/api/checklist/items", { ...telegram, meta })).status).toBe(400);
+    }
+  });
+
+  test("with RBAC off, role rows do not decide swarm edits: the legacy policy does", async () => {
+    await attachRole(userId, "admin");
+    expect((await api("GET")).body.canEditSwarm).toBe(true);
+    process.env.RBAC_ENABLED = "false";
+    // The admin role row stays, but a user token is no Lead under the legacy policy.
+    expect((await api("GET")).body.canEditSwarm).toBe(false);
+    auth = { kind: "operator", fingerprint: "op:checklist" };
+    expect((await api("GET")).body.canEditSwarm).toBe(true);
+  });
+
   test("operator without a user sees swarm items, but cannot create user items", async () => {
     auth = { kind: "operator", fingerprint: "op:checklist" };
     const response = await api("GET");
@@ -516,6 +595,45 @@ describe("checklist ownership and mutations", () => {
     });
   });
 
+  test("non-lead agents read the checklist but cannot change it", async () => {
+    const agentId = crypto.randomUUID();
+    await createAgent({ id: agentId, name: "Checklist Worker", isLead: false, status: "idle" });
+    const taskId = await root(`shared/checklist-${crypto.randomUUID()}/`);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET agentId = ?, status = 'in_progress' WHERE id = ?",
+      [agentId, taskId],
+    );
+    auth = { kind: "operator", fingerprint: "op:checklist" };
+    expect((await api("GET", "/api/checklist", undefined, agentId)).status).toBe(200);
+    const patch = await api(
+      "PATCH",
+      `/api/checklist/items/user:${userId}:use_case`,
+      { action: "done" },
+      agentId,
+    );
+    expect(patch.status).toBe(403);
+    const add = await api(
+      "POST",
+      "/api/checklist/items",
+      { scope: "user", kind: "custom", label: "Worker item" },
+      agentId,
+    );
+    expect(add.status).toBe(403);
+  });
+
+  test("a user token with an agent header is recorded as the user, not the Lead", async () => {
+    const agentId = crypto.randomUUID();
+    await createAgent({ id: agentId, name: "Header Lead", isLead: true, status: "idle" });
+    const response = await api(
+      "PATCH",
+      `/api/checklist/items/user:${userId}:use_case`,
+      { action: "done" },
+      agentId,
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.item.statusChangedBy).toBe(userId);
+  });
+
   test("firstOpenItem skips done, signaled, removed, nudged and custom items, and nudge writes join transactions", async () => {
     process.env.GITHUB_TOKEN = "fixture-token";
     await listChecklist(userId);
@@ -525,14 +643,14 @@ describe("checklist ownership and mutations", () => {
     const taskId = crypto.randomUUID();
     await expect(
       getDbClient().transaction(async () => {
-        await markNudged("swarm:channel", taskId);
+        await markNudged("swarm:channel", taskId, userId);
         expect((await firstOpenItem(userId, true))?.id).toBe(`user:${userId}:use_case`);
         throw new Error("Rollback nudge");
       }),
     ).rejects.toThrow("Rollback nudge");
     expect((await firstOpenItem(userId, true))?.id).toBe("swarm:channel");
     await getDbClient().transaction(async () => {
-      await markNudged("swarm:channel", taskId);
+      await markNudged("swarm:channel", taskId, userId);
     });
     expect(await item("channel")).toMatchObject({
       nudgedTaskId: taskId,
@@ -546,7 +664,7 @@ describe("checklist ownership and mutations", () => {
 
   test("firstOpenItem advances to the next swarm item after a nudge", async () => {
     expect((await firstOpenItem(userId, true))?.id).toBe("swarm:channel");
-    await markNudged("swarm:channel", crypto.randomUUID());
+    await markNudged("swarm:channel", crypto.randomUUID(), userId);
     expect((await firstOpenItem(userId, true))?.id).toBe("swarm:tool");
     await mutateChecklist(actor, { action: "remove", id: "swarm:tool" });
     expect((await firstOpenItem(userId, true))?.id).toBe(`user:${userId}:use_case`);

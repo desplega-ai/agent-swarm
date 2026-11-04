@@ -5,7 +5,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { getAutomationSetupStates, setupIntegrationFlags } from "./automation-preflight";
 import { getDbClient } from "./db";
 import { sessionSummaryQuery } from "./db/session-tree";
-import { getOAuthTokens } from "./db-queries/oauth";
+import { hasOAuthTokens } from "./db-queries/oauth";
 
 type ChecklistRow = Omit<ChecklistItem, "meta" | "signal" | "done" | "editable"> & {
   meta: string | null;
@@ -32,12 +32,60 @@ export type ChecklistAction =
 export class ChecklistError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 403 | 404,
+    readonly status: 400 | 403 | 404 | 409,
   ) {
     super(message);
   }
 }
 
+/** The default rows every list starts with: two swarm items and the reader's use case. */
+function defaultRows(userId: string | null): ChecklistRow[] {
+  const now = new Date().toISOString();
+  const row = (
+    id: string,
+    scope: ChecklistRow["scope"],
+    kind: ChecklistRow["kind"],
+    label: string,
+    href: string,
+    sortOrder: number,
+  ): ChecklistRow => ({
+    id,
+    scope,
+    userId: scope === "user" ? userId : null,
+    kind,
+    label,
+    href,
+    meta: null,
+    sortOrder,
+    status: "open",
+    statusChangedAt: null,
+    statusChangedBy: null,
+    statusChangedByName: null,
+    statusReason: null,
+    nudgedAt: null,
+    nudgedTaskId: null,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
+  return [
+    row("swarm:channel", "swarm", "channel", "Connect a chat channel", "/integrations/channels", 0),
+    row("swarm:tool", "swarm", "tool", "Connect work tools", "/integrations/tools", 1),
+    ...(userId
+      ? [
+          row(
+            `user:${userId}:use_case`,
+            "user",
+            "use_case",
+            "Plan your first use case",
+            "/sessions",
+            2,
+          ),
+        ]
+      : []),
+  ];
+}
+
+/** Write paths only: reads merge the defaults in memory and take no write lock. */
 async function seedChecklist(userId: string | null): Promise<void> {
   const db = getDbClient();
   await db.run(
@@ -55,95 +103,140 @@ async function seedChecklist(userId: string | null): Promise<void> {
   }
 }
 
+/** Stored rows plus any default not stored yet, in list order. */
+async function checklistRows(userId: string | null): Promise<ChecklistRow[]> {
+  const rows = await getDbClient().query<ChecklistRow>(
+    `SELECT c.*, CASE WHEN c.statusChangedBy LIKE 'lead:%' THEN 'Lead' ELSE u.name END AS statusChangedByName
+     FROM checklist_items c LEFT JOIN users u ON u.id = c.statusChangedBy
+     WHERE c.scope = 'swarm' OR (c.scope = 'user' AND c.userId = ?)`,
+    [userId],
+  );
+  const stored = new Set(rows.map((row) => row.id));
+  const all = [...rows, ...defaultRows(userId).filter((row) => !stored.has(row.id))];
+  // Same order as `ORDER BY sortOrder, createdAt, id`.
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return all.sort(
+    (a, b) => a.sortOrder - b.sortOrder || cmp(a.createdAt, b.createdAt) || cmp(a.id, b.id),
+  );
+}
+
+/** A stored meta that is not a JSON object reads as no meta, never as an error. */
+function parseMeta(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getUseCaseSignal(userId: string | null): Promise<boolean> {
   if (!userId) return false;
   // Apps have keys but no creator column. See .non-audit-tables.
-  // Bound session checks to the user's 100 most recently created asset keys.
-  const candidates = await getDbClient().query<{ key: string }>(
+  // Bound the check to the user's 100 most recently created group keys.
+  const keys = await getDbClient().query<{ key: string }>(
     `SELECT "key", MAX(createdAt) AS newest FROM (
        SELECT "key", createdAt FROM scheduled_tasks WHERE created_by = ?
        UNION ALL SELECT "key", createdAt FROM pages WHERE created_by = ?
        UNION ALL SELECT "key", createdAt FROM workflows WHERE created_by = ?
-     ) GROUP BY "key" ORDER BY newest DESC, "key" LIMIT 100`,
+     ) GROUP BY "key" ORDER BY newest DESC, "key"`,
     [userId, userId, userId],
   );
-  for (const { key } of candidates) {
-    if (!isGroupKey(key)) continue;
-    const query = sessionSummaryQuery({ keyPrefix: key, viewer: { userId, scope: "all" } });
-    const read = await getDbClient().get<{ found: number }>(
-      `SELECT 1 AS found FROM (${query.sql}) WHERE readState = 'read' LIMIT 1`,
-      query.params,
-    );
-    if (read) return true;
-  }
-  return false;
+  const groups = keys
+    .map(({ key }) => key)
+    .filter(isGroupKey)
+    .slice(0, 100);
+  if (groups.length === 0) return false;
+  const query = sessionSummaryQuery({ keyPrefixes: groups, viewer: { userId, scope: "all" } });
+  const read = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found FROM (${query.sql}) WHERE readState = 'read' LIMIT 1`,
+    query.params,
+  );
+  return read !== null;
 }
 
+/** Each signal is computed at most once per call, and only when a row needs it. */
+function lazySignals(userId: string | null) {
+  const once = <T>(fn: () => Promise<T>) => {
+    let value: Promise<T> | undefined;
+    return () => {
+      value ??= fn();
+      return value;
+    };
+  };
+  const flags = once(async () => setupIntegrationFlags(await getAutomationSetupStates()));
+  const adapters = once(async () => {
+    const names = new Set<string>(healthyChatSdkAdapters());
+    if ((await flags()).slack) names.add("slack");
+    return names;
+  });
+  const tool = once(async () => {
+    const f = await flags();
+    if (f.github || f.gitlab || f.bitbucket || f.linear || f.jira) return true;
+    return (await hasOAuthTokens("google")) || (await hasOAuthTokens("microsoft"));
+  });
+  const plannedUseCase = once(() => getUseCaseSignal(userId));
+  return async (row: ChecklistRow, meta: Record<string, unknown> | null) => {
+    if (row.kind === "custom") return null;
+    if (row.kind === "channel") {
+      const names = await adapters();
+      return typeof meta?.adapter === "string" ? names.has(meta.adapter) : names.size > 0;
+    }
+    return row.kind === "tool" ? tool() : plannedUseCase();
+  };
+}
+
+function toItem(
+  row: ChecklistRow,
+  meta: Record<string, unknown> | null,
+  signal: boolean | null,
+  userId: string | null,
+  canEditSwarm: boolean,
+): ChecklistItem {
+  // Explicit fields keep audit columns internal to the service.
+  return {
+    id: row.id,
+    scope: row.scope,
+    userId: row.userId,
+    kind: row.kind,
+    label: row.label,
+    href: row.href,
+    meta,
+    sortOrder: row.sortOrder,
+    status: row.status,
+    statusChangedAt: row.statusChangedAt,
+    statusChangedBy: row.statusChangedBy,
+    statusChangedByName: row.statusChangedByName,
+    statusReason: row.statusReason,
+    nudgedAt: row.nudgedAt,
+    nudgedTaskId: row.nudgedTaskId,
+    signal,
+    done: row.status === "done" || signal === true,
+    editable: row.scope === "swarm" ? canEditSwarm : row.userId === userId,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/**
+ * Read-only: the dashboard polls this. `signal` is null for custom items and
+ * for items marked done by hand, which need no check.
+ */
 export async function listChecklist(
   userId: string | null,
   canEditSwarm = false,
 ): Promise<ChecklistItem[]> {
-  await seedChecklist(userId);
-  const setup = await getAutomationSetupStates();
-  const flags = setupIntegrationFlags(setup);
-  const [google, microsoft, useCase] = await Promise.all([
-    getOAuthTokens("google"),
-    getOAuthTokens("microsoft"),
-    getUseCaseSignal(userId),
-  ]);
-  const adapters = new Set<string>(healthyChatSdkAdapters());
-  if (flags.slack) adapters.add("slack");
-  const tool =
-    flags.github ||
-    flags.gitlab ||
-    flags.bitbucket ||
-    flags.linear ||
-    flags.jira ||
-    google !== null ||
-    microsoft !== null;
-  const rows = await getDbClient().query<ChecklistRow>(
-    `SELECT c.*, CASE WHEN c.statusChangedBy LIKE 'lead:%' THEN 'Lead' ELSE u.name END AS statusChangedByName
-     FROM checklist_items c LEFT JOIN users u ON u.id = c.statusChangedBy
-     WHERE c.scope = 'swarm' OR (c.scope = 'user' AND c.userId = ?)
-     ORDER BY c.sortOrder, c.createdAt, c.id`,
-    [userId],
+  const signalOf = lazySignals(userId);
+  return Promise.all(
+    (await checklistRows(userId)).map(async (row) => {
+      const meta = parseMeta(row.meta);
+      const signal = row.status === "done" ? null : await signalOf(row, meta);
+      return toItem(row, meta, signal, userId, canEditSwarm);
+    }),
   );
-  return rows.map((row) => {
-    const meta = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : null;
-    const signal =
-      row.kind === "custom"
-        ? null
-        : row.kind === "channel"
-          ? typeof meta?.adapter === "string"
-            ? adapters.has(meta.adapter)
-            : adapters.size > 0
-          : row.kind === "tool"
-            ? tool
-            : useCase;
-    // Explicit fields keep audit columns internal to the service.
-    return {
-      id: row.id,
-      scope: row.scope,
-      userId: row.userId,
-      kind: row.kind,
-      label: row.label,
-      href: row.href,
-      meta,
-      sortOrder: row.sortOrder,
-      status: row.status,
-      statusChangedAt: row.statusChangedAt,
-      statusChangedBy: row.statusChangedBy,
-      statusChangedByName: row.statusChangedByName,
-      statusReason: row.statusReason,
-      nudgedAt: row.nudgedAt,
-      nudgedTaskId: row.nudgedTaskId,
-      signal,
-      done: row.status === "done" || signal === true,
-      editable: row.scope === "swarm" ? canEditSwarm : row.userId === userId,
-      createdAt: row.createdAt,
-      lastUpdatedAt: row.lastUpdatedAt,
-    };
-  });
 }
 
 export async function mutateChecklist(
@@ -174,6 +267,16 @@ export async function mutateChecklist(
     const now = new Date().toISOString();
     if (action.action === "add") {
       const userId = action.scope === "user" ? actor.userId : null;
+      const adapter = action.kind === "channel" ? action.meta?.adapter : undefined;
+      if (typeof adapter === "string") {
+        const open = await tx.get<{ id: string }>(
+          `SELECT id FROM checklist_items
+           WHERE kind = 'channel' AND status = 'open' AND scope = ? AND userId IS ?
+             AND CASE WHEN json_valid(meta) THEN json_extract(meta, '$.adapter') END = ?`,
+          [action.scope, userId, adapter],
+        );
+        if (open) throw new ChecklistError(`An open item already connects ${adapter}`, 409);
+      }
       const max = await tx.get<{ sortOrder: number }>(
         "SELECT COALESCE(MAX(sortOrder), -1) + 1 AS sortOrder FROM checklist_items WHERE scope = ? AND userId IS ?",
         [action.scope, userId],
@@ -226,22 +329,29 @@ export async function mutateChecklist(
   return items.find((item) => item.id === id)!;
 }
 
+/** The first open, editable, not-nudged item without a signal. Checks stop at the match. */
 export async function firstOpenItem(
   userId: string | null,
   canEditSwarm: boolean,
 ): Promise<ChecklistItem | null> {
-  return (
-    (await listChecklist(userId, canEditSwarm)).find(
-      (item) =>
-        item.editable === true &&
-        item.status === "open" &&
-        item.signal === false &&
-        item.nudgedAt === null,
-    ) ?? null
-  );
+  const signalOf = lazySignals(userId);
+  for (const row of await checklistRows(userId)) {
+    const editable = row.scope === "swarm" ? canEditSwarm : row.userId === userId;
+    if (!editable || row.status !== "open" || row.nudgedAt !== null) continue;
+    const meta = parseMeta(row.meta);
+    const signal = await signalOf(row, meta);
+    if (signal === false) return toItem(row, meta, signal, userId, canEditSwarm);
+  }
+  return null;
 }
 
-export async function markNudged(itemId: string, taskId: string): Promise<void> {
+/** A write path: stores the default rows first, so a default item keeps its nudge. */
+export async function markNudged(
+  itemId: string,
+  taskId: string,
+  userId: string | null,
+): Promise<void> {
+  await seedChecklist(userId);
   const now = new Date().toISOString();
   await getDbClient().run(
     "UPDATE checklist_items SET nudgedAt = ?, nudgedTaskId = ?, lastUpdatedAt = ? WHERE id = ?",

@@ -1,5 +1,5 @@
 import { AlertCircle, FolderOpen, Loader2 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, FsContinueError } from "@/api/client";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -51,24 +51,25 @@ function ContinueCard({ title, children }: { title: string; children: ReactNode 
 /**
  * `/fs/continue?return_to=<live agent-fs URL>`: "Continue with your swarm" on
  * the live agent-fs app lands here. The dashboard holds the swarm session, so
- * it asks the API for a named agent-fs key and goes back to `return_to` with
- * the key in the fragment. The live app stores the key and strips it.
+ * after one confirm click it asks the API for a named agent-fs key and goes
+ * back to `return_to` with the key in the fragment. The live app stores the
+ * key and strips it. The click keeps a plain visit (a link, a prefetch) from
+ * minting a key.
  */
 export default function FsContinuePage() {
   const [returnTo] = useState(() => new URLSearchParams(window.location.search).get("return_to"));
   const host = returnHost(returnTo);
   const [error, setError] = useState<string | null>(null);
-  // One key per visit: StrictMode runs the effect twice.
-  const started = useRef(false);
+  const [started, setStarted] = useState(false);
 
-  useEffect(() => {
-    if (!returnTo || !host || started.current) return;
-    started.current = true;
+  function start() {
+    if (!returnTo || started) return;
+    setStarted(true);
     api
       .fsContinue({ returnTo })
       .then(({ redirectUrl }) => window.location.replace(redirectUrl))
       .catch((err: unknown) => setError(errorMessage(err)));
-  }, [returnTo, host]);
+  }
 
   if (!returnTo || !host) {
     return (
@@ -88,6 +89,22 @@ export default function FsContinuePage() {
           {error}
         </AlertCallout>
         <OpenFiles />
+      </ContinueCard>
+    );
+  }
+
+  if (!started) {
+    return (
+      <ContinueCard title={`Continue to ${host}?`}>
+        <p className="text-pretty text-sm text-muted-foreground">
+          This signs {host} in to the shared files with a new agent-fs key for your account.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={start}>
+            Continue to {host}
+          </Button>
+          <OpenFiles />
+        </div>
       </ContinueCard>
     );
   }

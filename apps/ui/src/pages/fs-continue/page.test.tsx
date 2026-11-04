@@ -24,7 +24,22 @@ mock.module("@/api/client", () => ({
 }));
 const box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
 mock.module("@/components/ui/button", () => ({
-  Button: ({ children }: { children?: ReactNode }) => children,
+  Button: ({
+    children,
+    asChild,
+    onClick,
+  }: {
+    children?: ReactNode;
+    asChild?: boolean;
+    onClick?: () => void;
+  }) =>
+    asChild ? (
+      children
+    ) : (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
 }));
 mock.module("@/components/ui/card", () => ({
   Card: box,
@@ -89,14 +104,25 @@ async function open(url: string) {
 
 const live = "https://live.agent-fs.dev/file/~/org/drive/x.md";
 
+async function confirm(view: HTMLElement) {
+  const button = view.querySelector("button");
+  expect(button?.textContent).toBe("Continue to live.agent-fs.dev");
+  await act(async () => button?.click());
+}
+
 describe("FsContinuePage", () => {
-  test("mints once and replaces the location with the fragment URL", async () => {
+  test("mints nothing on a visit, then once after the confirm click", async () => {
     const redirectUrl = `${live}#key=af_example&apiUrl=${encodeURIComponent("https://swarm.example.test/agentfs")}`;
     stubApi(async () => ({ redirectUrl }));
     const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
+    expect(calls).toEqual([]);
+    expect(view.textContent).toContain("Continue to live.agent-fs.dev?");
+    expect(view.querySelector('a[href="/file"]')).not.toBeNull();
+    await confirm(view);
     expect(calls).toEqual([live]);
     expect(replaced).toEqual([redirectUrl]);
     expect(view.textContent).toContain("Continuing to live.agent-fs.dev");
+    expect(view.querySelector("button")).toBeNull();
   });
 
   test("an API error shows its message and a link to the files", async () => {
@@ -104,6 +130,7 @@ describe("FsContinuePage", () => {
       throw new FsContinueError("invalid_return_to", 400);
     });
     const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
+    await confirm(view);
     expect(replaced).toEqual([]);
     expect(view.textContent).toContain("Could not continue to live.agent-fs.dev");
     expect(view.textContent).toContain("does not point to your agent-fs app");
@@ -119,6 +146,7 @@ describe("FsContinuePage", () => {
         throw new FsContinueError("x", status);
       });
       const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
+      await confirm(view);
       expect(view.textContent).toContain(text);
       await act(async () => root?.unmount());
       container?.remove();

@@ -759,6 +759,12 @@ export async function markAuthorizationRefreshFailed(
 
 // ── Provider-string compatibility adapters ──
 
+/** Same answer as `getOAuthTokens(provider) !== null`, without decrypting the tokens. */
+export async function hasOAuthTokens(provider: string): Promise<boolean> {
+  const row = await rawDefaultAuthorizationForProvider(provider);
+  return row !== null && row.status !== "revoked";
+}
+
 export async function getOAuthTokens(provider: string): Promise<OAuthTokens | null> {
   const row = await rawDefaultAuthorizationForProvider(provider);
   if (!row) return null;
