@@ -27,7 +27,8 @@ function config(
     | "redirect"
     | "redirect-error"
     | "redirect-cancel"
-    | "redirect-retry",
+    | "redirect-retry"
+    | "coalesce",
   stateFile: string,
 ): ProviderSessionConfig {
   return {
@@ -268,6 +269,45 @@ describe("Claude SDK production adapter lifecycle", () => {
       expect(JSON.parse(await Bun.file(stateFile).text()).userMessages).toEqual([
         "initial-message",
       ]);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "a singular UUID result answers coalesced inputs and leaves a later input open",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "coalesce.json");
+      const session = await new ClaudeAdapter(async () => {}).createSession(
+        config(directory, "coalesce", stateFile),
+      );
+      try {
+        await waitForFile(stateFile);
+        expect(await session.deliverSteering!({ mode: "queue", text: "second" })).toEqual({
+          delivered: true,
+          mode: "queue",
+        });
+        // The fixture's first result echoes only the initial id. "second" is
+        // still outstanding, so completion must not have closed the input.
+        expect(await session.deliverSteering!({ mode: "queue", text: "third" })).toEqual({
+          delivered: true,
+          mode: "queue",
+        });
+        const result = await Promise.race([
+          session.waitForCompletion(),
+          Bun.sleep(3_000).then(() => {
+            throw new Error("coalesced singular-UUID result left inputs unanswered");
+          }),
+        ]);
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(await Bun.file(stateFile).text()).userMessages).toEqual([
+          "initial-message",
+          "second",
+          "third",
+        ]);
+      } finally {
+        await session.abort("coalesce test cleanup");
+      }
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

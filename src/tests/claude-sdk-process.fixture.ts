@@ -86,9 +86,9 @@ function resultMessage(
     uuid: crypto.randomUUID(),
     session_id: sessionId,
     user_message_uuid: userUuids[turn - 1],
-    ...(mode === "redirect-error" || mode === "redirect-retry"
-      ? { user_message_uuids: userUuids }
-      : {}),
+    // redirect-retry echoes only the singular id. A cumulative list would hide
+    // coalesced inputs that a real singular result leaves unanswered.
+    ...(mode === "redirect-error" ? { user_message_uuids: userUuids } : {}),
   };
 }
 
@@ -232,6 +232,20 @@ async function handleLine(line: string): Promise<boolean> {
         : "";
   userMessages.push(text);
   userUuids.push(message.uuid ?? "");
+
+  if (mode === "coalesce") {
+    await writeStateFile(stateFile, { argv, userMessages });
+    if (userMessages.length === 2) {
+      // Singular echo of the first input. The second stays unanswered.
+      writeMessage(assistantMessage("partial", 1));
+      writeMessage(resultMessage("partial", 1, 0));
+    } else if (userMessages.length >= 3) {
+      // Singular echo of the last merged input, with no UUID list.
+      writeMessage(assistantMessage("coalesced", userMessages.length));
+      writeMessage(resultMessage("coalesced", userMessages.length, 0));
+    }
+    return false;
+  }
 
   if (mode?.startsWith("redirect")) {
     await writeStateFile(stateFile, { argv, userMessages, interrupts });

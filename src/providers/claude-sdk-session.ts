@@ -489,20 +489,43 @@ class ClaudeSdkSession implements ProviderSession {
     return this.shutdownPromise;
   }
 
+  /**
+   * A singular `user_message_uuid` names the last message merged into the turn.
+   * Every unanswered input enqueued at or before it was coalesced into that
+   * turn and is not echoed on its own. Inputs enqueued after it stay open.
+   */
+  private answerCoalescedThrough(lastUuid: string): void {
+    if (!this.unansweredInputs.has(lastUuid)) return;
+    for (const uuid of [...this.unansweredInputs]) {
+      this.unansweredInputs.delete(uuid);
+      if (uuid === lastUuid) return;
+    }
+  }
+
+  private noteAnsweredInputs(result: SDKResultMessage): void {
+    const listed = result.user_message_uuids;
+    if (listed && listed.length > 0) {
+      this.inputResultIdsSupported = true;
+      for (const uuid of listed) this.unansweredInputs.delete(uuid);
+      return;
+    }
+    if (result.user_message_uuid) {
+      this.inputResultIdsSupported = true;
+      this.answerCoalescedThrough(result.user_message_uuid);
+      return;
+    }
+    if (!this.inputResultIdsSupported) {
+      // Older executables do not echo input UUIDs. Preserve their existing
+      // queued_turn_count completion contract.
+      this.unansweredInputs.clear();
+    }
+  }
+
   private handleMessage(message: SDKMessage): boolean {
     const json = message as ClaudeProtocolMessage;
     if (json.type === "result") {
       const result = message as SDKResultMessage;
-      const answered =
-        result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : []);
-      if (answered.length > 0) {
-        this.inputResultIdsSupported = true;
-        for (const uuid of answered) this.unansweredInputs.delete(uuid);
-      } else if (!this.inputResultIdsSupported) {
-        // Older executables do not echo input UUIDs. Preserve their existing
-        // queued_turn_count completion contract.
-        this.unansweredInputs.clear();
-      }
+      this.noteAnsweredInputs(result);
       this.turnActive = (result.queued_turn_count ?? 0) > 0 || this.unansweredInputs.size > 0;
       for (const resolve of this.resultWaiters) resolve();
       this.resultWaiters.clear();

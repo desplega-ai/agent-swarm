@@ -265,7 +265,9 @@ and shuts down the process tree instead of starting another turn.
 
 Concurrent deliveries are serialized. Input UUIDs keep an earlier result from
 closing a session with unanswered messages, including messages coalesced into
-one turn. Older executables without UUID echoes retain their existing
+one turn. A result that echoes only `user_message_uuid` answers every input
+enqueued through that id, because the id is the last message merged into the
+turn. Older executables without UUID echoes retain their existing
 `queued_turn_count` completion behavior. Interrupts keep already queued input;
 they never resend it. `delivered` still means the SDK accepted the envelope;
 only the agent's `accept-steer` call marks its Swarm message ID `handled`.

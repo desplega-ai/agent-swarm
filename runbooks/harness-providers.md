@@ -583,8 +583,10 @@ Until initialization records transport, Claude requests retain queue-only admiss
 before awaiting control responses. Redirect waits for both `query.interrupt()`
 and the interrupted result, then writes the unchanged steering envelope.
 Queued messages survive the interrupt and are never resent. Input UUIDs and
-result UUID lists keep the session open for unanswered/coalesced input. Older
-executables without UUID echoes keep the `queued_turn_count` fallback.
+result UUID lists keep the session open for unanswered input. A result that
+echoes only `user_message_uuid` answers every input enqueued through that id,
+because the id is the last message merged into the turn. Older executables
+without UUID echoes keep the `queued_turn_count` fallback.
 Cancellation closes input immediately and wins over pending deliveries.
 
 An interrupt failure or a 10-second redirect deadline returns undeliverable;
