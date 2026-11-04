@@ -835,6 +835,7 @@ Per-task context is appended to the **task prompt** (the first user turn), after
 | Template `system.agent.scripts_only_mode.slack` | `## Slack (scripts-only)` | Worker, scripts-only, Slack-originated task |
 | Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
+| `task.checklist.nudge` | `## Setup suggestion` | Lead only. The poll trigger carries `checklistNudge`: a human-sourced task (`ui`, `slack`, `chat`, `comb`) with a known requester who has an open, never-nudged checklist item. Sent once per item |
 | cwd warning | `Note: The task requested working directory ...` | Task `dir` does not exist |
 
 The shared `system.agent.communication` template sets reply defaults for every session composite:

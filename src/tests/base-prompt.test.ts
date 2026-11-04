@@ -1154,15 +1154,15 @@ describe("getBasePrompt: size budget", () => {
   });
 
   // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
-  // while the skill list is still unknown.
-  test("a fresh claude lead stays under 6,100 characters", async () => {
+  // while the skill list is still unknown, and the missing-tool pointer (~150 chars).
+  test("a fresh claude lead stays under 6,250 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(6_100);
+    expect(result.length).toBeLessThan(6_250);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

@@ -104,6 +104,7 @@ Worker completion/failure triggers a follow-up, or only wakes your deferred wait
 For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
+A task needs a tool that is not connected (GitHub, Linear, Jira, Gmail, ...): say so and link \`APP_URL\` + \`/integrations/tools\`. Do not work around it.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
 `,
   variables: [],
@@ -635,6 +636,25 @@ If this task reveals new stable communication preferences for this requester, pe
       name: "requester_notes_section",
       description: "Formatted notes section sourced from users.notes, or empty string",
     },
+  ],
+  category: "task_lifecycle",
+});
+
+// One-shot setup nudge for the lead. The API picks the requester's first open
+// checklist item, marks it nudged, and ships it on the poll trigger. The task
+// prompt carries it once; the system prompt never does.
+registerTemplate({
+  eventType: "task.checklist.nudge",
+  header: "",
+  defaultBody: `
+## Setup suggestion
+The requester has not finished setting up the swarm. Open item: {{label}}.
+If it fits the conversation, offer it once, at the end of your reply, with the link {{href}}. If it does not fit, leave it out. Do not repeat the offer, and do not raise it again if they decline.
+`,
+  variables: [
+    { name: "label", description: "Checklist item label, e.g. Connect a chat channel" },
+    { name: "href", description: "Dashboard link that opens the setup page for the item" },
+    { name: "kind", description: "Checklist item kind: channel, tool, use_case or custom" },
   ],
   category: "task_lifecycle",
 });

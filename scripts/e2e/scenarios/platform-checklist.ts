@@ -1,6 +1,7 @@
+import type { SimulatedTrigger } from "../agent-sim";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { asUser, createUser } from "./core-helpers";
+import { asUser, createAssignedTask, createUser, retireAgent } from "./core-helpers";
 
 export const platformChecklist: Scenario = {
   name: "platform-checklist",
@@ -104,5 +105,58 @@ export const platformChecklist: Scenario = {
         ?.status === "done",
       "Completion persisted",
     );
+
+    const useCaseId = `user:${userId}:use_case`;
+    expectStatus(
+      await ctx.api("PATCH", `/api/checklist/items/${useCaseId}`, {
+        headers,
+        body: { action: "restore" },
+      }),
+      [200],
+      "restore member use case for nudge",
+    );
+    const triggers = new Map<string, SimulatedTrigger>();
+    const lead = await ctx.startAgent({
+      role: "lead",
+      name: `checklist-nudge-lead-${ctx.nonce}`,
+      onTask(trigger) {
+        triggers.set(trigger.taskId, trigger);
+        return { status: "completed", output: "Checklist nudge received" };
+      },
+    });
+    try {
+      const firstTaskId = await createAssignedTask(ctx, lead.agentId, "First checklist request", {
+        source: "ui",
+        requestedByUserId: userId,
+      });
+      await lead.waitForTask(firstTaskId);
+      const nudge = asRecord(triggers.get(firstTaskId)?.checklistNudge);
+      expect(nudge.itemId === useCaseId, "Member receives only their own use case nudge");
+      expect(
+        nudge.kind === "use_case" &&
+          typeof nudge.label === "string" &&
+          typeof nudge.href === "string",
+        "Nudge contains the worker prompt fields",
+      );
+      response = await ctx.api("GET", "/api/checklist", { headers });
+      expectStatus(response, [200], "read nudged checklist");
+      const nudgedItem = asRecords(response.json, "items").find((entry) => entry.id === useCaseId);
+      expect(
+        typeof nudgedItem?.nudgedAt === "string" && nudgedItem.nudgedTaskId === firstTaskId,
+        "Checklist records the nudge time and task",
+      );
+      const secondTaskId = await createAssignedTask(ctx, lead.agentId, "Second checklist request", {
+        source: "ui",
+        requestedByUserId: userId,
+      });
+      await lead.waitForTask(secondTaskId);
+      expect(
+        triggers.get(secondTaskId)?.checklistNudge === undefined,
+        "The member's only editable item is never nudged twice",
+      );
+    } finally {
+      await lead.stop();
+      await retireAgent(ctx, lead.agentId);
+    }
   },
 };

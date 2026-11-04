@@ -6,6 +6,7 @@ import {
   type BudgetRefusalContext,
   emitBudgetRefusalSideEffects,
 } from "../be/budget-refusal-notify";
+import { firstOpenItem, markNudged } from "../be/checklist";
 import {
   claimMentions,
   claimOfferedTask,
@@ -33,11 +34,14 @@ import {
 } from "../be/model-tier-resolution";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
+import { getUserGrant } from "../be/rbac-roles";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
 import {
+  type Agent,
+  type AgentTask,
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
   ModelProfileCredentialsSchema,
@@ -48,7 +52,9 @@ import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { readsRepoSecrets } from "./config";
+import { resolveAppUrl } from "./config-values";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
@@ -119,6 +125,9 @@ const PollTaskAssignedTriggerSchema = z.object({
     credentialAllowlist: ModelProfileCredentialsSchema.optional(),
   }),
   requestedBy: TaskRequestedBySchema.optional(),
+  checklistNudge: z
+    .object({ itemId: z.string(), kind: z.string(), label: z.string(), href: z.string() })
+    .optional(),
 });
 
 // `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
@@ -205,6 +214,36 @@ async function attachmentsForTrigger(
     mimeType: a.mimeType,
     sizeBytes: a.sizeBytes,
   }));
+}
+
+async function buildChecklistNudge(task: AgentTask, agent: Agent) {
+  const userId = task.requestedByUserId;
+  if (!agent.isLead || !userId || !["ui", "slack", "chat", "comb"].includes(task.source ?? "")) {
+    return undefined;
+  }
+  try {
+    return await getDbClient().transaction(async () => {
+      const grant = await getUserGrant(userId);
+      const canEditSwarm = grant.grantsAll || grant.verbs.has("config.write.any");
+      const item = await firstOpenItem(userId, canEditSwarm);
+      if (!item) return undefined;
+      await markNudged(item.id, task.id);
+      const appUrl = await resolveAppUrl();
+      const href = item.href ?? "/";
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        href: `${appUrl ?? ""}${href}`,
+      };
+    });
+  } catch (error) {
+    console.warn(
+      "[/api/poll] Checklist nudge failed:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -500,6 +539,7 @@ export async function handlePoll(
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTaskRequestedBy).
             const assignedRequestedBy = await buildTaskRequestedBy(pendingTask);
+            const nudge = await buildChecklistNudge(pendingTask, agent);
             // The surface that started the whole chain, so the worker can tag
             // its session events with it (workers cannot read the task tree).
             const assignedTriggerSurface = await resolveTriggerSurface(
@@ -519,6 +559,7 @@ export async function handlePoll(
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
+                ...(nudge && { checklistNudge: nudge }),
               },
             };
           }

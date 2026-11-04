@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildChecklistNudgePrompt,
   buildRequesterProfilePrompt,
   buildTaskSessionPrompts,
   type TaskSessionContext,
@@ -48,6 +49,12 @@ const sessionA: TaskSessionContext = {
     notes: "Lead with the answer.",
     comms: { verbosity: "terse" },
   },
+  checklistNudge: {
+    itemId: "swarm:channel",
+    kind: "channel",
+    label: "Connect a chat channel",
+    href: "https://swarm.example.com/integrations/channels",
+  },
   cwdWarning: 'Note: The task requested working directory "/nope" but it does not exist.',
 };
 
@@ -78,7 +85,16 @@ describe("buildTaskSessionPrompts", () => {
       expect(a.systemPrompt).toBe(b.systemPrompt);
       expect(a.systemPrompt).toBe(c.systemPrompt);
       expect(a.systemPrompt).toEndWith("\n\nOperator note: be careful.");
-      for (const perTask of ["## Repository", "## Requester Profile", "Taras", "Eze", "/nope"]) {
+      for (const perTask of [
+        "## Repository",
+        "## Requester Profile",
+        "## Setup suggestion",
+        "has not finished setting up",
+        "Connect a chat channel",
+        "Taras",
+        "Eze",
+        "/nope",
+      ]) {
         expect(a.systemPrompt).not.toContain(perTask);
       }
     });
@@ -113,6 +129,7 @@ describe("buildTaskSessionPrompts", () => {
 
     const repoBlock = await getTaskContextPrompt({ ...args, repoContext: sessionA.repoContext });
     const profile = await buildRequesterProfilePrompt(sessionA.requestedBy);
+    const nudge = await buildChecklistNudgePrompt(sessionA.checklistNudge);
     expect(repoBlock).toContain("## Repository");
     expect(repoBlock).toContain("Alpha repo rules.");
     expect(profile).toContain("This task was requested by Taras (CTO).");
@@ -122,11 +139,37 @@ describe("buildTaskSessionPrompts", () => {
     expect(prompt).toContain(profile);
     expect(prompt).toEndWith(sessionA.cwdWarning ?? "");
     expect(prompt.indexOf(repoBlock)).toBeLessThan(prompt.indexOf(profile));
+    expect(prompt.indexOf(profile)).toBeLessThan(prompt.indexOf(nudge));
     expect(prompt).not.toMatch(/\n{3,}/);
   });
 
   test("a task with no per-task context keeps its prompt unchanged", async () => {
     const { prompt } = await build(agentArgs("claude"), sessionC, "/work-on-task ccc");
     expect(prompt).toBe("/work-on-task ccc");
+  });
+
+  test("a lead task with a checklist nudge carries it once, in the task prompt only", async () => {
+    const lead = agentArgs("claude", { role: "lead" });
+    const withNudge = await build(lead, sessionA, "/work-on-task aaa");
+    const withoutNudge = await build(
+      lead,
+      { ...sessionA, checklistNudge: undefined },
+      "/work-on-task aaa",
+    );
+    const nudge = await buildChecklistNudgePrompt(sessionA.checklistNudge);
+
+    expect(nudge).toContain("## Setup suggestion");
+    expect(nudge).toContain("Open item: Connect a chat channel.");
+    expect(nudge).toContain("https://swarm.example.com/integrations/channels");
+    expect(withNudge.systemPrompt).toBe(withoutNudge.systemPrompt);
+    expect(withNudge.systemPrompt).not.toContain("has not finished setting up");
+    expect(withNudge.prompt.split("has not finished setting up").length - 1).toBe(1);
+    expect(withoutNudge.prompt).not.toContain("has not finished setting up");
+    // The static pointer for missing tools lives in the lead contract instead.
+    expect(withNudge.systemPrompt).toContain("/integrations/tools");
+  });
+
+  test("no nudge renders nothing", async () => {
+    expect(await buildChecklistNudgePrompt(undefined)).toBe("");
   });
 });
