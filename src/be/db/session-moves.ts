@@ -132,6 +132,23 @@ export async function moveSessionChains(input: {
   return moved;
 }
 
+/**
+ * Point `key` favorites under `from` at the same path under `to` (a group
+ * rename). A principal that already starred the new key keeps that row, and
+ * the old row goes.
+ */
+export async function moveKeyFavorites(input: { from: string; to: string }): Promise<void> {
+  const { lo, hi } = keyPrefixRange(input.from);
+  const range = "itemType = 'key' AND itemId >= ? AND itemId < ?";
+  await getDbClient().transaction(async () => {
+    await getDbClient().run(
+      `UPDATE OR IGNORE user_favorites SET itemId = ? || substr(itemId, ?) WHERE ${range}`,
+      [input.to, lo.length + 1, lo, hi],
+    );
+    await getDbClient().run(`DELETE FROM user_favorites WHERE ${range}`, [lo, hi]);
+  });
+}
+
 export async function listPrefixRoots(input: {
   from: string;
   userId?: string | null;

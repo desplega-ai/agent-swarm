@@ -1046,7 +1046,7 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path";
+export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
 
 export interface UserFavorite {
   id: string;

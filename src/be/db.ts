@@ -12954,10 +12954,12 @@ export async function setFavorite(opts: {
   favorite: boolean;
   actorId?: string | null;
 }): Promise<UserFavorite | null> {
+  // A `key` favorite is a Sessions group: store its normalized asset key.
+  const itemId = opts.itemType === "key" ? normalizeAssetKey(opts.itemId) : opts.itemId;
   if (!opts.favorite) {
     await getDbClient().run(
       "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",
-      [opts.favoriteScope, opts.itemType, opts.itemId],
+      [opts.favoriteScope, opts.itemType, itemId],
     );
     return null;
   }
@@ -12973,7 +12975,7 @@ export async function setFavorite(opts: {
          lastUpdatedAt = excluded.lastUpdatedAt,
          updated_by = excluded.updated_by
        RETURNING *`,
-    [opts.favoriteScope, opts.userId ?? null, opts.itemType, opts.itemId, now, now, actor, actor],
+    [opts.favoriteScope, opts.userId ?? null, opts.itemType, itemId, now, now, actor, actor],
   );
   if (!row) throw new Error("Failed to set favorite");
   return rowToUserFavorite(row);

@@ -2344,7 +2344,8 @@
               "page",
               "workflow",
               "schedule",
-              "agent-fs-path"
+              "agent-fs-path",
+              "key"
             ]
           },
           "itemId": {
@@ -22503,7 +22504,8 @@
                 "page",
                 "workflow",
                 "schedule",
-                "agent-fs-path"
+                "agent-fs-path",
+                "key"
               ]
             },
             "required": false,
@@ -22582,7 +22584,8 @@
                       "page",
                       "workflow",
                       "schedule",
-                      "agent-fs-path"
+                      "agent-fs-path",
+                      "key"
                     ]
                   },
                   "itemId": {
@@ -22619,7 +22622,8 @@
                         "page",
                         "workflow",
                         "schedule",
-                        "agent-fs-path"
+                        "agent-fs-path",
+                        "key"
                       ]
                     },
                     "itemId": {
@@ -22642,6 +22646,16 @@
                     "itemId",
                     "row"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid asset key for a key favorite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

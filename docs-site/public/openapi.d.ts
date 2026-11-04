@@ -7715,7 +7715,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                     itemIds?: string;
                 };
                 header?: never;
@@ -7759,7 +7759,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -7775,10 +7775,19 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
+                    };
+                };
+                /** @description Invalid asset key for a key favorite */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description No authenticated principal context */
@@ -29186,7 +29195,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
