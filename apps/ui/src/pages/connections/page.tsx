@@ -21,7 +21,6 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
   useCredentialBindings,
-  useDeleteOAuthApp,
   useDeleteScriptConnection,
   useDiscoverOAuthApp,
   useIntegrationsCatalog,
@@ -61,6 +60,7 @@ import {
   HIDE_WHEN_COMPACT,
   useDataGridColumns,
 } from "@/components/shared/data-grid";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -111,8 +111,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { matchScriptConnection } from "@/lib/tools-search";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { CatalogBrowser } from "@/pages/connections/components/catalog-browser";
+import { OAuthAppsList } from "@/pages/connections/components/oauth-apps-list";
 import { OAuthInlineConnect } from "@/pages/connections/components/oauth-inline-connect";
 
 const KIND_OPTIONS: Array<ScriptConnectionKind | "all"> = ["all", "openapi", "graphql", "mcp"];
@@ -125,14 +127,14 @@ const NEW_PARAM_BY_TAB: Record<ScriptConnectionsTab, string> = {
   "oauth-apps": "oauth-app",
 };
 const ADD_LABEL_BY_TAB: Record<ScriptConnectionsTab, string> = {
-  connections: "Add Connection",
-  bindings: "Add Binding",
-  "oauth-apps": "Add OAuth App",
+  connections: "Add connection",
+  bindings: "Add binding",
+  "oauth-apps": "Add OAuth app",
 };
 const SEARCH_PLACEHOLDER_BY_TAB: Record<ScriptConnectionsTab, string> = {
-  connections: "Search connections...",
-  bindings: "Search bindings by config key, provider...",
-  "oauth-apps": "Search OAuth apps by provider, client ID...",
+  connections: "Search connections",
+  bindings: "Search bindings",
+  "oauth-apps": "Search OAuth apps",
 };
 function splitList(value: string): string[] {
   return value
@@ -1009,10 +1011,19 @@ export function AddConnectionDialog({
 }) {
   const upsert = useUpsertScriptConnection();
   const {
-    data: catalog = [],
+    data: fullCatalog = [],
     isLoading: catalogLoading,
     error: catalogError,
   } = useIntegrationsCatalog();
+  const { data: presets = [] } = useOAuthPresets();
+  // Providers whose preset is hidden (Linear, Jira) connect through their own
+  // integration page, so the add catalog leaves them out.
+  const catalog = useMemo(() => {
+    const hidden = new Set(presets.filter((p) => p.hiddenInCatalog).map((p) => p.id));
+    return hidden.size === 0
+      ? fullCatalog
+      : fullCatalog.filter((entry) => !entry.presetId || !hidden.has(entry.presetId));
+  }, [fullCatalog, presets]);
   const [step, setStep] = useState<"catalog" | "form">(connection ? "form" : "catalog");
   const [showErrors, setShowErrors] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -2379,178 +2390,6 @@ function CredentialBindingsSection({
   );
 }
 
-function OAuthAppsSection({
-  apps,
-  search,
-  loading,
-}: {
-  apps: OAuthAppSummary[];
-  search: string;
-  loading: boolean;
-}) {
-  const navigate = useNavigate();
-  const [editOpen, setEditOpen] = useState(false);
-  const [editApp, setEditApp] = useState<OAuthAppSummary | undefined>();
-  const deleteApp = useDeleteOAuthApp();
-  // The single static callback every authorization now redirects to. Used to
-  // flag apps still registered against the legacy per-provider callback.
-  const { data: staticCallback } = useOAuthRedirectUri();
-
-  const columnDefs = useMemo<ColDef<OAuthAppSummary>[]>(
-    () => [
-      {
-        field: "provider",
-        headerName: "Provider",
-        minWidth: 140,
-        flex: 1,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
-          <span className="font-semibold">{params.value}</span>
-        ),
-      },
-      {
-        field: "source",
-        headerName: "Source",
-        width: 130,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
-          params.data ? <OAuthSourceBadge source={params.data.source} /> : null,
-      },
-      {
-        field: "clientId",
-        headerName: "Client ID",
-        minWidth: 160,
-        flex: 1,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
-          <span className="block max-w-full truncate font-mono text-xs text-muted-foreground">
-            {params.value}
-          </span>
-        ),
-      },
-      {
-        field: "redirectUri",
-        headerName: "Redirect URI",
-        minWidth: 220,
-        flex: 1,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
-          params.data ? (
-            <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              <LegacyCallbackWarning app={params.data} staticCallback={staticCallback} />
-              <MiddleTruncation className="text-xs text-muted-foreground">
-                {params.data.redirectUri}
-              </MiddleTruncation>
-              <span onClick={(event) => event.stopPropagation()}>
-                <CopyButton value={params.data.redirectUri} />
-              </span>
-            </span>
-          ) : null,
-      },
-      {
-        headerName: "Accounts",
-        width: 110,
-        valueGetter: (params) => params.data?.authorizations.length ?? 0,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
-          const count = params.data?.authorizations.length ?? 0;
-          return (
-            <span className={count === 0 ? "text-muted-foreground" : "font-medium"}>{count}</span>
-          );
-        },
-      },
-      {
-        headerName: "Status",
-        width: 130,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
-          const worst = worstAuthorizationStatus(params.data?.authorizations ?? []);
-          return worst ? (
-            <OAuthAuthorizationStatusBadge status={worst} />
-          ) : (
-            <span className="text-muted-foreground">no accounts</span>
-          );
-        },
-      },
-      {
-        headerName: "Actions",
-        width: 150,
-        sortable: false,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
-          const app = params.data;
-          if (!app) return null;
-          return (
-            <span
-              className="flex items-center gap-1.5"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => {
-                  setEditApp(app);
-                  setEditOpen(true);
-                }}
-              >
-                Edit
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" aria-label={`Delete ${app.provider}`}>
-                    <Trash2 className="size-4" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete OAuth app?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This deletes the app configuration and all {app.authorizations.length}{" "}
-                      authorization(s) for {app.provider}.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      onClick={async () => {
-                        try {
-                          await deleteApp.mutateAsync(app.id);
-                          toast.success("OAuth app deleted");
-                        } catch (error) {
-                          toastMutationError(error);
-                        }
-                      }}
-                      disabled={deleteApp.isPending}
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </span>
-          );
-        },
-      },
-    ],
-    [deleteApp, staticCallback],
-  );
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0 gap-3">
-      <DataGrid
-        rowData={apps}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        loading={loading}
-        emptyMessage="No OAuth apps found"
-        paginationQueryKey="oauthApps"
-        onRowClicked={(event) => {
-          const target = event.event?.target as HTMLElement | null;
-          if (target?.closest("a, button")) return;
-          if (event.data) {
-            void navigate(`/integrations/tools/oauth-apps/${encodeURIComponent(event.data.id)}`);
-          }
-        }}
-      />
-      <OAuthAppDialog open={editOpen} onOpenChange={setEditOpen} app={editApp} />
-    </div>
-  );
-}
-
 function TagInput({
   values,
   onChange,
@@ -2643,10 +2482,13 @@ export function OAuthAppDialog({
   open,
   onOpenChange,
   app,
+  initialPresetId = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   app?: OAuthAppSummary;
+  /** Create mode: preselect this preset once the presets load (`?preset=`). */
+  initialPresetId?: string;
 }) {
   const upsert = useUpsertOAuthApp();
   const discover = useDiscoverOAuthApp();
@@ -2673,8 +2515,10 @@ export function OAuthAppDialog({
     [presets, presetId],
   );
 
+  const appliedInitialPresetRef = useRef(false);
   useEffect(() => {
     if (!open) return;
+    appliedInitialPresetRef.current = false;
     setShowErrors(false);
     setPresetId("");
     setProvider(app?.provider ?? "");
@@ -2712,6 +2556,14 @@ export function OAuthAppDialog({
         : [],
     );
   }
+
+  // Apply `initialPresetId` once after each reset above, when the presets have loaded.
+  useEffect(() => {
+    if (!open || app || !initialPresetId || appliedInitialPresetRef.current) return;
+    if (!presets.some((preset) => preset.id === initialPresetId)) return;
+    appliedInitialPresetRef.current = true;
+    applyPreset(initialPresetId);
+  });
 
   async function discoverFromUrl() {
     try {
@@ -2830,11 +2682,13 @@ export function OAuthAppDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="custom">Custom (no preset)</SelectItem>
-                  {presets.map((preset) => (
-                    <SelectItem key={preset.id} value={preset.id}>
-                      {preset.displayName}
-                    </SelectItem>
-                  ))}
+                  {presets
+                    .filter((preset) => !preset.hiddenInCatalog || preset.id === presetId)
+                    .map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.displayName}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -3280,23 +3134,29 @@ export function ScriptConnectionsPanel({
     [refreshConnection, setEnabled, deleteConnection, bindings],
   );
 
+  const filteredConnections = useMemo(
+    () => (connections ?? []).filter((connection) => matchScriptConnection(connection, search)),
+    [connections, search],
+  );
   const addTarget = NEW_PARAM_BY_TAB[activeTab];
   const addLabel = ADD_LABEL_BY_TAB[activeTab];
   const searchPlaceholder = SEARCH_PLACEHOLDER_BY_TAB[activeTab];
 
   function setNewParam(value: string) {
-    setParam("new", value);
+    setParam("new", value, { reset: value ? [] : ["preset"] });
   }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         {leading}
-        <div className="flex w-full flex-col gap-2 md:ml-auto md:w-auto md:flex-row md:items-center">
-          <div className="relative w-full md:w-64">
+        <div className="flex w-full items-center gap-2 md:ml-auto md:w-auto">
+          <div className="relative min-w-0 flex-1 md:w-56 md:flex-none">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              type="search"
               placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
               value={search}
               onChange={(event) =>
                 setParam("search", event.target.value, {
@@ -3307,88 +3167,85 @@ export function ScriptConnectionsPanel({
             />
           </div>
           {activeTab === "connections" ? (
-            <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-              <Select
-                value={kindFilter}
-                onValueChange={(value) =>
-                  setParam("kind", value, {
-                    defaultValue: "all",
-                    reset: ["connectionsPage"],
-                  })
-                }
-              >
-                <SelectTrigger className="w-full md:w-[130px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Kinds</SelectItem>
-                  <SelectItem value="openapi">OpenAPI</SelectItem>
-                  <SelectItem value="graphql">GraphQL</SelectItem>
-                  <SelectItem value="mcp">MCP</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={scopeFilter}
-                onValueChange={(value) =>
-                  setParam("scope", value, {
-                    defaultValue: "all",
-                    reset: ["connectionsPage"],
-                  })
-                }
-              >
-                <SelectTrigger className="w-full md:w-[130px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Scopes</SelectItem>
-                  <SelectItem value="global">Global</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
-                  <SelectItem value="repo">Repo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-          <div className="flex items-center gap-2">
-            {activeTab === "connections" || activeTab === "bindings" ? (
-              <DataGridColumnsMenu
-                state={activeTab === "connections" ? gridColumns : bindingsColumns}
-              />
-            ) : null}
-            {/* Per-tab add action rides the toolbar as a bare "+". */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  className="size-8 shrink-0"
-                  onClick={() => setNewParam(addTarget)}
-                  aria-label={addLabel}
+            <FiltersPopover
+              activeCount={(kindFilter === "all" ? 0 : 1) + (scopeFilter === "all" ? 0 : 1)}
+            >
+              <FilterField label="Kind">
+                <Select
+                  value={kindFilter}
+                  onValueChange={(value) =>
+                    setParam("kind", value, {
+                      defaultValue: "all",
+                      reset: ["connectionsPage"],
+                    })
+                  }
                 >
-                  <Plus className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{addLabel}</TooltipContent>
-            </Tooltip>
-            {trailing}
-          </div>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All kinds</SelectItem>
+                    <SelectItem value="openapi">OpenAPI</SelectItem>
+                    <SelectItem value="graphql">GraphQL</SelectItem>
+                    <SelectItem value="mcp">MCP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Scope">
+                <Select
+                  value={scopeFilter}
+                  onValueChange={(value) =>
+                    setParam("scope", value, {
+                      defaultValue: "all",
+                      reset: ["connectionsPage"],
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All scopes</SelectItem>
+                    <SelectItem value="global">Global</SelectItem>
+                    <SelectItem value="agent">Agent</SelectItem>
+                    <SelectItem value="repo">Repo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
+            </FiltersPopover>
+          ) : null}
+          {activeTab === "connections" || activeTab === "bindings" ? (
+            <DataGridColumnsMenu
+              state={activeTab === "connections" ? gridColumns : bindingsColumns}
+              compact
+            />
+          ) : null}
+          {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+          <Button size="sm" className="shrink-0" onClick={() => setNewParam(addTarget)}>
+            <Plus className="size-4" />
+            <span className="max-md:sr-only">{addLabel}</span>
+          </Button>
+          {trailing}
         </div>
       </div>
       {activeTab === "connections" ? (
         <DataGrid
-          rowData={connections ?? []}
+          rowData={filteredConnections}
           columnDefs={columnDefs}
           columns={gridColumns}
-          quickFilterText={search}
           onRowClicked={(event) => {
             const target = event.event?.target as HTMLElement | null;
             if (target?.closest("a, button")) return;
             if (event.data?.id) void navigate(`/integrations/tools/connections/${event.data.id}`);
           }}
           loading={isLoading}
-          emptyMessage="No script connections found"
+          emptyMessage={
+            search ? "No script connections match your search" : "No script connections yet"
+          }
           paginationQueryKey="connections"
         />
       ) : activeTab === "oauth-apps" ? (
-        <OAuthAppsSection apps={oauthApps} search={search} loading={oauthAppsLoading} />
+        <OAuthAppsList apps={oauthApps} search={search} loading={oauthAppsLoading} />
       ) : (
         <div className="flex flex-col flex-1 min-h-0">
           <p className="mb-3 shrink-0 text-xs text-muted-foreground">
@@ -3424,6 +3281,7 @@ export function ScriptConnectionsPanel({
       <OAuthAppDialog
         open={newParam === "oauth-app"}
         onOpenChange={(open) => setNewParam(open ? "oauth-app" : "")}
+        initialPresetId={readStringParam(searchParams, "preset")}
       />
     </div>
   );

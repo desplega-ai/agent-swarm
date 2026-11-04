@@ -2475,6 +2475,8 @@ export interface OAuthPreset {
   requiresRefreshTokenRotation?: boolean;
   extraParams?: Record<string, string>;
   setupHints: string[];
+  /** Left out of the "add" pickers (Linear, Jira: use their integration page). */
+  hiddenInCatalog?: boolean;
 }
 
 export interface UpsertOAuthAppResult {
@@ -2975,6 +2977,8 @@ export interface McpServer {
   version: number;
   createdAt: string;
   lastUpdatedAt: string;
+  /** Agents with an active install. Set by the list route only. */
+  installCount?: number;
 }
 
 export type McpOAuthStatus = "connected" | "expired" | "error" | "revoked";
