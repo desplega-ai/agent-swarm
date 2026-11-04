@@ -1,0 +1,94 @@
+---
+title: Choosing an AI operating model
+description: "A guide for leaders at companies under 100 people on where AI judgment and agent platforms belong in the work."
+---
+
+Most companies under 100 people pick up AI agents in the same scattered way. A specialist tool gets bought by one team, a few scripts get written by whoever felt the pain, and an assistant sits open in a browser tab. Each of those calls made sense on its own. Together they form an operating model nobody chose.
+
+The decision is where judgment belongs, what should happen the same way every time, what context the work needs, and who owns it after launch. Several models can run side by side in one company. The useful question is which model each piece of agentic work sits in, and who answers for the result.
+
+## The five operating models
+
+| Model | Choose it when | Check before committing |
+| --- | --- | --- |
+| Vertical AI product | A focused product already covers the function, and your process fits the scope it was built for. | Which of your systems and records must it read and write? Who handles the cases it does not cover, and who owns the data it stores? |
+| Deterministic workflow automation | The steps and rules are known, inputs are predictable, and the same conditions should produce the same action. | What happens when an input is missing or arrives outside the rule? Who updates the rules when the process changes? |
+| Shared agent platform | Work runs across several steps or tools, needs judgment along the way, and benefits from context the team reuses. | Where must a person review the result before it lands? Who operates the platform and the permissions? |
+| Custom build | The workflow is central to how the company runs, no product fits it, and the team can build and maintain the system. | Is there an owner for changes and failure recovery after the first release? |
+| Hiring or process redesign | The work depends on relationships and accountability, or the process needs to change before software would help. | Is the work defined well enough to automate, or would software lock in a confusing process? |
+
+These are categories, not a ranking. A focused product can cover one specialist task while an agent prepares a summary for a person. Write down each choice with an owner, so the next person does not solve the same problem with another tool.
+
+## How to choose
+
+### Work shape
+
+Start with how repeatable the steps are. Stable inputs and stable rules point to deterministic automation. Work that varies between cases, or arrives with missing information, needs judgment somewhere in the loop. Variation is the signal to look harder at what the person doing the task decides today.
+
+### Cross-functional context
+
+Ask how much context the work needs from outside its own step. A task that depends on what sales learned last month and what support heard this week needs a shared place to keep that. A task that reads one record and writes one field does not.
+
+### Exceptions and the cost of a wrong answer
+
+List the exceptions the process already has, because they are the part that breaks first. Then price the wrong answer. A wrong draft costs a review. A wrong invoice costs money, and a wrong permission costs trust. The cost decides how much of the work can run without a person in front of it.
+
+### Ownership after launch
+
+Name the person who answers for the process in three months, when the instructions are stale, the integration token expired or a model changed behaviour. Someone in the team must hold the process, whatever tool executes it.
+
+### Governance
+
+Decide who approves an action before it takes effect, who can pause the work, and what gets logged for review later. Write this down before the first automated action lands in a customer-facing system. Governance that is decided after an incident is a cleanup, not a control.
+
+### Integration needs
+
+Count the systems the work touches and how well each one is documented. A workflow that spans an issue tracker and a repository needs both integrations to stay healthy on every upgrade. Fewer systems and stable interfaces lower the cost of every model in the table.
+
+### Maintenance capacity
+
+A technology team of 20 or fewer has real limits on what it can operate alongside the product. Count the recurring work. Upgrades come back and integrations break. Someone has to review what the system did last week. If nobody has that time, pick the model that consumes less of it, even when the more capable option looks better in a demo.
+
+## Map one workflow first
+
+Before choosing a tool, write down one real workflow from trigger to outcome. Cover five things:
+
+1. The trigger: what starts the work, and how often it happens.
+2. The systems: where the input lives, where the result goes, and who has access to both.
+3. The decisions: the points where a person or a model has to judge something.
+4. The exceptions: the cases that already need a human today.
+5. The owner: the person who answers for the result.
+
+A page of notes is enough. If the workflow cannot be written down, the process is unclear, and unclear processes get worse when automated. Fix the process first, because automating a step nobody understands produces the same confusion faster.
+
+## When a shared agent platform fits, and what Agent Swarm provides
+
+A shared agent platform fits when the work is recurring, spans tools, needs judgment along the way, and more than one person depends on the same context. Three signs point at it: several workflows share the same company knowledge, requests arrive in the tools the team already uses, and someone must coordinate the pieces and review the result.
+
+Agent Swarm is built for that shape of work.
+
+One deployment serves the whole team. People reach it from the tools where requests already arrive: Slack, Linear and GitHub among them. Every agent works from the same memory, skills and task history, so work one person starts and work a schedule fires land in one place the team can inspect. See [Team Collaboration](/docs/features/team-collaboration).
+
+A lead agent breaks complex requests into tasks and delegates them to workers that run in Docker containers, which keeps each worker's environment separate. See the [Architecture Overview](/docs/architecture/overview).
+
+Workflows are DAGs that start from a webhook or a schedule, and a person can also run one by hand. They resume from the last checkpoint after a crash, fan out across items or parallel branches, and can pause on a human-in-the-loop node until someone approves. See [Workflows](/docs/concepts/workflows).
+
+The company operates it. Agent Swarm is self-hosted: your team runs the infrastructure and the upgrades, and holds the credentials and the backups. Size the host before you start and read both the [Deployment Guide](/docs/guides/deployment) and [Host Requirements](/docs/guides/host-requirements).
+
+Access control is yours to add. The product ships without a built-in login page by design. Early self-hosters authenticate with a pre-shared API key. Single sign-on comes from an identity provider in front of it, using oauth2-proxy with trusted headers, as described in [Self-Hosted SSO](/docs/guides/self-hosted-sso).
+
+The honest counter-case matters as much. If the work is bounded and local to one team, a focused product or a rule-based workflow will cost less to run. If nobody on the team can own the host and its upgrades, a self-hosted platform is the wrong purchase, whatever it can do. A shared platform does not replace process ownership or human accountability, and it does not fix a workflow nobody has defined.
+
+## Pilot, measure, decide
+
+Run one workflow, not a transformation. Pick one with a named owner and a result the team can check without asking an agent what happened. Give it limited permissions and a reversible scope. Keep consequential actions behind human review until the ordinary cases and the exceptions both behave.
+
+Measure the outcomes that matter: how often the workflow reaches the right result, how often a person takes over, how the exceptions get handled, and whether the people who need the output use it. Agent count and token spend are easy to report and tell you little about whether the work improved.
+
+Set a review date before the pilot starts. On that date, decide whether to expand, revise or stop. Write the decision down. A pilot that nobody reviews becomes the operating model by default.
+
+## Next steps
+
+Start with [Getting Started](/docs/getting-started) for a first lead-and-worker task, then read the [Architecture Overview](/docs/architecture/overview) to see how the pieces fit. When you are ready to run it yourself, the [Deployment Guide](/docs/guides/deployment) covers the reference Docker Compose setup.
+
+For a platform-by-platform comparison, see [open-source AI agent platforms that you self-host](https://www.agent-swarm.dev/blog/best-open-source-ai-agent-platforms-self-host).
