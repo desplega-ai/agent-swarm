@@ -98,6 +98,30 @@ class GateExecutor extends BaseExecutor<typeof GateExecutor.schema, typeof GateE
   }
 }
 
+/** Records the key order of its config objects, as a script or System One node iterates them. */
+const keyOrders: { runId: string; args: string[]; nested: string[] }[] = [];
+class OrderExecutor extends BaseExecutor<typeof OrderExecutor.schema, typeof OrderExecutor.out> {
+  static readonly schema = z.object({
+    args: z.record(z.string(), z.unknown()),
+    nested: z.record(z.string(), z.unknown()),
+  });
+  static readonly out = z.object({ args: z.array(z.string()) });
+  readonly type = "order";
+  readonly mode = "instant" as const;
+  readonly configSchema = OrderExecutor.schema;
+  readonly outputSchema = OrderExecutor.out;
+
+  protected async execute(
+    config: z.infer<typeof OrderExecutor.schema>,
+    _context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
+  ): Promise<ExecutorResult<z.infer<typeof OrderExecutor.out>>> {
+    const args = Object.keys(config.args);
+    keyOrders.push({ runId: meta.runId, args, nested: Object.keys(config.nested) });
+    return { status: "success", output: { args } };
+  }
+}
+
 class MockHitlExecutor extends BaseExecutor<
   typeof MockHitlExecutor.schema,
   typeof MockHitlExecutor.out
@@ -154,6 +178,7 @@ beforeAll(() => {
   registry = createExecutorRegistry(deps);
   registry.register(new ProbeExecutor(deps));
   registry.register(new GateExecutor(deps));
+  registry.register(new OrderExecutor(deps));
   registry.register(new MockHitlExecutor(deps));
   teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
 });
@@ -516,17 +541,23 @@ describe("pinned definition storage", () => {
     expect(merged.id).toBe(pinnedFrom.id);
   });
 
-  test("the hash ignores key order and absent-vs-undefined fields", async () => {
+  test("the hash keeps nested key order and ignores top-level order and undefined fields", async () => {
     const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
     const pinned = toPinnedDefinition(workflow);
-    const reversed = Object.fromEntries(
+    const topReversed = Object.fromEntries(
       Object.entries({ ...pinned, dir: undefined }).reverse(),
     ) as typeof pinned;
-    reversed.definition = Object.fromEntries(
-      Object.entries(pinned.definition).reverse(),
-    ) as WorkflowDefinition;
+    const [first, ...rest] = pinned.definition.nodes;
+    const nestedReversed = {
+      ...pinned,
+      definition: {
+        ...pinned.definition,
+        nodes: [Object.fromEntries(Object.entries(first!).reverse()) as WorkflowNode, ...rest],
+      },
+    };
 
-    expect(hashPinnedDefinition(reversed).hash).toBe(hashPinnedDefinition(pinned).hash);
+    expect(hashPinnedDefinition(topReversed)).toEqual(hashPinnedDefinition(pinned));
+    expect(hashPinnedDefinition(nestedReversed).hash).not.toBe(hashPinnedDefinition(pinned).hash);
   });
 
   test("toggling enabled mints no new definition row", async () => {
@@ -568,5 +599,47 @@ describe("pinned definition storage", () => {
     await deleteWorkflow(wf2.id);
     expect(await exists(h1)).toBe(false);
     expect(await exists(h2)).toBe(false);
+  });
+});
+
+// ─── Execution-relevant order ────────────────────────────────
+
+describe("a resumed run keeps the key order it started with", () => {
+  /** `n1` (agent task, the pause) → `n2`, which records the order of `args` and `nested`. */
+  function ordered(args: Record<string, unknown>, nested: Record<string, unknown>) {
+    return {
+      nodes: [
+        { id: "n1", type: "agent-task", config: { template: "Work" }, next: "n2" },
+        { id: "n2", type: "order", config: { args, nested } },
+      ],
+    } as WorkflowDefinition;
+  }
+  const orderOf = (runId: string) => keyOrders.find((entry) => entry.runId === runId);
+
+  test("object keys reach the executor in definition order after a pause", async () => {
+    const workflow = await makeWorkflow(ordered({ z: 1, a: 2 }, { y: 1, b: 2 }));
+    const runId = await startOnA(workflow);
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+
+    await completeN1Task(runId);
+    await waitForRunStatus(runId, "completed");
+
+    expect(orderOf(runId)).toEqual({ runId, args: ["z", "a"], nested: ["y", "b"] });
+  });
+
+  test("definitions that differ only in key order pin distinct rows and resume apart", async () => {
+    const workflow = await makeWorkflow(ordered({ z: 1, a: 2 }, { y: 1, b: 2 }));
+    const first = await startOnA(workflow);
+    await editTo(workflow.id, ordered({ a: 2, z: 1 }, { b: 2, y: 1 }));
+    const second = await startOnA((await getWorkflow(workflow.id))!);
+    expect(await pinHash(second)).not.toBe(await pinHash(first));
+
+    await completeN1Task(second);
+    await completeN1Task(first);
+    await waitForRunStatus(first, "completed");
+    await waitForRunStatus(second, "completed");
+
+    expect(orderOf(first)).toEqual({ runId: first, args: ["z", "a"], nested: ["y", "b"] });
+    expect(orderOf(second)).toEqual({ runId: second, args: ["a", "z"], nested: ["b", "y"] });
   });
 });

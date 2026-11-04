@@ -334,6 +334,9 @@ completion, foreach drives and restart recovery.
 |---|---|
 | `definition`, `input`, `params`, `dir`, `vcsRepo`, `name`, `description`, `triggers`, `cooldown`, `triggerSchema`, `requiredParams`, `requires` | `enabled`, `key`, `createdByAgentId`, row metadata |
 
+- The snapshot keeps nested key order as written: script `args` and System One `questions`
+  and `criteria` are iterated in that order, so definitions that differ only in order get
+  distinct rows. Only the top-level field order is normalized.
 - A run with no hash (created before 283, or a recorded setup failure) reads the live row.
 - Retry re-runs on the pinned definition. To pick up an edit, trigger a new run.
 - Two reads stay live: a `swarm-script` node resolves its script when the step runs, and a

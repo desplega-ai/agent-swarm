@@ -31,29 +31,25 @@ export const PINNED_WORKFLOW_KEYS = [
   "vcsRepo",
 ] as const satisfies readonly (keyof PinnedWorkflowDefinition)[];
 
-export function toPinnedDefinition(workflow: Workflow): PinnedWorkflowDefinition {
+export function toPinnedDefinition(workflow: PinnedWorkflowDefinition): PinnedWorkflowDefinition {
   const pinned: Record<string, unknown> = {};
   for (const key of PINNED_WORKFLOW_KEYS) pinned[key] = workflow[key];
   return pinned as PinnedWorkflowDefinition;
 }
 
-function sortJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortJson);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, nested]) => nested !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => [key, sortJson(nested)]),
-  );
-}
-
-/** Key order and absent-vs-undefined fields do not change the hash. */
+/**
+ * The stored snapshot and its hash. Nested key order is kept exactly as the
+ * definition wrote it: executors iterate config objects (script `args`, System
+ * One `questions` and `choices`) in insertion order, so a resumed run must see
+ * the order it started with, and two definitions that differ only in order get
+ * two rows. Only the top level is normalized (`PINNED_WORKFLOW_KEYS` order);
+ * absent and `undefined` fields serialize the same.
+ */
 export function hashPinnedDefinition(pinned: PinnedWorkflowDefinition): {
   hash: string;
   snapshot: string;
 } {
-  const snapshot = JSON.stringify(sortJson(pinned));
+  const snapshot = JSON.stringify(toPinnedDefinition(pinned));
   return { hash: computeContentHash(snapshot), snapshot };
 }
 
