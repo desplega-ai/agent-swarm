@@ -19,4 +19,6 @@ export TLC_HOME=/path/with/jre-and-jar
 ./long-run.sh                                          # larger constants + -simulate
 ```
 
+TLC defaults to 4 workers. Use `TLC_WORKERS=auto ./tlc.sh ...` to use all cores for a local run.
+
 A green run proves the model, not the code. When a file named in `ACTIONS.md` changes, re-check that its row is still true.
