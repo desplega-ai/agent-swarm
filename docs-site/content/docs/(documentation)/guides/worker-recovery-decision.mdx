@@ -11,11 +11,11 @@ A resume starts a new agent session. Native session resume is deprecated, so con
 
 A resume pinned to an agent that never returns escalates to the Lead, which re-delegates to an agent it chooses. A resume that could not be pinned, for example because the original agent was at capacity, enters the affinity-gated pool instead.
 
-A task can still end `failed`. Repeated crash-recovery resumes stop at `HEARTBEAT_MAX_RESUME_GENERATIONS`, default `3` in `src/heartbeat/heartbeat.ts`, so a task that keeps flapping cannot retry forever. A shutdown also marks a task `failed` when the worker can neither supersede nor pause it through the API. An interrupted workflow step gets no resume follow-up: it fails, and the workflow's own retry policy decides what happens next.
+A task can still end `failed`. Repeated crash-recovery resumes stop at `HEARTBEAT_MAX_RESUME_GENERATIONS`, default `3` in `src/heartbeat/heartbeat.ts`, so a task that keeps flapping cannot retry forever. A shutdown also tries to mark a task `failed` when the worker can neither supersede nor pause it through the API. That request goes through the API as well, so when the API is unreachable the task can stay `in_progress` until [stalled-task remediation](#stalled-task-remediation) picks it up. An interrupted workflow step gets no resume follow-up: it fails, and the workflow's own retry policy decides what happens next.
 
 ## Graceful shutdown and resume
 
-When a worker container receives SIGTERM, it waits for its active tasks inside a grace period, `SHUTDOWN_TIMEOUT`, default 30 seconds. Any task still running when the grace period ends is superseded, and the API creates a resume follow-up from its saved progress. The follow-up is pinned to the same agent id, which survives the restart, when that agent has a free slot. When the supersede call fails, the worker falls back to marking the task `paused`, and on restart it resumes paused tasks assigned to its own agent id. When both calls fail, the task is marked `failed`.
+When a worker container receives SIGTERM, it waits for its active tasks inside a grace period, `SHUTDOWN_TIMEOUT`, default 30 seconds. Any task still running when the grace period ends is superseded, and the API creates a resume follow-up from its saved progress. The follow-up is pinned to the same agent id, which survives the restart, when that agent has a free slot. When the supersede call fails, the worker falls back to marking the task `paused`, and on restart it resumes paused tasks assigned to its own agent id. When both calls fail, the worker sends a final finish request that marks the task `failed`. If the API is unreachable, that request can fail too, and the task stays `in_progress` until stalled-task remediation handles it.
 
 The deployment guide also covers an optional API drain, which is off by default. With drain enabled, the API keeps serving after SIGTERM but hands out no new work, tells workers it is draining, and lets a worker hand off its in-flight task while the API is still up to receive the handoff. Enable it only where the API and the workers stop together, because an API-only restart with drain on would make every live worker drop its in-flight work.
 
@@ -53,7 +53,8 @@ A one-off [script workflow run](/docs/guides/script-workflow-runs) journals ever
 | Waits | The pin is unreclaimed and the reaper is off or no Lead is reachable |
 | Needs Lead action | An affinity-tagged task has no eligible agent |
 | Terminal | The resume cap is reached and the task is marked `failed` |
-| Terminal | Supersede and pause both fail at shutdown and the task is marked `failed` |
+| Terminal | Supersede and pause both fail at shutdown and the final finish request marks the task `failed` |
+| Waits | Supersede, pause and the finish request all fail, so the task stays `in_progress` until stalled-task remediation handles it |
 
 ## Operator checks
 
