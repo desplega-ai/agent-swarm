@@ -16,6 +16,7 @@ import {
 } from "@/be/db";
 import {
   LEARNING_MAX_TAGS,
+  LEARNING_MIN_CHARS,
   storeTaskLearning,
   type TaskLearningResult,
 } from "@/be/memory/task-learning";
@@ -129,10 +130,11 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
       workstream: z.string().optional(),
       similarity: z.number().optional(),
       error: z.string().optional(),
+      noiseFloor: z.string().optional(),
     })
     .optional()
     .describe(
-      "Present when the call carried a learning: stored, replayed (same text already stored for this task), duplicate (an existing swarm memory at key/memoryId says the same; similarity is the raw cosine), or failed with error.",
+      "Present when the call carried a learning: stored, replayed (same text already stored for this task), duplicate (an existing swarm memory at key/memoryId says the same; similarity is the raw cosine), or failed with error. A failed learning rejected as noise also carries noiseFloor: too-short or repeats-progress.",
     ),
 });
 
@@ -207,7 +209,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ])
           .optional()
           .describe(
-            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. The first line of text is the title. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
+            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under ${LEARNING_MIN_CHARS} characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
           ),
         persistMemory: z
           .boolean()
@@ -507,6 +509,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 isLead: agent.isLead === true,
                 task: existingTask,
                 learning,
+                sameCall: { progress, output },
               }).then(resolve, (err) =>
                 resolve({ status: "failed", error: scrubSecrets(String(err)) }),
               ),
