@@ -84,7 +84,7 @@ The `inject-learning` tool creates swarm-scoped memories by default, so learning
 
 ## TTL & Expiry
 
-Memories have a time-to-live (TTL) based on their source type. Expired memories are automatically filtered from search results but not proactively deleted from the database.
+Memories have a time-to-live (TTL) based on their source type. Expired memories are filtered from search results at once, and the periodic memory GC deletes them.
 
 | Source | TTL | Rationale |
 |--------|-----|-----------|
@@ -93,7 +93,11 @@ Memories have a time-to-live (TTL) based on their source type. Expired memories 
 | `file_index` | 30 days | File contents may change |
 | `manual` | Never expires | Explicitly stored knowledge is permanent |
 
-Expired memories can still be retrieved by ID via `memory-get` — only search results are filtered. The `memory-delete` tool provides explicit cleanup when needed.
+The key overrides the source in two cases. A memory under `/longterm/` never expires, whatever its source. A store-progress learning under `/learnings/` expires 30 days after it is written: one worth keeping is moved under `/longterm/`, which clears the expiry, and the rest ages out. A move into `/learnings/` starts the 30-day clock, and a move out of it takes the source's own TTL (none for `manual`). An in-place edit, or a move that crosses neither boundary, keeps the expiry.
+
+A store-progress learning that repeats a swarm memory under `/learnings/` or `/longterm/` (raw cosine 0.80 or higher) is not stored; the existing memory gets a positive rating instead. The check scores the newest 10,000 rows under each prefix: it is exact while a prefix holds at most 10,000 rows, and past that an older twin is missed and the API logs `capped=true`. It runs with or without the sqlite-vec extension.
+
+Before the periodic GC runs, expired memories can still be retrieved by ID via `memory-get`; once GC deletes them, they are no longer available. The `memory-delete` tool provides explicit cleanup when needed.
 
 ## Memory Retrieval & Reranking
 

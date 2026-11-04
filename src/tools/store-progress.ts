@@ -14,6 +14,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
+import { LEARNING_TTL_DAYS } from "@/be/memory/constants";
 import {
   LEARNING_MAX_TAGS,
   LEARNING_MIN_CHARS,
@@ -209,7 +210,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ])
           .optional()
           .describe(
-            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under ${LEARNING_MIN_CHARS} characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
+            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under ${LEARNING_MIN_CHARS} characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. Expires after ${LEARNING_TTL_DAYS} days. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
           ),
         persistMemory: z
           .boolean()

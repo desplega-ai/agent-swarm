@@ -685,6 +685,8 @@ describe("script connections", () => {
       // 278 indexes agent_tasks columns and alters slack_messages, neither of
       // which this fixture's partial schema has.
       markMigrationApplied(database, "278_slack_render_v2_reconcile.sql");
+      // 279 backfills agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "279_backfill_learning_expiry.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
