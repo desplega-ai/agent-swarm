@@ -520,16 +520,17 @@ describe("checklist ownership and mutations", () => {
     process.env.GITHUB_TOKEN = "fixture-token";
     await listChecklist(userId);
     await mutateChecklist(actor, { action: "add", scope: "user", kind: "custom", label: "Manual" });
-    expect((await firstOpenItem(userId))?.id).toBe("swarm:channel");
+    expect((await firstOpenItem(userId, false))?.id).toBe(`user:${userId}:use_case`);
+    expect((await firstOpenItem(userId, true))?.id).toBe("swarm:channel");
     const taskId = crypto.randomUUID();
     await expect(
       getDbClient().transaction(async () => {
         await markNudged("swarm:channel", taskId);
-        expect((await firstOpenItem(userId))?.id).toBe(`user:${userId}:use_case`);
+        expect((await firstOpenItem(userId, true))?.id).toBe(`user:${userId}:use_case`);
         throw new Error("Rollback nudge");
       }),
     ).rejects.toThrow("Rollback nudge");
-    expect((await firstOpenItem(userId))?.id).toBe("swarm:channel");
+    expect((await firstOpenItem(userId, true))?.id).toBe("swarm:channel");
     await getDbClient().transaction(async () => {
       await markNudged("swarm:channel", taskId);
     });
@@ -537,7 +538,17 @@ describe("checklist ownership and mutations", () => {
       nudgedTaskId: taskId,
       nudgedAt: expect.any(String),
     });
+    await mutateChecklist(actor, { action: "done", id: `user:${userId}:use_case` });
+    expect(await firstOpenItem(userId, true)).toBeNull();
     await mutateChecklist(actor, { action: "remove", id: `user:${userId}:use_case` });
-    expect(await firstOpenItem(userId)).toBeNull();
+    expect(await firstOpenItem(userId, true)).toBeNull();
+  });
+
+  test("firstOpenItem advances to the next swarm item after a nudge", async () => {
+    expect((await firstOpenItem(userId, true))?.id).toBe("swarm:channel");
+    await markNudged("swarm:channel", crypto.randomUUID());
+    expect((await firstOpenItem(userId, true))?.id).toBe("swarm:tool");
+    await mutateChecklist(actor, { action: "remove", id: "swarm:tool" });
+    expect((await firstOpenItem(userId, true))?.id).toBe(`user:${userId}:use_case`);
   });
 });

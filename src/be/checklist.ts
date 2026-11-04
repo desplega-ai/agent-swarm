@@ -226,10 +226,17 @@ export async function mutateChecklist(
   return items.find((item) => item.id === id)!;
 }
 
-export async function firstOpenItem(userId: string | null): Promise<ChecklistItem | null> {
+export async function firstOpenItem(
+  userId: string | null,
+  canEditSwarm: boolean,
+): Promise<ChecklistItem | null> {
   return (
-    (await listChecklist(userId)).find(
-      (item) => item.status === "open" && item.signal === false && item.nudgedAt === null,
+    (await listChecklist(userId, canEditSwarm)).find(
+      (item) =>
+        item.editable === true &&
+        item.status === "open" &&
+        item.signal === false &&
+        item.nudgedAt === null,
     ) ?? null
   );
 }

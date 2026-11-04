@@ -40283,6 +40283,29 @@
                               "required": [
                                 "name"
                               ]
+                            },
+                            "checklistNudge": {
+                              "type": "object",
+                              "properties": {
+                                "itemId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "href": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "itemId",
+                                "kind",
+                                "label",
+                                "href"
+                              ]
                             }
                           },
                           "required": [

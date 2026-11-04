@@ -17461,6 +17461,12 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                checklistNudge?: {
+                                    itemId: string;
+                                    kind: string;
+                                    label: string;
+                                    href: string;
+                                };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
                                 type: "unread_mentions";

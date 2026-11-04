@@ -3416,6 +3416,8 @@ interface Trigger {
     /** Structured communication preferences from `users.metadata.comms`. */
     comms?: { tone?: string; language?: string; verbosity?: string };
   };
+  /** One-shot setup nudge for the lead (server-picked open checklist item). */
+  checklistNudge?: ChecklistNudge;
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -3459,6 +3461,21 @@ function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
 }
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
+
+export type ChecklistNudge = { itemId: string; kind: string; label: string; href: string };
+
+/** The lead's one-shot setup suggestion, rendered into the task prompt only. */
+export async function buildChecklistNudgePrompt(
+  nudge: ChecklistNudge | undefined,
+): Promise<string> {
+  if (!nudge) return "";
+  const result = await resolveTemplateAsync("task.checklist.nudge", {
+    label: nudge.label,
+    href: nudge.href,
+    kind: nudge.kind,
+  });
+  return result.skipped ? "" : result.text.trim();
+}
 
 export async function buildRequesterProfilePrompt(
   requestedBy: RequesterProfile | undefined,
@@ -3504,6 +3521,7 @@ export function missingTaskDirWarning(
 /** Per-task context that rides in the task prompt, never the system prompt. */
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
+  checklistNudge?: ChecklistNudge;
   /** Set when the task's `dir` does not exist and the session falls back. */
   cwdWarning?: string;
 };
@@ -3513,7 +3531,7 @@ export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArg
  * agent (profile, harness, deployment), so it is byte-identical across that
  * agent's sessions and the provider reads it from cache instead of re-writing
  * it. Everything that varies per task (repository block, scripts-only Slack
- * note, requester profile, cwd warning) is appended to the task prompt.
+ * note, requester profile, checklist nudge, cwd warning) is appended to the task prompt.
  */
 export async function buildTaskSessionPrompts(input: {
   basePromptArgs: BasePromptArgs;
@@ -3534,6 +3552,7 @@ export async function buildTaskSessionPrompts(input: {
       slackContext: context.slackContext,
     }),
     await buildRequesterProfilePrompt(context.requestedBy),
+    await buildChecklistNudgePrompt(context.checklistNudge),
     context.cwdWarning?.trim(),
   ]
     .filter((part): part is string => Boolean(part))
@@ -7641,6 +7660,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             repoContext: currentRepoContext,
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
+            checklistNudge: trigger.checklistNudge,
             cwdWarning,
           },
         });
