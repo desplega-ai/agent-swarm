@@ -1,6 +1,8 @@
 import { THEME_MODES, ThemePresetPicker } from "@/components/shared/theme-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { Switch } from "@/components/ui/switch";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 export default function AppearancePage() {
   const { mode, setMode } = useTheme();
+  const [autoReload, setAutoReload] = useLocalToggle("entity-auto-reload", false);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
@@ -48,6 +51,23 @@ export default function AppearancePage() {
               </button>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Entity updates</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <div>
+            <label htmlFor="entity-auto-reload" className="text-sm font-medium">
+              Reload new versions automatically
+            </label>
+            <p className="text-sm text-muted-foreground">
+              After you interact, choose when to load a new version.
+            </p>
+          </div>
+          <Switch id="entity-auto-reload" checked={autoReload} onCheckedChange={setAutoReload} />
         </CardContent>
       </Card>
 

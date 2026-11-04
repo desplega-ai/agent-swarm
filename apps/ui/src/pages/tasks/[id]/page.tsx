@@ -33,7 +33,9 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskStatus, TaskWithLogs } from "@/api/types";
+import { useOptionalContextPanel } from "@/components/context-panel/context-panel-state";
 import { useTaskPath } from "@/components/layout/use-task-path";
+import { LinkPreviewDock } from "@/components/link-preview/link-preview-dock";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
@@ -138,6 +140,12 @@ type LogMode = "transcript" | "raw";
 
 /** The rename limit of `PATCH /api/tasks/{id}/title`. */
 const TITLE_MAX = 120;
+
+/**
+ * The room the transcript column needs next to a link preview, with its
+ * paddings. The details card (`w-80`) adds 320 px while it is open.
+ */
+const TASK_PREVIEW_SIBLING_MIN = 400;
 
 /**
  * Task title as the page heading, at most two lines. A clamped title shows
@@ -497,10 +505,22 @@ export default function TaskDetailPage() {
     [setParam],
   );
   // The details card next to the column folds away, as the app sidebar does.
-  const [detailsCollapsed, setDetailsCollapsed] = useLocalToggle(
+  const [storedDetailsCollapsed, setStoredDetailsCollapsed] = useLocalToggle(
     "tasks:details-panel-collapsed",
     false,
   );
+  // An open link preview folds the details card, so the transcript and the
+  // preview share the row. The toggle still shows the card while previewing,
+  // without touching the stored pick: closing the preview brings that back.
+  const previewOpen = !!useOptionalContextPanel()?.preview;
+  const [detailsWhilePreviewing, setDetailsWhilePreviewing] = useState(false);
+  useEffect(() => {
+    if (!previewOpen) setDetailsWhilePreviewing(false);
+  }, [previewOpen]);
+  const detailsCollapsed = previewOpen ? !detailsWhilePreviewing : storedDetailsCollapsed;
+  const setDetailsCollapsed = previewOpen
+    ? (collapsed: boolean) => setDetailsWhilePreviewing(!collapsed)
+    : setStoredDetailsCollapsed;
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. One scroller holds the column and the details card: the
   // log flows in it.
@@ -1088,26 +1108,30 @@ export default function TaskDetailPage() {
   // right. A narrow column wraps the chips under the source line.
   const wideHero = (
     // `group/title`: a pointer anywhere on the header shows the rename pencil.
-    <div className="group/title grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
-      {/* The page's one heading. The breadcrumb truncates the title (and
+    // A narrow column (a link preview open beside it) puts the actions under
+    // the title, so the title keeps the column's width.
+    <div className="@container/hero">
+      <div className="group/title grid shrink-0 grid-cols-1 gap-x-6 gap-y-2.5 @min-[36rem]/hero:grid-cols-[minmax(0,1fr)_auto]">
+        {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
-      <div className="min-w-0">{renderHeading(true)}</div>
-      <div className="flex items-start justify-end gap-1">
-        <TaskActions model={actions} className="justify-end" />
-        {detailsToggle}
-      </div>
-      <div
-        data-slot="task-meta-row"
-        className="col-span-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
-      >
-        <div className="min-w-0">{sourceLine}</div>
-        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {tagsChip}
-          <StatusBadge status={task.status} size="md" />
-          {costChip}
-          {wideModelChip}
-          {wideProfileChip}
-          {agentChip}
+        <div className="min-w-0">{renderHeading(true)}</div>
+        <div className="flex items-start gap-1 @min-[36rem]/hero:justify-end">
+          <TaskActions model={actions} className="@min-[36rem]/hero:justify-end" />
+          {detailsToggle}
+        </div>
+        <div
+          data-slot="task-meta-row"
+          className="col-span-full flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
+        >
+          <div className="min-w-0">{sourceLine}</div>
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+            {tagsChip}
+            <StatusBadge status={task.status} size="md" />
+            {costChip}
+            {wideModelChip}
+            {wideProfileChip}
+            {agentChip}
+          </div>
         </div>
       </div>
     </div>
@@ -1168,8 +1192,17 @@ export default function TaskDetailPage() {
           header down to the message box, which is pinned under it (it bleeds
           into <main>'s padding). The hero scrolls away and the tabs stick to
           the top. The log flows in this scroller: the tabs' height goes to it
-          as a CSS variable, so its toolbar sticks under the tabs. */}
-      <div className={cn("@min-[60rem]:hidden flex min-h-0 flex-1 flex-col", MAIN_BLEED)}>
+          as a CSS variable, so its toolbar sticks under the tabs. With a link
+          preview open the breakpoint drops to 48rem, the room the transcript
+          (400 px) and the preview (360 px) take in a row: the details card
+          folds instead of the page turning into tabs. */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          previewOpen ? "@min-[48rem]:hidden" : "@min-[60rem]:hidden",
+          MAIN_BLEED,
+        )}
+      >
         <div
           ref={setNarrowScroller}
           style={{ "--log-sticky-top": `${narrowTabsHeight}px` } as CSSProperties}
@@ -1232,7 +1265,8 @@ export default function TaskDetailPage() {
       <div
         ref={wideAreaRef}
         className={cn(
-          "hidden @min-[60rem]:flex flex-1 min-h-0 flex-col -mr-4 md:-mr-6",
+          "hidden flex-1 min-h-0 -mr-4 md:-mr-6",
+          previewOpen ? "@min-[48rem]:flex" : "@min-[60rem]:flex",
           MAIN_BLEED_Y,
         )}
       >
@@ -1244,7 +1278,7 @@ export default function TaskDetailPage() {
               "--log-sticky-bottom": `${wideComposerHeight}px`,
             } as CSSProperties
           }
-          className="relative -ml-3 min-h-0 flex-1 overflow-y-auto pl-3 [scrollbar-gutter:stable]"
+          className="relative -ml-3 min-h-0 min-w-0 flex-1 overflow-y-auto pl-3 [scrollbar-gutter:stable]"
         >
           <div className="grid min-h-full grid-cols-[minmax(0,1fr)_auto] pr-4">
             <section className="flex min-w-0 flex-col">
@@ -1311,6 +1345,15 @@ export default function TaskDetailPage() {
             </AnimatedReveal>
           </div>
         </div>
+        {/* A link preview opens here, in the page body next to the
+            transcript and the details card (T3 Code's preview panel). Under
+            the wide breakpoint, or with no room, it opens as a sheet. */}
+        <LinkPreviewDock
+          storageKey="agent-swarm-task-link-preview-width"
+          siblingMinWidth={
+            detailsCollapsed ? TASK_PREVIEW_SIBLING_MIN : TASK_PREVIEW_SIBLING_MIN + 320
+          }
+        />
       </div>
     </div>
   );

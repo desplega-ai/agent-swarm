@@ -52,6 +52,11 @@ import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
+import { AlertCallout } from "@/components/ui/alert-callout";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -72,6 +77,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
 import {
   readBooleanParam,
@@ -79,6 +85,7 @@ import {
   readStringParam,
   useUrlSearchState,
 } from "@/hooks/use-url-search-state";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
@@ -101,7 +108,44 @@ export default function WorkflowDetailPage() {
       allowed: RUNS_PAGE_SIZE_OPTIONS,
     },
   );
-  const { data: workflow, isLoading } = useWorkflow(id!);
+  const { data: latestWorkflow, isLoading } = useWorkflow(id!);
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const workflowRevision =
+    latestWorkflow &&
+    JSON.stringify([
+      latestWorkflow.definition,
+      latestWorkflow.triggers,
+      latestWorkflow.cooldown,
+      latestWorkflow.input,
+      latestWorkflow.requiredParams,
+      latestWorkflow.requires,
+    ]);
+  const [paramsDraft, setParamsDraft] = useState(false);
+  const workflowVersion = useVersionedValue(id, latestWorkflow, workflowRevision, autoReload, {
+    draft: paramsDraft,
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
+  useVersionUpdateToast({
+    entityKey: `workflow:${id}`,
+    latestRevision: workflowRevision,
+    pending: workflowVersion.pending,
+    editing: workflowVersion.editing,
+    autoReload,
+    canAutoReload: workflowVersion.canAutoReload,
+    onLoad: workflowVersion.apply,
+  });
+  const workflow =
+    latestWorkflow && workflowVersion.value
+      ? {
+          ...latestWorkflow,
+          definition: workflowVersion.value.definition,
+          triggers: workflowVersion.value.triggers,
+          cooldown: workflowVersion.value.cooldown,
+          input: workflowVersion.value.input,
+          requiredParams: workflowVersion.value.requiredParams,
+          requires: workflowVersion.value.requires,
+        }
+      : latestWorkflow;
   const { data: runsData, isLoading: runsLoading } = useWorkflowRuns(id!, {
     limit: runsPageSize,
     offset: runsPage * runsPageSize,
@@ -232,7 +276,7 @@ export default function WorkflowDetailPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div ref={workflowVersion.scopeRef} className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
       <div className="shrink-0 space-y-3">
         <button
@@ -401,7 +445,12 @@ export default function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="setup" className="flex flex-col flex-1 min-h-0">
-          <WorkflowSetupPanel workflow={workflow} focusParam={focusedParam} />
+          <WorkflowSetupPanel
+            key={workflow.id}
+            workflow={workflow}
+            focusParam={focusedParam}
+            onDraftChange={setParamsDraft}
+          />
         </TabsContent>
 
         {/* Triggers tab */}
@@ -497,6 +546,7 @@ export default function WorkflowDetailPage() {
 function WorkflowSetupPanel({
   workflow,
   focusParam,
+  onDraftChange,
 }: {
   workflow: {
     id: string;
@@ -504,11 +554,28 @@ function WorkflowSetupPanel({
     params?: Record<string, unknown>;
   };
   focusParam?: string;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const updateWorkflow = useUpdateWorkflow();
   const [params, setParams] = useState<Record<string, unknown>>(workflow.params ?? {});
+  const [dirty, setDirty] = useState(false);
+  const [baseParams, setBaseParams] = useState(() => JSON.stringify(workflow.params ?? {}));
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const paramsChangedRemotely = dirty && baseParams !== JSON.stringify(workflow.params ?? {});
 
-  useEffect(() => setParams(workflow.params ?? {}), [workflow.params]);
+  // A parameter draft holds new workflow versions until it is saved or reset.
+  useEffect(() => {
+    onDraftChange?.(dirty);
+    return () => onDraftChange?.(false);
+  }, [dirty, onDraftChange]);
+
+  useEffect(() => {
+    if (!dirty) {
+      setParams(workflow.params ?? {});
+      setBaseParams(JSON.stringify(workflow.params ?? {}));
+    }
+  }, [workflow.params, dirty]);
 
   return (
     <Card className="max-w-2xl">
@@ -519,22 +586,41 @@ function WorkflowSetupPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {paramsChangedRemotely && (
+          <AlertCallout
+            tone="warning"
+            action={
+              <Button size="sm" variant="outline" onClick={() => setDirty(false)}>
+                Load saved parameters
+              </Button>
+            }
+          >
+            The saved parameters changed while you were editing. Load them before saving.
+          </AlertCallout>
+        )}
         <AutomationParamsFields
           requiredParams={workflow.requiredParams}
           params={params}
           focusParam={focusParam}
-          onChange={setParams}
+          onChange={(next) => {
+            setParams(next);
+            setDirty(true);
+          }}
         />
         {workflow.requiredParams?.length ? (
           <Button
             type="button"
             size="sm"
-            disabled={updateWorkflow.isPending}
+            disabled={updateWorkflow.isPending || paramsChangedRemotely}
             onClick={() =>
               updateWorkflow.mutate(
                 { id: workflow.id, data: { params } },
                 {
-                  onSuccess: () => toast.success("Workflow parameters saved"),
+                  onSuccess: () => {
+                    if (JSON.stringify(paramsRef.current) === JSON.stringify(params))
+                      setDirty(false);
+                    toast.success("Workflow parameters saved");
+                  },
                   onError: (error) =>
                     toast.error(
                       error instanceof Error ? error.message : "Failed to save parameters",

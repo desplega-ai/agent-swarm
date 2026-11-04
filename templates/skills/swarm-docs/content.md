@@ -50,6 +50,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [PR Review](https://docs.agent-swarm.dev/docs/playbooks/pr-review). When: Someone wants every pull request reviewed automatically before a person looks at it.
 - [Linear Delivery Loop](https://docs.agent-swarm.dev/docs/playbooks/linear-delivery-loop). When: Someone wants agents to take Linear issues through implementation, CI and review to merged pull requests, with a person approving each one. Template: `community/linear-delivery-loop`.
 - [Slack Reply Gate](https://docs.agent-swarm.dev/docs/playbooks/slack-reply-gate). When: Someone wants Lead to stop answering or waking on Slack thread banter, reactions, or messages meant for other people. Not when: Someone wants to route Slack messages to a specific agent or channel, which is a pre.slack.route extension.
+- [Small-Company Workflows](https://docs.agent-swarm.dev/docs/playbooks/small-company-workflows). When: Someone at a small company asks which recurring cross-team workflows they could run with agents, with people approving the decisions. Not when: Someone wants a documented production playbook for one job, which is the linked playbook itself.
 - [Hot Patterns](https://docs.agent-swarm.dev/docs/playbooks/patterns). Reference.
 - [Pattern: Litmus Tests (LLM-as-Judge Quality Gates)](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests). When: Someone wants one agent to check another agent's output against a rubric before it ships.
 - [Pattern: Drain Loops (Stacked PRs + Merge Loop)](https://docs.agent-swarm.dev/docs/playbooks/patterns/drain-loops). When: Someone wants a large change split into small stacked pull requests and merged in order.
@@ -59,6 +60,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 
 ## Guides
 
+- [Choosing an AI operating model](https://docs.agent-swarm.dev/docs/guides/choosing-an-ai-operating-model). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.

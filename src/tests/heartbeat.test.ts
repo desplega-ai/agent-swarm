@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   cancelTask,
@@ -29,6 +29,7 @@ import {
   codeLevelTriage,
   getBootEpochMs,
   getRebootAffectedTasks,
+  parseHeartbeatIntervalMs,
   preflightGate,
   runHeartbeatSweep,
   runRebootSweep,
@@ -1482,6 +1483,32 @@ describe("Heartbeat Triage", () => {
       stopHeartbeat();
       // Should not throw when called again
       stopHeartbeat();
+    });
+
+    test("HEARTBEAT_INTERVAL_MS falls back to 90s unless it is a positive integer", () => {
+      for (const raw of ["Infinity", "-Infinity", "NaN", "0", "-5", "1.5", ""]) {
+        expect(parseHeartbeatIntervalMs(raw)).toBe(90_000);
+      }
+      expect(parseHeartbeatIntervalMs(undefined)).toBe(90_000);
+      expect(parseHeartbeatIntervalMs("1500")).toBe(1500);
+    });
+
+    test("startHeartbeat schedules the sanitized env interval", () => {
+      const previous = process.env.HEARTBEAT_INTERVAL_MS;
+      const log = spyOn(console, "log");
+      try {
+        process.env.HEARTBEAT_INTERVAL_MS = "Infinity";
+        startHeartbeat();
+        const started = log.mock.calls.some((call) =>
+          String(call[0]).includes("Starting with 90000ms"),
+        );
+        expect(started).toBe(true);
+      } finally {
+        stopHeartbeat();
+        log.mockRestore();
+        if (previous === undefined) delete process.env.HEARTBEAT_INTERVAL_MS;
+        else process.env.HEARTBEAT_INTERVAL_MS = previous;
+      }
     });
   });
 });
