@@ -1,5 +1,5 @@
 import { AlertCircle, Info, RotateCw } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { useChatSdkStatus, useInvalidateChatSdkStatus } from "@/api/hooks/use-chat-sdk";
@@ -33,9 +33,18 @@ import { findConfigForKey, TRUTHY_VALUES } from "@/lib/integrations-status";
 // reload, no restart.
 // ---------------------------------------------------------------------------
 
+/** How long the "Applying" notice stays after a save. */
+const SAVED_NOTICE_MS = 8000;
+
 export function ChatSdkSection({ def, configs, adapter }: SpecialFlowSectionProps) {
   const status = useChatSdkStatus();
   const [savedNotice, setSavedNotice] = useState(false);
+  // The reload applies within seconds, so the notice hides itself.
+  useEffect(() => {
+    if (!savedNotice) return;
+    const timer = setTimeout(() => setSavedNotice(false), SAVED_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [savedNotice]);
   const storedAdapters = findConfigForKey(configs, "CHAT_SDK_ADAPTERS")?.value;
   const storedEnabled = findConfigForKey(configs, "CHAT_SDK_ENABLED")?.value;
   // No config row: the running values come from the deployment environment.
