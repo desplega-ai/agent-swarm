@@ -334,6 +334,20 @@ describe("savings compute", () => {
         expect(await p50()).toBeGreaterThan(shipped * 1.2);
       });
 
+      test("the daily series uses the same stored curve, so it still sums to the header", async () => {
+        await store(doubled);
+        const jobs = (await get(`workflowId=${workflowId}&days=7`)).body as {
+          rows: { savingUsd: { p50: number } }[];
+        };
+        const daily = (await get(`workflowId=${workflowId}&days=7`, "daily")).body as {
+          calibrationSource: string;
+          points: { savingUsd: number }[];
+        };
+        expect(daily.calibrationSource).toBe("deployment");
+        const cents = daily.points.reduce((sum, p) => sum + Math.round(p.savingUsd * 100), 0);
+        expect(cents).toBe(Math.round((jobs.rows[0]?.savingUsd.p50 ?? Number.NaN) * 100));
+      });
+
       test("a malformed stored curve falls back to the shipped one", async () => {
         await store("{not json");
         const { body } = await get(`workflowId=${workflowId}&days=7&tier=smart`);

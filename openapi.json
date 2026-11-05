@@ -51847,6 +51847,13 @@
                     "calibratedAt": {
                       "type": "string"
                     },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
                     "computedAt": {
                       "type": "string"
                     },
@@ -51892,6 +51899,7 @@
                     "tier",
                     "calibrationModel",
                     "calibratedAt",
+                    "calibrationSource",
                     "computedAt",
                     "valid",
                     "reason",
