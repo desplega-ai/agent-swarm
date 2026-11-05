@@ -8,6 +8,7 @@ import {
   nodeOpsOf,
   priceWorkflow,
   SAVINGS_TIERS,
+  splitByDay,
   type WorkflowFacts,
 } from "../be/savings/model";
 
@@ -153,5 +154,49 @@ describe("savings model", () => {
     expect(jobKey("pr-fix-loop-retired-2026-10-28")).toBe("pr-fix-loop");
     expect(jobKey("pr-fix-loop")).toBe("pr-fix-loop");
     expect(F_FOLLOWUP).toBe(0.107);
+  });
+
+  test("daily split sums to the window, and capped schedule runs spread pro rata", () => {
+    // 2 days of polling every 5 minutes (288 a day) against a 1-day cap of 24,
+    // plus one manual run with an agent task and a recorded LLM cost.
+    const day1 = facts({
+      runs: 288,
+      countedRuns: 288,
+      schedRuns: 288,
+      schedEffectRuns: 3,
+      opsSum: 288 * 5,
+      recordedLlmUsd: 0.4,
+    });
+    const day2 = facts({
+      runs: 145,
+      countedRuns: 145,
+      schedRuns: 144,
+      schedEffectRuns: 0,
+      opsSum: 145 * 5,
+      agentTasks: 1,
+      agentUsd: 2,
+      followupUsd: 0.1,
+      recordedLlmUsd: 0.2,
+    });
+    const window = facts({});
+    for (const k of Object.keys(window) as (keyof WorkflowFacts)[]) window[k] = day1[k] + day2[k];
+    const priced = priceWorkflow(window, { tier: "smart", days: 1, band: "job" });
+    expect(priced.capApplied).toBe(true);
+    const points = splitByDay(
+      window,
+      [
+        { day: "2026-10-01", ...day1 },
+        { day: "2026-10-02", ...day2 },
+      ],
+      { tier: "smart", days: 1 },
+    );
+    const sum = (key: "savingUsd" | "actualUsd") => points.reduce((s, p) => s + p[key], 0);
+    expect(sum("savingUsd")).toBeCloseTo(priced.savingUsd.p50, 9);
+    expect(sum("actualUsd")).toBeCloseTo(priced.actualUsd, 9);
+    // The 24 counted schedule runs split 288:144; the manual run stays on day 2.
+    const unit = priced.agentOnlyUsdPerRun;
+    const share = priced.substitutedRuns / window.runs;
+    expect(points[0]?.savingUsd).toBeCloseTo(16 * unit - 0.4 * share, 9);
+    expect(points[1]?.savingUsd).toBeCloseTo((8 + 1) * unit - 0.2 * share, 9);
   });
 });

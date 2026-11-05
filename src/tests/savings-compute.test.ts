@@ -208,11 +208,21 @@ describe("savings compute", () => {
       // 6 scheduled steps + fetch + sw, 2 s each; the agent step is excluded.
       computeSecs: expect.closeTo(16, 3) as unknown as number,
     });
+    // One bucket per UTC start day; the skipped run still counts as a run.
+    expect(out.byDay.map((d) => [d.day, d.runs, d.countedRuns, d.schedEffectRuns])).toEqual([
+      ["2026-10-02", 1, 1, 1],
+      ["2026-10-03", 1, 1, 0],
+      ["2026-10-04", 1, 1, 0],
+      ["2026-10-05", 1, 1, 0],
+      ["2026-10-06", 1, 0, 0],
+    ]);
+    expect(out.byDay[0]).toMatchObject({ agentTasks: 1, agentUsd: 1, opsSum: 4 });
+    expect(out.byDay[3]).toMatchObject({ agentTasks: 1, agentUsd: 2, followupUsd: 0.5 });
   });
 
   test("negative control: an unknown workflow id has no runs", async () => {
     const out = await computeWorkflowWindow({ id: "no-such-workflow", definition: {} }, WINDOW);
-    expect(out).toEqual({ status: "ok", facts: expect.objectContaining({ runs: 0 }) });
+    expect(out).toEqual({ status: "ok", facts: expect.objectContaining({ runs: 0 }), byDay: [] });
   });
 
   test("a workflow above the live limit is refused before any step scan", async () => {
@@ -220,10 +230,10 @@ describe("savings compute", () => {
     expect(out).toEqual({ status: "too-many-runs", runs: LIVE_MAX_RUNS + 1 });
   });
 
-  describe("GET /api/savings/jobs", () => {
-    const get = async (query: string) => {
+  describe("GET /api/savings/jobs and /api/savings/daily", () => {
+    const get = async (query: string, path = "jobs") => {
       resetSavingsCache();
-      const res = await fetch(`http://127.0.0.1:${port}/api/savings/jobs?${query}`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/savings/${path}?${query}`);
       return { status: res.status, body: (await res.json().catch(() => null)) as never };
     };
 
@@ -243,6 +253,10 @@ describe("savings compute", () => {
     test("too many runs is reported, never as $0", async () => {
       const { body } = await get(`workflowId=${busyWorkflowId}&days=90`);
       expect(body).toMatchObject({ valid: false, reason: "too-many-runs", rows: [] });
+      const daily = await get(`workflowId=${busyWorkflowId}&days=90`, "daily");
+      expect(daily.body).toMatchObject({ valid: false, reason: "too-many-runs", points: [] });
+      const idle = await get(`workflowId=${emptyWorkflowId}`, "daily");
+      expect(idle.body).toMatchObject({ valid: false, reason: "no-runs", points: [] });
     });
 
     test("unknown workflow is 404; bad tier, days or a missing id is 400", async () => {
@@ -250,6 +264,8 @@ describe("savings compute", () => {
       expect((await get(`workflowId=${workflowId}&tier=huge`)).status).toBe(400);
       expect((await get(`workflowId=${workflowId}&days=12`)).status).toBe(400);
       expect((await get("")).status).toBe(400);
+      expect((await get("workflowId=nope", "daily")).status).toBe(404);
+      expect((await get(`workflowId=${workflowId}&tier=huge`, "daily")).status).toBe(400);
     });
 
     test("scans run in the bounded executor: a spent budget is a 408, not a blocked API", async () => {
@@ -283,6 +299,37 @@ describe("savings compute", () => {
       expect(b.rows[0]?.substitutedRuns).toBe(4);
       const band = b.rows[0]?.savingUsd;
       expect(band && band.p10 < band.p50 && band.p50 < band.p90).toBe(true);
+    });
+
+    test("the daily points sum to the header saving", async () => {
+      // Runs over several days; the previous test moved them all to yesterday.
+      // An hour back keeps every run clear of the window end (`now` at request time).
+      await getDbClient().run(
+        "UPDATE workflow_runs SET startedAt=strftime('%Y-%m-%dT%H:%M:%fZ','now','-' || (rowid % 6) || ' days','-1 hour') WHERE workflowId=?",
+        [workflowId],
+      );
+      const jobs = (await get(`workflowId=${workflowId}&days=7`)).body as {
+        rows: { savingUsd: { p50: number }; actualUsd: number }[];
+      };
+      const { status, body } = await get(`workflowId=${workflowId}&days=7`, "daily");
+      expect(status).toBe(200);
+      const daily = body as {
+        valid: boolean;
+        tier: string;
+        points: { day: string; savingUsd: number; actualUsd: number }[];
+      };
+      expect(daily.valid).toBe(true);
+      expect(daily.tier).toBe("smart");
+      // A 7-day window touches 8 UTC days; every one has a point.
+      expect(daily.points).toHaveLength(8);
+      const cents = (xs: number[]) => Math.round(xs.reduce((s, x) => s + x, 0) * 100);
+      expect(cents(daily.points.map((p) => p.savingUsd))).toBe(
+        Math.round((jobs.rows[0]?.savingUsd.p50 ?? Number.NaN) * 100),
+      );
+      expect(cents(daily.points.map((p) => p.actualUsd))).toBe(
+        Math.round((jobs.rows[0]?.actualUsd ?? Number.NaN) * 100),
+      );
+      expect(daily.points.filter((p) => p.savingUsd !== 0).length).toBeGreaterThan(0);
     });
   });
 });
