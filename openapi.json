@@ -59262,9 +59262,14 @@
     },
     "/api/trackers/jira/authorize": {
       "get": {
-        "summary": "Redirect to Atlassian OAuth consent screen",
+        "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -59274,11 +59279,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Atlassian OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",
@@ -59945,9 +59990,14 @@
     },
     "/api/trackers/linear/authorize": {
       "get": {
-        "summary": "Redirect to Linear OAuth consent screen",
+        "summary": "Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -59957,11 +60007,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Linear OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",

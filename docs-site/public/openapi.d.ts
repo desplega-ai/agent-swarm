@@ -23425,11 +23425,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Atlassian OAuth consent screen */
+        /** Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23437,12 +23438,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Atlassian OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -23924,11 +23945,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Linear OAuth consent screen */
+        /** Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23936,12 +23958,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Linear OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {

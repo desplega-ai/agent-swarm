@@ -1,7 +1,9 @@
 import { AlertCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { toast } from "sonner";
 import { useJiraTrackerStatus } from "@/api/hooks/use-jira-status";
 import { useLinearTrackerStatus } from "@/api/hooks/use-linear-status";
+import { fetchTrackerAuthorizeUrl } from "@/api/tracker-authorize";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -108,21 +110,29 @@ function OAuthPane({
   // Both fields save themselves; Connect opens once both are stored.
   const canConnect = form.isSaved(`${prefix}_CLIENT_ID`) && form.isSaved(`${prefix}_CLIENT_SECRET`);
   const [hintOpen, setHintOpen] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
-  function connect() {
+  async function connect() {
     // A step id, not a number: it survives steps being added before it.
     const back = `${window.location.origin}/setup?step=integrations&integration=${provider}`;
-    window.location.assign(
-      `${apiUrl}/api/trackers/${provider}/authorize?redirect=${encodeURIComponent(back)}`,
-    );
+    // Starting the flow needs the bearer, so fetch the consent URL, then navigate.
+    setConnecting(true);
+    try {
+      window.location.assign(await fetchTrackerAuthorizeUrl(provider, back));
+    } catch (err) {
+      setConnecting(false);
+      toast.error(`Could not start ${name} OAuth`, {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // `aria-disabled`, not `disabled`: the button stays focusable, so its tooltip can say why.
   const connectButton = (
     <Button
       type="button"
-      onClick={canConnect ? connect : undefined}
-      aria-disabled={canConnect ? undefined : true}
+      onClick={canConnect && !connecting ? connect : undefined}
+      aria-disabled={canConnect && !connecting ? undefined : true}
       className="aria-disabled:opacity-50 aria-disabled:hover:bg-primary aria-disabled:active:scale-100"
     >
       Connect {name}
