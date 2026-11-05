@@ -1,3 +1,5 @@
+import type { Monaco } from "@monaco-editor/react";
+
 // Monaco's defineTheme API requires hex color strings — CSS variables not supported. Light/dark theme objects mirror brand-palette values and stay in sync with globals.css.
 
 export const monacoLightTheme = {
@@ -52,20 +54,14 @@ export const monacoDarkTheme = {
   },
 };
 
-// Markdown snippets (MarkdownView): the same token colors on a transparent
-// editor, so the snippet's muted card shows through.
-const TRANSPARENT_EDITOR = {
-  "editor.background": "#00000000",
-  "editor.lineHighlightBackground": "#00000000",
-  "editor.lineHighlightBorder": "#00000000",
-};
+// Monaco themes are global: the last editor to mount sets the theme for every
+// editor on the page. Editors that can share a page (workflow script nodes,
+// script sources, markdown snippets) use these names so none overrides another.
+// A markdown snippet gets its transparent background from CSS
+// (`[data-monaco-snippet]` in `markdown.css`), not from a theme of its own.
+export const MONACO_GITHUB_THEME = { light: "github-light", dark: "github-dark" } as const;
 
-export const monacoSnippetLightTheme = {
-  ...monacoLightTheme,
-  colors: { ...monacoLightTheme.colors, ...TRANSPARENT_EDITOR },
-};
-
-export const monacoSnippetDarkTheme = {
-  ...monacoDarkTheme,
-  colors: { ...monacoDarkTheme.colors, ...TRANSPARENT_EDITOR },
-};
+export function defineGithubThemes(monaco: Monaco) {
+  monaco.editor.defineTheme(MONACO_GITHUB_THEME.light, monacoLightTheme);
+  monaco.editor.defineTheme(MONACO_GITHUB_THEME.dark, monacoDarkTheme);
+}
