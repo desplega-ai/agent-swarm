@@ -4457,6 +4457,7 @@ export interface SavingsJobsResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   computedAt: string;
   valid: boolean;
   reason: "no-runs" | "too-many-runs" | null;

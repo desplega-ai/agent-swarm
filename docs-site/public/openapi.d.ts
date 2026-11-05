@@ -20079,6 +20079,8 @@ export interface paths {
                             tier: "smol" | "regular" | "smart" | "ultra";
                             calibrationModel: string;
                             calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
                             computedAt: string;
                             valid: boolean;
                             /** @enum {string|null} */
