@@ -273,6 +273,7 @@ export function isBrowserReachableUrl(value: string): boolean {
     // IPv4-mapped `::ffff:a.b.c.d`: judge the embedded IPv4 address.
     if (parsed.slice(0, 5).every((x) => x === 0) && g(5) === 0xffff) {
       const a = g(6) >> 8;
+      if (a === 0) return false;
       return a === 127 || !isPrivateIpv4(a, g(6) & 0xff);
     }
     return true;
@@ -280,6 +281,7 @@ export function isBrowserReachableUrl(value: string): boolean {
   const octets = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (octets) {
     const [a, b] = [Number(octets[1]), Number(octets[2])];
+    if (a === 0) return false;
     return a === 127 || !isPrivateIpv4(a, b);
   }
   if (!host.includes(".")) return false;
