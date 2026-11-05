@@ -125,6 +125,10 @@ export const PERMISSIONS = {
     description: "Edit checklist items the caller owns.",
     namespace: "checklist",
   },
+  "checklist.write.agent": {
+    description: "Change a user's checklist items as an agent. Only the Lead.",
+    namespace: "checklist",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",

@@ -47,6 +47,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "agent.context.read.any",
   "memory.learning.inject",
   "memory.write.consolidated",
+  "checklist.write.agent",
   "channel.delete",
   "integration.kapso.manage",
   "integration.chat.manage",

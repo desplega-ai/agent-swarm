@@ -121,8 +121,9 @@ export async function handleChecklist(
   // Agents act on the checklist only as the Lead.
   if (
     principal.kind === "agent" &&
-    !principal.isLead &&
-    !getChecklist.match(req.method, pathSegments)
+    !getChecklist.match(req.method, pathSegments) &&
+    !can({ principal, verb: "checklist.write.agent", resource: { kind: "none" }, source: "http" })
+      .allow
   ) {
     jsonError(res, "Only the Lead agent can change the checklist", 403);
     return true;
