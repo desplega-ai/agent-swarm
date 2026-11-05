@@ -70,6 +70,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.
 - [agent-fs Co-deployment](https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment). When: Someone wants shared persistent files for agents on a self-hosted swarm.
 - [Self-Hosted SSO](https://docs.agent-swarm.dev/docs/guides/self-hosted-sso). When: Someone wants their self-hosted swarm dashboard behind single sign-on.
+- [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/guides/ai-operations-governance). Reference.
 - [E2B Provider Smoke Tests](https://docs.agent-swarm.dev/docs/guides/e2b-provider-smoke-tests). Reference.
 - [Evals Harness](https://docs.agent-swarm.dev/docs/guides/evals-harness). Reference.
 - [Personalization & Status](https://docs.agent-swarm.dev/docs/guides/personalization). Reference.
