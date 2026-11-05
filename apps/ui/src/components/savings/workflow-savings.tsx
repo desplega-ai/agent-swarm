@@ -137,8 +137,8 @@ export function WorkflowSavingsTab({ workflowId }: { workflowId: string }) {
           <PiggyBank className="size-6 text-muted-foreground" />
           <p className="text-sm font-medium">No saving to show</p>
           <p className="max-w-md text-xs text-muted-foreground">
-            {data.reason === "too-many-runs"
-              ? `This workflow ran too many times in the last ${days} days to compute its saving live.`
+            {data.reason === "not-computed"
+              ? `Not computed yet: the savings rollup is still filling the last ${days} days.`
               : `This workflow has no runs in the last ${days} days.`}
           </p>
         </CardContent>

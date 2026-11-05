@@ -1,15 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getWorkflow } from "../be/db";
-import { computeWorkflowWindow, type SavingsSql, type WorkflowWindow } from "../be/savings/compute";
+import type { DbParam } from "../be/db-client";
+import type { SavingsSql } from "../be/savings/compute";
 import {
   CALIBRATED_AT,
   CALIBRATION_MODEL,
-  priceWorkflow,
+  type PricedWorkflow,
   SAVINGS_TIERS,
   type SavingsBand,
-  splitByDay,
 } from "../be/savings/model";
+import { readWorkflowSavings, type SavingsTotals } from "../be/savings/read";
+import { refreshWorkflowToday } from "../be/savings/rollup";
 import { executeReadOnlyQueryGated } from "./db-query";
 import {
   DbQueryConcurrencyCapError,
@@ -19,19 +21,40 @@ import {
 import { route } from "./route-def";
 import { json } from "./utils";
 
-/** Live facts are reused for this long, so page views do not rescan the runs. */
-const FACTS_TTL_MS = 10 * 60 * 1000;
-
 /**
  * The scans run through the bounded db-query executor: a child process with a
- * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so a
- * burst of requests can neither block the API's event loop nor pile up.
+ * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so they
+ * can neither block the API's event loop nor pile up.
  */
-const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
-  const result = await executeReadOnlyQueryGated(sql, params, getDbQueryHttpBudgetMs(), 10_000);
-  return result.rows.map((row) =>
-    Object.fromEntries(result.columns.map((column, i) => [column, row[i]])),
-  ) as T[];
+function boundedSql(budgetMs: () => number): SavingsSql {
+  return async <T>(sql: string, params: DbParam[]) => {
+    const result = await executeReadOnlyQueryGated(sql, params, budgetMs(), 10_000);
+    return result.rows.map((row) =>
+      Object.fromEntries(result.columns.map((column, i) => [column, row[i]])),
+    ) as T[];
+  };
+}
+
+/** Request-path scans (today's bucket of one workflow) use the HTTP db-query budget. */
+const requestSql = boundedSql(getDbQueryHttpBudgetMs);
+
+/** The router's step scan for one day takes about 10 s. */
+const ROLLUP_QUERY_BUDGET_MS = 60_000;
+
+/**
+ * Scans of the hourly rollup. They run in the background, so a full
+ * concurrency cap is waited out (up to about a minute) instead of failing the day.
+ */
+export const savingsRollupSql: SavingsSql = async <T>(sql: string, params: DbParam[]) => {
+  const run = boundedSql(() => ROLLUP_QUERY_BUDGET_MS);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run<T>(sql, params);
+    } catch (err) {
+      if (!(err instanceof DbQueryConcurrencyCapError) || attempt >= 20) throw err;
+      await Bun.sleep(Math.min(5_000, 250 * attempt));
+    }
+  }
 };
 
 const SavingsBandSchema = z.object({ p10: z.number(), p50: z.number(), p90: z.number() });
@@ -41,6 +64,8 @@ const SavingsJobRowSchema = z.object({
   workflowId: z.string(),
   name: z.string(),
   basis: z.literal("modelled"),
+  /** True when the enabled-only rule priced only the runs with a downstream effect (an event router). */
+  enabledOnlyRule: z.boolean(),
   runs: z.number().int(),
   substitutedRuns: z.number().int(),
   effectRuns: z.number().int(),
@@ -56,113 +81,82 @@ const SavingsJobRowSchema = z.object({
   agentOnlyUsdPerRun: z.number(),
 });
 
-const SavingsJobsResponseSchema = z.object({
+const SavingsTotalsSchema = z.object({
+  runs: z.number().int(),
+  substitutedRuns: z.number().int(),
+  enabledOnlyRuns: z.number().int(),
+  actualUsd: z.number(),
+  agentOnlyUsd: SavingsBandSchema,
+  savingUsd: SavingsBandSchema,
+  actualHours: z.number(),
+  hoursSaved: SavingsBandSchema,
+});
+
+const savingsMeta = {
   window: z.object({ start: z.string(), end: z.string(), days: z.number().int() }),
   tier: z.enum(SAVINGS_TIERS),
   calibrationModel: z.string(),
   calibratedAt: z.string(),
-  computedAt: z.string(),
-  /** False when there is nothing to show: no runs, or too many runs to compute live. */
+  /** Newest rollup time of the window's days; null before the first rollup. */
+  computedAt: z.string().nullable(),
+  /** False when there is nothing to show: the window is not computed yet, or had no runs. Never $0. */
   valid: z.boolean(),
-  reason: z.enum(["no-runs", "too-many-runs"]).nullable(),
+  reason: z.enum(["not-computed", "no-runs"]).nullable(),
+};
+
+const SavingsJobsResponseSchema = z.object({
+  ...savingsMeta,
   rows: z.array(SavingsJobRowSchema),
+  /** Sum of `rows`; the band is the single-job spread for one row and the fleet spread for more. */
+  total: SavingsTotalsSchema.nullable(),
 });
+
+const SavingsDailyResponseSchema = z.object({
+  ...savingsMeta,
+  /** p50 per UTC day, oldest first. The points add up to the window's p50 saving and actual cost. */
+  points: z.array(z.object({ day: z.string(), savingUsd: z.number(), actualUsd: z.number() })),
+});
+
+const windowQuery = {
+  days: z.enum(["7", "30", "90"]).default("30").transform(Number),
+  tier: z.enum(SAVINGS_TIERS).default("smart"),
+};
 
 const savingsJobsRoute = route({
   method: "get",
   path: "/api/savings/jobs",
   pattern: ["api", "savings", "jobs"],
-  summary: "Estimated automation savings for a workflow",
+  summary: "Estimated automation savings per workflow",
   description:
-    "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
   tags: ["Savings"],
   query: z.object({
-    workflowId: z.string().min(1),
-    days: z.enum(["7", "30", "90"]).default("30").transform(Number),
-    tier: z.enum(SAVINGS_TIERS).default("smart"),
+    workflowId: z.string().min(1).optional(),
+    kind: z.enum(["workflow"]).optional(),
+    ...windowQuery,
   }),
   responses: {
-    200: { description: "Savings rows for the workflow", schema: SavingsJobsResponseSchema },
-    400: { description: "Missing workflowId, or an unknown days or tier value" },
+    200: { description: "Savings rows", schema: SavingsJobsResponseSchema },
+    400: { description: "Neither workflowId nor kind, or an unknown days or tier value" },
     404: { description: "Workflow not found" },
-    408: { description: "A savings query ran past its time budget" },
-    429: { description: "Too many concurrent database queries; retry shortly" },
   },
-});
-
-const SavingsDailyResponseSchema = z.object({
-  window: z.object({ start: z.string(), end: z.string(), days: z.number().int() }),
-  tier: z.enum(SAVINGS_TIERS),
-  calibrationModel: z.string(),
-  calibratedAt: z.string(),
-  computedAt: z.string(),
-  valid: z.boolean(),
-  reason: z.enum(["no-runs", "too-many-runs"]).nullable(),
-  /** One point per UTC day in the window, oldest first; empty when not valid. */
-  points: z.array(
-    z.object({
-      day: z.string(),
-      /** p50; the points sum to the p50 saving of `/api/savings/jobs`. */
-      savingUsd: z.number(),
-      actualUsd: z.number(),
-    }),
-  ),
 });
 
 const savingsDailyRoute = route({
   method: "get",
   path: "/api/savings/daily",
   pattern: ["api", "savings", "daily"],
-  summary: "Daily automation savings for a workflow",
+  summary: "Daily automation savings of a workflow",
   description:
-    "The workflow's p50 saving and actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "The workflow's p50 saving and actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
   tags: ["Savings"],
-  query: z.object({
-    workflowId: z.string().min(1),
-    days: z.enum(["7", "30", "90"]).default("30").transform(Number),
-    tier: z.enum(SAVINGS_TIERS).default("smart"),
-  }),
+  query: z.object({ workflowId: z.string().min(1), ...windowQuery }),
   responses: {
-    200: {
-      description: "Daily savings points for the workflow",
-      schema: SavingsDailyResponseSchema,
-    },
+    200: { description: "Daily savings points", schema: SavingsDailyResponseSchema },
     400: { description: "Missing workflowId, or an unknown days or tier value" },
     404: { description: "Workflow not found" },
-    408: { description: "A savings query ran past its time budget" },
-    429: { description: "Too many concurrent database queries; retry shortly" },
   },
 });
-
-type CachedFacts = { at: number; start: string; end: string; result: Promise<WorkflowWindow> };
-const factsCache = new Map<string, CachedFacts>();
-
-/** Test hook. */
-export function resetSavingsCache(): void {
-  factsCache.clear();
-}
-
-function cachedWindow(
-  workflow: { id: string; definition: unknown },
-  days: number,
-  now: number,
-): CachedFacts {
-  const key = `${workflow.id}:${days}`;
-  const hit = factsCache.get(key);
-  if (hit && now - hit.at < FACTS_TTL_MS) return hit;
-  const end = new Date(now).toISOString();
-  const start = new Date(now - days * 86_400_000).toISOString();
-  const entry: CachedFacts = {
-    at: now,
-    start,
-    end,
-    result: computeWorkflowWindow(workflow, { start, end }, boundedSql),
-  };
-  // A failed computation is not cached.
-  void entry.result.catch(() => factsCache.delete(key));
-  factsCache.set(key, entry);
-  return entry;
-}
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
 const roundBand = (b: SavingsBand): SavingsBand => ({
@@ -190,13 +184,81 @@ export function roundToTotal(values: number[]): number[] {
   return floors.map((c) => c / 100);
 }
 
-/** Every UTC day from `start` to `end`, both inclusive. */
-function utcDays(start: string, end: string): string[] {
-  const out: string[] = [];
-  for (let t = Date.parse(start.slice(0, 10)); t <= Date.parse(end); t += 86_400_000) {
-    out.push(new Date(t).toISOString().slice(0, 10));
+function toRow(row: PricedWorkflow & { workflowId: string; name: string }) {
+  return {
+    kind: "workflow" as const,
+    workflowId: row.workflowId,
+    name: row.name,
+    basis: "modelled" as const,
+    enabledOnlyRule: row.enabledOnlyRule,
+    runs: row.runs,
+    substitutedRuns: row.substitutedRuns,
+    effectRuns: row.effectRuns,
+    enabledOnlyRuns: row.enabledOnlyRuns,
+    capApplied: row.capApplied,
+    opsPerRun: round2(row.opsPerRun),
+    actualUsd: round2(row.actualUsd),
+    agentOnlyUsd: roundBand(row.agentOnlyUsd),
+    savingUsd: roundBand(row.savingUsd),
+    actualHours: round2(row.actualHours),
+    agentOnlyHours: roundBand(row.agentOnlyHours),
+    hoursSaved: roundBand(row.hoursSaved),
+    agentOnlyUsdPerRun: round2(row.agentOnlyUsdPerRun),
+  };
+}
+
+function toTotals(t: SavingsTotals) {
+  return {
+    ...t,
+    actualUsd: round2(t.actualUsd),
+    agentOnlyUsd: roundBand(t.agentOnlyUsd),
+    savingUsd: roundBand(t.savingUsd),
+    actualHours: round2(t.actualHours),
+    hoursSaved: roundBand(t.hoursSaved),
+  };
+}
+
+function notFound(res: ServerResponse): true {
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Workflow not found" }));
+  return true;
+}
+
+/**
+ * One workflow: bring today's bucket up to date first when it has a run newer
+ * than the last rollup. Best effort: on a busy database the hourly bucket is served.
+ */
+async function readOne(workflowId: string, days: number, tier: (typeof SAVINGS_TIERS)[number]) {
+  const workflow = await getWorkflow(workflowId);
+  if (!workflow) return null;
+  const now = Date.now();
+  try {
+    await refreshWorkflowToday(workflow, requestSql, now);
+  } catch (err) {
+    if (!(err instanceof DbQueryConcurrencyCapError || err instanceof DbQueryTimeoutError))
+      throw err;
   }
-  return out;
+  return readWorkflowSavings({ days, tier, now, workflowId });
+}
+
+function meta(
+  read: { window: { start: string; end: string; days: number }; computedAt: string | null },
+  tier: (typeof SAVINGS_TIERS)[number],
+  valid: { complete: boolean; hasRows: boolean },
+) {
+  return {
+    window: read.window,
+    tier,
+    calibrationModel: CALIBRATION_MODEL,
+    calibratedAt: CALIBRATED_AT,
+    computedAt: read.computedAt,
+    valid: valid.complete && valid.hasRows,
+    reason: !valid.complete
+      ? ("not-computed" as const)
+      : valid.hasRows
+        ? null
+        : ("no-runs" as const),
+  };
 }
 
 export async function handleSavings(
@@ -205,62 +267,20 @@ export async function handleSavings(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  const isJobs = savingsJobsRoute.match(req.method, pathSegments);
-  if (!isJobs && !savingsDailyRoute.match(req.method, pathSegments)) return false;
-  const parsed = isJobs
-    ? await savingsJobsRoute.parse(req, res, pathSegments, queryParams)
-    : await savingsDailyRoute.parse(req, res, pathSegments, queryParams);
-  if (!parsed) return true;
-  const { workflowId, days, tier } = parsed.query;
-  const workflow = await getWorkflow(workflowId);
-  if (!workflow) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Workflow not found" }));
-    return true;
-  }
-  const entry = cachedWindow(workflow, days, Date.now());
-  let result: WorkflowWindow;
-  try {
-    result = await entry.result;
-  } catch (err) {
-    if (err instanceof DbQueryConcurrencyCapError) {
-      res.setHeader("Retry-After", "1");
-      json(res, { error: "db_query_concurrency_cap", message: err.message }, 429);
-      return true;
-    }
-    if (err instanceof DbQueryTimeoutError) {
-      json(res, { error: "db_query_timeout", message: err.message }, 408);
-      return true;
-    }
-    throw err;
-  }
-  const base = {
-    window: { start: entry.start, end: entry.end, days },
-    tier,
-    calibrationModel: CALIBRATION_MODEL,
-    calibratedAt: CALIBRATED_AT,
-    computedAt: new Date(entry.at).toISOString(),
-  };
-  if (result.status === "too-many-runs" || result.facts.runs === 0) {
-    const reason = result.status === "too-many-runs" ? "too-many-runs" : "no-runs";
-    if (isJobs) savingsJobsRoute.respond(res, 200, { ...base, valid: false, reason, rows: [] });
-    else savingsDailyRoute.respond(res, 200, { ...base, valid: false, reason, points: [] });
-    return true;
-  }
-
-  if (!isJobs) {
-    const split = new Map(
-      splitByDay(result.facts, result.byDay, { tier, days }).map((p) => [p.day, p]),
-    );
-    const dayList = utcDays(entry.start, entry.end);
-    const saving = roundToTotal(dayList.map((d) => split.get(d)?.savingUsd ?? 0));
-    const actual = roundToTotal(dayList.map((d) => split.get(d)?.actualUsd ?? 0));
+  if (savingsDailyRoute.match(req.method, pathSegments)) {
+    const parsed = await savingsDailyRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { workflowId, days, tier } = parsed.query;
+    const read = await readOne(workflowId, days, tier);
+    if (!read) return notFound(res);
+    const hasRows = read.rows.length > 0;
+    const points = read.complete && hasRows ? read.points : [];
+    const saving = roundToTotal(points.map((p) => p.savingUsd));
+    const actual = roundToTotal(points.map((p) => p.actualUsd));
     savingsDailyRoute.respond(res, 200, {
-      ...base,
-      valid: true,
-      reason: null,
-      points: dayList.map((day, i) => ({
-        day,
+      ...meta(read, tier, { complete: read.complete, hasRows }),
+      points: points.map((p, i) => ({
+        day: p.day,
         savingUsd: saving[i] as number,
         actualUsd: actual[i] as number,
       })),
@@ -268,32 +288,23 @@ export async function handleSavings(
     return true;
   }
 
-  const priced = priceWorkflow(result.facts, { tier, days, band: "job" });
+  if (!savingsJobsRoute.match(req.method, pathSegments)) return false;
+  const parsed = await savingsJobsRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  const { workflowId, kind, days, tier } = parsed.query;
+  if (!workflowId && !kind) {
+    json(res, { error: "Pass workflowId or kind=workflow" }, 400);
+    return true;
+  }
+  const read = workflowId
+    ? await readOne(workflowId, days, tier)
+    : await readWorkflowSavings({ days, tier, now: Date.now() });
+  if (!read) return notFound(res);
+  const show = read.complete;
   savingsJobsRoute.respond(res, 200, {
-    ...base,
-    valid: true,
-    reason: null,
-    rows: [
-      {
-        kind: "workflow",
-        workflowId: workflow.id,
-        name: workflow.name,
-        basis: "modelled",
-        runs: priced.runs,
-        substitutedRuns: priced.substitutedRuns,
-        effectRuns: priced.effectRuns,
-        enabledOnlyRuns: priced.enabledOnlyRuns,
-        capApplied: priced.capApplied,
-        opsPerRun: round2(priced.opsPerRun),
-        actualUsd: round2(priced.actualUsd),
-        agentOnlyUsd: roundBand(priced.agentOnlyUsd),
-        savingUsd: roundBand(priced.savingUsd),
-        actualHours: round2(priced.actualHours),
-        agentOnlyHours: roundBand(priced.agentOnlyHours),
-        hoursSaved: roundBand(priced.hoursSaved),
-        agentOnlyUsdPerRun: round2(priced.agentOnlyUsdPerRun),
-      },
-    ],
+    ...meta(read, tier, { complete: read.complete, hasRows: read.rows.length > 0 }),
+    rows: show ? read.rows.map(toRow) : [],
+    total: show && read.total ? toTotals(read.total) : null,
   });
   return true;
 }

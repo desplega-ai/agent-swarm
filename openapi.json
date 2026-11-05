@@ -51430,8 +51430,8 @@
     },
     "/api/savings/jobs": {
       "get": {
-        "summary": "Estimated automation savings for a workflow",
-        "description": "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "summary": "Estimated automation savings per workflow",
+        "description": "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51446,8 +51446,19 @@
               "type": "string",
               "minLength": 1
             },
-            "required": true,
+            "required": false,
             "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workflow"
+              ]
+            },
+            "required": false,
+            "name": "kind",
             "in": "query"
           },
           {
@@ -51482,7 +51493,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Savings rows for the workflow",
+            "description": "Savings rows",
             "content": {
               "application/json": {
                 "schema": {
@@ -51523,7 +51534,10 @@
                       "type": "string"
                     },
                     "computedAt": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "valid": {
                       "type": "boolean"
@@ -51534,8 +51548,8 @@
                         "null"
                       ],
                       "enum": [
+                        "not-computed",
                         "no-runs",
-                        "too-many-runs",
                         null
                       ]
                     },
@@ -51561,6 +51575,9 @@
                             "enum": [
                               "modelled"
                             ]
+                          },
+                          "enabledOnlyRule": {
+                            "type": "boolean"
                           },
                           "runs": {
                             "type": "integer"
@@ -51671,6 +51688,7 @@
                           "workflowId",
                           "name",
                           "basis",
+                          "enabledOnlyRule",
                           "runs",
                           "substitutedRuns",
                           "effectRuns",
@@ -51686,6 +51704,96 @@
                           "agentOnlyUsdPerRun"
                         ]
                       }
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
                     }
                   },
                   "required": [
@@ -51696,14 +51804,15 @@
                     "computedAt",
                     "valid",
                     "reason",
-                    "rows"
+                    "rows",
+                    "total"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "Missing workflowId, or an unknown days or tier value",
+            "description": "Neither workflowId nor kind, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -51721,34 +51830,14 @@
                 }
               }
             }
-          },
-          "408": {
-            "description": "A savings query ran past its time budget",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many concurrent database queries; retry shortly",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         }
       }
     },
     "/api/savings/daily": {
       "get": {
-        "summary": "Daily automation savings for a workflow",
-        "description": "The workflow's p50 saving and actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "summary": "Daily automation savings of a workflow",
+        "description": "The workflow's p50 saving and actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
         "tags": [
           "Savings"
         ],
@@ -51799,7 +51888,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Daily savings points for the workflow",
+            "description": "Daily savings points",
             "content": {
               "application/json": {
                 "schema": {
@@ -51840,7 +51929,10 @@
                       "type": "string"
                     },
                     "computedAt": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "valid": {
                       "type": "boolean"
@@ -51851,8 +51943,8 @@
                         "null"
                       ],
                       "enum": [
+                        "not-computed",
                         "no-runs",
-                        "too-many-runs",
                         null
                       ]
                     },
@@ -51905,26 +51997,6 @@
           },
           "404": {
             "description": "Workflow not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "408": {
-            "description": "A savings query ran past its time budget",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many concurrent database queries; retry shortly",
             "content": {
               "application/json": {
                 "schema": {

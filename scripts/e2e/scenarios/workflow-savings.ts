@@ -1,6 +1,7 @@
-// Automation savings for one workflow: a run is priced, its daily series sums to
-// the same saving, an idle workflow is not valid (never $0), and bad input is rejected.
-import { asRecord, asRecords, expect, expectStatus } from "../http";
+// Automation savings, read from the hourly rollup: a run is priced on the
+// detail route right away, the daily points add up to it, the list route
+// answers, an idle workflow is not valid (never $0), and bad input is rejected.
+import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
   createWorkflow,
@@ -23,7 +24,12 @@ export const workflowSavings: Scenario = {
       const { runId } = await triggerWorkflow(ctx, ran);
       await expectRunStatus(ctx, runId, "completed");
 
+      // The rollup backfills its days on boot; wait for the first tick.
       let response = await ctx.api("GET", `/api/savings/jobs?workflowId=${ran}&days=7&tier=smart`);
+      await pollUntil(async () => {
+        response = await ctx.api("GET", `/api/savings/jobs?workflowId=${ran}&days=7&tier=smart`);
+        return asRecord(response.json).reason !== "not-computed";
+      }, 30_000);
       expectStatus(response, [200], "savings for a workflow with a run");
       let json = asRecord(response.json);
       expect(json.valid === true && json.reason === null, `valid savings ${response.text}`);
@@ -38,12 +44,12 @@ export const workflowSavings: Scenario = {
         `saving band ordered ${JSON.stringify(band)}`,
       );
 
-      // The daily series sums to the same p50 saving.
+      // The daily series sums to the same p50 saving, to the cent.
       response = await ctx.api("GET", `/api/savings/daily?workflowId=${ran}&days=7&tier=smart`);
       expectStatus(response, [200], "daily savings for a workflow with a run");
       const daily = asRecord(response.json);
       const points = asRecords(daily, "points");
-      expect(daily.valid === true && points.length === 8, `8 daily points ${response.text}`);
+      expect(daily.valid === true && points.length === 7, `7 daily points ${response.text}`);
       const pointCents = Math.round(points.reduce((s, p) => s + Number(p.savingUsd), 0) * 100);
       expect(
         pointCents === Math.round(Number(band.p50) * 100),
@@ -60,6 +66,10 @@ export const workflowSavings: Scenario = {
       response = await ctx.api("GET", `/api/savings/daily?workflowId=missing-${ctx.nonce}`);
       expectStatus(response, [404], "daily: unknown workflow");
 
+      response = await ctx.api("GET", "/api/savings/jobs?kind=workflow&days=7");
+      expectStatus(response, [200], "savings for every workflow");
+      expect(Array.isArray(asRecord(response.json).rows), `list rows ${response.text}`);
+
       response = await ctx.api("GET", `/api/savings/jobs?workflowId=${idle}`);
       expectStatus(response, [200], "savings for an idle workflow");
       json = asRecord(response.json);
@@ -73,7 +83,7 @@ export const workflowSavings: Scenario = {
       response = await ctx.api("GET", `/api/savings/jobs?workflowId=${ran}&tier=huge`);
       expectStatus(response, [400], "unknown tier");
       response = await ctx.api("GET", "/api/savings/jobs");
-      expectStatus(response, [400], "missing workflowId");
+      expectStatus(response, [400], "neither workflowId nor kind");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
       await deleteWorkflowQuietly(ctx, idle);
