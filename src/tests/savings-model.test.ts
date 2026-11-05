@@ -107,8 +107,28 @@ describe("savings model", () => {
       { tier: "smart", days: 30, band: "job" },
     );
     expect(priced.actualUsd).toBeCloseTo(11, 9);
+    expect(priced.measuredUsd).toBeCloseTo(11, 9);
     expect(priced.agentOnlyUsd.p50 - 10).toBeCloseTo(4 * priced.agentOnlyUsdPerRun, 9);
     expect(priced.actualHours).toBeCloseTo(3, 9);
+  });
+
+  test("measured spend is reported unscaled; the scaled estimate keeps the saving", () => {
+    // One $100 manual run and 999 skipped runs on one day.
+    const window = facts({ runs: 1000, countedRuns: 1, opsSum: 10, agentTasks: 1, agentUsd: 100 });
+    const priced = priceWorkflow(window, { tier: "smart", days: 30, band: "job" });
+    expect(priced.substitutedRuns).toBe(1);
+    expect(priced.measuredUsd).toBe(100);
+    // The estimator's actual side is the scaled estimate, not the $100 measured.
+    expect(priced.actualUsd).toBeCloseTo(0.1, 9);
+    // Kept agent spend cancels: the saving is one substituted run at the unit cost.
+    expect(priced.savingUsd.p50).toBeCloseTo(priced.agentOnlyUsdPerRun, 9);
+    const [point] = splitByDay(window, [{ day: "2026-10-01", ...window }], {
+      tier: "smart",
+      days: 30,
+    });
+    expect(point?.measuredUsd).toBe(100);
+    expect(point?.actualUsd).toBeCloseTo(0.1, 9);
+    expect(point?.savingUsd).toBeCloseTo(priced.savingUsd.p50, 9);
   });
 
   test("recorded LLM cost replaces the token estimate", () => {
@@ -191,9 +211,11 @@ describe("savings model", () => {
       ],
       { tier: "smart", days: 1 },
     );
-    const sum = (key: "savingUsd" | "actualUsd") => points.reduce((s, p) => s + p[key], 0);
+    const sum = (key: "savingUsd" | "actualUsd" | "measuredUsd") =>
+      points.reduce((s, p) => s + p[key], 0);
     expect(sum("savingUsd")).toBeCloseTo(priced.savingUsd.p50, 9);
     expect(sum("actualUsd")).toBeCloseTo(priced.actualUsd, 9);
+    expect(sum("measuredUsd")).toBeCloseTo(priced.measuredUsd, 9);
     // The 24 counted schedule runs split 288:144; the manual run stays on day 2.
     const unit = priced.agentOnlyUsdPerRun;
     const share = priced.substitutedRuns / window.runs;

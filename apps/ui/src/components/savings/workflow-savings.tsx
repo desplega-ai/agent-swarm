@@ -86,7 +86,7 @@ function SavingsKpis({ row, note, days }: { row: SavingsJobRow; note: string; da
         label={`Saved (${days}d)`}
         value={<span className="font-mono tabular-nums">{formatUsd(row.savingUsd.p50)}</span>}
         detail={`${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)}`}
-        info={`What these runs would have cost as agent tasks, minus what they cost. The range is the 80% band. ${note}`}
+        info={`What these runs would have cost as agent tasks, minus their estimated cost. The range is the 80% band. ${note}`}
       />
       <StatPanel
         label="Agent-hours saved"
@@ -105,15 +105,10 @@ function SavingsKpis({ row, note, days }: { row: SavingsJobRow; note: string; da
         info="Runs an agent would have had to do. Skipped and cancelled runs do not count, and scheduled runs count at most 24 a day unless they started an agent task or a workflow."
       />
       <StatPanel
-        label="Actual vs agent-only"
-        value={
-          <span className="font-mono tabular-nums">
-            {formatUsd(row.actualUsd)}{" "}
-            <span className="text-muted-foreground">vs {formatUsd(row.agentOnlyUsd.p50)}</span>
-          </span>
-        }
-        detail={`Agent-only ${formatUsd(row.agentOnlyUsd.p10)} to ${formatUsd(row.agentOnlyUsd.p90)}`}
-        info="What the counted runs cost (agent tasks they started, their reviews, LLM calls) next to what agent tasks alone would have cost."
+        label="Measured spend"
+        value={<span className="font-mono tabular-nums">{formatUsd(row.measuredUsd)}</span>}
+        detail={`Est. ${formatUsd(row.actualUsd)} for substituted runs vs ${formatUsd(row.agentOnlyUsd.p50)} agent-only`}
+        info="What all the window's runs cost: agent tasks they started, their reviews, LLM calls. The estimate scales it to the substituted share of runs; the saving subtracts that estimate from the agent-only cost."
       />
     </div>
   );
@@ -173,7 +168,11 @@ export function WorkflowSavingsTab({ workflowId }: { workflowId: string }) {
               <DetailRow label="Agent-only cost per run">
                 {formatUsd(row.agentOnlyUsdPerRun)}
               </DetailRow>
-              <DetailRow label="Actual cost">{formatUsd(row.actualUsd)}</DetailRow>
+              <DetailRow label="Measured spend">{formatUsd(row.measuredUsd)}</DetailRow>
+              <DetailRow label="Substituted-run cost (est.)">{formatUsd(row.actualUsd)}</DetailRow>
+              <DetailRow label="Agent-only cost (est.)">
+                {formatUsd(row.agentOnlyUsd.p50)}
+              </DetailRow>
             </dl>
           </CardContent>
         </Card>
@@ -185,8 +184,12 @@ export function WorkflowSavingsTab({ workflowId }: { workflowId: string }) {
             <p>
               Each counted run is priced as an agent session whose length grows with the run's
               deterministic operations, plus a lead review. Agent tasks the workflow started count
-              at their real cost on both sides. The saving is that agent-only cost minus what the
-              runs cost.
+              at their cost on both sides. The saving is that agent-only cost minus the runs' cost.
+            </p>
+            <p>
+              The runs' cost in the saving is an estimate: the measured spend scaled by substituted
+              runs over all runs, as if spend were spread evenly. Measured spend is the unscaled
+              total.
             </p>
             <p>
               Covers this workflow's own runs; sub-workflow runs are not included. Scheduled runs
