@@ -932,6 +932,33 @@ describe("agent-fs provisioning seeder", () => {
       expect(records).toHaveLength(0);
     });
 
+    test("an org URL set by an admin is kept with no write", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(
+        patchStub(records, () => Response.json({}), {
+          id: "shared-org",
+          swarmUrl: "https://admin-choice.example.test",
+        }),
+      );
+      expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("kept");
+      expect(records.map((record) => record.method)).toEqual(["GET"]);
+    });
+
+    test("an empty or null org URL gets the swarm URL", async () => {
+      process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+      await seedSharedConfig();
+      for (const swarmUrl of ["", "  ", null]) {
+        const records: RequestRecord[] = [];
+        setAgentFsProvisionFetchForTests(
+          patchStub(records, () => Response.json({}), { id: "shared-org", swarmUrl }),
+        );
+        expect(await syncAgentFsOrgSwarmUrl("https://swarm.example.test")).toBe("set");
+        expect(records.map((record) => record.method)).toEqual(["GET", "PATCH"]);
+      }
+    });
+
     test("other failures throw, and an unprovisioned org is skipped with no request", async () => {
       process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
       await seedSharedConfig();

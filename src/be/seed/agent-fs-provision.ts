@@ -271,13 +271,15 @@ export async function resolveAgentFsSharedContext(): Promise<{
  * "Continue with <swarm>" (`PATCH /orgs/{orgId}` with `{ swarmUrl }`). Runs
  * once per boot, after the seeders, with the explicit `APP_URL`. No URL (the
  * hosted fallback is not this swarm) or an unprovisioned shared org is
- * "skipped": it never provisions. The org is read first, and a matching value
- * is "unchanged" with no write. An agent-fs without the route (404 or 405,
- * for example 0.18.17) is "unsupported", not an error.
+ * "skipped": it never provisions. The org is read first, and the swarm writes
+ * only when its `swarmUrl` is empty: an org admin can set it in the agent-fs
+ * app, and the swarm never overwrites that. A matching value is "unchanged",
+ * a different one is "kept", and neither writes. An agent-fs without the
+ * route (404 or 405, for example 0.18.17) is "unsupported", not an error.
  */
 export async function syncAgentFsOrgSwarmUrl(
   swarmUrl: string | undefined,
-): Promise<"set" | "unchanged" | "unsupported" | "skipped"> {
+): Promise<"set" | "unchanged" | "kept" | "unsupported" | "skipped"> {
   if (!swarmUrl) return "skipped";
   const apiUrl = await resolveApiUrl();
   const apiKey =
@@ -291,8 +293,10 @@ export async function syncAgentFsOrgSwarmUrl(
   const headers = { authorization: `Bearer ${apiKey}` };
   try {
     const org = await agentFsRequest<{ swarmUrl?: unknown }>(apiUrl, orgPath, { headers });
+    const current = typeof org?.swarmUrl === "string" ? org.swarmUrl.trim() : "";
     // agent-fs drops the trailing slash when it stores the value.
-    if (org?.swarmUrl === swarmUrl.replace(/\/+$/, "")) return "unchanged";
+    if (current === swarmUrl.replace(/\/+$/, "")) return "unchanged";
+    if (current) return "kept";
     await agentFsRequest(apiUrl, orgPath, { method: "PATCH", headers, body: { swarmUrl } });
     return "set";
   } catch (error) {

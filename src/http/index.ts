@@ -814,10 +814,10 @@ httpServer
       );
     });
 
-    // The shared agent-fs org learns this swarm's URL on every boot, for the
-    // live app's "Continue with <swarm>". Only an explicit APP_URL: the hosted
-    // fallback would point a self-hosted org at another swarm. Not awaited:
-    // agent-fs is optional.
+    // The shared agent-fs org learns this swarm's URL at boot, for the live
+    // app's "Continue with <swarm>", while the org has none. A URL that an org
+    // admin set stays. Only an explicit APP_URL: the hosted fallback would
+    // point a self-hosted org at another swarm. Not awaited: agent-fs is optional.
     void import("../be/seed/agent-fs-provision")
       .then(({ syncAgentFsOrgSwarmUrl }) => syncAgentFsOrgSwarmUrl(getConfiguredAppUrls()[0]))
       .catch((err: unknown) => {
