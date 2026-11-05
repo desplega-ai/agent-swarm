@@ -51,3 +51,21 @@ export const monacoDarkTheme = {
     "editor.inactiveSelectionBackground": "#388bfd22",
   },
 };
+
+// Markdown snippets (MarkdownView): the same token colors on a transparent
+// editor, so the snippet's muted card shows through.
+const TRANSPARENT_EDITOR = {
+  "editor.background": "#00000000",
+  "editor.lineHighlightBackground": "#00000000",
+  "editor.lineHighlightBorder": "#00000000",
+};
+
+export const monacoSnippetLightTheme = {
+  ...monacoLightTheme,
+  colors: { ...monacoLightTheme.colors, ...TRANSPARENT_EDITOR },
+};
+
+export const monacoSnippetDarkTheme = {
+  ...monacoDarkTheme,
+  colors: { ...monacoDarkTheme.colors, ...TRANSPARENT_EDITOR },
+};
