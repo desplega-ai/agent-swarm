@@ -793,6 +793,7 @@ describe("a superseded task holds its profile until its resume exists", () => {
       agentIds: [],
       openTaskCount: 0,
       scheduleIds: [],
+      fallbackOf: [],
     });
     expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("deleted");
 

@@ -1154,6 +1154,10 @@ class ApiClient {
       throw new Error("Invalid feedback endpoint");
     }
 
+    if (parsedEndpoint.username || parsedEndpoint.password) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
     const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
     if (
       parsedEndpoint.protocol !== "https:" &&

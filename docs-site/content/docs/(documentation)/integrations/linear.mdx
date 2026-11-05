@@ -61,7 +61,14 @@ LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callbac
 
 ### 3. Complete OAuth
 
-Start the server and visit `<MCP_BASE_URL>/api/trackers/linear/authorize` in a browser to complete the OAuth flow. The token is encrypted at rest in `swarm_config`.
+Start the server, then click **Connect to Linear** on the dashboard's Linear integration page. Starting the flow requires the swarm API key (or a lead/user token with `oauth-authorization.manage`), so a bare browser visit to the authorize route returns 401. Without the dashboard, fetch the consent URL with your key and open it:
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "<MCP_BASE_URL>/api/trackers/linear/authorize?format=json" | jq -r .authorizeUrl
+```
+
+The token is encrypted at rest in `swarm_config`.
 
 ## How it works
 

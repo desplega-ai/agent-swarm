@@ -411,6 +411,7 @@ flowchart TD
 ```
 
 `crash_recovery` and `graceful_shutdown` resumes prefer their original agent when that agent is reachable and has capacity.
+A `provider_fallback` resume (a worker's `POST /api/tasks/{id}/supersede` after a provider error, runbooks/model-tiers.md § Fallbacks on provider errors) always pins to its agent, ignoring capacity, reachability and the fresh gate: the server picked its fallback profile against that agent alone, so a full slot (another claim took the parent's freed one) leaves the resume pending on the agent instead of the pool. Lead-only work on an agent that cannot hold a lead-only pin gets no fallback. When no fallback is left, the route leaves the task running and the worker fails it; nothing is superseded.
 Reachability includes sleeping agents on enabled provisionable pools with closed circuits when runtime pools are enabled.
 The crash and graceful pin switches retain their existing behavior. Other resume reasons still require fresh activity.
 A Lead-only task can pin only to an eligible Lead. Recovery uses the current Lead when its original agent is a worker.
@@ -473,10 +474,12 @@ if proposed.action == fail:
     continue
 
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
-resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
+resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown | provider_fallback):
     # after create: carryUnhandledSteering(parent, resume) (see below)
     preferredAgentId = undefined
-    if parent.agentId:
+    if reason == provider_fallback and fallback picked:   # nextFallback, before supersede
+        preferredAgentId = parent.agentId                  # no capacity / reachability / fresh gate
+    elif parent.agentId:
         cand = getAgentById(parent.agentId)
         if cand and isAgentReachable(cand) and activeCount(cand) < cand.maxTasks:
             isCrash = (reason == crash_recovery) and HEARTBEAT_PIN_CRASH_RESUME
@@ -487,7 +490,9 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     tags = [auto-resume, reason:<r>, resume-generation:<n>]
     if reason == crash_recovery and preferredAgentId: tags += [crash-recovery-pin]   # mark a GENUINE pin
     if reason == graceful_shutdown and preferredAgentId: tags += [graceful-shutdown-pin]
-    createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
+    model = provider_fallback ? { profile: pick } : inheritedModelSelection(parent)
+    createTaskExtended(resume, agentId = preferredAgentId, tags = tags, ...model,
+                       fallbackHops = parent.fallbackHops + (provider_fallback ? [hop] : []))
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 # supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:

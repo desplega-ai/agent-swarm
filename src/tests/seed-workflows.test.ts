@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb, listWorkflows, updateWorkflow } from "../be/db";
+import { closeDb, computeContentHash, initDb, listWorkflows, updateWorkflow } from "../be/db";
 import { getSeedState, runSeeder } from "../be/seed";
+import { recordSeedState } from "../be/seed/state-db";
 import {
+  canonicalJson,
   createWorkflowsSeeder,
   loadSeedWorkflows,
+  seededWorkflowState,
   type WorkflowTemplateSource,
 } from "../be/seed/workflows-seeder";
+import { snapshotAndUpdateWorkflow } from "../workflows/version";
 
 const TEST_DB_PATH = "./test-seed-workflows.sqlite";
 
@@ -20,7 +24,11 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function workflowSource(template = "Do the work.", description = "Seeded workflow.") {
+function workflowSource(
+  template = "Do the work.",
+  description = "Seeded workflow.",
+  input: Record<string, string> = { channel: "" },
+) {
   return {
     config: JSON.stringify({
       name: "test-seeded-workflow",
@@ -31,9 +39,42 @@ function workflowSource(template = "Do the work.", description = "Seeded workflo
     }),
     content: `# Test\n\n\`\`\`json\n${JSON.stringify({
       nodes: [{ id: "work", type: "agent-task", config: { template } }],
+      input,
     })}\n\`\`\``,
   } satisfies WorkflowTemplateSource;
 }
+
+/**
+ * Overwrite the recorded seed state with the hash older releases stored: the
+ * whole template workflow, operator settings included.
+ */
+async function recordLegacySeedState(source: WorkflowTemplateSource): Promise<void> {
+  const [workflow] = loadSeedWorkflows([source]);
+  await recordSeedState("workflow", workflow!.name, computeContentHash(canonicalJson(workflow)));
+}
+
+/** A real node edit on top of operator settings. */
+const NODE_EDIT = {
+  nodes: [{ id: "ui-edit", type: "agent-task", config: { template: "Edited." } }],
+  onNodeFailure: "fail",
+} as const;
+
+/** Operator settings, made the way the update-workflow tool makes them. */
+async function tuneSettings(id: string): Promise<void> {
+  await snapshotAndUpdateWorkflow(id, {
+    input: { channel: "C123" },
+    enabled: true,
+    description: "Tuned by the operator.",
+    cooldown: { hours: 22, from: "start" },
+  });
+}
+
+const TUNED = {
+  input: { channel: "C123" },
+  enabled: true,
+  description: "Tuned by the operator.",
+  cooldown: { hours: 22, from: "start" },
+};
 
 /** A zero-config candidate: no requires, no placeholders — eligible for auto-enable. */
 function zeroConfigWorkflowSource(opts?: {
@@ -175,21 +216,135 @@ describe("workflows seeder", () => {
     expect(second).toMatchObject({ skippedUnchanged: 1, updated: 0, failed: [] });
   });
 
-  test("preserves a workflow enabled by the operator", async () => {
+  test("an input-only edit still gets the template update and keeps the live input", async () => {
     await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
     const seeded = await getWorkflow();
-    await updateWorkflow(seeded!.id, { enabled: true });
+    await snapshotAndUpdateWorkflow(seeded!.id, { input: { channel: "C123" } });
+
+    const update = createWorkflowsSeeder([workflowSource("Source update.")]);
+    const result = await runSeeder(update, { quiet: true });
+    expect(result).toMatchObject({ updated: 1, skippedUserModified: 0, failed: [] });
+    const live = await getWorkflow();
+    expect(live?.definition.nodes[0]?.config.template).toBe("Source update.");
+    expect(live?.input).toEqual({ channel: "C123" });
+    expect((await getSeedState("workflow", live!.name))?.seededHash).toBe(
+      update.items()[0]!.contentHash,
+    );
+    expect(await seededWorkflowState(live!)).toBe("pristine");
+  });
+
+  test("a template update keeps every operator setting", async () => {
+    await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+    await tuneSettings((await getWorkflow())!.id);
+
+    const result = await runSeeder(
+      createWorkflowsSeeder([workflowSource("Source update.", "New template description.")]),
+      { quiet: true },
+    );
+    expect(result).toMatchObject({ updated: 1, failed: [] });
+    const live = await getWorkflow();
+    expect(live).toMatchObject(TUNED);
+    expect(live?.definition.nodes[0]?.config.template).toBe("Source update.");
+    expect(await seededWorkflowState(live!)).toBe("pristine");
+  });
+
+  test("a template update adds new input keys without touching live values", async () => {
+    await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+    await snapshotAndUpdateWorkflow((await getWorkflow())!.id, { input: { channel: "C123" } });
+
+    await runSeeder(
+      createWorkflowsSeeder([
+        workflowSource("Source update.", undefined, { channel: "", newKey: "default" }),
+      ]),
+      { quiet: true },
+    );
+    expect((await getWorkflow())?.input).toEqual({ channel: "C123", newKey: "default" });
+  });
+
+  test("preserves a node edit made together with operator settings", async () => {
+    await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+    const seeded = await getWorkflow();
+    await tuneSettings(seeded!.id);
+    await snapshotAndUpdateWorkflow(seeded!.id, { definition: NODE_EDIT });
 
     const result = await runSeeder(createWorkflowsSeeder([workflowSource("Source update.")]), {
       quiet: true,
     });
-    expect(result.skippedUserModified).toBe(1);
-    expect(await getWorkflow()).toMatchObject({
-      enabled: true,
-      definition: {
-        nodes: [{ id: "work", type: "agent-task", config: { template: "Do the work." } }],
-        onNodeFailure: "fail",
-      },
+    expect(result).toMatchObject({ updated: 0, skippedUserModified: 1, failed: [] });
+    const live = await getWorkflow();
+    expect(live?.definition.nodes[0]?.id).toBe("ui-edit");
+    expect(await seededWorkflowState(live!)).toBe("edited");
+  });
+
+  describe("legacy whole-workflow seed state", () => {
+    test("an input-only edit with a seeded snapshot gets the update and the state migrates", async () => {
+      await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+      await recordLegacySeedState(workflowSource());
+      await tuneSettings((await getWorkflow())!.id);
+      // Before the update the workflow still reads pristine (the scheduler's view).
+      expect(await seededWorkflowState((await getWorkflow())!)).toBe("pristine");
+
+      const update = createWorkflowsSeeder([workflowSource("Source update.")]);
+      const result = await runSeeder(update, { quiet: true });
+      expect(result).toMatchObject({ updated: 1, skippedUserModified: 0, failed: [] });
+      const live = await getWorkflow();
+      expect(live).toMatchObject(TUNED);
+      expect(live?.definition.nodes[0]?.config.template).toBe("Source update.");
+      expect((await getSeedState("workflow", live!.name))?.seededHash).toBe(
+        update.items()[0]!.contentHash,
+      );
+      expect(await seededWorkflowState(live!)).toBe("pristine");
+    });
+
+    test("an untouched workflow gets the update", async () => {
+      await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+      await recordLegacySeedState(workflowSource());
+
+      const result = await runSeeder(createWorkflowsSeeder([workflowSource("Source update.")]), {
+        quiet: true,
+      });
+      expect(result).toMatchObject({ updated: 1, failed: [] });
+      expect((await getWorkflow())?.definition.nodes[0]?.config.template).toBe("Source update.");
+    });
+
+    test("a node edit is preserved", async () => {
+      await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+      await recordLegacySeedState(workflowSource());
+      const seeded = await getWorkflow();
+      await snapshotAndUpdateWorkflow(seeded!.id, {
+        input: { channel: "C123" },
+        definition: NODE_EDIT,
+      });
+
+      const result = await runSeeder(createWorkflowsSeeder([workflowSource("Source update.")]), {
+        quiet: true,
+      });
+      expect(result).toMatchObject({ updated: 0, skippedUserModified: 1, failed: [] });
+      expect((await getWorkflow())?.definition.nodes[0]?.id).toBe("ui-edit");
+    });
+
+    test("a settings edit with no seeded snapshot is preserved", async () => {
+      await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+      await recordLegacySeedState(workflowSource());
+      await updateWorkflow((await getWorkflow())!.id, { input: { channel: "C123" } });
+
+      const result = await runSeeder(createWorkflowsSeeder([workflowSource("Source update.")]), {
+        quiet: true,
+      });
+      expect(result).toMatchObject({ updated: 0, skippedUserModified: 1, failed: [] });
+      expect(await seededWorkflowState((await getWorkflow())!)).toBe("edited");
+    });
+
+    test("a workflow already matching the template re-baselines to the new hash", async () => {
+      const seeder = createWorkflowsSeeder([workflowSource()]);
+      await runSeeder(seeder, { quiet: true });
+      await recordLegacySeedState(workflowSource());
+
+      const result = await runSeeder(seeder, { quiet: true });
+      expect(result).toMatchObject({ skippedUnchanged: 1, updated: 0, failed: [] });
+      expect((await getSeedState("workflow", "test-seeded-workflow"))?.seededHash).toBe(
+        seeder.items()[0]!.contentHash,
+      );
     });
   });
 
@@ -208,6 +363,7 @@ describe("workflows seeder", () => {
     });
     expect(result.skippedUserModified).toBe(1);
     expect((await getWorkflow())?.definition.nodes[0]?.id).toBe("ui-edit");
+    expect(await seededWorkflowState((await getWorkflow())!)).toBe("edited");
   });
 
   test("updates a pristine workflow when its template changes", async () => {

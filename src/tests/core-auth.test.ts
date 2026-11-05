@@ -98,16 +98,17 @@ describe("handleCore auth middleware (route() auth.apiKey=false is honored)", ()
     expect(res.status).not.toBe(401);
   });
 
-  test("Linear webhook/authorize/callback are still public", async () => {
-    for (const path of [
-      "/api/trackers/linear/authorize",
-      "/api/trackers/linear/callback",
-      "/api/trackers/linear/webhook",
-    ]) {
+  test("Linear webhook/callback are still public", async () => {
+    for (const path of ["/api/trackers/linear/callback", "/api/trackers/linear/webhook"]) {
       const method = path.endsWith("/webhook") ? "POST" : "GET";
       const res = await fetch(`http://localhost:${port}${path}`, { method });
       expect(res.status).not.toBe(401);
     }
+  });
+
+  test("Linear authorize requires a Bearer (it starts an admin OAuth flow)", async () => {
+    const res = await fetch(`http://localhost:${port}/api/trackers/linear/authorize`);
+    expect(res.status).toBe(401);
   });
 
   test("Workflow webhook trigger is still public", async () => {

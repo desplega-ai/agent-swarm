@@ -375,6 +375,7 @@ const RESUME_REASONS: Record<string, string> = {
   context_limits: "a full context window",
   manual_supersede: "a manual restart",
   crash_recovery: "a crash",
+  provider_fallback: "a provider error",
 };
 
 function resumeLabel(tags: readonly string[] | undefined): string {

@@ -213,6 +213,13 @@ export interface ProviderResult {
   output?: string;
   isError: boolean;
   errorCategory?: string;
+  /**
+   * `harness`: the session ended on an exception the adapter did not trace to
+   * the model provider (MCP or tool transport, the harness's own IPC). Its
+   * text never moves the task to a fallback profile. Unset: a provider
+   * response or the adapter's own error tracking decided the failure.
+   */
+  errorOrigin?: "harness";
   /** Human-readable failure reason built from error tracking. */
   failureReason?: string;
   /**

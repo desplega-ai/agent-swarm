@@ -63,6 +63,8 @@ export interface ModelProfile {
   seededFrom: string | null;
   /** Pooled-key allowlist: credential var → allowed key suffixes. Null uses the whole pool. */
   credentials: Record<string, string[]> | null;
+  /** Same-harness profiles a task hops to, in order, on a provider error. Unset on older APIs. */
+  fallbacks?: string[];
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -422,6 +424,26 @@ export interface AgentLatestModel {
   reasoningEffort?: ReasoningEffortLevel;
 }
 
+/** Why a provider session ended in a way another profile may survive. */
+export type ProviderErrorClass =
+  | "rate_limit"
+  | "model_window"
+  | "seat"
+  | "credits"
+  | "overloaded"
+  | "server_error"
+  | "auth"
+  | "pool_empty";
+
+/** One same-agent fallback hop: the work left `from` on `errorClass` and resumed on `profile`. */
+export interface FallbackHop {
+  from: string;
+  profile: string;
+  errorClass: ProviderErrorClass;
+  at: string;
+  skipped?: { profile: string; reason: string }[];
+}
+
 export interface AgentTask {
   id: string;
   key: string;
@@ -465,6 +487,8 @@ export interface AgentTask {
   profile?: string;
   /** Model profile the server applied at claim (the ask, the agent default, or a tier alias). */
   resolvedProfile?: string;
+  /** Provider-error fallback hops the work took, oldest first. */
+  fallbackHops?: FallbackHop[];
   /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
   /** Effort the session ran at (task effort, else the agent's setting). */

@@ -56,7 +56,12 @@ To temporarily disable Jira without removing the env vars: `JIRA_DISABLE=true` (
 ### 3. Connect
 
 1. Restart the API server so `initJira()` picks up the new env vars.
-2. Visit `<MCP_BASE_URL>/api/trackers/jira/authorize` in a browser — you'll be redirected through Atlassian's consent screen.
+2. Click **Authorize** on the dashboard's Jira integration page. You'll be sent through Atlassian's consent screen. Starting the flow requires the swarm API key (or a lead/user token with `oauth-authorization.manage`). Without the dashboard, fetch the consent URL and open it in a browser:
+
+   ```bash
+   curl -s -H "Authorization: Bearer $API_KEY" \
+     "<MCP_BASE_URL>/api/trackers/jira/authorize?format=json" | jq -r .authorizeUrl
+   ```
 3. After consent, the swarm stores the access/refresh tokens, fetches `accessible-resources`, and persists `cloudId` + `siteUrl` in the `oauth_apps.metadata` blob.
 
 Verify with:

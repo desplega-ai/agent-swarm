@@ -691,6 +691,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "281_model_profiles_pr2.sql");
       // 283 alters workflow_runs, which this fixture does not create.
       markMigrationApplied(database, "283_workflow_run_definitions.sql");
+      // 284 alters model_profiles (made by the skipped 220) and agent_tasks.
+      markMigrationApplied(database, "284_model_profile_fallbacks.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
