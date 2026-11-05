@@ -45,7 +45,6 @@ async function removeDbFiles(path: string): Promise<void> {
 describe("savings compute", () => {
   let agentId: string;
   let workflowId: string;
-  let emptyWorkflowId: string;
   let busyWorkflowId: string;
 
   async function run(opts: {
@@ -101,7 +100,6 @@ describe("savings compute", () => {
     initDb(TEST_DB_PATH);
     agentId = (await createAgent({ name: "savings-agent", isLead: false, status: "idle" })).id;
     workflowId = (await createWorkflow({ name: "savings-fixture", definition: DEFINITION })).id;
-    emptyWorkflowId = (await createWorkflow({ name: "savings-empty", definition: DEFINITION })).id;
     busyWorkflowId = (await createWorkflow({ name: "savings-busy", definition: DEFINITION })).id;
 
     // Three scheduled runs; the first created an agent task (an effect run).
