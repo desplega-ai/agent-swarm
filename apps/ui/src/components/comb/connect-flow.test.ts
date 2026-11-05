@@ -14,7 +14,13 @@ const me = {
 
 /** Fakes that succeed. `ls` answers each call from `lsResults` in order ("ok" or a status). */
 function fakeDeps(overrides: Partial<ConnectFlowDeps> = {}, lsResults: Array<"ok" | number> = []) {
-  const calls = { register: 0, getMe: 0, ls: 0, invite: [] as string[], inviteKeys: [] as string[] };
+  const calls = {
+    register: 0,
+    getMe: 0,
+    ls: 0,
+    invite: [] as string[],
+    inviteKeys: [] as string[],
+  };
   const connected: AgentFsCredential[] = [];
   const deps: ConnectFlowDeps = {
     register: async () => {
