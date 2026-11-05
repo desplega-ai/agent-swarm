@@ -88,6 +88,7 @@ import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 import { normalizeSessionLogs, parseSessionLogs, sumItemCallUsage } from "@/logs-parser";
+import { FallbackHopsChip } from "./fallback-hops-chip";
 import { directChildren } from "./spawned-tasks";
 import {
   TaskActions,
@@ -1130,6 +1131,7 @@ export default function TaskDetailPage() {
             {costChip}
             {wideModelChip}
             {wideProfileChip}
+            <FallbackHopsChip hops={task.fallbackHops} />
             {agentChip}
           </div>
         </div>
@@ -1168,6 +1170,7 @@ export default function TaskDetailPage() {
           {costChip}
           {narrowModelChip}
           {narrowProfileChip}
+          <FallbackHopsChip hops={task.fallbackHops} />
           {tagsChip}
         </div>
       </div>

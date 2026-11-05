@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { classifyProviderErrorOf } from "../commands/provider-error-class";
 import { renderContextBoundNote } from "../prompts/context-bound-note";
 import type {
   AgentMessageItem,
@@ -2681,6 +2682,16 @@ describe("CodexSession — rate-limit error preservation", () => {
     expect(result.failureReason).toBe("unexpected network failure");
     expect(result.isError).toBe(true);
     expect(result.rateLimitResetAt).toBeUndefined();
+  });
+
+  test("an unexpected throw is a harness error: a 503 in its text never moves the task to a fallback profile", async () => {
+    const { result } = await runSessionWithThrowingThread(
+      [{ type: "thread.started", thread_id: "thread-mcp-503" }, { type: "turn.started" }],
+      new Error("MCP error -32000: HTTP 503 Service Unavailable"),
+      testConfig({ logFile: join(tmpLogDir, "mcp-503.log"), cwd: "" }),
+    );
+    expect(result.errorOrigin).toBe("harness");
+    expect(classifyProviderErrorOf(result, result.failureReason, "gpt-6.1-sol")).toBeNull();
   });
 });
 
