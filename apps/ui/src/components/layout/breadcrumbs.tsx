@@ -204,7 +204,7 @@ export function Breadcrumbs() {
 
   if (segments.length === 0) {
     return (
-      <span className="min-w-0 truncate text-sm font-medium text-foreground">
+      <span className="min-w-0 truncate text-sm font-medium text-foreground max-md:px-1.5 max-md:text-base max-md:font-semibold">
         {user?.name ? `Hi, ${user.name}` : "Welcome to Agent Swarm"}
       </span>
     );
@@ -341,7 +341,7 @@ export function Breadcrumbs() {
           top-to-bottom so the hierarchy is still readable on a narrow screen. */}
       <nav className="flex min-w-0 items-center md:hidden" aria-label="Breadcrumb">
         <DropdownMenu onOpenChange={(open) => !open && setPhoneAncestorsOpen(false)}>
-          <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-foreground font-medium transition-colors hover:bg-accent">
+          <DropdownMenuTrigger className="flex min-h-11 min-w-0 items-center gap-1 rounded-md px-1.5 text-base font-semibold text-foreground transition-colors hover:bg-accent">
             <span className={cn("truncate", leaf.mono && "font-mono")}>{leaf.label}</span>
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>

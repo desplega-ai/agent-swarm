@@ -53,6 +53,13 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+/** True where the page offers a session about itself: the phone header menu shows the row. */
+export function useContextPanelOffered(): boolean {
+  const { supported } = useContextPanel();
+  const pageCtx = usePageContext();
+  return supported && pageCtx !== null;
+}
+
 /** Header button next to the notification bell. Hidden where the panel is not offered. */
 export function ContextPanelToggle() {
   const { supported, open, toggle } = useContextPanel();

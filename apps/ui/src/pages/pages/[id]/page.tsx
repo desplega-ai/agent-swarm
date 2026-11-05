@@ -45,7 +45,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
@@ -53,7 +53,9 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { usePage } from "@/api/hooks/use-pages";
 import type { PageListItem, PageMetadata } from "@/api/types";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
+import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { PageActions } from "@/components/shared/page-actions";
 import {
   showVersionUpdatedToast,
   useVersionUpdateToast,
@@ -737,6 +739,7 @@ export default function ArtifactPage() {
         action={
           <PageHeaderActions
             id={pageId!}
+            title={data.title}
             frameQuery={frameQuery}
             themedFrameQuery={themedFrameQuery}
             authMode={data.authMode}
@@ -797,6 +800,7 @@ function HeaderIconButton({
  */
 function PageHeaderActions({
   id,
+  title,
   frameQuery,
   themedFrameQuery,
   authMode,
@@ -807,6 +811,8 @@ function PageHeaderActions({
   feedback,
 }: {
   id: string;
+  /** The page's title: names the phone action sheet. */
+  title: string;
   /** Forwarded page params, for the "Full" route. */
   frameQuery: string;
   /** `frameQuery` plus the viewer theme, for the "Open" link. */
@@ -823,45 +829,107 @@ function PageHeaderActions({
   // The share link carries the same query as the iframe, so "Open" keeps
   // whatever filter, theme and mode the page is showing.
   const href = getPageHtmlUrl(id) + themedFrameQuery;
+  const navigate = useNavigate();
+  const fullRoute = pageRoute(id, frameQuery, true);
   return (
-    <div className="flex items-center gap-0.5">
-      <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
-      {feedback ? (
-        <HeaderIconButton
-          label="Feedback"
-          tooltip="Feedback: select elements on the page, comment on them, and send the comments to the swarm"
-          variant={feedback.on ? "default" : "ghost"}
-          aria-pressed={feedback.on}
-          onClick={feedback.onToggle}
-        >
-          <MessageSquarePlus className="size-4" />
-        </HeaderIconButton>
-      ) : null}
-      <HeaderIconButton
-        asChild
-        label="Open"
-        tooltip={
-          authMode === "password"
-            ? "Open in a new tab (password required)"
-            : "Open the API-served URL in a new tab"
+    <>
+      <PageActions
+        title={title}
+        // A phone keeps the star, plus the feedback toggle while it is on so
+        // one tap turns it off. Everything else sits in the sheet.
+        primary={
+          <>
+            <FavoriteButton
+              favorite={favorite}
+              disabled={favoriteDisabled}
+              onToggle={onToggleFavorite}
+              className="size-11 [&_svg]:size-5"
+            />
+            {feedback?.on ? (
+              <Button
+                size="icon"
+                className="size-11"
+                aria-label="Feedback"
+                aria-pressed
+                onClick={feedback.onToggle}
+              >
+                <MessageSquarePlus className="size-5" />
+              </Button>
+            ) : null}
+          </>
+        }
+        more={
+          <>
+            {feedback ? (
+              <ActionSheetItem
+                icon={MessageSquarePlus}
+                label={feedback.on ? "Stop feedback" : "Feedback"}
+                onSelect={feedback.onToggle}
+              />
+            ) : null}
+            <ActionSheetItem
+              icon={ExternalLink}
+              label={authMode === "password" ? "Open in a new tab (password)" : "Open in a new tab"}
+              onSelect={() => window.open(href, "_blank", "noreferrer")}
+            />
+            <ActionSheetItem icon={FileDown} label="Export PDF" onSelect={onExportPdf} />
+            <ActionSheetItem
+              icon={Database}
+              label="Saved room state"
+              onSelect={() => setRoomOpen(true)}
+            />
+            <ActionSheetItem
+              icon={Maximize2}
+              label="Full screen"
+              onSelect={() => void navigate(fullRoute)}
+            />
+          </>
         }
       >
-        <a href={href} target="_blank" rel="noreferrer">
-          <ExternalLink className="size-4" />
-        </a>
-      </HeaderIconButton>
-      <HeaderIconButton label="Export PDF" onClick={onExportPdf}>
-        <FileDown className="size-4" />
-      </HeaderIconButton>
-      <HeaderIconButton label="Saved room state" onClick={() => setRoomOpen(true)}>
-        <Database className="size-4" />
-      </HeaderIconButton>
-      <HeaderIconButton asChild label="Full screen">
-        <Link to={pageRoute(id, frameQuery, true)}>
-          <Maximize2 className="size-4" />
-        </Link>
-      </HeaderIconButton>
+        <div className="flex items-center gap-0.5">
+          <FavoriteButton
+            favorite={favorite}
+            disabled={favoriteDisabled}
+            onToggle={onToggleFavorite}
+          />
+          {feedback ? (
+            <HeaderIconButton
+              label="Feedback"
+              tooltip="Feedback: select elements on the page, comment on them, and send the comments to the swarm"
+              variant={feedback.on ? "default" : "ghost"}
+              aria-pressed={feedback.on}
+              onClick={feedback.onToggle}
+            >
+              <MessageSquarePlus className="size-4" />
+            </HeaderIconButton>
+          ) : null}
+          <HeaderIconButton
+            asChild
+            label="Open"
+            tooltip={
+              authMode === "password"
+                ? "Open in a new tab (password required)"
+                : "Open the API-served URL in a new tab"
+            }
+          >
+            <a href={href} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+            </a>
+          </HeaderIconButton>
+          <HeaderIconButton label="Export PDF" onClick={onExportPdf}>
+            <FileDown className="size-4" />
+          </HeaderIconButton>
+          <HeaderIconButton label="Saved room state" onClick={() => setRoomOpen(true)}>
+            <Database className="size-4" />
+          </HeaderIconButton>
+          <HeaderIconButton asChild label="Full screen">
+            <Link to={fullRoute}>
+              <Maximize2 className="size-4" />
+            </Link>
+          </HeaderIconButton>
+        </div>
+      </PageActions>
       <RoomInspectorDialog key={id} pageId={id} open={roomOpen} onOpenChange={setRoomOpen} />
-    </div>
+    </>
   );
 }
