@@ -20048,7 +20048,7 @@ export interface paths {
         };
         /**
          * Estimated automation savings for a workflow
-         * @description What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend; `actualUsd` is that spend scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         * @description What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.
          */
         get: {
             parameters: {
@@ -20098,9 +20098,11 @@ export interface paths {
                                 enabledOnlyRuns: number;
                                 capApplied: boolean;
                                 opsPerRun: number;
-                                /** @description Measured spend of every run in the window: agent tasks, their reviews, LLM calls. */
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
                                 measuredUsd: number;
-                                /** @description Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
                                 actualUsd: number;
                                 agentOnlyUsd: {
                                     p10: number;
@@ -20184,7 +20186,7 @@ export interface paths {
         };
         /**
          * Daily automation savings for a workflow
-         * @description The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         * @description The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.
          */
         get: {
             parameters: {
@@ -20224,10 +20226,12 @@ export interface paths {
                             points: {
                                 day: string;
                                 savingUsd: number;
-                                /** @description Scaled estimate: the day's measured spend times the window's substituted share. */
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
                                 actualUsd: number;
                                 /** @description The day's measured spend, not scaled. */
                                 measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
                             }[];
                         };
                     };

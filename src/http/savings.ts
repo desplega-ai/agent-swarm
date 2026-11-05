@@ -51,11 +51,18 @@ const SavingsJobRowSchema = z.object({
   opsPerRun: z.number(),
   measuredUsd: z
     .number()
-    .describe("Measured spend of every run in the window: agent tasks, their reviews, LLM calls."),
+    .describe(
+      "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost.",
+    ),
+  estimatedLlmUsd: z
+    .number()
+    .describe(
+      "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost.",
+    ),
   actualUsd: z
     .number()
     .describe(
-      "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this.",
+      "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this.",
     ),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
@@ -87,7 +94,7 @@ const savingsJobsRoute = route({
   pattern: ["api", "savings", "jobs"],
   summary: "Estimated automation savings for a workflow",
   description:
-    "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend; `actualUsd` is that spend scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1),
@@ -122,10 +129,14 @@ const SavingsDailyResponseSchema = z.object({
       actualUsd: z
         .number()
         .describe(
-          "Scaled estimate: the day's measured spend times the window's substituted share.",
+          "Scaled estimate: the day's measured and estimated spend times the window's substituted share.",
         ),
       /** Measured; the points sum to the jobs row's `measuredUsd`. */
       measuredUsd: z.number().describe("The day's measured spend, not scaled."),
+      /** Estimated; the points sum to the jobs row's `estimatedLlmUsd`. */
+      estimatedLlmUsd: z
+        .number()
+        .describe("The day's LLM spend estimated from tokens and output size, not measured."),
     }),
   ),
 });
@@ -136,7 +147,7 @@ const savingsDailyRoute = route({
   pattern: ["api", "savings", "daily"],
   summary: "Daily automation savings for a workflow",
   description:
-    "The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1),
@@ -298,6 +309,7 @@ export async function handleSavings(
     const saving = roundToTotal(dayList.map((d) => split.get(d)?.savingUsd ?? 0));
     const actual = roundToTotal(dayList.map((d) => split.get(d)?.actualUsd ?? 0));
     const measured = roundToTotal(dayList.map((d) => split.get(d)?.measuredUsd ?? 0));
+    const estimated = roundToTotal(dayList.map((d) => split.get(d)?.estimatedLlmUsd ?? 0));
     savingsDailyRoute.respond(res, 200, {
       ...base,
       valid: true,
@@ -307,6 +319,7 @@ export async function handleSavings(
         savingUsd: saving[i] as number,
         actualUsd: actual[i] as number,
         measuredUsd: measured[i] as number,
+        estimatedLlmUsd: estimated[i] as number,
       })),
     });
     return true;
@@ -330,6 +343,7 @@ export async function handleSavings(
         capApplied: priced.capApplied,
         opsPerRun: round2(priced.opsPerRun),
         measuredUsd: round2(priced.measuredUsd),
+        estimatedLlmUsd: round2(priced.estimatedLlmUsd),
         actualUsd: round2(priced.actualUsd),
         agentOnlyUsd: roundBand(priced.agentOnlyUsd),
         savingUsd: roundBand(priced.savingUsd),

@@ -107,7 +107,9 @@ describe("savings model", () => {
       { tier: "smart", days: 30, band: "job" },
     );
     expect(priced.actualUsd).toBeCloseTo(11, 9);
-    expect(priced.measuredUsd).toBeCloseTo(11, 9);
+    // The $1 LLM estimate is not measured spend.
+    expect(priced.measuredUsd).toBeCloseTo(10, 9);
+    expect(priced.estimatedLlmUsd).toBeCloseTo(1, 9);
     expect(priced.agentOnlyUsd.p50 - 10).toBeCloseTo(4 * priced.agentOnlyUsdPerRun, 9);
     expect(priced.actualHours).toBeCloseTo(3, 9);
   });
@@ -131,6 +133,25 @@ describe("savings model", () => {
     expect(point?.savingUsd).toBeCloseTo(priced.savingUsd.p50, 9);
   });
 
+  test("estimated LLM spend is reported apart from measured spend", () => {
+    // No recorded LLM cost: $5 is estimated from tokens and output size.
+    const window = facts({ runs: 1, countedRuns: 1, opsSum: 10, estimatedLlmUsd: 5 });
+    const priced = priceWorkflow(window, { tier: "smart", days: 30, band: "job" });
+    expect(priced.measuredUsd).toBe(0);
+    expect(priced.estimatedLlmUsd).toBe(5);
+    // The saving still subtracts the estimate.
+    expect(priced.actualUsd).toBe(5);
+    expect(priced.savingUsd.p50).toBeCloseTo(priced.agentOnlyUsdPerRun - 5, 9);
+    const [point] = splitByDay(window, [{ day: "2026-10-01", ...window }], {
+      tier: "smart",
+      days: 30,
+    });
+    expect(point?.measuredUsd).toBe(0);
+    expect(point?.estimatedLlmUsd).toBe(5);
+    expect(point?.actualUsd).toBe(5);
+    expect(point?.savingUsd).toBeCloseTo(priced.savingUsd.p50, 9);
+  });
+
   test("recorded LLM cost replaces the token estimate", () => {
     const priced = priceWorkflow(facts({ recordedLlmUsd: 2, estimatedLlmUsd: 5 }), {
       tier: "smart",
@@ -138,6 +159,8 @@ describe("savings model", () => {
       band: "job",
     });
     expect(priced.actualUsd).toBe(2);
+    expect(priced.measuredUsd).toBe(2);
+    expect(priced.estimatedLlmUsd).toBe(0);
   });
 
   test("a pure agent dispatcher substitutes nothing and pays no review", () => {
@@ -211,11 +234,12 @@ describe("savings model", () => {
       ],
       { tier: "smart", days: 1 },
     );
-    const sum = (key: "savingUsd" | "actualUsd" | "measuredUsd") =>
+    const sum = (key: "savingUsd" | "actualUsd" | "measuredUsd" | "estimatedLlmUsd") =>
       points.reduce((s, p) => s + p[key], 0);
     expect(sum("savingUsd")).toBeCloseTo(priced.savingUsd.p50, 9);
     expect(sum("actualUsd")).toBeCloseTo(priced.actualUsd, 9);
     expect(sum("measuredUsd")).toBeCloseTo(priced.measuredUsd, 9);
+    expect(sum("estimatedLlmUsd")).toBeCloseTo(priced.estimatedLlmUsd, 9);
     // The 24 counted schedule runs split 288:144; the manual run stays on day 2.
     const unit = priced.agentOnlyUsdPerRun;
     const share = priced.substitutedRuns / window.runs;
