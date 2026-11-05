@@ -11,3 +11,13 @@ export function useWorkflowSavings(workflowId: string | undefined) {
     retry: false,
   });
 }
+
+export function useWorkflowSavingsDaily(workflowId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["savings", "workflow-daily", workflowId],
+    queryFn: () => api.getWorkflowSavingsDaily(workflowId as string),
+    enabled: !!workflowId && enabled,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+}

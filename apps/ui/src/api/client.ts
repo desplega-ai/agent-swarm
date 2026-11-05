@@ -121,6 +121,7 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
   SavingsJobsResponse,
   SavingsTier,
   ScheduledTask,
@@ -4021,6 +4022,21 @@ class ApiClient {
     });
     if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
     return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /** The workflow's modelled saving per UTC day, from the same computation as `getWorkflowSavings`. */
+  async getWorkflowSavingsDaily(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/daily?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load daily workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
