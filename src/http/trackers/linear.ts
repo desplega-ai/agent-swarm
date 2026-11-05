@@ -13,6 +13,11 @@ import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
+import {
+  ensureTrackerAuthorizeAdmin,
+  TrackerAuthorizeQuerySchema,
+  TrackerAuthorizeUrlSchema,
+} from "./authorize-gate";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -42,12 +47,20 @@ const linearAuthorize = route({
   method: "get",
   path: "/api/trackers/linear/authorize",
   pattern: ["api", "trackers", "linear", "authorize"],
-  summary: "Redirect to Linear OAuth consent screen",
+  summary: "Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL",
   tags: ["Trackers"],
-  auth: { apiKey: false },
-  query: z.object({ redirect: z.string().optional() }),
+  // Bearer-required (route default) and gated on oauth-authorization.manage:
+  // the grant lands on the swarm-wide default authorization. Only the
+  // provider callback below stays public.
+  query: TrackerAuthorizeQuerySchema,
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
+    200: {
+      description: "Consent URL (format=json), for clients that navigate themselves",
+      schema: TrackerAuthorizeUrlSchema,
+    },
     302: { description: "Redirect to Linear OAuth" },
+    403: { description: "Caller lacks oauth-authorization.manage" },
     500: { description: "Failed to generate authorization URL" },
     503: { description: "Linear integration not configured" },
   },
@@ -164,6 +177,8 @@ export async function handleLinearTracker(
     const queryParams = parseQueryParams(req.url || "");
     const parsed = await linearAuthorize.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const initiator = await ensureTrackerAuthorizeAdmin(req, res, "Linear");
+    if (!initiator) return true;
     if (!isLinearEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Linear integration not configured" }));
@@ -171,13 +186,20 @@ export async function handleLinearTracker(
     }
 
     try {
-      const url = await getLinearAuthorizationUrl(allowedCredentialRedirect(parsed.query.redirect));
+      const url = await getLinearAuthorizationUrl(
+        allowedCredentialRedirect(parsed.query.redirect),
+        initiator.userId,
+      );
       if (!url) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Failed to generate authorization URL" }));
         return true;
       }
 
+      if (parsed.query.format === "json") {
+        linearAuthorize.respond(res, 200, { authorizeUrl: url });
+        return true;
+      }
       res.writeHead(302, { Location: url });
       res.end();
     } catch (err) {

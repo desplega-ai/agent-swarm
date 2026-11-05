@@ -18,7 +18,8 @@ Bidirectional sync between Agent Swarm and Linear. Webhook-driven inbound (Linea
    # LINEAR_TEAM_ID=<optional: scope to a specific team>
    ```
 6. **Start server**: `bun run start:http`
-7. **Run OAuth flow**: visit `http://localhost:3013/api/trackers/linear/authorize` in your browser
+7. **Run OAuth flow**: click **Connect to Linear** in the dashboard, or fetch the consent URL with the API key and open it in your browser:
+   `curl -s -H "Authorization: Bearer $API_KEY" "http://localhost:3013/api/trackers/linear/authorize?format=json" | jq -r .authorizeUrl`
 8. **Verify connection**:
    ```bash
    curl -H "Authorization: Bearer $API_KEY" http://localhost:3013/api/trackers/linear/status

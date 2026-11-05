@@ -7,11 +7,9 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import {
-  buildLinearAuthorizeUrl,
-  useDisconnectLinear,
-  useLinearTrackerStatus,
-} from "@/api/hooks/use-linear-status";
+import { toast } from "sonner";
+import { useDisconnectLinear, useLinearTrackerStatus } from "@/api/hooks/use-linear-status";
+import { openTrackerAuthorizeInNewTab } from "@/api/tracker-authorize";
 import { OAuthSection, OAuthSectionRow, OAuthStatusRow } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -52,7 +50,11 @@ export function LinearOAuthSection() {
   const handleCopy = (key: CopyKey, value: string) => copy(value, key);
 
   function handleAuthorize() {
-    window.open(buildLinearAuthorizeUrl(), "_blank", "noopener,noreferrer");
+    openTrackerAuthorizeInNewTab("linear").catch((err: unknown) => {
+      toast.error("Could not start Linear OAuth", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   if (isLoading) {
