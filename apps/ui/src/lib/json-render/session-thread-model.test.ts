@@ -489,24 +489,62 @@ describe("isDispatchSettled", () => {
 });
 
 describe("latestStepText", () => {
-  const summarize = (entry: { text?: string }) => entry.text ?? null;
+  type Entry = { createdAt: string; text?: string };
+  const summarize = (entry: Entry) => entry.text ?? null;
+  const at = (second: number) => `2026-11-05T00:00:${String(second).padStart(2, "0")}.000Z`;
 
   test("returns null for an empty log list", () => {
     expect(latestStepText([], summarize)).toBeNull();
   });
 
-  test("returns the latest non-null summary, scanning backwards", () => {
-    // A trailing noise entry with no summary must not mask "Reading files".
-    const logs = [{ text: "Created" }, { text: "Reading files" }, {}];
+  test("picks the newest step from server-ordered (newest-first) logs", () => {
+    // `GET /api/tasks/{id}` sorts logs by createdAt DESC. A newer entry with
+    // no summary must not mask "Reading files".
+    const logs: Entry[] = [
+      { createdAt: at(3) },
+      { createdAt: at(2), text: "Reading files" },
+      { createdAt: at(1), text: "Claimed" },
+      { createdAt: at(0), text: "Created" },
+    ];
+    expect(latestStepText(logs, summarize)).toBe("Reading files");
+  });
+
+  test("does not depend on array order", () => {
+    const logs: Entry[] = [
+      { createdAt: at(0), text: "Created" },
+      { createdAt: at(2), text: "Reading files" },
+      { createdAt: at(1), text: "Claimed" },
+    ];
     expect(latestStepText(logs, summarize)).toBe("Reading files");
   });
 
   test("returns null when no entry summarizes", () => {
-    expect(latestStepText([{}, {}], summarize)).toBeNull();
+    expect(latestStepText([{ createdAt: at(0) }, { createdAt: at(1) }], summarize)).toBeNull();
   });
 });
 
 describe("extractRequestText", () => {
+  test("reads the marker when a Caller line follows it (the current template)", () => {
+    const prompt = [
+      "Edit the screen.",
+      "",
+      '[App action] app=a1 action=editScreen input={"message":"Make it blue"}',
+      'Caller (server-verified): {"kind":"user","userId":"u1"}',
+    ].join("\n");
+    expect(extractRequestText(task({ task: prompt }))).toBe("Make it blue");
+  });
+
+  test("the last marker line wins over one quoted in the configured prompt", () => {
+    const prompt = [
+      'Example: [App action] app=x action=y input={"message":"quoted"}',
+      '[App action] app=x action=y input={"message":"quoted"}',
+      "",
+      '[App action] app=a1 action=ask input={"message":"real"}',
+      "Caller (server-verified): {}",
+    ].join("\n");
+    expect(extractRequestText(task({ task: prompt }))).toBe("real");
+  });
+
   test("pulls the user's message out of an app-dispatched task's trailing JSON marker", () => {
     const prompt =
       '# Edit a screen doc\n\nYou are an editing agent...\n\n\n[App action] app=663d7831-2d76-4465-930d-72662ed88a52 action=generateScreen input={"screenId":"d8d9e50d-ef22-49b5-a81a-e296477d6be9","message":"Add a card with a title \'Hello\'"}';

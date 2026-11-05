@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { AgentTask } from "../../apps/ui/src/api/types";
+import { extractRequestText } from "../../apps/ui/src/lib/json-render/session-thread-model";
 import { parseAppDefinition } from "../apps/definition";
+import { resolveTemplateFromCode } from "../prompts/resolver";
+import "../prompts/session-templates";
 
 async function expectParseIssue(definition: unknown, message: string): Promise<void> {
   const parsed = await parseAppDefinition(definition);
@@ -187,5 +191,21 @@ describe("SessionThread validation", () => {
     const definition = sessionThreadDefinition();
     (definition.pages.main.elements.thread.props as Record<string, unknown>).id = "a/b";
     await expectParseIssue(definition, "SessionThread id must match ^[A-Za-z0-9_-]+$");
+  });
+});
+
+describe("SessionThread turn text", () => {
+  test("shows only input.message for a prompt rendered from the task.app.action template", () => {
+    const input = { screenId: "s1", message: 'Add a card titled "Hello"\nwith two lines' };
+    const { text } = resolveTemplateFromCode("task.app.action", {
+      prompt: "# Edit a screen\n\nYou edit the screen doc.",
+      app_id: "app-1",
+      action_name: "editScreen",
+      input_json: JSON.stringify(input),
+      caller_json: JSON.stringify({ kind: "user", userId: "u1" }),
+    });
+    expect(text).toContain("[App action]");
+    const task = { id: "t1", task: text } as AgentTask;
+    expect(extractRequestText(task)).toBe(input.message);
   });
 });

@@ -46,26 +46,31 @@ export function resolveLeafTask(chain: AgentTask[]): AgentTask | undefined {
 
 /**
  * `task.task` for an app-dispatched task is the FULL resolved agent prompt
- * (the action's configured `prompt` plus a trailing
- * `[App action] app=<id> action=<name> input=<json>` marker appended by the
- * `task.app.action` template — see `src/prompts/session-templates.ts`), not
- * the user's short message. Pull the real message back out of that trailing
- * JSON's `message` field for display; fall back to the raw `task.task` for
- * any chain entry that didn't come through an app action (e.g. steered
- * directly from the dashboard) or whose input has no `message` field.
+ * from the `task.app.action` template (`src/prompts/session-templates.ts`):
+ * the action's `prompt`, then a marker line
+ * `[App action] app=<id> action=<name> input=<json>`, then further lines
+ * (today `Caller (server-verified): <json>`). `input_json` is
+ * `JSON.stringify(input)`, a single line, so the marker is matched line by
+ * line and never assumed to be the last one. The last marker line wins, since
+ * the configured `prompt` comes first and could quote one. A root test
+ * renders the real template through this parser so the two cannot drift.
+ * Falls back to the raw `task.task` for a task that did not come through an
+ * app action (e.g. steered from the dashboard) or whose input has no
+ * `message`.
  */
-const APP_ACTION_MARKER = /\[App action\] app=\S+ action=\S+ input=(\{.*\})\s*$/s;
+const APP_ACTION_MARKER_LINE = /^\[App action\] app=\S+ action=\S+ input=(\{.*\})[ \t]*$/gm;
 
 export function extractRequestText(task: AgentTask): string {
-  const match = APP_ACTION_MARKER.exec(task.task);
-  if (match) {
+  let inputJson: string | undefined;
+  for (const match of task.task.matchAll(APP_ACTION_MARKER_LINE)) inputJson = match[1];
+  if (inputJson !== undefined) {
     try {
-      const input = JSON.parse(match[1]) as Record<string, unknown>;
+      const input = JSON.parse(inputJson) as Record<string, unknown>;
       if (typeof input.message === "string" && input.message.trim().length > 0) {
         return input.message;
       }
     } catch {
-      // Malformed JSON tail — fall through to the raw task text.
+      // Malformed JSON — fall through to the raw task text.
     }
   }
   return task.task;
@@ -277,18 +282,22 @@ export function isDispatchSettled(input: {
 }
 
 /**
- * The latest non-null summary line of an activity stream, scanning backwards,
- * or `null`: the live turn's subtitle under "Working…". The component passes
- * the dashboard transcript's `summarizeAgentLog` (which caps a progress note at
- * 140 chars); it is a parameter so this module has no runtime `@/` imports.
+ * The summary of the newest activity entry that has one, or `null`: the live
+ * turn's subtitle under "Working…". Picks by `createdAt`, not array position,
+ * because `GET /api/tasks/{id}` returns logs newest-first (`ORDER BY createdAt
+ * DESC`). The component passes the dashboard transcript's `summarizeAgentLog`
+ * (which caps a progress note at 140 chars); it is a parameter so this module
+ * has no runtime `@/` imports.
  */
-export function latestStepText<T>(
+export function latestStepText<T extends { createdAt: string }>(
   logs: readonly T[],
   summarize: (log: T) => string | null,
 ): string | null {
-  for (let i = logs.length - 1; i >= 0; i--) {
-    const text = summarize(logs[i] as T);
-    if (text) return text;
+  let newest: { at: string; text: string } | null = null;
+  for (const log of logs) {
+    if (newest !== null && log.createdAt <= newest.at) continue;
+    const text = summarize(log);
+    if (text) newest = { at: log.createdAt, text };
   }
-  return null;
+  return newest?.text ?? null;
 }
