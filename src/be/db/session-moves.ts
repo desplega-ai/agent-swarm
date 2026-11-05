@@ -135,17 +135,23 @@ export async function moveSessionChains(input: {
 /**
  * Point `key` favorites under `from` at the same path under `to` (a group
  * rename). A principal that already starred the new key keeps that row, and
- * the old row goes.
+ * the old row goes. With `scope`, only that favorite scope's stars move.
  */
-export async function moveKeyFavorites(input: { from: string; to: string }): Promise<void> {
+export async function moveKeyFavorites(input: {
+  from: string;
+  to: string;
+  scope?: string;
+}): Promise<void> {
   const { lo, hi } = keyPrefixRange(input.from);
-  const range = "itemType = 'key' AND itemId >= ? AND itemId < ?";
+  const scoped = input.scope !== undefined;
+  const range = `itemType = 'key' AND itemId >= ? AND itemId < ?${scoped ? " AND favoriteScope = ?" : ""}`;
+  const rangeParams = [lo, hi, ...(scoped ? [input.scope as string] : [])];
   await getDbClient().transaction(async () => {
     await getDbClient().run(
       `UPDATE OR IGNORE user_favorites SET itemId = ? || substr(itemId, ?) WHERE ${range}`,
-      [input.to, lo.length + 1, lo, hi],
+      [input.to, lo.length + 1, ...rangeParams],
     );
-    await getDbClient().run(`DELETE FROM user_favorites WHERE ${range}`, [lo, hi]);
+    await getDbClient().run(`DELETE FROM user_favorites WHERE ${range}`, rangeParams);
   });
 }
 

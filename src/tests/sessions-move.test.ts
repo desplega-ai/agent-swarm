@@ -454,6 +454,27 @@ test("stars stay while sessions are left under the old key and follow on a retry
   expect(await ids()).toEqual(["shared/went/"]);
 });
 
+test("a rename that moves no session moves only the caller's own stars", async () => {
+  for (const [scope, itemId] of [
+    [`user:${owner}`, "shared/empty-group/"],
+    [`user:${other}`, "shared/empty-group/"],
+  ]) {
+    await setFavorite({ favoriteScope: scope, itemType: "key", itemId, favorite: true });
+  }
+  const starred = async (user: string) =>
+    (await listFavorites({ favoriteScope: `user:${user}`, itemType: "key" }))
+      .map((f) => f.itemId)
+      .filter((id) => /^shared\/(empty-group|empty-moved)\//.test(id));
+
+  const rename = await call("session-moves/prefix", {
+    from: "shared/empty-group/",
+    to: "shared/empty-moved/",
+  });
+  expect(rename.body).toEqual({ moved: [], skipped: [], remaining: 0 });
+  expect(await starred(owner)).toEqual(["shared/empty-moved/"]);
+  expect(await starred(other)).toEqual(["shared/empty-group/"]);
+});
+
 test("user prefix moves exclude ownerless roots and report only visible roots owned by others", async () => {
   for (const from of ["shared/requester/", `personal/${other}/requester/`]) {
     const own = await session(`${from}nested/`);
