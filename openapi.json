@@ -51428,6 +51428,303 @@
         }
       }
     },
+    "/api/savings/jobs": {
+      "get": {
+        "summary": "Estimated automation savings for a workflow",
+        "description": "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Savings rows for the workflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "computedAt": {
+                      "type": "string"
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "no-runs",
+                        "too-many-runs",
+                        null
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "workflow"
+                            ]
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "basis": {
+                            "type": "string",
+                            "enum": [
+                              "modelled"
+                            ]
+                          },
+                          "runs": {
+                            "type": "integer"
+                          },
+                          "substitutedRuns": {
+                            "type": "integer"
+                          },
+                          "effectRuns": {
+                            "type": "integer"
+                          },
+                          "enabledOnlyRuns": {
+                            "type": "integer"
+                          },
+                          "capApplied": {
+                            "type": "boolean"
+                          },
+                          "opsPerRun": {
+                            "type": "number"
+                          },
+                          "actualUsd": {
+                            "type": "number"
+                          },
+                          "agentOnlyUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "savingUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "actualHours": {
+                            "type": "number"
+                          },
+                          "agentOnlyHours": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "hoursSaved": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "agentOnlyUsdPerRun": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "workflowId",
+                          "name",
+                          "basis",
+                          "runs",
+                          "substitutedRuns",
+                          "effectRuns",
+                          "enabledOnlyRuns",
+                          "capApplied",
+                          "opsPerRun",
+                          "actualUsd",
+                          "agentOnlyUsd",
+                          "savingUsd",
+                          "actualHours",
+                          "agentOnlyHours",
+                          "hoursSaved",
+                          "agentOnlyUsdPerRun"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing workflowId, or an unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions/tokens": {
       "post": {
         "summary": "Mint an ephemeral task or runtime token",

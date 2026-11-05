@@ -1,0 +1,272 @@
+/**
+ * Automation savings model: what the work a workflow did would have cost if
+ * agent tasks had done it instead.
+ *
+ * Port of the `automation-savings-estimate` script, version 7, calibrated on
+ * 2026-11-05 against opus 5.5 session costs. Change a constant here only
+ * together with a new calibration.
+ *
+ * Per substituted run: agent-only cost = R * curve(tau) * err + F, with
+ * tau = T0 + K * ops (capped at TAU_MAX turns), where ops counts the awaited
+ * I/O calls of the deterministic steps. Agent-task nodes inside a workflow are
+ * kept at their actual cost on both sides; only the deterministic glue is
+ * substituted.
+ */
+
+export const SAVINGS_TIERS = ["smol", "regular", "smart", "ultra"] as const;
+export type SavingsTier = (typeof SAVINGS_TIERS)[number];
+export type SavingsBand = { p10: number; p50: number; p90: number };
+type Quantile = keyof SavingsBand;
+
+export const CALIBRATION_MODEL = "claude-opus-5-5";
+export const CALIBRATED_AT = "2026-11-05";
+
+/** Agent turns per deterministic op. */
+export const K = 0.2753;
+/** Bootstrap turns of a fresh agent session. */
+export const T0 = 2;
+/** tau cap: the fleet's p95 session length in turns. */
+export const TAU_MAX = 61;
+/** An agent would not poll faster than hourly: schedule runs count at most 24 a day. */
+export const CAP_PER_DAY = 24;
+/** Lead follow-up review per standalone agent task, USD. */
+export const F_FOLLOWUP = 0.107;
+/** USD per million SystemOne input tokens when a run records no cost. */
+export const JEV_PER_M = 0.042;
+/** Failure and retry multiplier, from scheduled agent tasks. */
+export const R: SavingsBand = { p10: 1.011, p50: 1.02, p90: 1.03 };
+/** Leave-one-out backtest spread for a single job. */
+export const ERR_JOB: SavingsBand = { p10: 0.542, p50: 1.0, p90: 1.508 };
+/** Monte Carlo spread for a fleet sum. */
+export const ERR_FLEET: SavingsBand = { p10: 0.746, p50: 1.0, p90: 1.325 };
+/** Ops of a swarm-script node whose script is not in the catalog. */
+export const DEFAULT_OPS = 9;
+/** Upper bound on the ops counted for one script. */
+export const MAX_SCRIPT_OPS = 100;
+
+// Session cost (USD) and agent-active hours by session length in turns
+// (index 0 = 1 turn), per tier, from 30 days of session_costs repriced at each
+// tier's model.
+export const CURVE: Record<SavingsTier, { usd: readonly number[]; hrs: readonly number[] }> = {
+  smol: {
+    usd: [
+      0.0056, 0.0068, 0.0075, 0.0086, 0.0092, 0.0105, 0.012, 0.0146, 0.0163, 0.0171, 0.0184, 0.02,
+      0.0212, 0.0222, 0.0225, 0.0242, 0.0254, 0.0268, 0.028, 0.0291, 0.0306, 0.0319, 0.0333, 0.0353,
+      0.0359, 0.0374, 0.0389, 0.0413, 0.043, 0.0434, 0.045, 0.047, 0.0489, 0.0505, 0.051, 0.0535,
+      0.0554, 0.057, 0.0586, 0.0595, 0.0612, 0.0633, 0.065, 0.0679, 0.0683, 0.0702, 0.0717, 0.0742,
+      0.0757, 0.0764, 0.078, 0.0805, 0.0824, 0.0842, 0.085, 0.0881, 0.0901, 0.093, 0.0949, 0.0963,
+      0.0979,
+    ],
+    hrs: [
+      0.00409, 0.00521, 0.00674, 0.00831, 0.00993, 0.0126, 0.01586, 0.01997, 0.02272, 0.02392,
+      0.02615, 0.03049, 0.034, 0.03708, 0.03835, 0.04398, 0.04779, 0.05207, 0.05544, 0.05811,
+      0.06247, 0.06595, 0.07002, 0.07589, 0.0778, 0.08234, 0.08704, 0.09357, 0.09884, 0.10091,
+      0.10694, 0.11393, 0.12002, 0.12476, 0.12736, 0.13666, 0.14271, 0.14854, 0.15322, 0.15738,
+      0.16341, 0.17023, 0.17766, 0.18815, 0.18983, 0.19846, 0.1996, 0.20217, 0.20833, 0.21012,
+      0.21538, 0.2224, 0.23067, 0.23488, 0.23825, 0.24844, 0.25554, 0.26838, 0.27469, 0.27725,
+      0.28259,
+    ],
+  },
+  regular: {
+    usd: [
+      0.0878, 0.1074, 0.1211, 0.1383, 0.1497, 0.1699, 0.196, 0.2372, 0.2628, 0.2762, 0.2952, 0.3209,
+      0.3399, 0.3544, 0.3593, 0.3859, 0.4041, 0.425, 0.4435, 0.4586, 0.4817, 0.5001, 0.5215, 0.5501,
+      0.5582, 0.5795, 0.6027, 0.6364, 0.6621, 0.6678, 0.6917, 0.7189, 0.7459, 0.7683, 0.7758,
+      0.8096, 0.8361, 0.8588, 0.8806, 0.893, 0.9152, 0.9422, 0.9654, 1.0056, 1.0108, 1.0351, 1.0545,
+      1.0885, 1.108, 1.1184, 1.1389, 1.1716, 1.1969, 1.2205, 1.2309, 1.2733, 1.3003, 1.3399, 1.3639,
+      1.3838, 1.4053,
+    ],
+    hrs: [
+      0.00341, 0.00435, 0.00562, 0.00693, 0.00828, 0.0105, 0.01322, 0.01665, 0.01894, 0.01994,
+      0.0218, 0.02541, 0.02834, 0.0309, 0.03197, 0.03665, 0.03983, 0.0434, 0.04621, 0.04844,
+      0.05207, 0.05497, 0.05836, 0.06326, 0.06485, 0.06863, 0.07255, 0.07799, 0.08239, 0.08411,
+      0.08914, 0.09496, 0.10004, 0.10399, 0.10616, 0.11391, 0.11896, 0.12382, 0.12771, 0.13118,
+      0.13621, 0.14189, 0.14808, 0.15683, 0.15823, 0.16542, 0.16638, 0.16852, 0.17365, 0.17514,
+      0.17952, 0.18537, 0.19227, 0.19578, 0.19858, 0.20708, 0.213, 0.22371, 0.22896, 0.23109,
+      0.23555,
+    ],
+  },
+  smart: {
+    usd: [
+      0.1746, 0.2138, 0.2413, 0.2756, 0.2983, 0.3385, 0.3907, 0.4729, 0.5243, 0.551, 0.589, 0.6402,
+      0.6783, 0.7075, 0.7173, 0.7705, 0.8068, 0.8487, 0.8857, 0.9158, 0.9621, 0.9989, 1.0416,
+      1.0987, 1.1149, 1.1576, 1.2041, 1.2714, 1.3225, 1.3339, 1.3815, 1.4359, 1.49, 1.5347, 1.5496,
+      1.617, 1.67, 1.7153, 1.7596, 1.7844, 1.8288, 1.8828, 1.9291, 2.0095, 2.0198, 2.0683, 2.1069,
+      2.1748, 2.2137, 2.2345, 2.2752, 2.3413, 2.3918, 2.4388, 2.4595, 2.5444, 2.5985, 2.678, 2.7259,
+      2.7657, 2.8086,
+    ],
+    hrs: [
+      0.00265, 0.00338, 0.00437, 0.00539, 0.00644, 0.00817, 0.01029, 0.01296, 0.01474, 0.01552,
+      0.01696, 0.01978, 0.02205, 0.02405, 0.02488, 0.02852, 0.031, 0.03377, 0.03596, 0.03769,
+      0.04052, 0.04278, 0.04541, 0.04923, 0.05046, 0.05341, 0.05645, 0.06069, 0.06411, 0.06545,
+      0.06937, 0.0739, 0.07785, 0.08092, 0.08261, 0.08865, 0.09257, 0.09635, 0.09939, 0.10209,
+      0.106, 0.11041, 0.11524, 0.12204, 0.12313, 0.12873, 0.12947, 0.13114, 0.13513, 0.13629,
+      0.1397, 0.14425, 0.14962, 0.15235, 0.15453, 0.16114, 0.16575, 0.17408, 0.17817, 0.17983,
+      0.1833,
+    ],
+  },
+  ultra: {
+    usd: [
+      0.4215, 0.5126, 0.5737, 0.6515, 0.702, 0.7922, 0.9108, 1.0969, 1.2137, 1.2729, 1.3559, 1.4659,
+      1.5471, 1.6075, 1.6273, 1.7385, 1.8143, 1.9006, 1.9774, 2.0389, 2.1345, 2.211, 2.2993, 2.4146,
+      2.4463, 2.5326, 2.6278, 2.7635, 2.8673, 2.8901, 2.9876, 3.0983, 3.2073, 3.2964, 3.3254,
+      3.4593, 3.5632, 3.6518, 3.7384, 3.784, 3.8661, 3.9685, 4.0556, 4.2104, 4.229, 4.3174, 4.3912,
+      4.5199, 4.5949, 4.6375, 4.7124, 4.8381, 4.931, 5.017, 5.0554, 5.2133, 5.3132, 5.4655, 5.5501,
+      5.6254, 5.7067,
+    ],
+    hrs: [
+      0.00265, 0.00338, 0.00437, 0.00539, 0.00644, 0.00817, 0.01029, 0.01296, 0.01474, 0.01552,
+      0.01696, 0.01978, 0.02205, 0.02405, 0.02488, 0.02852, 0.031, 0.03377, 0.03596, 0.03769,
+      0.04052, 0.04278, 0.04541, 0.04923, 0.05046, 0.05341, 0.05645, 0.06069, 0.06411, 0.06545,
+      0.06937, 0.0739, 0.07785, 0.08092, 0.08261, 0.08865, 0.09257, 0.09635, 0.09939, 0.10209,
+      0.106, 0.11041, 0.11524, 0.12204, 0.12313, 0.12873, 0.12947, 0.13114, 0.13513, 0.13629,
+      0.1397, 0.14425, 0.14962, 0.15235, 0.15453, 0.16114, 0.16575, 0.17408, 0.17817, 0.17983,
+      0.1833,
+    ],
+  },
+};
+
+/** Linear interpolation on the tier curve; tau is clamped to [1, TAU_MAX]. */
+export function curve(tau: number, tier: SavingsTier, key: "usd" | "hrs"): number {
+  const t = Math.max(1, Math.min(TAU_MAX, tau));
+  const a = CURVE[tier][key];
+  const lo = Math.floor(t);
+  const hi = Math.ceil(t);
+  const vLo = a[lo - 1] as number;
+  const vHi = a[hi - 1] as number;
+  return vLo + (vHi - vLo) * (t - lo);
+}
+
+/** Retired copies (`<name>-retired-YYYY-MM-DD`) are versions of one job. */
+export function jobKey(name: string): string {
+  return name.replace(/-retired-\d{4}-\d{2}-\d{2}$/, "");
+}
+
+/** Count of `await` in a script's source, as the ops a swarm-script node performs. */
+export function scriptOpsFromAwaitCount(awaits: number): number {
+  return Math.min(MAX_SCRIPT_OPS, Number(awaits) || 0);
+}
+
+type DefinitionNode = { id: string; type: string; config?: Record<string, unknown> };
+
+/** Deterministic ops per node id. Agent-task, wait and control nodes count 0. */
+export function nodeOpsOf(
+  definition: { nodes?: DefinitionNode[] } | null | undefined,
+  opsByScript: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const ops = new Map<string, number>();
+  for (const node of definition?.nodes ?? []) {
+    let o = 0;
+    if (node.type === "swarm-script") {
+      const name = node.config?.scriptName;
+      o = (typeof name === "string" ? opsByScript.get(name) : undefined) ?? DEFAULT_OPS;
+    } else if (node.type === "script") {
+      o = Math.max(1, (JSON.stringify(node.config ?? {}).match(/\bawait\b/g) ?? []).length);
+    } else if (
+      ["system-one-decision", "system-one-extraction", "raw-llm", "notify", "code-match"].includes(
+        node.type,
+      )
+    ) {
+      o = 1;
+    }
+    ops.set(node.id, o);
+  }
+  return ops;
+}
+
+/** Tier-independent facts about one workflow over a window. */
+export type WorkflowFacts = {
+  /** Every run that started in the window. */
+  runs: number;
+  /** Runs that were not skipped or cancelled. */
+  countedRuns: number;
+  /** Counted runs started by a schedule. */
+  schedRuns: number;
+  /** Of `schedRuns`, the runs that created an agent task or started a child workflow. */
+  schedEffectRuns: number;
+  /** Deterministic ops summed over every step of every run. */
+  opsSum: number;
+  agentTasks: number;
+  /** Session cost of the agent tasks the runs created. */
+  agentUsd: number;
+  agentMs: number;
+  /** Lead follow-up review cost of those agent tasks. */
+  followupUsd: number;
+  /** LLM cost a run reported itself (report node). */
+  recordedLlmUsd: number;
+  /** LLM cost estimated from SystemOne tokens and raw-llm output size. */
+  estimatedLlmUsd: number;
+  /** Wall time of the deterministic steps. */
+  computeSecs: number;
+};
+
+export type PricedWorkflow = {
+  runs: number;
+  substitutedRuns: number;
+  /** Schedule runs above the hourly cap that still count because they had an effect. */
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  /** What one substituted run would cost an agent at p50 (R * curve + review). */
+  agentOnlyUsdPerRun: number;
+};
+
+const bandOf = (fn: (q: Quantile) => number): SavingsBand => ({
+  p10: fn("p10"),
+  p50: fn("p50"),
+  p90: fn("p90"),
+});
+
+/**
+ * Price one workflow's facts at a tier. `band` picks the error spread: `job`
+ * for a single job, `fleet` for a sum over many jobs.
+ */
+export function priceWorkflow(
+  facts: WorkflowFacts,
+  opts: { tier: SavingsTier; days: number; band: "job" | "fleet" },
+): PricedWorkflow {
+  const cap = CAP_PER_DAY * opts.days;
+  const runs = facts.runs;
+  // Schedule runs: at most the hourly cap, but a run with a downstream effect always counts.
+  const vCap = Math.min(facts.schedRuns, cap);
+  const vSched = Math.max(vCap, facts.schedEffectRuns);
+  const substituted = vSched + (facts.countedRuns - facts.schedRuns);
+  const opsPerRun = runs > 0 ? facts.opsSum / runs : 0;
+  const tau = Math.min(TAU_MAX, T0 + K * opsPerRun);
+  // A pure agent dispatcher (no deterministic ops) substitutes nothing.
+  const orchestrates = !(opsPerRun < 1 && facts.agentTasks > 0);
+  const unitUsd = orchestrates ? curve(tau, opts.tier, "usd") : 0;
+  const unitHrs = orchestrates ? curve(tau, opts.tier, "hrs") : 0;
+  const review = unitUsd > 0 ? F_FOLLOWUP : 0;
+  const share = runs > 0 ? substituted / runs : 0;
+  const llmUsd = facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd;
+  const keptUsd = (facts.agentUsd + facts.followupUsd) * share;
+  const keptHours = (facts.agentMs / 3.6e6) * share;
+  const actualUsd = (facts.agentUsd + facts.followupUsd + llmUsd) * share;
+  const actualHours = (facts.agentMs / 3.6e6 + facts.computeSecs / 3600) * share;
+  const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
+  const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
+  const agentOnlyHours = bandOf((q) => keptHours + substituted * R[q] * unitHrs * err[q]);
+  return {
+    runs,
+    substitutedRuns: substituted,
+    effectRuns: vSched - vCap,
+    enabledOnlyRuns: runs - substituted,
+    capApplied: facts.schedRuns > cap,
+    opsPerRun,
+    actualUsd,
+    agentOnlyUsd,
+    savingUsd: bandOf((q) => agentOnlyUsd[q] - actualUsd),
+    actualHours,
+    agentOnlyHours,
+    hoursSaved: bandOf((q) => agentOnlyHours[q] - actualHours),
+    agentOnlyUsdPerRun: R.p50 * unitUsd + review,
+  };
+}
