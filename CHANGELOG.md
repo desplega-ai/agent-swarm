@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-05
+
+### Added
+- UI: native-style phone header and page action sheets (#2735).
+
+### Changed
+- Docker: bumped amp, gemini and the claude-managed SDK (#2743).
+
+### Fixed
+- Docker: the v2.8.0 full worker image installed the context-mode Claude and Codex plugin marketplaces unpinned and baked plugin 2.1.0, which requires Node 24.15.0 or later. The image ships Node 22, so the plugin's hook denied every Bash call in sessions with context-mode on. Both marketplaces are now pinned to v1.0.169, the same version as the context-mode CLI. Upgrade from 2.8.0 if you run workers with context-mode on. Releases before 2.8.0 are not affected: their images were built before upstream moved to its Node 24 line (#2741).
+- Scripts: a native run ends when the script's default export resolves (#2737).
+
 ## [2.8.0] - 2026-11-05
 
 ### Added
