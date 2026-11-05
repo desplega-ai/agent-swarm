@@ -1,4 +1,4 @@
-import Editor, { type Monaco } from "@monaco-editor/react";
+import Editor from "@monaco-editor/react";
 import {
   Children,
   createContext,
@@ -12,7 +12,7 @@ import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
-import { monacoSnippetDarkTheme, monacoSnippetLightTheme } from "../../lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "../../lib/monaco-themes";
 import { CopyButton } from "./copy-button";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 import { SwarmLinkChip, useSwarmLinkPlugins } from "./markdown-link-chip";
@@ -37,13 +37,6 @@ function tryPrettyJson(text: string): string | null {
     // not JSON
   }
   return null;
-}
-
-const SNIPPET_THEME = { light: "markdown-snippet-light", dark: "markdown-snippet-dark" } as const;
-
-function defineSnippetThemes(monaco: Monaco) {
-  monaco.editor.defineTheme(SNIPPET_THEME.light, monacoSnippetLightTheme);
-  monaco.editor.defineTheme(SNIPPET_THEME.dark, monacoSnippetDarkTheme);
 }
 
 const MONACO_LINE_HEIGHT = 16;
@@ -102,17 +95,19 @@ export function MonacoCodeBlock({
       className={cn(
         "relative w-full overflow-hidden",
         // A snippet sits on a muted card, as fenced code does in agent-fs;
-        // its editor theme is transparent so the card shows through.
+        // `[data-monaco-snippet]` in markdown.css clears the editor background
+        // so the card shows through.
         fill ? "h-full border-y border-border" : "my-3 rounded-md border border-border bg-muted/60",
       )}
       data-monaco-block="markdown-view"
+      data-monaco-snippet={fill ? undefined : ""}
       style={fill ? undefined : { height }}
     >
       <CopyButton value={value} />
       <Editor
         language={resolvedLanguage}
-        theme={fill ? (theme === "dark" ? "vs-dark" : "vs") : SNIPPET_THEME[theme]}
-        beforeMount={defineSnippetThemes}
+        theme={fill ? (theme === "dark" ? "vs-dark" : "vs") : MONACO_GITHUB_THEME[theme]}
+        beforeMount={defineGithubThemes}
         value={value}
         options={{
           readOnly: true,

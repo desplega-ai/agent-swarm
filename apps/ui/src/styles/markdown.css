@@ -207,3 +207,13 @@
 :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):last-child {
   padding-right: 0;
 }
+
+/* Fenced code (MonacoCodeBlock snippets). Monaco themes are global, so a
+ * snippet shares the github-* theme with every other editor on the page and
+ * clears its background here instead, scoped to the snippet, so its muted card
+ * shows through. Monaco writes theme colors as variables on `.monaco-editor`;
+ * this selector outranks that rule. Not in `:where()` for that reason. */
+[data-monaco-snippet] .monaco-editor {
+  --vscode-editor-background: transparent;
+  --vscode-editorGutter-background: transparent;
+}
