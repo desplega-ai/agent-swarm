@@ -100,11 +100,14 @@ const pathLabels: Record<string, string> = {
   "/integrations/tools/connections": "Script connections",
   "/settings/connection-playground": "Connection playground",
   "/settings/fetch-credentials": "Raw fetch credentials",
+  // `/fs/continue` (the agent-fs sign-in handoff) has no `/fs` page of its own.
+  "/fs": "Files",
 };
 const pathLinks: Record<string, string> = {
   "/integrations/tools/connections": "/integrations/tools?tab=connections",
   "/integrations/tools/oauth-apps": "/integrations/tools?tab=oauth-apps",
   "/integrations/tools/mcp-servers": "/integrations/tools?tab=mcp",
+  "/fs": "/file",
 };
 
 /**
