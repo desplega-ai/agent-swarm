@@ -45,7 +45,10 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-// Components whose `id` claims a `/ui/<id>/...` state slot.
+// Components whose `id` claims a `/ui/<id>/...` state slot. Mirrored by the
+// element assembler (`apps/ui/src/lib/json-render/assemble.ts`), which
+// namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
+// two lists equal.
 const UI_STATE_COMPONENTS = new Set([
   "SearchInput",
   "Select",
