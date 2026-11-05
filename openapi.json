@@ -51431,7 +51431,7 @@
     "/api/savings/jobs": {
       "get": {
         "summary": "Estimated automation savings per workflow",
-        "description": "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "description": "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51599,11 +51599,15 @@
                           },
                           "measuredUsd": {
                             "type": "number",
-                            "description": "Measured spend of every run in the window: agent tasks, their reviews, LLM calls."
+                            "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
+                          },
+                          "estimatedLlmUsd": {
+                            "type": "number",
+                            "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
                           },
                           "actualUsd": {
                             "type": "number",
-                            "description": "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this."
+                            "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
                           },
                           "agentOnlyUsd": {
                             "type": "object",
@@ -51702,6 +51706,7 @@
                           "capApplied",
                           "opsPerRun",
                           "measuredUsd",
+                          "estimatedLlmUsd",
                           "actualUsd",
                           "agentOnlyUsd",
                           "savingUsd",
@@ -51728,6 +51733,9 @@
                           "type": "integer"
                         },
                         "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
                           "type": "number"
                         },
                         "actualUsd": {
@@ -51799,6 +51807,7 @@
                         "substitutedRuns",
                         "enabledOnlyRuns",
                         "measuredUsd",
+                        "estimatedLlmUsd",
                         "actualUsd",
                         "agentOnlyUsd",
                         "savingUsd",
@@ -51848,7 +51857,7 @@
     "/api/savings/daily": {
       "get": {
         "summary": "Daily automation savings of a workflow",
-        "description": "The workflow's p50 saving and actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
+        "description": "The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
         "tags": [
           "Savings"
         ],
@@ -51972,18 +51981,23 @@
                           },
                           "actualUsd": {
                             "type": "number",
-                            "description": "Scaled estimate: the day's measured spend times the window's substituted share."
+                            "description": "Scaled estimate: the day's measured and estimated spend times the window's substituted share."
                           },
                           "measuredUsd": {
                             "type": "number",
                             "description": "The day's measured spend, not scaled."
+                          },
+                          "estimatedLlmUsd": {
+                            "type": "number",
+                            "description": "The day's LLM spend estimated from tokens and output size, not measured."
                           }
                         },
                         "required": [
                           "day",
                           "savingUsd",
                           "actualUsd",
-                          "measuredUsd"
+                          "measuredUsd",
+                          "estimatedLlmUsd"
                         ]
                       }
                     }

@@ -11,7 +11,7 @@ import {
   type SavingsBand,
 } from "../be/savings/model";
 import { readWorkflowSavings, type SavingsTotals } from "../be/savings/read";
-import { refreshWorkflowToday } from "../be/savings/rollup";
+import { refreshWorkflowToday, utcDay } from "../be/savings/rollup";
 import { executeReadOnlyQueryGated } from "./db-query";
 import {
   DbQueryConcurrencyCapError,
@@ -74,11 +74,18 @@ const SavingsJobRowSchema = z.object({
   opsPerRun: z.number(),
   measuredUsd: z
     .number()
-    .describe("Measured spend of every run in the window: agent tasks, their reviews, LLM calls."),
+    .describe(
+      "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost.",
+    ),
+  estimatedLlmUsd: z
+    .number()
+    .describe(
+      "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost.",
+    ),
   actualUsd: z
     .number()
     .describe(
-      "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this.",
+      "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this.",
     ),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
@@ -95,6 +102,7 @@ const SavingsTotalsSchema = z.object({
   substitutedRuns: z.number().int(),
   enabledOnlyRuns: z.number().int(),
   measuredUsd: z.number(),
+  estimatedLlmUsd: z.number(),
   actualUsd: z.number(),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
@@ -131,9 +139,13 @@ const SavingsDailyResponseSchema = z.object({
       actualUsd: z
         .number()
         .describe(
-          "Scaled estimate: the day's measured spend times the window's substituted share.",
+          "Scaled estimate: the day's measured and estimated spend times the window's substituted share.",
         ),
       measuredUsd: z.number().describe("The day's measured spend, not scaled."),
+      /** Estimated; the points sum to the jobs row's `estimatedLlmUsd`. */
+      estimatedLlmUsd: z
+        .number()
+        .describe("The day's LLM spend estimated from tokens and output size, not measured."),
     }),
   ),
 });
@@ -149,7 +161,7 @@ const savingsJobsRoute = route({
   pattern: ["api", "savings", "jobs"],
   summary: "Estimated automation savings per workflow",
   description:
-    "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+    "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1).optional(),
@@ -169,7 +181,7 @@ const savingsDailyRoute = route({
   pattern: ["api", "savings", "daily"],
   summary: "Daily automation savings of a workflow",
   description:
-    "The workflow's p50 saving and actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
+    "The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
   tags: ["Savings"],
   query: z.object({ workflowId: z.string().min(1), ...windowQuery }),
   responses: {
@@ -219,6 +231,7 @@ function toRow(row: PricedWorkflow & { workflowId: string; name: string }) {
     capApplied: row.capApplied,
     opsPerRun: round2(row.opsPerRun),
     measuredUsd: round2(row.measuredUsd),
+    estimatedLlmUsd: round2(row.estimatedLlmUsd),
     actualUsd: round2(row.actualUsd),
     agentOnlyUsd: roundBand(row.agentOnlyUsd),
     savingUsd: roundBand(row.savingUsd),
@@ -233,6 +246,7 @@ function toTotals(t: SavingsTotals) {
   return {
     ...t,
     measuredUsd: round2(t.measuredUsd),
+    estimatedLlmUsd: round2(t.estimatedLlmUsd),
     actualUsd: round2(t.actualUsd),
     agentOnlyUsd: roundBand(t.agentOnlyUsd),
     savingUsd: roundBand(t.savingUsd),
@@ -247,6 +261,49 @@ function notFound(res: ServerResponse): true {
   return true;
 }
 
+/** After a refresh scanned the day, later reads within this long reuse it. */
+export const REFRESH_TTL_MS = 60_000;
+
+/**
+ * Refresh state per workflow and UTC day. Concurrent reads share the refresh in
+ * flight. Once one has scanned the day (computed, refused as too many runs, or
+ * stopped by a busy database), reads skip the refresh for REFRESH_TTL_MS, so a
+ * burst or a high-volume workflow scans at most once a minute. A refresh that
+ * found no newer run did no scan and is not held.
+ */
+const refreshes = new Map<string, { at: number; done: Promise<unknown> }>();
+
+/** Test hook: forget the refresh state. */
+export function resetSavingsRefreshCache(): void {
+  refreshes.clear();
+}
+
+function refreshToday(
+  workflow: Parameters<typeof refreshWorkflowToday>[0],
+  now: number,
+): Promise<unknown> {
+  const key = `${workflow.id}:${utcDay(now)}`;
+  const hit = refreshes.get(key);
+  if (hit && (hit.at === 0 || now - hit.at < REFRESH_TTL_MS)) return hit.done;
+  for (const [k, v] of refreshes) if (v.at > 0 && now - v.at >= REFRESH_TTL_MS) refreshes.delete(k);
+  const entry = { at: 0, done: Promise.resolve() as Promise<unknown> };
+  entry.done = refreshWorkflowToday(workflow, requestSql, now).then(
+    (outcome) => {
+      if (outcome === "skipped") refreshes.delete(key);
+      else entry.at = Date.now();
+    },
+    (err) => {
+      if (!(err instanceof DbQueryConcurrencyCapError || err instanceof DbQueryTimeoutError)) {
+        refreshes.delete(key);
+        throw err;
+      }
+      entry.at = Date.now();
+    },
+  );
+  refreshes.set(key, entry);
+  return entry.done;
+}
+
 /**
  * One workflow: bring today's bucket up to date first when it has a run newer
  * than the last rollup. Best effort: on a busy database the hourly bucket is served.
@@ -255,12 +312,7 @@ async function readOne(workflowId: string, days: number, tier: (typeof SAVINGS_T
   const workflow = await getWorkflow(workflowId);
   if (!workflow) return null;
   const now = Date.now();
-  try {
-    await refreshWorkflowToday(workflow, requestSql, now);
-  } catch (err) {
-    if (!(err instanceof DbQueryConcurrencyCapError || err instanceof DbQueryTimeoutError))
-      throw err;
-  }
+  await refreshToday(workflow, now);
   return readWorkflowSavings({ days, tier, now, workflowId });
 }
 
@@ -301,6 +353,7 @@ export async function handleSavings(
     const saving = roundToTotal(points.map((p) => p.savingUsd));
     const actual = roundToTotal(points.map((p) => p.actualUsd));
     const measured = roundToTotal(points.map((p) => p.measuredUsd));
+    const estimated = roundToTotal(points.map((p) => p.estimatedLlmUsd));
     savingsDailyRoute.respond(res, 200, {
       ...meta(read, tier, { complete: read.complete, hasRows }),
       points: points.map((p, i) => ({
@@ -308,6 +361,7 @@ export async function handleSavings(
         savingUsd: saving[i] as number,
         actualUsd: actual[i] as number,
         measuredUsd: measured[i] as number,
+        estimatedLlmUsd: estimated[i] as number,
       })),
     });
     return true;

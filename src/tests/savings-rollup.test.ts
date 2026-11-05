@@ -22,7 +22,7 @@ import {
   stopSavingsRollup,
   workflowDaysToCompute,
 } from "../be/savings/rollup";
-import { handleSavings } from "../http/savings";
+import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -248,6 +248,8 @@ describe("savings rollup", () => {
     expect(actual).toBeCloseTo(row?.actualUsd ?? Number.NaN, 6);
     const measured = read.points.reduce((s, p) => s + p.measuredUsd, 0);
     expect(measured).toBeCloseTo(row?.measuredUsd ?? Number.NaN, 6);
+    const estimated = read.points.reduce((s, p) => s + p.estimatedLlmUsd, 0);
+    expect(estimated).toBeCloseTo(row?.estimatedLlmUsd ?? Number.NaN, 6);
     // 14 effect tasks at $0.50 each, unscaled.
     expect(row?.measuredUsd).toBeCloseTo(7, 6);
     expect(read.points.filter((p) => p.savingUsd > 0).map((p) => p.day)).toEqual(WEEK);
@@ -307,6 +309,27 @@ describe("savings rollup", () => {
       };
       expect(list.valid).toBe(true);
       expect(list.rows.map((r) => r.workflowId)).toContain(wf);
+    });
+
+    test("reads share one refresh, and a scanned day is held for a minute", async () => {
+      await runSavingsRollupTick(inProcessSql);
+      const wf = (await createWorkflow({ name: "rollup-burst", definition: DEFINITION })).id;
+      const runs = async () =>
+        (
+          (await get(`/api/savings/jobs?workflowId=${wf}&days=7`)).body as {
+            rows: { runs: number }[];
+          }
+        ).rows[0]?.runs ?? 0;
+      // No newer run: the refresh scans nothing and is not held.
+      expect(await runs()).toBe(0);
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+      // A burst shares the one refresh in flight.
+      expect(await Promise.all(Array.from({ length: 5 }, runs))).toEqual([1, 1, 1, 1, 1]);
+      // Within the hold, a newer run waits instead of rescanning the day.
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+      expect(await runs()).toBe(1);
+      resetSavingsRefreshCache();
+      expect(await runs()).toBe(2);
     });
 
     test("bad input is rejected", async () => {

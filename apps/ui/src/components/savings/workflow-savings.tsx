@@ -105,8 +105,8 @@ function SavingsKpis({ row, note, days }: { row: SavingsJobRow; note: string; da
       <StatPanel
         label="Measured spend"
         value={<span className="font-mono tabular-nums">{formatUsd(row.measuredUsd)}</span>}
-        detail={`Est. ${formatUsd(row.actualUsd)} for substituted runs vs ${formatUsd(row.agentOnlyUsd.p50)} agent-only`}
-        info="What all the window's runs cost: agent tasks they started, their reviews, LLM calls. The estimate scales it to the substituted share of runs; the saving subtracts that estimate from the agent-only cost."
+        detail={`${row.estimatedLlmUsd > 0 ? `+ ${formatUsd(row.estimatedLlmUsd)} est. LLM · ` : ""}Est. ${formatUsd(row.actualUsd)} for substituted runs vs ${formatUsd(row.agentOnlyUsd.p50)} agent-only`}
+        info="What all the window's runs cost: agent tasks they started, their reviews, recorded LLM cost. LLM calls with no recorded cost are estimated from tokens and output size and shown apart. The saving subtracts both, scaled to the substituted share of runs, from the agent-only cost."
       />
     </div>
   );
@@ -167,6 +167,9 @@ export function WorkflowSavingsTab({ workflowId }: { workflowId: string }) {
                 {formatUsd(row.agentOnlyUsdPerRun)}
               </DetailRow>
               <DetailRow label="Measured spend">{formatUsd(row.measuredUsd)}</DetailRow>
+              {row.estimatedLlmUsd > 0 ? (
+                <DetailRow label="LLM spend (est.)">{formatUsd(row.estimatedLlmUsd)}</DetailRow>
+              ) : null}
               <DetailRow label="Substituted-run cost (est.)">{formatUsd(row.actualUsd)}</DetailRow>
               <DetailRow label="Agent-only cost (est.)">
                 {formatUsd(row.agentOnlyUsd.p50)}
@@ -185,9 +188,10 @@ export function WorkflowSavingsTab({ workflowId }: { workflowId: string }) {
               at their cost on both sides. The saving is that agent-only cost minus the runs' cost.
             </p>
             <p>
-              The runs' cost in the saving is an estimate: the measured spend scaled by substituted
-              runs over all runs, as if spend were spread evenly. Measured spend is the unscaled
-              total.
+              The runs' cost in the saving is an estimate: the spend scaled by substituted runs over
+              all runs, as if spend were spread evenly. Measured spend is the unscaled total of
+              recorded costs; LLM calls with no recorded cost are estimated from tokens and output
+              size and listed apart.
             </p>
             <p>
               Covers this workflow's own runs; sub-workflow runs are not included. Scheduled runs

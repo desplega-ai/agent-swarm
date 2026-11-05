@@ -235,10 +235,16 @@ export type PricedWorkflow = {
   enabledOnlyRuns: number;
   capApplied: boolean;
   opsPerRun: number;
-  /** Measured spend of every run in the window: agent tasks, their reviews, LLM calls. */
+  /** Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
   measuredUsd: number;
   /**
-   * Scaled estimate, not a measurement: `measuredUsd * substitutedRuns / runs`.
+   * LLM spend estimated from tokens and output size, not measured. Zero when the
+   * runs recorded their LLM cost, which then counts in `measuredUsd` instead.
+   */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate, not a measurement:
+   * `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`.
    * The estimator's actual side; it assumes spend is spread evenly over runs.
    */
   actualUsd: number;
@@ -251,6 +257,20 @@ export type PricedWorkflow = {
   /** What one substituted run would cost an agent at p50 (R * curve + review). */
   agentOnlyUsdPerRun: number;
 };
+
+/**
+ * Split spend into measured and estimated. The window picks the LLM source
+ * (`useRecorded`): when any run recorded its LLM cost, no day adds an estimate.
+ */
+function spendOf(
+  facts: WorkflowFacts,
+  useRecorded: boolean,
+): { measuredUsd: number; estimatedLlmUsd: number } {
+  return {
+    measuredUsd: facts.agentUsd + facts.followupUsd + (useRecorded ? facts.recordedLlmUsd : 0),
+    estimatedLlmUsd: useRecorded ? 0 : facts.estimatedLlmUsd,
+  };
+}
 
 const bandOf = (fn: (q: Quantile) => number): SavingsBand => ({
   p10: fn("p10"),
@@ -315,10 +335,7 @@ function priceRouter(
     opsPerRun,
     // Measured spend is reported; the rule subtracts nothing (v7: the jobs
     // the router starts are priced, with their spend, on their own rows).
-    measuredUsd:
-      facts.agentUsd +
-      facts.followupUsd +
-      (facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd),
+    ...spendOf(facts, facts.recordedLlmUsd > 0),
     actualUsd: 0,
     agentOnlyUsd,
     savingUsd: agentOnlyUsd,
@@ -354,11 +371,10 @@ export function priceWorkflow(
   const unitHrs = orchestrates ? curve(tau, opts.tier, "hrs") : 0;
   const review = unitUsd > 0 ? F_FOLLOWUP : 0;
   const share = runs > 0 ? substituted / runs : 0;
-  const llmUsd = facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd;
+  const { measuredUsd, estimatedLlmUsd } = spendOf(facts, facts.recordedLlmUsd > 0);
   const keptUsd = (facts.agentUsd + facts.followupUsd) * share;
   const keptHours = (facts.agentMs / 3.6e6) * share;
-  const measuredUsd = facts.agentUsd + facts.followupUsd + llmUsd;
-  const actualUsd = measuredUsd * share;
+  const actualUsd = (measuredUsd + estimatedLlmUsd) * share;
   const actualHours = (facts.agentMs / 3.6e6 + facts.computeSecs / 3600) * share;
   const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
   const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
@@ -372,6 +388,7 @@ export function priceWorkflow(
     capApplied: vCap < facts.schedRuns,
     opsPerRun,
     measuredUsd,
+    estimatedLlmUsd,
     actualUsd,
     agentOnlyUsd,
     savingUsd: bandOf((q) => agentOnlyUsd[q] - actualUsd),
@@ -383,9 +400,9 @@ export function priceWorkflow(
 }
 
 /**
- * Split a window's p50 saving, scaled actual cost and measured spend across
- * the UTC days its runs started on, so the days sum to `priceWorkflow` over
- * the window. The unit
+ * Split a window's p50 saving, scaled actual cost, measured spend and
+ * estimated LLM spend across the UTC days its runs started on, so the days
+ * sum to `priceWorkflow` over the window. The unit
  * cost (tau), the substituted share and the LLM source are the window's.
  * When the hourly cap or the effect rule makes the window's counted schedule
  * runs differ from the raw ones, they are spread pro rata over the days'
@@ -398,18 +415,22 @@ export function splitByDay(
   opts: { tier: SavingsTier; days: number },
   /** The window's pricing when it is already known (a cap shared with other versions). */
   pricedWindow?: PricedWorkflow,
-): { day: string; savingUsd: number; actualUsd: number; measuredUsd: number }[] {
+): {
+  day: string;
+  savingUsd: number;
+  actualUsd: number;
+  measuredUsd: number;
+  estimatedLlmUsd: number;
+}[] {
   const priced = pricedWindow ?? priceWorkflow(facts, { ...opts, band: "job" });
   const useRecorded = facts.recordedLlmUsd > 0;
-  const measuredOf = (d: WorkflowFacts) =>
-    d.agentUsd + d.followupUsd + (useRecorded ? d.recordedLlmUsd : d.estimatedLlmUsd);
   // Enabled-only rule: each effect run is one decision at the window's unit cost.
   if (priced.enabledOnlyRule) {
     return byDay.map((d) => ({
       day: d.day,
       savingUsd: d.effectRuns * priced.agentOnlyUsdPerRun,
       actualUsd: 0,
-      measuredUsd: measuredOf(d),
+      ...spendOf(d, useRecorded),
     }));
   }
   const runs = facts.runs;
@@ -422,14 +443,15 @@ export function splitByDay(
     const substituted =
       (facts.schedRuns > 0 ? (vSched * d.schedRuns) / facts.schedRuns : 0) +
       (d.countedRuns - d.schedRuns);
+    const { measuredUsd, estimatedLlmUsd } = spendOf(d, useRecorded);
     const keptUsd = (d.agentUsd + d.followupUsd) * share;
-    const measuredUsd = measuredOf(d);
-    const actualUsd = measuredUsd * share;
+    const actualUsd = (measuredUsd + estimatedLlmUsd) * share;
     return {
       day: d.day,
       savingUsd: keptUsd + substituted * unitUsd - actualUsd,
       actualUsd,
       measuredUsd,
+      estimatedLlmUsd,
     };
   });
 }

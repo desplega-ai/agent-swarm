@@ -146,20 +146,21 @@ export async function writeWorkflowDay(
  * Recompute today's bucket of one workflow when it has a run newer than the
  * last rollup of today, so a detail page shows a run within seconds instead of
  * an hour. Skipped above LIVE_MAX_RUNS runs today (the hourly tick covers
- * those) and before the rollup has computed today at all.
+ * those) and before the rollup has computed today at all. `skipped` means no
+ * scan ran; `computed` and `refused` mean the day's scans ran.
  */
 export async function refreshWorkflowToday(
   workflow: WorkflowRow,
   sql: SavingsSql,
   now: number,
-): Promise<boolean> {
+): Promise<"skipped" | "computed" | "refused"> {
   const day = utcDay(now);
   const client = getDbClient();
   const marker = await client.get<{ computedAt: string }>(
     "SELECT computedAt FROM automation_savings_days WHERE day=? AND jobKind='workflow' AND modelVersion=?",
     [day, MODEL_VERSION],
   );
-  if (!marker) return false;
+  if (!marker) return "skipped";
   const bucket = await client.get<{ computedAt: string }>(
     "SELECT computedAt FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=? AND subKind=''",
     [day, workflow.id],
@@ -170,13 +171,13 @@ export async function refreshWorkflowToday(
     "SELECT count(*) n FROM workflow_runs WHERE workflowId=? AND startedAt>=?",
     [workflow.id, since],
   );
-  if (!Number(newer?.n)) return false;
+  if (!Number(newer?.n)) return "skipped";
   const out = await computeWorkflowWindow(
     { id: workflow.id, definition: parseDefinition(workflow.definition) },
     { start: dayStartIso(day), end: dayStartIso(utcDay(dayStartMs(day) + DAY_MS)) },
     sql,
   );
-  if (out.status !== "ok") return false;
+  if (out.status !== "ok") return "refused";
   const computedAt = new Date(now).toISOString();
   await client.run(
     INSERT_BUCKET,
@@ -186,7 +187,7 @@ export async function refreshWorkflowToday(
       computedAt,
     ),
   );
-  return true;
+  return "computed";
 }
 
 export type SavingsRollupTickOptions = {
