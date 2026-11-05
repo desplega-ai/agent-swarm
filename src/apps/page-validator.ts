@@ -58,8 +58,10 @@ const UI_STATE_COMPONENTS = new Set([
   "Table",
 ]);
 
-// A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
+// A SchemaForm or SessionThread id is spliced into `/ui/<id>/value`, so it must
+// be a plain token.
 const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
+const PLAIN_TOKEN_ID_COMPONENTS = new Set(["SchemaForm", "SessionThread"]);
 const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
@@ -74,7 +76,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
-  SessionThread: ["onDispatch"],
+  SessionThread: ["onDispatch", "onRootCreated", "onReset"],
 };
 
 /**
@@ -1420,7 +1422,8 @@ export function validatePage(
         formIds.add(rawElement.props.id);
       }
       if (
-        type === "SchemaForm" &&
+        typeof type === "string" &&
+        PLAIN_TOKEN_ID_COMPONENTS.has(type) &&
         isPlainObject(rawElement.props) &&
         typeof rawElement.props.id === "string" &&
         (!SCHEMA_FORM_ID.test(rawElement.props.id) || RESERVED_UI_IDS.has(rawElement.props.id))
@@ -1428,7 +1431,7 @@ export function validatePage(
         issues.push(
           issue(
             `${propsPath}.id`,
-            "SchemaForm id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+            `${type} id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype`,
           ),
         );
       }

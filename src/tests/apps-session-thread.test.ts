@@ -56,11 +56,10 @@ describe("SessionThread validation", () => {
     expect(parsed.success).toBe(true);
   });
 
-  test("accepts a minimal SessionThread (no rootTaskId, no onDispatch, defaulted placeholder) that still claims /ui/<id>", async () => {
-    // `rootTaskId`/`onDispatch` are optional and `placeholder` is generator-defaulted
-    // (stripDefaultedFromRequired), so `id` alone must validate — and `draftEcho`
-    // binding `/ui/thread/value` proves the bare component still registers its
-    // UI state slot.
+  test("accepts a minimal SessionThread (only id) that still claims /ui/<id>", async () => {
+    // Every prop but `id` is optional, so `id` alone must validate, and
+    // `draftEcho` binding `/ui/thread/value` proves the bare component still
+    // registers its UI state slot.
     const definition = sessionThreadDefinition();
     definition.pages.main.elements.thread.props = { id: "thread" } as never;
     const parsed = await parseAppDefinition(definition);
@@ -156,5 +155,37 @@ describe("SessionThread validation", () => {
     const parsed = await parseAppDefinition(definition);
     if (!parsed.success) console.error(parsed.issues);
     expect(parsed.success).toBe(true);
+  });
+
+  test("rejects an onRootCreated app.mutate against an undeclared model", async () => {
+    await expectParseIssue(
+      sessionThreadDefinition("screen", {
+        onRootCreated: [
+          {
+            action: "app.mutate",
+            params: {
+              model: "ghost",
+              op: "update",
+              rowId: "r1",
+              values: { rootTaskId: { $chain: "newTaskId" } },
+            },
+          },
+        ],
+      }),
+      'unknown model "ghost"',
+    );
+  });
+
+  test("rejects an onReset step with an unknown action type", async () => {
+    await expectParseIssue(
+      sessionThreadDefinition("screen", { onReset: [{ action: "app.explode", params: {} }] }),
+      'unknown action type "app.explode"',
+    );
+  });
+
+  test("rejects a SessionThread id that is not a plain token", async () => {
+    const definition = sessionThreadDefinition();
+    (definition.pages.main.elements.thread.props as Record<string, unknown>).id = "a/b";
+    await expectParseIssue(definition, "SessionThread id must match ^[A-Za-z0-9_-]+$");
   });
 });
