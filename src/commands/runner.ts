@@ -3610,7 +3610,9 @@ export async function buildThreadParticipantsPrompt(
           : !untrusted && notes.length > 0
             ? `${notes.join("; ")}.`
             : "no saved preferences.";
-    return `- ${person.label}: ${roles.length > 0 ? `${roles.join(", ")}. ` : ""}${profile}`;
+    return roles.length > 0
+      ? `- ${person.label}: ${roles.join(", ")}. ${profile[0]!.toUpperCase()}${profile.slice(1)}`
+      : `- ${person.label}: ${profile}`;
   });
   if (thread.more > 0) lines.push(`- <${thread.more} more...>`);
   const result = await resolveTemplateAsync("task.thread.participants", {
