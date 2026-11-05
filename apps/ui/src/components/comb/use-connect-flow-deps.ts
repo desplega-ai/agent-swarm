@@ -32,8 +32,13 @@ export function useConnectFlowDeps(): ConnectFlowDeps | null {
           { path: "/" },
           driveId as string,
         ),
-      invite: async (address) => {
-        await api.inviteAgentFsMember({ email: address, role: "editor" });
+      invite: async (address, key) => {
+        const result = await api.inviteAgentFsMember({ email: address, role: "editor" });
+        // agent-fs >= 0.18.19 answers an account outside the org with a
+        // pending invite; the person connecting accepts it with their own key.
+        if (result.status === "pending" && result.token) {
+          await new AgentFsClient({ endpoint, apiKey: key }).acceptInvite(result.token);
+        }
         void invalidateStatusQuery(queryClient);
       },
       connect,
