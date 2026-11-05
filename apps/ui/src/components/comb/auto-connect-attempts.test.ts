@@ -49,4 +49,21 @@ describe("auto-connect attempts", () => {
     await Promise.resolve();
     expect(settledOutcome("k")).toEqual({ kind: "failed", message: "no" });
   });
+
+  test("a rejected attempt records no outcome and leaks no unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const attempt = startAttempt("k", async () => {
+        throw new Error("boom");
+      });
+      await expect(attempt).rejects.toThrow("boom");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(settledOutcome("k")).toBeNull();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });

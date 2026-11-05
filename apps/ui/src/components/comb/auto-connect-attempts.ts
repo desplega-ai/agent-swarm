@@ -35,11 +35,16 @@ export function startAttempt(
   const attempt = run();
   attempts.set(runKey, attempt);
   if (settled.delete(runKey)) notify();
-  void attempt.then((outcome) => {
-    if (attempts.get(runKey) !== attempt) return;
-    settled.set(runKey, outcome);
-    notify();
-  });
+  // The caller handles a rejection of `attempt`. The derived promise only
+  // records outcomes, so it swallows the rejection instead of leaking it.
+  void attempt.then(
+    (outcome) => {
+      if (attempts.get(runKey) !== attempt) return;
+      settled.set(runKey, outcome);
+      notify();
+    },
+    () => undefined,
+  );
   return attempt;
 }
 
