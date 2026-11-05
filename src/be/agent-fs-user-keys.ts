@@ -47,13 +47,21 @@ export async function ensureUserAgentFsAccount(userId: string): Promise<AccountS
   const role = grant.grantsAll || grant.verbs.has("task.fs.mutate") ? "editor" : "viewer";
   const members = await getCurrentOrgMembers(shared.apiUrl, shared.authHeaders, shared.orgId);
   let member = members.find((candidate) => candidate.email === email.toLowerCase());
+  // The primary key of an account this call registers. It is used only to
+  // accept the org invite below and is never stored or returned.
+  let registeredKey: string | undefined;
   if (!member) {
     try {
-      // Registration creates the account before the invite, without retaining its primary key.
-      await agentFsRequest(shared.apiUrl, "/auth/register", {
-        method: "POST",
-        body: { email },
-      });
+      // Registration creates the account before the invite.
+      const registered = await agentFsRequest<{ apiKey?: unknown }>(
+        shared.apiUrl,
+        "/auth/register",
+        { method: "POST", body: { email } },
+      );
+      if (typeof registered?.apiKey === "string" && registered.apiKey) {
+        registeredKey = registered.apiKey;
+        registerVolatileSecret(registeredKey, "AGENT_FS_USER_PRIMARY_KEY");
+      }
     } catch (error) {
       if (!(error instanceof AgentFsRequestError) || error.status >= 500) throw error;
       if (error.status !== 409) return pending(error.message);
@@ -62,7 +70,32 @@ export async function ensureUserAgentFsAccount(userId: string): Promise<AccountS
 
   if (!member || roleRank(member.role) < roleRank(role)) {
     const invited = await inviteEmailToSharedOrg(email, role);
-    if (invited.status === "pending") return pending("The agent-fs org invite is pending");
+    if (invited.status === "pending") {
+      // agent-fs >= 0.18.19 answers every account outside the org with a
+      // pending invite. An account the swarm registered in this call is ours,
+      // so accept with its own key. An account that existed before must
+      // accept the invite itself.
+      if (!registeredKey || !invited.token) return pending("The agent-fs org invite is pending");
+      try {
+        await agentFsRequest(
+          shared.apiUrl,
+          `/invites/${encodeURIComponent(invited.token)}/accept`,
+          {
+            method: "POST",
+            headers: { authorization: `Bearer ${registeredKey}` },
+            allowConflict: true,
+          },
+        );
+      } catch (error) {
+        // The request path carries the invite token: report without it.
+        if (error instanceof AgentFsRequestError && error.status < 500) {
+          return pending(`The agent-fs org invite could not be accepted: HTTP ${error.status}`);
+        }
+        throw new Error(
+          `agent-fs invite accept failed${error instanceof AgentFsRequestError ? `: HTTP ${error.status}` : ""}`,
+        );
+      }
+    }
     member = (await getCurrentOrgMembers(shared.apiUrl, shared.authHeaders, shared.orgId)).find(
       (candidate) => candidate.email === email.toLowerCase(),
     );

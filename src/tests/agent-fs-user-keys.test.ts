@@ -47,6 +47,8 @@ let inviteResponse: Response | undefined;
 let keyResponse: Response | undefined;
 let membersResponse: Response | undefined;
 let roleUpdateResponse: Response | undefined;
+let acceptResponse: Response | undefined;
+let lastInviteRole: Member["role"] | undefined;
 
 async function configSnapshot() {
   return getDbClient().query("SELECT * FROM swarm_config ORDER BY id");
@@ -77,13 +79,16 @@ beforeEach(async () => {
   keyResponse = undefined;
   membersResponse = undefined;
   roleUpdateResponse = undefined;
+  acceptResponse = undefined;
+  lastInviteRole = undefined;
   server = undefined;
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
-      const body = request.method === "GET" ? null : await request.json();
+      const text = request.method === "GET" ? "" : await request.text();
+      const body = text ? JSON.parse(text) : null;
       records.push({
         method: request.method,
         path,
@@ -100,6 +105,7 @@ beforeEach(async () => {
         );
       }
       if (request.method === "POST" && path === `${MEMBERS_PATH}/invite`) {
+        lastInviteRole = body.role;
         if (inviteResponse) return inviteResponse;
         members = [{ userId: AFS_USER_ID, email, role: body.role }];
         return Response.json({
@@ -110,6 +116,11 @@ beforeEach(async () => {
           orgRole: body.role,
           drives: [],
         });
+      }
+      if (request.method === "POST" && /^\/invites\/[^/]+\/accept$/.test(path)) {
+        if (acceptResponse) return acceptResponse;
+        members = [{ userId: AFS_USER_ID, email, role: lastInviteRole ?? "viewer" }];
+        return Response.json({ ok: true, orgId: ORG_ID, role: lastInviteRole });
       }
       if (request.method === "PATCH" && path === `${MEMBERS_PATH}/${AFS_USER_ID}`) {
         if (roleUpdateResponse) return roleUpdateResponse;
@@ -265,8 +276,38 @@ describe("user agent-fs keys", () => {
     expect((await mintUserAgentFsKey(userId, "Laptop")).status).toBe("pending");
   });
 
-  test("returns pending instead of minting when the invitation is pending", async () => {
+  test("accepts a pending invite with the key of the account it just registered", async () => {
     members = [];
+    const token = crypto.randomUUID();
+    inviteResponse = Response.json({
+      ok: true,
+      status: "pending",
+      inviteId: crypto.randomUUID(),
+      expiresAt: "2026-11-11T10:00:00Z",
+      token,
+    });
+    const before = await configSnapshot();
+    const result = await mintUserAgentFsKey(userId, "Laptop");
+    expect(result.status).toBe("minted");
+    expect(JSON.stringify(result)).not.toContain(PRIMARY_KEY);
+    expect(records.find((record) => record.path === `/invites/${token}/accept`)).toEqual({
+      method: "POST",
+      path: `/invites/${token}/accept`,
+      authorization: `Bearer ${PRIMARY_KEY}`,
+      body: null,
+    });
+    const paths = records.map((record) => record.path);
+    expect(paths.indexOf(`/invites/${token}/accept`)).toBeLessThan(paths.indexOf(KEYS_PATH));
+    expect(await configSnapshot()).toEqual(before);
+    expect(JSON.stringify(await getSwarmConfigs())).not.toContain(PRIMARY_KEY);
+  });
+
+  test("returns pending when an account that existed before gets a pending invite", async () => {
+    members = [];
+    registerResponse = Response.json(
+      { error: "CONFLICT", message: "Email is already registered" },
+      { status: 409 },
+    );
     inviteResponse = Response.json({
       ok: true,
       status: "pending",
@@ -275,6 +316,18 @@ describe("user agent-fs keys", () => {
       token: crypto.randomUUID(),
     });
     expect((await mintUserAgentFsKey(userId, "Laptop")).status).toBe("pending");
+    expect(records.some((record) => record.path.startsWith("/invites/"))).toBe(false);
+    expect(records.some((record) => record.path === KEYS_PATH)).toBe(false);
+  });
+
+  test("returns pending without the invite token when the accept is rejected", async () => {
+    members = [];
+    const token = crypto.randomUUID();
+    inviteResponse = Response.json({ ok: true, status: "pending", token });
+    acceptResponse = Response.json({ error: "NOT_FOUND", message: token }, { status: 404 });
+    const result = await mintUserAgentFsKey(userId, "Laptop");
+    expect(result.status).toBe("pending");
+    expect(JSON.stringify(result)).not.toContain(token);
     expect(records.some((record) => record.path === KEYS_PATH)).toBe(false);
   });
 
