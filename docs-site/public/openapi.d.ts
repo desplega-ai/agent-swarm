@@ -20193,8 +20193,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Daily automation savings of a workflow or script
-         * @description The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.
+         * Daily automation savings of a workflow, a script or the fleet
+         * @description The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.
          */
         get: {
             parameters: {
@@ -20243,7 +20243,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Not exactly one of workflowId and scriptName, or an unknown days or tier value */
+                /** @description Both workflowId and scriptName, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20254,6 +20254,133 @@ export interface paths {
                 };
                 /** @description Workflow or script not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet automation savings
+         * @description What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Fleet savings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | null;
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            byKind: {
+                                workflows: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                scheduledScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                agentInvokedScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                            } | null;
+                            /** @description Measured session spend of the whole swarm in the window, as on the usage page. */
+                            fleetLlmUsd: number;
+                            /** @description `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total. */
+                            selfOptimizationRatio: number | null;
+                            excluded: {
+                                /** @description Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs. */
+                                enabledOnlyRuns: number;
+                            } | null;
+                            assumptions: string[];
+                        };
+                    };
+                };
+                /** @description An unknown days or tier value */
+                400: {
                     headers: {
                         [name: string]: unknown;
                     };

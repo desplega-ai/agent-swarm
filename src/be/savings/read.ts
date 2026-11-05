@@ -60,7 +60,7 @@ export type WorkflowSavingsRead = {
   complete: boolean;
   rows: WorkflowSavingsRow[];
   total: SavingsTotals | null;
-  /** p50 per UTC day of the window, oldest first; they add up to the row. Only for a single workflow. */
+  /** p50 per UTC day of the window, oldest first, summed over the rows; they add up to the total. */
   points: SavingsDailyPoint[];
 };
 
@@ -106,13 +106,15 @@ const isRetired = (name: string) => /-retired-\d{4}-\d{2}-\d{2}$/.test(name);
 /**
  * Price the workflows of a window from the rollup: every workflow when
  * `workflowId` is absent, else that one (its job's other versions still share
- * the schedule cap).
+ * the schedule cap). `band: "fleet"` prices the total with the fleet spread
+ * even for one row, for a caller that adds it to other totals.
  */
 export async function readWorkflowSavings(opts: {
   days: number;
   tier: SavingsTier;
   now: number;
   workflowId?: string;
+  band?: "fleet";
 }): Promise<WorkflowSavingsRead> {
   const client = getDbClient();
   const { firstDay, ...window } = savingsWindow(opts.days, opts.now);
@@ -197,9 +199,10 @@ export async function readWorkflowSavings(opts: {
   const selected = [...jobs.values()].filter(
     (j) => !opts.workflowId || j.workflowId === opts.workflowId,
   );
-  const band = selected.length === 1 ? "job" : "fleet";
+  const band = opts.band ?? (selected.length === 1 ? "job" : "fleet");
   const rows: WorkflowSavingsRow[] = [];
   const totalParts: PricedWorkflow[] = [];
+  const dayParts: SavingsDailyPoint[][] = [];
   for (const job of selected) {
     const pricing = { tier: opts.tier, days: opts.days };
     const allocation = allocations.get(job.workflowId);
@@ -208,18 +211,17 @@ export async function readWorkflowSavings(opts: {
     totalParts.push(
       band === "job" ? priced : priceWorkflow(job.facts, { ...pricing, band }, allocation),
     );
+    dayParts.push(splitByDay(job.facts, job.days, pricing, priced));
   }
   rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
 
-  const only = selected.length === 1 ? selected[0] : undefined;
-  const points = only && rows[0] ? dailyPoints(only, rows[0], firstDay, opts.days, opts.tier) : [];
   return {
     window,
     computedAt,
     complete,
     rows,
     total: totalParts.length > 0 ? sumTotals(totalParts) : null,
-    points,
+    points: rows.length > 0 ? fillDays(dayParts.flat(), firstDay, opts.days) : [],
   };
 }
 
@@ -246,33 +248,26 @@ function sumTotals(parts: PricedWorkflow[]): SavingsTotals {
   };
 }
 
-/** Every day of the window gets a point; days without runs are zero. */
-function dailyPoints(
-  job: Job,
-  priced: PricedWorkflow,
-  firstDay: string,
-  windowDays: number,
-  tier: SavingsTier,
-): SavingsDailyPoint[] {
-  return fillDays(
-    splitByDay(job.facts, job.days, { tier, days: windowDays }, priced),
-    firstDay,
-    windowDays,
-  );
-}
-
+/** One point per day of the window, adding up the points of each day; days without runs are zero. */
 function fillDays(
   points: SavingsDailyPoint[],
   firstDay: string,
   windowDays: number,
 ): SavingsDailyPoint[] {
-  const split = new Map(points.map((p) => [p.day, p]));
-  return Array.from({ length: windowDays }, (_, i) => {
+  const days = Array.from({ length: windowDays }, (_, i) => {
     const day = utcDay(Date.parse(dayStartIso(firstDay)) + i * DAY_MS);
-    return (
-      split.get(day) ?? { day, savingUsd: 0, actualUsd: 0, measuredUsd: 0, estimatedLlmUsd: 0 }
-    );
+    return { day, savingUsd: 0, actualUsd: 0, measuredUsd: 0, estimatedLlmUsd: 0 };
   });
+  const byDay = new Map(days.map((p) => [p.day, p]));
+  for (const p of points) {
+    const d = byDay.get(p.day);
+    if (!d) continue;
+    d.savingUsd += p.savingUsd;
+    d.actualUsd += p.actualUsd;
+    d.measuredUsd += p.measuredUsd;
+    d.estimatedLlmUsd += p.estimatedLlmUsd;
+  }
+  return days;
 }
 
 export type ScriptSavingsRow = PricedWorkflow & {
@@ -337,6 +332,8 @@ export async function readScriptSavings(opts: {
   tier: SavingsTier;
   now: number;
   scriptName?: string;
+  /** As in `readWorkflowSavings`. */
+  band?: "fleet";
 }): Promise<ScriptSavingsRead> {
   const client = getDbClient();
   const { firstDay, ...window } = savingsWindow(opts.days, opts.now);
@@ -377,9 +374,10 @@ export async function readScriptSavings(opts: {
     ).map((r) => r.scriptName),
   );
 
-  const band = jobs.size === 1 ? "job" : "fleet";
+  const band = opts.band ?? (jobs.size === 1 ? "job" : "fleet");
   const rows: ScriptSavingsRow[] = [];
   const totalParts: PricedWorkflow[] = [];
+  const dayParts: SavingsDailyPoint[][] = [];
   for (const [scriptName, job] of jobs) {
     const kind: ScriptKind = scheduled.has(scriptName)
       ? "script-scheduled"
@@ -388,28 +386,125 @@ export async function readScriptSavings(opts: {
     const priced = priceScript(job.facts, { ...pricing, band: "job" });
     rows.push({ ...priced, kind, scriptName, name: scriptName });
     totalParts.push(band === "job" ? priced : priceScript(job.facts, { ...pricing, band }));
+    dayParts.push(
+      splitScriptByDay(
+        job.facts,
+        [...job.days].map(([day, f]) => ({ ...f, day })),
+        priced,
+      ),
+    );
   }
   rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
 
-  const [only] = jobs.values();
-  const points =
-    jobs.size === 1 && only && rows[0]
-      ? fillDays(
-          splitScriptByDay(
-            only.facts,
-            [...only.days].map(([day, f]) => ({ ...f, day })),
-            rows[0],
-          ),
-          firstDay,
-          opts.days,
-        )
-      : [];
   return {
     window,
     computedAt,
     complete,
     rows,
     total: totalParts.length > 0 ? sumTotals(totalParts) : null,
-    points,
+    points: rows.length > 0 ? fillDays(dayParts.flat(), firstDay, opts.days) : [],
   };
+}
+
+export type FleetKindTotals = {
+  jobs: number;
+  runs: number;
+  substitutedRuns: number;
+  /** p50 */
+  savingUsd: number;
+  /** p50 */
+  hoursSaved: number;
+};
+
+export type FleetSavingsRead = Omit<WorkflowSavingsRead, "rows"> & {
+  workflows: WorkflowSavingsRow[];
+  scripts: ScriptSavingsRow[];
+  byKind: {
+    workflows: FleetKindTotals;
+    scheduledScripts: FleetKindTotals;
+    agentInvokedScripts: FleetKindTotals;
+  };
+};
+
+function kindTotals(rows: PricedWorkflow[]): FleetKindTotals {
+  return {
+    jobs: rows.length,
+    runs: rows.reduce((s, r) => s + r.runs, 0),
+    substitutedRuns: rows.reduce((s, r) => s + r.substitutedRuns, 0),
+    savingUsd: rows.reduce((s, r) => s + r.savingUsd.p50, 0),
+    hoursSaved: rows.reduce((s, r) => s + r.hoursSaved.p50, 0),
+  };
+}
+
+function addTotals(a: SavingsTotals, b: SavingsTotals): SavingsTotals {
+  const band = (x: SavingsBand, y: SavingsBand) => sumBand([x, y]);
+  return {
+    runs: a.runs + b.runs,
+    substitutedRuns: a.substitutedRuns + b.substitutedRuns,
+    enabledOnlyRuns: a.enabledOnlyRuns + b.enabledOnlyRuns,
+    measuredUsd: a.measuredUsd + b.measuredUsd,
+    estimatedLlmUsd: a.estimatedLlmUsd + b.estimatedLlmUsd,
+    actualUsd: a.actualUsd + b.actualUsd,
+    agentOnlyUsd: band(a.agentOnlyUsd, b.agentOnlyUsd),
+    savingUsd: band(a.savingUsd, b.savingUsd),
+    actualHours: a.actualHours + b.actualHours,
+    hoursSaved: band(a.hoursSaved, b.hoursSaved),
+  };
+}
+
+/**
+ * The fleet: every workflow and every script of the window. The total uses
+ * the fleet band unless the fleet is one job; the daily points add up to its p50.
+ */
+export async function readFleetSavings(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+}): Promise<FleetSavingsRead> {
+  const wf = await readWorkflowSavings({ ...opts, band: "fleet" });
+  const sc = await readScriptSavings({ ...opts, band: "fleet" });
+  const all: PricedWorkflow[] = [...wf.rows, ...sc.rows];
+  const total =
+    all.length === 1
+      ? sumTotals(all)
+      : wf.total && sc.total
+        ? addTotals(wf.total, sc.total)
+        : (wf.total ?? sc.total);
+  const points =
+    all.length > 0
+      ? fillDays(
+          [...wf.points, ...sc.points],
+          savingsWindow(opts.days, opts.now).firstDay,
+          opts.days,
+        )
+      : [];
+  const computedAt =
+    wf.computedAt && sc.computedAt
+      ? wf.computedAt > sc.computedAt
+        ? wf.computedAt
+        : sc.computedAt
+      : (wf.computedAt ?? sc.computedAt);
+  return {
+    window: wf.window,
+    computedAt,
+    complete: wf.complete && sc.complete,
+    workflows: wf.rows,
+    scripts: sc.rows,
+    total,
+    points,
+    byKind: {
+      workflows: kindTotals(wf.rows),
+      scheduledScripts: kindTotals(sc.rows.filter((r) => r.kind === "script-scheduled")),
+      agentInvokedScripts: kindTotals(sc.rows.filter((r) => r.kind === "script-agent-invoked")),
+    },
+  };
+}
+
+/** Session spend of the whole swarm in the window, the same sum the usage page shows. */
+export async function readFleetLlmUsd(window: SavingsWindow): Promise<number> {
+  const row = await getDbClient().get<{ usd: number | null }>(
+    "SELECT sum(totalCostUsd) usd FROM session_costs WHERE createdAt>=? AND createdAt<=?",
+    [window.start, window.end],
+  );
+  return Number(row?.usd) || 0;
 }

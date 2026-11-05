@@ -40,6 +40,7 @@ export function RankedSpendCard({
   nameLabel,
   rows,
   countLabel,
+  valueLabel = "Cost",
 }: {
   title: string;
   /** Column header for the name, for example "Agent". */
@@ -47,6 +48,8 @@ export function RankedSpendCard({
   rows: RankedSpendRow[];
   /** Column header for `count`, for example "Sessions". */
   countLabel: string;
+  /** Column header for `costUsd`. */
+  valueLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const sorted = [...rows].sort((a, b) => b.costUsd - a.costUsd);
@@ -67,7 +70,7 @@ export function RankedSpendCard({
         >
           <span>{nameLabel}</span>
           <span className="text-right">Share</span>
-          <span className="text-right">Cost</span>
+          <span className="text-right">{valueLabel}</span>
           <span className="text-right">{countLabel}</span>
           <span className="hidden text-right @sm:block">Avg</span>
         </div>
