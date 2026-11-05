@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getWorkflow } from "../be/db";
-import { computeWorkflowWindow, type WorkflowWindow } from "../be/savings/compute";
+import { computeWorkflowWindow, type SavingsSql, type WorkflowWindow } from "../be/savings/compute";
 import {
   CALIBRATED_AT,
   CALIBRATION_MODEL,
@@ -9,10 +9,29 @@ import {
   SAVINGS_TIERS,
   type SavingsBand,
 } from "../be/savings/model";
+import { executeReadOnlyQueryGated } from "./db-query";
+import {
+  DbQueryConcurrencyCapError,
+  DbQueryTimeoutError,
+  getDbQueryHttpBudgetMs,
+} from "./db-query-shared";
 import { route } from "./route-def";
+import { json } from "./utils";
 
 /** Live facts are reused for this long, so page views do not rescan the runs. */
 const FACTS_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * The scans run through the bounded db-query executor: a child process with a
+ * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so a
+ * burst of requests can neither block the API's event loop nor pile up.
+ */
+const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
+  const result = await executeReadOnlyQueryGated(sql, params, getDbQueryHttpBudgetMs(), 10_000);
+  return result.rows.map((row) =>
+    Object.fromEntries(result.columns.map((column, i) => [column, row[i]])),
+  ) as T[];
+};
 
 const SavingsBandSchema = z.object({ p10: z.number(), p50: z.number(), p90: z.number() });
 
@@ -65,6 +84,8 @@ const savingsJobsRoute = route({
     200: { description: "Savings rows for the workflow", schema: SavingsJobsResponseSchema },
     400: { description: "Missing workflowId, or an unknown days or tier value" },
     404: { description: "Workflow not found" },
+    408: { description: "A savings query ran past its time budget" },
+    429: { description: "Too many concurrent database queries; retry shortly" },
   },
 });
 
@@ -90,7 +111,7 @@ function cachedWindow(
     at: now,
     start,
     end,
-    result: computeWorkflowWindow(workflow, { start, end }),
+    result: computeWorkflowWindow(workflow, { start, end }, boundedSql),
   };
   // A failed computation is not cached.
   void entry.result.catch(() => factsCache.delete(key));
@@ -122,7 +143,21 @@ export async function handleSavings(
     return true;
   }
   const entry = cachedWindow(workflow, days, Date.now());
-  const result = await entry.result;
+  let result: WorkflowWindow;
+  try {
+    result = await entry.result;
+  } catch (err) {
+    if (err instanceof DbQueryConcurrencyCapError) {
+      res.setHeader("Retry-After", "1");
+      json(res, { error: "db_query_concurrency_cap", message: err.message }, 429);
+      return true;
+    }
+    if (err instanceof DbQueryTimeoutError) {
+      json(res, { error: "db_query_timeout", message: err.message }, 408);
+      return true;
+    }
+    throw err;
+  }
   const base = {
     window: { start: entry.start, end: entry.end, days },
     tier,
