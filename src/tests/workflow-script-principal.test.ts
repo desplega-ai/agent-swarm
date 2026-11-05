@@ -7,9 +7,12 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import dreamingConfig from "../../templates/workflows/dreaming/config.json" with { type: "text" };
+import dreamingContent from "../../templates/workflows/dreaming/content.md" with { type: "text" };
 import {
   closeDb,
   completeTask,
+  computeContentHash,
   createAgent,
   createScheduledTask,
   createWorkflow,
@@ -24,9 +27,15 @@ import {
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import * as runCredential from "../be/scripts/run-credential";
-import { runSeeder } from "../be/seed";
+import { getSeedState, runSeeder } from "../be/seed";
 import { createSchedulesSeeder } from "../be/seed/schedules-seeder";
-import { createWorkflowsSeeder } from "../be/seed/workflows-seeder";
+import { recordSeedState } from "../be/seed/state-db";
+import {
+  canonicalJson,
+  createWorkflowsSeeder,
+  loadSeedWorkflows,
+  seededWorkflowState,
+} from "../be/seed/workflows-seeder";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
@@ -168,6 +177,22 @@ afterAll(async () => {
 });
 
 /** Put the seeded dreaming row back after a test edits it. */
+/** The built-in dreaming template, with `marker` appended to the synthesize prompt. */
+function dreamingSource(marker?: string): { config: string; content: string } {
+  const content = dreamingContent as unknown as string;
+  if (!marker) return { config: dreamingConfig as unknown as string, content };
+  const match = content.match(/```json\s*\n([\s\S]*?)\n```/)!;
+  const payload = JSON.parse(match[1]!) as {
+    nodes: { id: string; config: Record<string, unknown> }[];
+  };
+  const synthesize = payload.nodes.find((node) => node.id === "synthesize")!;
+  synthesize.config.template = `${synthesize.config.template as string}\n${marker}`;
+  return {
+    config: dreamingConfig as unknown as string,
+    content: content.replace(match[1]!, () => JSON.stringify(payload)),
+  };
+}
+
 async function restoreDreaming(): Promise<void> {
   await updateWorkflow(dreaming.id, {
     description: dreaming.description,
@@ -364,22 +389,87 @@ describe("swarm-script principal for a creator-less workflow", () => {
     expect(calls).toEqual([]);
   });
 
-  test("a creator-less schedule refuses the lead for an edit with no seeded snapshot", async () => {
+  test("a creator-less schedule refuses the lead for a legacy-state edit with no seeded snapshot", async () => {
     const schedule = await createScheduledTask({
       name: `principal-unsnapshotted-${crypto.randomUUID().slice(0, 8)}`,
       cronExpression: "0 0 1 1 *",
       targetType: "workflow",
       workflowId: dreaming.id,
     });
-    // Delete the history so no snapshot proves the seeded state.
+    const state = await getSeedState("workflow", "dreaming");
+    // Older releases recorded a whole-workflow hash, which a description edit
+    // changes. Delete the history so no snapshot proves the seeded state.
+    const [seed] = loadSeedWorkflows([dreamingSource()]);
+    await recordSeedState("workflow", "dreaming", computeContentHash(canonicalJson(seed)));
     await getDbClient().run("DELETE FROM workflow_versions WHERE workflowId = ?", [dreaming.id]);
     await updateWorkflow(dreaming.id, { description: "edited without a snapshot" });
     try {
       await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("were edited");
     } finally {
       await restoreDreaming();
+      await recordSeedState("workflow", "dreaming", state!.seededHash);
     }
     expect(calls).toEqual([]);
+  });
+
+  test("a creator-less schedule refuses the lead for a node edit with no seeded snapshot", async () => {
+    const schedule = await createScheduledTask({
+      name: `principal-unsnapshotted-node-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    await getDbClient().run("DELETE FROM workflow_versions WHERE workflowId = ?", [dreaming.id]);
+    const [gather, ...rest] = dreaming.definition.nodes;
+    await updateWorkflow(dreaming.id, {
+      definition: {
+        ...dreaming.definition,
+        nodes: [{ ...gather!, config: { ...gather!.config, scriptName: "evil" } }, ...rest],
+      },
+    });
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("were edited");
+    } finally {
+      await restoreDreaming();
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test("a template update on input-tuned dreaming with legacy seed state keeps the lead", async () => {
+    // The live shape: seeded under a whole-workflow hash, then the lead set
+    // `input` through update-workflow, then a release changed the template.
+    const state = await getSeedState("workflow", "dreaming");
+    const [seed] = loadSeedWorkflows([dreamingSource()]);
+    await recordSeedState("workflow", "dreaming", computeContentHash(canonicalJson(seed)));
+    const tunedInput = { ...dreaming.input, leadAgentId: leadId, slackChannel: "C123" };
+    await snapshotAndUpdateWorkflow(
+      dreaming.id,
+      { input: tunedInput },
+      { changedByAgentId: leadId },
+    );
+    const schedule = await createScheduledTask({
+      name: `principal-template-update-${crypto.randomUUID().slice(0, 8)}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "workflow",
+      workflowId: dreaming.id,
+    });
+    try {
+      const result = await runSeeder(createWorkflowsSeeder([dreamingSource("TEMPLATE UPDATE")]), {
+        quiet: true,
+      });
+      expect(result).toMatchObject({ updated: 1, skippedUserModified: 0, failed: [] });
+      const live = (await listWorkflows()).find((w) => w.name === "dreaming")!;
+      expect(live.input).toEqual(tunedInput);
+      expect(JSON.stringify(live.definition)).toContain("TEMPLATE UPDATE");
+      expect(await seededWorkflowState(live)).toBe("pristine");
+
+      await dispatchScheduleTarget(schedule);
+      expect(gatherPrincipals()).toEqual([leadId]);
+      expect(calls[0]?.args.leadAgentId).toBe(leadId);
+    } finally {
+      await restoreDreaming();
+      await recordSeedState("workflow", "dreaming", state!.seededHash);
+    }
   });
 
   test("a long successful night does not make the next nightly fire skip", async () => {
