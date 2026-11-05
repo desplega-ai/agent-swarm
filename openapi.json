@@ -1307,6 +1307,54 @@
                   "type",
                   "icon"
                 ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
               }
             ]
           },
@@ -7647,6 +7695,54 @@
                                   "type",
                                   "icon"
                                 ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "url"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "maxLength": 2048,
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "url"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent-fs"
+                                    ]
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 2,
+                                    "maxLength": 1024
+                                  },
+                                  "orgId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "driveId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "path"
+                                ]
                               }
                             ]
                           },
@@ -12122,6 +12218,54 @@
                         "required": [
                           "type",
                           "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
                         ]
                       },
                       {

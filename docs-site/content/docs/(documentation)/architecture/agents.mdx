@@ -46,7 +46,7 @@ Existing undated lines may remain or be deleted. A replacement is recognized as 
 
 ### Agent Appearance
 
-An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.
+An agent profile can optionally store an avatar: a Lucide icon and hex color, an https image link, or an image in agent-fs. In the dashboard, open an agent's detail page and use the **Avatar** field on the Profile tab. **Glyph** opens the appearance picker: search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. **Link** saves an https image URL on Enter. **Upload** stores a file on the swarm's agent-fs drive at `/agents/<agentId>/avatar-<epochMs>.<ext>`; it needs agent-fs connected in this browser. Each choice saves at once. In edit mode, clicking the avatar disc still opens the glyph picker. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color. An image that cannot load, or an agent-fs image in a browser without agent-fs connected, shows the deterministic icon instead.
 
 The same setting is available through `update-profile`:
 
@@ -59,6 +59,8 @@ The same setting is available through `update-profile`:
   }
 }
 ```
+
+The other shapes are `{ "type": "url", "url": "https://…" }` (https only, no credentials, up to 2048 characters) and `{ "type": "agent-fs", "path": "/agents/<agentId>/avatar.png" }`. An agent-fs avatar names both `orgId` and `driveId`, or neither for the swarm drive.
 
 Pass `"avatar": null` to restore the deterministic default. Omitting `avatar` leaves the current appearance unchanged.
 

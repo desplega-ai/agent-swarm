@@ -11,6 +11,7 @@
     "asset-namespaces",
     "agent-fs-co-deployment",
     "self-hosted-sso",
+    "ai-operations-governance",
     "e2b-provider-smoke-tests",
     "evals-harness",
     "personalization",

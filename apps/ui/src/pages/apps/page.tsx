@@ -6,12 +6,12 @@
  */
 
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import type { LucideIcon } from "lucide-react";
 import { LayoutGrid } from "lucide-react";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApps } from "@/api/hooks/use-apps";
-import type { AppIcon, AppListItem } from "@/api/types";
+import type { AppListItem } from "@/api/types";
+import { AppGlyph } from "@/components/apps/app-glyph";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
@@ -20,7 +20,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { AVATAR_ICON_CATALOG } from "@/lib/agent-icon";
 import { formatSmartTime } from "@/lib/utils";
 
 type AppsView = "table" | "tiles";
@@ -47,28 +46,6 @@ function storeView(view: AppsView) {
   } catch {
     // The choice just won't survive a reload.
   }
-}
-
-/**
- * Catalog icon wins; a missing or unrecognized name falls back to the generic
- * app icon (a valid color still applies). The name comes from stored app data, so it is looked up as an own
- * key only, and the color must be a `#RRGGBB` hex before it reaches `style`.
- */
-function resolveAppIcon(icon: AppIcon | null | undefined): {
-  Icon: LucideIcon;
-  color: string | undefined;
-} {
-  const Icon =
-    icon?.type === "lucide" && Object.hasOwn(AVATAR_ICON_CATALOG, icon.icon)
-      ? AVATAR_ICON_CATALOG[icon.icon]
-      : undefined;
-  const color = icon?.color && /^#[0-9a-fA-F]{6}$/.test(icon.color) ? icon.color : undefined;
-  return { Icon: Icon ?? LayoutGrid, color };
-}
-
-function AppGlyph({ icon, className }: { icon: AppIcon | null | undefined; className?: string }) {
-  const { Icon, color } = resolveAppIcon(icon);
-  return <Icon aria-hidden className={className} style={color ? { color } : undefined} />;
 }
 
 export default function AppsListingPage() {
@@ -181,7 +158,11 @@ export default function AppsListingPage() {
               className="group flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground group-hover:text-foreground">
-                <AppGlyph icon={app.icon} className="h-7 w-7" />
+                <AppGlyph
+                  icon={app.icon}
+                  className="h-7 w-7"
+                  imageClassName="h-14 w-14 rounded-2xl"
+                />
               </div>
               <span className="line-clamp-2 text-sm font-medium text-foreground">{app.name}</span>
             </Link>

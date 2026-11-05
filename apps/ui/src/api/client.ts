@@ -21,6 +21,7 @@ import type {
   ApiKeyStatusResponse,
   AppActionResponse,
   AppDetail,
+  AppIcon,
   AppListItem,
   AppRow,
   ApprovalRequest,
@@ -4382,6 +4383,26 @@ class ApiClient {
 
   async getApp(id: string): Promise<{ app: AppDetail }> {
     return this.appRequest(`/api/apps/${encodeURIComponent(id)}`, undefined, "Failed to load app");
+  }
+
+  /**
+   * RFC 7396 merge patch of an app (`app.manage`). `definition` merges into the
+   * stored definition; a `null` value removes that key. `definition.icon` is
+   * replaced whole, so switching icon types leaves no stale keys.
+   */
+  async patchApp(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      definition?: Record<string, unknown> & { icon?: AppIcon | null };
+    },
+  ): Promise<{ app: AppDetail }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+      "Failed to update app",
+    );
   }
 
   /**

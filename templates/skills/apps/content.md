@@ -132,7 +132,14 @@ An optional top-level `"theme"` sets the preset the dashboard applies to the app
 
 Viewers can override the preset per app from the app's settings drawer; the override rides the reserved `$theme` key of the user-config values (accepted on every app, even without a declared `userConfig` schema, and never visible at `/user/...`). A present override always beats the definition's `theme` — even an unrecognized one, which degrades to the dashboard theme — so treat `theme` as the app's default styling, not a guarantee.
 
-An optional top-level `"icon"` sets the app's icon on the dashboard Apps page, in the same shape as agent avatars: `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The server validates shape only; the dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name, so omitting `icon` is always safe.
+An optional top-level `"icon"` sets the app's icon on the dashboard Apps page. It takes one of three shapes:
+
+- `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name.
+- `{ "type": "url", "url": "https://..." }`: an https image link, at most 2048 characters, no credentials.
+- `{ "type": "agent-fs", "path": "/apps/<appId>/icon.png" }`: an image on the swarm's agent-fs drive. Add both `orgId` and `driveId` for another drive; never just one.
+
+The server validates shape only. The dashboard shows the grid glyph while an image loads, when it fails to load, and when the viewer has no agent-fs connected, so omitting `icon` is always safe. `app-patch` replaces `icon` whole, so switching shapes leaves no keys from the old one.
+
 
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
