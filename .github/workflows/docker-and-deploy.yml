@@ -660,41 +660,11 @@ jobs:
       # Skip only when a newer main commit touches on.push.paths, so it starts its
       # own run and deploy. A newer docs-only commit starts no run; skipping for it
       # would leave prod on an older deploy. is_tip=true means "this run deploys".
+      # Logic and regression test: scripts/deploy-guard.sh, src/tests/deploy-guard.test.ts.
       - name: Check running commit is main tip
         id: guard
         shell: bash
-        run: |
-          set -euo pipefail
-
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          main_tip="$(git rev-parse origin/main)"
-
-          echo "Running commit: ${GITHUB_SHA}"
-          echo "Current origin/main: ${main_tip}"
-
-          if [ "${GITHUB_SHA}" = "${main_tip}" ]; then
-            echo "is_tip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Running commit is still the main tip; proceeding with tag promotion and deploy"
-            exit 0
-          fi
-
-          # The trigger paths live only in on.push.paths above; read them from there.
-          mapfile -t pathspecs < <(yq -r '.on.push.paths[] | ":(glob)" + .' .github/workflows/docker-and-deploy.yml)
-          if [ "${#pathspecs[@]}" -eq 0 ]; then
-            echo "::error::Could not read on.push.paths from the workflow file"
-            exit 1
-          fi
-
-          changed="$(git diff --name-only "${GITHUB_SHA}" "${main_tip}" -- "${pathspecs[@]}")"
-          if [ -z "${changed}" ]; then
-            echo "is_tip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Newer main commits up to ${main_tip} touch no trigger paths and start no run; proceeding with tag promotion and deploy"
-          else
-            echo "is_tip=false" >> "$GITHUB_OUTPUT"
-            echo "Trigger-path files changed since ${GITHUB_SHA}:"
-            echo "${changed}" | head -20
-            echo "::notice::Skipping tag promotion and deploy because newer main commits up to ${main_tip} touch trigger paths and start their own run"
-          fi
+        run: bash scripts/deploy-guard.sh
 
       # Read before promotion: the commit :latest points at now is the previous
       # deploy, which bounds the change list in the Slack notification.

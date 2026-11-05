@@ -66,9 +66,10 @@ the `agent-swarm-deploy` concurrency lock through the completed Dokploy deploy.
 late stale build cannot evict a queued main-tip run.
 After acquiring that lock, it checks whether a newer main commit touches the
 workflow's `on.push.paths` (read from the workflow file, so the list lives in one
-place). If one does, that commit starts its own run, so this stale run keeps its
-SHA/version images but skips both promotion and deployment. Newer commits outside
-those paths (docs, for example) start no run, so they do not block the deploy.
+place). If one does, that commit starts its own run, so this stale run keeps
+its SHA/version images but skips both promotion and deployment. Newer commits
+outside those paths (docs, for example) start no run, so they do not block the
+deploy. Logic: `scripts/deploy-guard.sh`; test: `src/tests/deploy-guard.test.ts`.
 Non-main manual dispatches cannot promote moving tags or deploy.
 
 Promotion uses the run's digest outputs, since even a SHA tag can change on a
