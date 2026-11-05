@@ -32,7 +32,14 @@ The Azure preset takes the resource name or URL and appends `/openai/v1`. The de
 
 ### Local embeddings with TEI
 
-Swarm memory runs on a local [Hugging Face Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server, with no paid key. With `nomic-ai/nomic-embed-text-v1.5`, start TEI with a larger request cap and a lower token budget:
+The one-command installer already includes TEI for new installations.
+For manual Compose deployments, add [docker-compose.tei.yml](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.tei.yml) to the base example.
+Follow the [operator procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/embeddings.md) for CPU architecture, configuration, and verification.
+Swarm memory and agent-fs file search use separate embedding configuration.
+
+Swarm memory can use a local [Hugging Face Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server without a paid embedding key.
+This standalone example assumes the API runs on the host. For a containerized API, use the Compose overlay above.
+With `nomic-ai/nomic-embed-text-v1.5`, start TEI with a larger request cap and a lower token budget:
 
 ```bash
 docker run -d --name tei -p 8091:80 -v tei-data:/data \
@@ -44,7 +51,7 @@ docker run -d --name tei -p 8091:80 -v tei-data:/data \
 Then point the swarm at it:
 
 ```bash
-EMBEDDING_API_BASE_URL=http://tei:80/v1
+EMBEDDING_API_BASE_URL=http://localhost:8091/v1
 EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
 EMBEDDING_API_KEY=local-tei
 EMBEDDING_QUERY_PREFIX="search_query: "

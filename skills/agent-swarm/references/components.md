@@ -68,7 +68,9 @@ Stored harness changes do not replace the credential requirements of the selecte
 | Session summaries and memory rating: preserve context and score retrieved memories. [Credential resolver](https://github.com/desplega-ai/agent-swarm/blob/main/src/utils/internal-ai/credentials.ts) | No extra key to boot. The runtime can reuse supported harness credentials. Bedrock credentials alone do not resolve here. | `MEMORY_RATERS=llm` opts into rating. Unset or empty selects no rating. Store additional provider keys as secrets when needed. | Production model override is `MEMORY_RATER_MODEL`. See the limitations below. |
 
 Embedding key precedence is `EMBEDDING_API_KEY`, then `OPENAI_API_KEY`. An explicitly empty `EMBEDDING_API_KEY` blocks that fallback.
-`OPENROUTER_API_KEY` alone does not configure embeddings. The provider retains its key and model after construction, so configuration reload does not refresh them.
+`OPENROUTER_API_KEY` alone does not configure embeddings.
+Local TEI needs no paid key. The [TEI overlay](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.tei.yml) supplies its endpoint and a nonempty placeholder key.
+Follow the [embeddings procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/embeddings.md) to choose a provider and verify it.
 Read the [memory initialization](https://github.com/desplega-ai/agent-swarm/blob/main/src/be/memory/index.ts) and [search fallback](https://github.com/desplega-ai/agent-swarm/blob/main/src/be/memory/providers/sqlite-store.ts).
 
 Production summary credentials resolve in this order: OpenRouter, Anthropic API key, OpenAI API key, Codex OAuth, then Claude OAuth through the CLI.
