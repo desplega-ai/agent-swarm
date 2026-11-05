@@ -31,20 +31,30 @@ export function parseSkillContent(content: string): ParsedSkill {
     throw new Error("Skill content has unterminated frontmatter. Missing closing ---.");
   }
 
-  const frontmatterRaw = trimmed.slice(3, secondDelimiter).trim();
+  const frontmatterRaw = trimmed.slice(3, secondDelimiter);
   const body = trimmed.slice(secondDelimiter + 3).trim();
 
-  // Parse simple YAML key-value pairs
+  // Keep permissive single-line values; delegate block scalar semantics to YAML.
   const metadata: Record<string, string> = {};
-  for (const line of frontmatterRaw.split("\n")) {
+  const lines = frontmatterRaw.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     let value = line.slice(colonIdx + 1).trim();
-    // YAML double-quoted scalars (emitted by buildSkillContent for values a
-    // plain scalar can't carry, and common in hand-written frontmatter): strip
-    // the quotes and JSON escapes. Malformed quoting falls back to the raw text.
-    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    if (/^[>|]-?$/.test(value)) {
+      const start = i;
+      while (i + 1 < lines.length && /^(?:\s|$)/.test(lines[i + 1] as string)) {
+        i++;
+      }
+      const block = Bun.YAML.parse(`${lines.slice(start, i + 1).join("\n")}\n`) as Record<
+        string,
+        string
+      >;
+      value = block[key] ?? "";
+    } else if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      // Preserve the existing JSON-unescaping and malformed-quote fallback.
       try {
         value = JSON.parse(value) as string;
       } catch {
