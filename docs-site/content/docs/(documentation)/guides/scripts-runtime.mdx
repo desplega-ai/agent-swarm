@@ -88,6 +88,19 @@ For external APIs that need secrets, prefer
 truly need a hand-written `fetch()`. In both cases, avoid putting raw tokens in
 source or args.
 
+### When a run ends
+
+A run ends when the script's default export resolves. On `native`, a call
+the script started but did not await (a `fetch`, a `ctx.swarm.kv_set`, a nested
+`ctx.swarm.script_run`) gets 2 s more to settle. Anything still pending then is
+stopped, and `stderr` says so. A run with nothing pending ends at once. On
+`quickjs` the executor aborts open host calls as soon as the run ends (see
+[Executors](#executors)). Await every call whose effect must land.
+
+This lets a `Promise.race` deadline bound a run. A nested `script_run` that
+lost the race is not cancelled: it keeps running on the server under its own
+wall-clock limit and records its own run.
+
 ### Console + logger
 
 `console.log` / `.warn` / `.error` / `.info` / `.debug` are global. They also
