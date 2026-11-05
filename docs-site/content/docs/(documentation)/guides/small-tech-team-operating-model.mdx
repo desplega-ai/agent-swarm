@@ -1,0 +1,81 @@
+---
+title: Small tech team operating model
+description: "How a small technology team runs Agent Swarm as the shared layer business teams request work through, with its limits and ownership split."
+---
+
+Agent Swarm fits a small technology team that wants one shared, self-hosted agent layer for the whole company: technology maintains the infrastructure, the skills and the governed workflows, and business teams request and review work from Slack, Linear or email. It does not fit a company with nobody to own the deployment, or a team that wants every workflow to run fully autonomously.
+
+## Limits
+
+Not every workflow should run unattended. Anything irreversible, which here means sending, merging, deleting or posting publicly, belongs behind a human-in-the-loop node or a `request-human-input` call. Read the rest of this page with that gate in place.
+
+- This page promises no headcount savings. What a shared layer changes is how much work one person can carry and how little routing sits between a request and its answer. You measure that yourself.
+- There is no built-in login, no native OIDC and no SAML. The documented path puts oauth2-proxy in front of the dashboard and API. In gate mode every authenticated user shares the operator key, so the API cannot tell two people apart. Trusted-header mode forwards user headers that nothing reads yet.
+- There is no role-assignment UI. Every new user starts as `admin` until someone sets roles with `PUT /api/users/{id}/roles`, so a role decision is a deliberate step in onboarding rather than a default. Only a person holding `admin` can answer an approval request: the built-in `requester` role has no `approval.respond` verb, and no endpoint adds one.
+- One deployment is one swarm. There are no multi-tenant workspaces inside it, which means one company per deployment.
+- `personal/` asset keys record write ownership. They are not a privacy boundary, so sensitive material needs a different control.
+- Microsoft Graph is outbound only through scripts, Composio is a prototype, and Apps are beta.
+
+## The operating model in four layers
+
+The shape is the same whether the technology team is five people or twenty: technology owns the layer, business teams own the work that flows through it. Four pieces do the work.
+
+**Shared infrastructure.** One Docker Compose or Helm deployment holds the whole company: one SQLite database file, volumes for the database and the agent workspaces, and one agent-fs bucket for files. Secret configuration values are encrypted at rest with AES-256-GCM and scripts never see them, only a redacted placeholder that the credential broker swaps for the real value at egress, and only for allow-listed hosts. Sizing is measured rather than guessed: over a four-hour observability window, a 4 vCPU / 8 GiB host fits the API, the lead, one heavy worker and one to two light workers, and 8 vCPU / 16 GiB fits the API, the lead, three heavy workers and two to four light ones. A team of twenty rarely needs the top of that range, because the constraint is how many tasks run at once, not how many people ask.
+
+**Reusable skills and scripts.** A skill is a `SKILL.md` file: frontmatter, then the procedure in prose. Any agent can create a personal skill, and a worker shares one with the swarm by calling `skill-publish`, which opens a `skill-approval` task for the lead. That approval is the editorial control on the layer, and it costs one review per skill. Workers poll and hot-reload their skill directories, so a fix lands without a redeploy. Scripts are the same idea for code: named TypeScript scripts in the catalog, plus script connections that register an API once and keep its credentials in a server-side binding.
+
+**Governed workflows.** Workflows are DAGs with a `human-in-the-loop` node, schedules on cron or interval, and checkpoint durability after every step. Governance sits on top. Daily USD budgets can be set globally, per agent and per user, and a task is refused at claim time when the budget is gone. Three roles, `admin`, `requester` and `viewer`, decide what a person token can do, and enforcement is on by default. Every permission decision is written to an audit log with 30-day retention by default. Slack inbound work can be limited to your own email domain with `SLACK_ALLOWED_EMAIL_DOMAINS`, which is the cheapest way to stop a stray mention from starting a paid task.
+
+**Support for nontechnical teams.** Nobody outside technology needs a new interface. Requests arrive through the integrations already in place: the issue trackers and chat surfaces where a mention or a status change becomes a task. The docs describe fifteen integrations today, some outbound only. Requester profiles carry each person's role and communication preferences into the agent's prompt, so the same agent answers a support lead and a CFO differently. The dashboard's Usage page gives technology a "Cost by User" view, so the cost conversation happens per team rather than per invoice. Apps hold the shared records a company needs a durable place for, such as an approval queue or a decision register. Per-customer working directories give an account team one folder that every later session reads before acting.
+
+## Who owns what
+
+The table is the part worth printing. A small team fails at this boundary more often than it fails at the technology.
+
+| Technology maintains | Business teams own | Shared |
+| --- | --- | --- |
+| Deployment, upgrades and backups | The request itself, phrased in their own terms | The skill text for their domain: business writes the procedure, technology publishes it as a swarm skill |
+| Secrets, integrations and script connections | The inputs and source data the work runs on | The review cadence for what the layer produces |
+| Swarm-scoped skills and workflow definitions | The approval on every irreversible step, held by a named person on `admin` | Which workflows are still worth running |
+| Budgets, roles and access | The quality bar for outputs, and the call that a workflow is no longer needed | The order in which new teams are added |
+
+## Staged rollout
+
+Each stage has an entry condition and an exit check. There are no durations here, because the pace depends on how many requests a team already handles by hand.
+
+**Stage 1, foundation.** Entry: someone in technology can run Compose and hold the secrets. Do the deploy, invite the requesters as `requester` and name the one or two people who will answer gates as `admin`, restrict Slack to your company domain, and set a daily budget per user before the first task runs. Exit: an invited requester creates a task and follows it from Slack or the task list, and technology sees that requester's spend under Cost by User.
+
+**Stage 2, one team and one recurring workflow.** Entry: one team has a report or a follow-up it produces by hand every week. Pick it from the playbooks, such as reports from multiple sources, proactive customer support or lead prospecting drafts, and put a human gate on the step that leaves the building. Exit: the workflow has run twice, a person approved each irreversible step, and the team still uses the output. If they stopped using it, fix the workflow or retire it before adding a second.
+
+**Stage 3, codify.** Entry: the same request has arrived three times. Turn the procedure into a swarm skill through `skill-publish`, and move API calls into a script connection so no credential sits in a prompt. Exit: a new teammate can trigger the work without reading your notes, and the skill text is one the business side agrees with.
+
+**Stage 4, widen.** Entry: two workflows run without anyone chasing them. Add teams, put shared records in Apps where people need a durable place to look, and retire the workflows nobody reviews. Exit: requests from more than one business team arrive through the same layer, and the list of running workflows is one somebody can defend line by line.
+
+## What to automate first
+
+Three criteria decide it. The work recurs, a named person reviews the output, and the risky step can be gated. If a candidate misses any of the three, it is not ready, whatever the potential saving looks like.
+
+On the technology side, the playbooks cover feature development from a Slack or Linear request to a reviewed pull request, PR review triage that routes only flagged hunks to a cheap reviewer, Open Oncall incident response with a one-click fix approval, and self-documenting release reports. These are the flows a twenty-person team feels first, because they are the ones that queue behind a single senior engineer.
+
+On the business side, the same layer serves reports joined from several sources, customer support follow-ups, prospecting drafts that a person sends, and content drafts that a person edits. The gate is what makes them safe: the draft is the agent's, the decision is the person's.
+
+Treat every one of these as an example of a shape, not a promise of autonomy. The playbooks describe where the human sits in each flow, and moving that gate later is a decision somebody makes on evidence.
+
+## Failure modes
+
+- **An irreversible action runs ungated.** Guard: a `human-in-the-loop` node or `request-human-input` before send, merge, delete or public post, and a review of the workflow graph when the steps change.
+- **Skills sprawl.** Guard: `skill-publish` opens a lead approval task, so every swarm-scoped skill has one owner who read it.
+- **The shared operator key hides who did what.** Guard: invite people as users so their tokens carry identity, avoid gate mode while you still need attribution, and read the audit log rather than guessing.
+- **Everyone is admin.** Guard: set roles explicitly at onboarding with `PUT /api/users/{id}/roles`, keep the named gate answerers on `admin` because no finer-grained role holds `approval.respond` yet, and leave the People page label out of any access decision.
+- **A spend surprise.** Guard: a daily budget globally and per user, plus the Cost by User view in the weekly review.
+- **A workflow with no business owner.** Guard: name the owner in the workflow, and retire anything that owner no longer reads.
+- **Treating `personal/` as private.** Guard: keep sensitive material out of it and use the namespace only for write ownership.
+
+## Related docs
+
+- [Team collaboration](/docs/features/team-collaboration) for the building blocks behind this model.
+- [Deployment](/docs/guides/deployment), [resource sizing](/docs/guides/performance-resource-sizing) and [secrets encryption](/docs/guides/secrets-encryption) for the infrastructure layer.
+- [Self-hosted SSO](/docs/guides/self-hosted-sso) for what the proxy does and does not give you.
+- [Workflows](/docs/concepts/workflows), [scheduling](/docs/concepts/scheduling) and the [HITL gates pattern](/docs/playbooks/patterns/hitl-gates) for the governed layer.
+- [Script connections](/docs/guides/script-connections) and [asset namespaces](/docs/guides/asset-namespaces) for credentials and file grouping.
+- [Integrations](/docs/integrations), [Apps](/docs/apps) and the [playbooks](/docs/playbooks) for what to run first.
