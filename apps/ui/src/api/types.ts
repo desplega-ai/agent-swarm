@@ -4462,3 +4462,21 @@ export interface SavingsJobsResponse {
   reason: "no-runs" | "too-many-runs" | null;
   rows: SavingsJobRow[];
 }
+
+/** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
+export interface SavingsDailyPoint {
+  day: string;
+  savingUsd: number;
+  actualUsd: number;
+}
+
+export interface SavingsDailyResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  computedAt: string;
+  valid: boolean;
+  reason: "no-runs" | "too-many-runs" | null;
+  points: SavingsDailyPoint[];
+}
