@@ -228,7 +228,8 @@ USER worker
 # Version: global ARG at the top of this file.
 ARG CONTEXT_MODE_VERSION
 USER root
-RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
@@ -837,15 +838,18 @@ USER root
 # extraKnownMarketplaces; Codex: config.toml `ref`), so a runtime marketplace
 # refresh stays on the tag. Plugin auto-update is also off at runtime:
 # DISABLE_AUTOUPDATER=1 (worker-base ENV) disables it in Claude Code.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build.
+# Guarded with || true so a marketplace/registry hiccup can't fail the build;
+# the leading `test -n` is NOT guarded, so an ARG that fails to reach this
+# stage fails the build instead of installing an unpinned or empty ref.
 # CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
 # `bun install` under the hood and previously left an 880 MB cache in a layer.
 ARG CONTEXT_MODE_VERSION
 USER worker
-RUN claude plugin marketplace add "mksglu/claude-context-mode#v${CONTEXT_MODE_VERSION}" || true \
-    && claude plugin install context-mode@context-mode --scope user || true \
-    && codex plugin marketplace add mksglu/context-mode --ref "v${CONTEXT_MODE_VERSION}" || true \
-    && codex plugin add context-mode@context-mode || true \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && { claude plugin marketplace add "mksglu/claude-context-mode#v${CONTEXT_MODE_VERSION}" || true; } \
+    && { claude plugin install context-mode@context-mode --scope user || true; } \
+    && { codex plugin marketplace add mksglu/context-mode --ref "v${CONTEXT_MODE_VERSION}" || true; } \
+    && { codex plugin add context-mode@context-mode || true; } \
     && rm -rf /home/worker/.bun/install/cache
 
 USER root
