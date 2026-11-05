@@ -107,7 +107,14 @@ function failingChecks({ setup, activity }: StatusResponse): FailingCheck[] {
   return checks;
 }
 
-export function HealthBadge({ status }: { status: StatusResponse }) {
+export function HealthBadge({
+  status,
+  className,
+}: {
+  status: StatusResponse;
+  /** The phone bar passes its 44 px touch-target size here. */
+  className?: string;
+}) {
   const sendEvent = useUiTelemetry();
   const [open, setOpen] = useState(false);
   const health = status.health;
@@ -120,6 +127,7 @@ export function HealthBadge({ status }: { status: StatusResponse }) {
         "hit-area flex items-center gap-2 rounded-md px-2 py-1 text-xs",
         "hover:bg-accent transition-colors data-[state=open]:bg-accent",
         "text-muted-foreground",
+        className,
       )}
     >
       <span className={cn("size-2 rounded-full", HEALTH_DOT_CLASS[health])} />
@@ -149,8 +157,12 @@ export function HealthBadge({ status }: { status: StatusResponse }) {
   );
 }
 
-/** Mounted only while the popover is open. */
-function HealthPopoverBody({
+/**
+ * Mounted only while the popover (or the phone health sheet) is open.
+ * Exported for the phone header menu, which shows the same details in a
+ * bottom sheet.
+ */
+export function HealthPopoverBody({
   status,
   onNavigate,
 }: {

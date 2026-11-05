@@ -11,6 +11,7 @@ import { useOpenCommandMenu } from "@/components/shared/command-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,13 +34,20 @@ export function AppHeader() {
  * The phone bar, laid out like a native navigation bar: the menu leads, the
  * page name owns the middle, search, the bell and one "more" sheet trail.
  * Every control is a 44 px ghost icon button. Health shows here only when it
- * needs a person; the rest of the desktop cluster lives in the sheet
+ * needs a person (unhealthy, or the API unreachable); the rest of the desktop
+ * cluster, healthy details included, lives in the sheet
  * (`PhoneHeaderMenu`). The safe-area padding keeps it clear of the notch
  * when the page runs edge to edge (an installed web app).
  */
 function PhoneHeader() {
-  const { data: status } = useStatusContext();
+  const { data: status, error: statusError } = useStatusContext();
+  const { isError: healthFailed, error: healthError } = useHealth();
   const openCommandMenu = useOpenCommandMenu();
+  // A failed probe means the API is unreachable. Say so in the bar, as the
+  // desktop red dot does, instead of waiting for someone to open the menu. It
+  // wins over a `/status` snapshot, which may be stale from before the outage.
+  const disconnected = healthFailed || (!status && Boolean(statusError));
+  const connectionErrorMessage = statusError?.message || healthError?.message || null;
 
   return (
     <header className="flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-0.5 bg-background pt-[env(safe-area-inset-top)] pr-[max(0.25rem,env(safe-area-inset-right))] pl-[max(0.25rem,env(safe-area-inset-left))]">
@@ -52,7 +60,11 @@ function PhoneHeader() {
       <div className="flex min-w-0 flex-1 items-center">
         <Breadcrumbs />
       </div>
-      {status && status.health !== "ok" ? <HealthBadge status={status} /> : null}
+      {disconnected ? (
+        <PhoneDisconnected message={connectionErrorMessage} />
+      ) : status && status.health !== "ok" ? (
+        <HealthBadge status={status} className="h-11 min-w-11 justify-center" />
+      ) : null}
       <Button
         variant="ghost"
         size="icon"
@@ -66,6 +78,33 @@ function PhoneHeader() {
       <NotificationBell className="size-11 [&_svg]:size-5 [&_[data-slot=badge]]:top-1.5 [&_[data-slot=badge]]:right-1" />
       <PhoneHeaderMenu />
     </header>
+  );
+}
+
+/** The phone bar's red dot while the API is unreachable; a tap says why. */
+function PhoneDisconnected({ message }: { message: string | null }) {
+  const { activeConnection } = useConfig();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-11"
+          aria-label="Swarm health: Disconnected"
+        >
+          <span aria-hidden="true" className="size-2.5 rounded-full bg-status-error" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Connection" className="w-72 space-y-1 text-sm">
+        <p className="font-medium">Disconnected</p>
+        <p className="text-xs text-muted-foreground text-balance">
+          {message
+            ? `Connection failed: ${message}${activeConnection ? ` (${activeConnection.apiUrl})` : ""}`
+            : "Connecting…"}
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 

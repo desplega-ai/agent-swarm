@@ -1,6 +1,15 @@
-import { Ellipsis, Github, Lightbulb, ListChecks, MessageSquarePlus, Moon } from "lucide-react";
+import {
+  ChevronRight,
+  Ellipsis,
+  Github,
+  Lightbulb,
+  ListChecks,
+  MessageSquarePlus,
+  Moon,
+} from "lucide-react";
 import { useState } from "react";
 import { useHealth, useStats } from "@/api/hooks/use-stats";
+import { useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { useStatusContext } from "@/app/status-context";
 import { useContextPanel } from "@/components/context-panel/context-panel-state";
 import { useContextPanelOffered } from "@/components/context-panel/context-session-panel";
@@ -20,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
-import { HEALTH_DOT_CLASS, HEALTH_LABEL } from "./health-badge";
+import { HEALTH_DOT_CLASS, HEALTH_LABEL, HealthPopoverBody } from "./health-badge";
 
 const GITHUB_URL = "https://github.com/desplega-ai/agent-swarm";
 
@@ -30,12 +39,16 @@ const GITHUB_URL = "https://github.com/desplega-ai/agent-swarm";
  * never look alike). Its bottom sheet holds what the
  * desktop header shows inline: swarm health and dev mode, setup progress,
  * the session about this page, improvements, the theme and the GitHub link.
+ * The health row opens the desktop health popover's details (failing checks,
+ * "Stuck? Ask us") in a sheet of its own, so a healthy phone reaches them too.
  * A dot on the button says a row inside wants a person (drafts waiting,
  * setup unfinished). An unhealthy swarm keeps its own dot in the bar.
  */
 export function PhoneHeaderMenu() {
   const [open, setOpen] = useState(false);
   const [improvementsOpen, setImprovementsOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const sendEvent = useUiTelemetry();
   const { theme, toggleTheme } = useTheme();
   const { data: status } = useStatusContext();
   const { data: health, isError } = useHealth();
@@ -50,13 +63,15 @@ export function PhoneHeaderMenu() {
   const isHealthy = Boolean(health) && !isError;
   const devMode = isHealthy && !stats.isError && stats.data?.devMode === true;
   // `/status` drives the label; older APIs without it fall back to `/health`.
-  const healthLabel = status
-    ? HEALTH_LABEL[status.health]
+  // A failed probe wins: the last `/status` snapshot predates the outage.
+  const liveStatus = isError ? null : status;
+  const healthLabel = liveStatus
+    ? HEALTH_LABEL[liveStatus.health]
     : isHealthy
       ? "Connected"
       : "Disconnected";
-  const healthDot = status
-    ? HEALTH_DOT_CLASS[status.health]
+  const healthDot = liveStatus
+    ? HEALTH_DOT_CLASS[liveStatus.health]
     : isHealthy
       ? "bg-status-success"
       : "bg-status-error";
@@ -95,17 +110,26 @@ export function PhoneHeaderMenu() {
         onOpenChange={setOpen}
         title={status?.identity.name ?? "Agent Swarm"}
       >
-        <div className="flex min-h-12 items-center gap-3 px-3 text-base">
-          <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
-            <span className={cn("size-2.5 rounded-full", healthDot)} />
-          </span>
-          <span className="min-w-0 flex-1 truncate">{healthLabel}</span>
-          {devMode ? (
-            <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
-              Dev
-            </Badge>
-          ) : null}
-        </div>
+        {liveStatus ? (
+          // `/status` carries the checks: the row opens their details.
+          <button
+            type="button"
+            aria-label={`Swarm health: ${healthLabel}`}
+            className="flex min-h-12 w-full items-center gap-3 rounded-md px-3 text-left text-base transition-colors active:bg-accent"
+            onClick={() => {
+              setOpen(false);
+              setHealthOpen(true);
+              sendEvent({ event: "feature.used", properties: { feature: "health_popover" } });
+            }}
+          >
+            <HealthRowContent dot={healthDot} label={healthLabel} devMode={devMode} />
+            <ChevronRight aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+          </button>
+        ) : (
+          <div className="flex min-h-12 items-center gap-3 px-3 text-base">
+            <HealthRowContent dot={healthDot} label={healthLabel} devMode={devMode} />
+          </div>
+        )}
         {setup ? (
           <ActionSheetItem
             icon={ListChecks}
@@ -144,6 +168,37 @@ export function PhoneHeaderMenu() {
       </ActionSheet>
       {waiting ? (
         <ImprovementsSheet open={improvementsOpen} onOpenChange={setImprovementsOpen} />
+      ) : null}
+      {status ? (
+        <ActionSheet open={healthOpen} onOpenChange={setHealthOpen} title="Swarm health">
+          <div className="space-y-3 px-3 pb-3">
+            <HealthPopoverBody status={status} onNavigate={() => setHealthOpen(false)} />
+          </div>
+        </ActionSheet>
+      ) : null}
+    </>
+  );
+}
+
+function HealthRowContent({
+  dot,
+  label,
+  devMode,
+}: {
+  dot: string;
+  label: string;
+  devMode: boolean;
+}) {
+  return (
+    <>
+      <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+        <span className={cn("size-2.5 rounded-full", dot)} />
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {devMode ? (
+        <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
+          Dev
+        </Badge>
       ) : null}
     </>
   );
