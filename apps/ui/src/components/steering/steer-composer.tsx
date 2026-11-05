@@ -84,8 +84,10 @@ const PRE_START_STATUSES = new Set<AgentTaskStatus>([
   "backlog",
 ]);
 
-/** Human-readable summary of what the server actually did. */
-function describeOutcome(result: SteerResult): string {
+/** Human-readable summary of what the server actually did. Exported for the
+ * json-render `SessionThread`, so a steer promoted to a follow-up task is
+ * reported there too. */
+export function describeOutcome(result: SteerResult): string {
   switch (result.outcome) {
     case "steered":
       return "Interrupted. Delivered into the running turn.";

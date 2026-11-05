@@ -54,6 +54,7 @@ const UI_STATE_COMPONENTS = new Set([
   "Chips",
   "Tree",
   "SchemaForm",
+  "SessionThread",
   "Table",
 ]);
 
@@ -73,6 +74,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
+  SessionThread: ["onDispatch"],
 };
 
 /**

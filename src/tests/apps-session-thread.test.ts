@@ -1,0 +1,160 @@
+import { describe, expect, test } from "bun:test";
+import { parseAppDefinition } from "../apps/definition";
+
+async function expectParseIssue(definition: unknown, message: string): Promise<void> {
+  const parsed = await parseAppDefinition(definition);
+  expect(parsed.success).toBe(false);
+  if (parsed.success) return;
+  expect(parsed.issues.some((entry) => entry.message.includes(message))).toBe(true);
+}
+
+function sessionThreadDefinition(model = "screen", overrides: Record<string, unknown> = {}) {
+  return {
+    models: {
+      screen: { columns: { rootTaskId: { kind: "string" } } },
+    },
+    queries: { screenById: { model: "screen" } },
+    actions: {
+      dispatchCoder: { kind: "task", prompt: "Edit the screen per the user's message" },
+    },
+    pages: {
+      main: {
+        root: "root",
+        elements: {
+          root: { type: "Stack", props: {}, children: ["thread", "draftEcho"] },
+          thread: {
+            type: "SessionThread",
+            props: {
+              id: "thread",
+              rootTaskId: { $state: "/queries/screenById/data/0/rootTaskId" },
+              onDispatch: [
+                { action: "app.action", params: { name: "dispatchCoder", input: { $form: "" } } },
+                {
+                  action: "app.mutate",
+                  params: {
+                    model,
+                    op: "update",
+                    rowId: "r1",
+                    values: { rootTaskId: { $state: "/actions/dispatchCoder/taskId" } },
+                  },
+                },
+              ],
+              ...overrides,
+            },
+          },
+          draftEcho: { type: "Text", props: { content: { $state: "/ui/thread/value" } } },
+        },
+      },
+    },
+    defaultPage: "main",
+  };
+}
+
+describe("SessionThread validation", () => {
+  test("accepts a SessionThread with a bound rootTaskId and an app.action + app.mutate onDispatch chain", async () => {
+    const parsed = await parseAppDefinition(sessionThreadDefinition());
+    expect(parsed.success).toBe(true);
+  });
+
+  test("accepts a minimal SessionThread (no rootTaskId, no onDispatch, defaulted placeholder) that still claims /ui/<id>", async () => {
+    // `rootTaskId`/`onDispatch` are optional and `placeholder` is generator-defaulted
+    // (stripDefaultedFromRequired), so `id` alone must validate — and `draftEcho`
+    // binding `/ui/thread/value` proves the bare component still registers its
+    // UI state slot.
+    const definition = sessionThreadDefinition();
+    definition.pages.main.elements.thread.props = { id: "thread" } as never;
+    const parsed = await parseAppDefinition(definition);
+    expect(parsed.success).toBe(true);
+  });
+
+  test("binding /ui/<id>/value without a matching SessionThread id fails", async () => {
+    const definition = sessionThreadDefinition();
+    definition.pages.main.elements.draftEcho.props = {
+      content: { $state: "/ui/phantom/value" },
+    };
+    await expectParseIssue(definition, 'state reference targets unknown UI control "phantom"');
+  });
+
+  test("rejects an onDispatch app.mutate against an undeclared model", async () => {
+    await expectParseIssue(sessionThreadDefinition("ghost"), 'unknown model "ghost"');
+  });
+
+  test("rejects an onDispatch app.action naming an undeclared app action", async () => {
+    await expectParseIssue(
+      sessionThreadDefinition("screen", {
+        onDispatch: [{ action: "app.action", params: { name: "nope" } }],
+      }),
+      'unknown app action "nope"',
+    );
+  });
+
+  test("rejects an onDispatch step with an unknown action type", async () => {
+    await expectParseIssue(
+      sessionThreadDefinition("screen", { onDispatch: [{ action: "app.explode", params: {} }] }),
+      'unknown action type "app.explode"',
+    );
+  });
+
+  test("accepts a $chain sentinel (e.g. parentTaskId) inside an onDispatch app.action's params", async () => {
+    const definition = sessionThreadDefinition("screen", {
+      onDispatch: [
+        {
+          action: "app.action",
+          params: {
+            name: "dispatchCoder",
+            input: { $form: "" },
+            parentTaskId: { $chain: "leafTaskId" },
+          },
+        },
+      ],
+    });
+    const parsed = await parseAppDefinition(definition);
+    expect(parsed.success).toBe(true);
+  });
+
+  test("rejects a $chain sentinel outside action params (not a resolvable literal there)", async () => {
+    const definition = sessionThreadDefinition();
+    definition.pages.main.elements.draftEcho.props = {
+      content: { $chain: "leafTaskId" },
+    };
+    await expectParseIssue(
+      definition,
+      "$row, $rowIndex, $form, and $chain bindings are only allowed in action params",
+    );
+  });
+
+  test("accepts an onRootCreated app.mutate writing $chain.newTaskId onto rootTaskId", async () => {
+    const definition = sessionThreadDefinition("screen", {
+      onDispatch: [
+        {
+          action: "app.action",
+          params: {
+            name: "dispatchCoder",
+            input: { $form: "" },
+            parentTaskId: { $chain: "leafTaskId" },
+          },
+        },
+      ],
+      onRootCreated: [
+        {
+          action: "app.mutate",
+          params: {
+            model: "screen",
+            op: "update",
+            rowId: "r1",
+            values: { rootTaskId: { $chain: "newTaskId" } },
+          },
+        },
+      ],
+      onReset: [
+        {
+          action: "app.mutate",
+          params: { model: "screen", op: "update", rowId: "r1", values: { rootTaskId: "" } },
+        },
+      ],
+    });
+    const parsed = await parseAppDefinition(definition);
+    if (!parsed.success) console.error(parsed.issues);
+    expect(parsed.success).toBe(true);
+  });
+});

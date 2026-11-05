@@ -176,8 +176,8 @@ const stackProps = z.object({
    * Grow to fill the remaining space of a `fill`-aware parent (another
    * `fill` Stack/Split) instead of sizing to content, and let its own
    * children do the same. Chain `fill` from the page root down to every
-   * container on the path to a scrolling leaf to build a viewport-height
-   * layout with no page scroll.
+   * container on the path to a scrolling leaf (Tree/SchemaForm/SessionThread)
+   * to build a viewport-height layout with no page scroll.
    */
   fill: z.boolean().optional(),
 });
@@ -357,6 +357,38 @@ const schemaFormProps = z.object({
    * field list scrolls inside whatever height the parent gives it. When a
    * sibling (e.g. a `fill` Tree) also sets `fill`, both split the parent's
    * height evenly and scroll independently. */
+  fill: z.boolean().optional(),
+});
+
+const sessionThreadProps = z.object({
+  /** State id — the composer draft lands at `/ui/<id>/value`. */
+  id: z.string(),
+  rootTaskId: z
+    .string()
+    .optional()
+    .describe(
+      'The chain\'s root task id — usually bound from a row column (e.g. screen.rootTaskId), but may just as well bind directly to stable context such as { "$state": "/route/params/sessionId" }. Not necessarily a row the app owns.',
+    ),
+  /** Composer placeholder (default "Send a message…"). */
+  placeholder: z.string().optional(),
+  onDispatch: actionChainSchema
+    .optional()
+    .describe(
+      'Action chain run with $form={message} to send a message. $chain={leafTaskId} is the current leaf task id, or null when rootTaskId is empty — a null $chain key drops the param, so `"parentTaskId": {"$chain": "leafTaskId"}` starts a brand-new root task on the first message (follow it with onRootCreated to adopt it as the root) and chains a new task off the terminal leaf on every later one. The chain should app.action a task.',
+    ),
+  onRootCreated: actionChainSchema
+    .optional()
+    .describe(
+      "Action chain run with $chain={newTaskId} immediately after a successful dispatch when NO rootTaskId was bound yet (the very first message in a new chain). Should app.mutate the new task's id onto rootTaskId. Never invoked on a follow-up dispatch (chaining off an existing root) — onDispatch's $chain={leafTaskId} covers that case via parentTaskId instead. Omit entirely when rootTaskId is sourced from something other than a row this app owns (e.g. externally-provided context) — there's nothing to write back.",
+    ),
+  onReset: actionChainSchema
+    .optional()
+    .describe(
+      "Action chain run when the user clicks Reset (rendered only when this is provided and rootTaskId is bound) — should clear rootTaskId so the next message starts a fresh chain.",
+    ),
+  /** Grow to fill a `fill`-aware parent instead of the fixed-height chain
+   * list — the turn history scrolls inside whatever height the parent gives
+   * it, with the composer pinned to the bottom. */
   fill: z.boolean().optional(),
 });
 
@@ -1240,6 +1272,11 @@ export const swarmCatalogSpec = {
       props: schemaFormProps,
       description:
         'Schema-driven props panel. Walks `schema.properties` and renders one control per property — text input (or a select when `enum` is present), number input, or switch — labelled by key with the property `description` as tooltip. Each field seeds from `value?.[key] ?? property.default`. On every field commit the draft object is written to `/ui/<id>/value` and the `onChange` chain is dispatched with `$form` = the current values and `{ "$value": true }` = the value just written (the whole merged doc when `baseDoc` is set; never read `/ui/<id>/value` with `$state` in `onChange`, the renderer resolves it before the commit and it is one edit stale). The draft rebuilds whenever the bound `schema` identity changes. With `baseDoc` (a `{ root, elements }` doc) and `nodeKey`, it edits `baseDoc.elements[nodeKey].props` and `/ui/<id>/value` holds the whole doc with the edit merged in, ready for one `app.mutate` (pass it as `{ "$value": true }`). At most 100 fields and 200 enum options render, and a `baseDoc` over 5,000 elements is refused. `fill: true` grows the field list to fill a `fill`-aware parent and scrolls internally instead of sizing to content — pair it with a `fill` sibling (e.g. Tree) in the same column Stack to split the available height evenly between them.',
+    },
+    SessionThread: {
+      props: sessionThreadProps,
+      description:
+        'Bind an app page to a chat-style history of a swarm task chain: one row per past request/result turn, a live "Working…" indicator (plus the latest activity step) while a turn is active, and a message composer. `rootTaskId` is usually a `{ "$state": … }` binding to a row column (or any other context-derived value) holding the chain root task id. Sending routes three ways: no root yet → run `onDispatch` (a new root task), then `onRootCreated` with `{ "$chain": "newTaskId" }`; leaf task running, paused or reviewing → steer it (queued, steering source `app-page`); leaf terminal → run `onDispatch` again, chaining off the leaf via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` on a new thread, and a null `$chain` key drops the param, so one `onDispatch` covers both the first message and follow-ups. A static action chain cannot conditionally skip a step, so `onRootCreated` exists to keep `onDispatch` from re-overwriting the root on every follow-up. `onRootCreated` and `onReset` (clears `rootTaskId`) are optional — omit either when not meaningful for a given binding. The composer draft is mirrored to `/ui/<id>/value`. At most the latest 100 turns render, each turn\'s request text is cut at 4,000 characters and its output at 20,000 (the detail sheet keeps the full task). `fill: true` grows the whole card to fill a `fill`-aware parent, with the turn history scrolling inside the remaining height and the composer pinned to the bottom.',
     },
     ElementRef: {
       props: elementRefProps,
