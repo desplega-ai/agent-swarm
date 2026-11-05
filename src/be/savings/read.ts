@@ -30,6 +30,7 @@ export type SavingsTotals = {
   runs: number;
   substitutedRuns: number;
   enabledOnlyRuns: number;
+  measuredUsd: number;
   actualUsd: number;
   agentOnlyUsd: SavingsBand;
   savingUsd: SavingsBand;
@@ -37,7 +38,12 @@ export type SavingsTotals = {
   hoursSaved: SavingsBand;
 };
 
-export type SavingsDailyPoint = { day: string; savingUsd: number; actualUsd: number };
+export type SavingsDailyPoint = {
+  day: string;
+  savingUsd: number;
+  actualUsd: number;
+  measuredUsd: number;
+};
 
 export type WorkflowSavingsRead = {
   window: SavingsWindow;
@@ -223,6 +229,7 @@ function sumTotals(parts: PricedWorkflow[]): SavingsTotals {
     runs: parts.reduce((s, p) => s + p.runs, 0),
     substitutedRuns: parts.reduce((s, p) => s + p.substitutedRuns, 0),
     enabledOnlyRuns: parts.reduce((s, p) => s + p.enabledOnlyRuns, 0),
+    measuredUsd: parts.reduce((s, p) => s + p.measuredUsd, 0),
     actualUsd: parts.reduce((s, p) => s + p.actualUsd, 0),
     agentOnlyUsd: sumBand(parts.map((p) => p.agentOnlyUsd)),
     savingUsd: sumBand(parts.map((p) => p.savingUsd)),
@@ -244,6 +251,6 @@ function dailyPoints(
   );
   return Array.from({ length: windowDays }, (_, i) => {
     const day = utcDay(Date.parse(dayStartIso(firstDay)) + i * DAY_MS);
-    return split.get(day) ?? { day, savingUsd: 0, actualUsd: 0 };
+    return split.get(day) ?? { day, savingUsd: 0, actualUsd: 0, measuredUsd: 0 };
   });
 }

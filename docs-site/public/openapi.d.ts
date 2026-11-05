@@ -20098,6 +20098,9 @@ export interface paths {
                                 enabledOnlyRuns: number;
                                 capApplied: boolean;
                                 opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, LLM calls. */
+                                measuredUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this. */
                                 actualUsd: number;
                                 agentOnlyUsd: {
                                     p10: number;
@@ -20109,6 +20112,7 @@ export interface paths {
                                     p50: number;
                                     p90: number;
                                 };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. */
                                 actualHours: number;
                                 agentOnlyHours: {
                                     p10: number;
@@ -20126,6 +20130,7 @@ export interface paths {
                                 runs: number;
                                 substitutedRuns: number;
                                 enabledOnlyRuns: number;
+                                measuredUsd: number;
                                 actualUsd: number;
                                 agentOnlyUsd: {
                                     p10: number;
@@ -20222,7 +20227,10 @@ export interface paths {
                             points: {
                                 day: string;
                                 savingUsd: number;
+                                /** @description Scaled estimate: the day's measured spend times the window's substituted share. */
                                 actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
                             }[];
                         };
                     };

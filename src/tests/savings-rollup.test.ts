@@ -246,6 +246,10 @@ describe("savings rollup", () => {
     const actual = read.points.reduce((s, p) => s + p.actualUsd, 0);
     expect(saving).toBeCloseTo(row?.savingUsd.p50 ?? Number.NaN, 6);
     expect(actual).toBeCloseTo(row?.actualUsd ?? Number.NaN, 6);
+    const measured = read.points.reduce((s, p) => s + p.measuredUsd, 0);
+    expect(measured).toBeCloseTo(row?.measuredUsd ?? Number.NaN, 6);
+    // 14 effect tasks at $0.50 each, unscaled.
+    expect(row?.measuredUsd).toBeCloseTo(7, 6);
     expect(read.points.filter((p) => p.savingUsd > 0).map((p) => p.day)).toEqual(WEEK);
   });
 

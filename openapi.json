@@ -51597,8 +51597,13 @@
                           "opsPerRun": {
                             "type": "number"
                           },
+                          "measuredUsd": {
+                            "type": "number",
+                            "description": "Measured spend of every run in the window: agent tasks, their reviews, LLM calls."
+                          },
                           "actualUsd": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this."
                           },
                           "agentOnlyUsd": {
                             "type": "object",
@@ -51639,7 +51644,8 @@
                             ]
                           },
                           "actualHours": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`."
                           },
                           "agentOnlyHours": {
                             "type": "object",
@@ -51695,6 +51701,7 @@
                           "enabledOnlyRuns",
                           "capApplied",
                           "opsPerRun",
+                          "measuredUsd",
                           "actualUsd",
                           "agentOnlyUsd",
                           "savingUsd",
@@ -51719,6 +51726,9 @@
                         },
                         "enabledOnlyRuns": {
                           "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
                         },
                         "actualUsd": {
                           "type": "number"
@@ -51788,6 +51798,7 @@
                         "runs",
                         "substitutedRuns",
                         "enabledOnlyRuns",
+                        "measuredUsd",
                         "actualUsd",
                         "agentOnlyUsd",
                         "savingUsd",
@@ -51960,13 +51971,19 @@
                             "type": "number"
                           },
                           "actualUsd": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Scaled estimate: the day's measured spend times the window's substituted share."
+                          },
+                          "measuredUsd": {
+                            "type": "number",
+                            "description": "The day's measured spend, not scaled."
                           }
                         },
                         "required": [
                           "day",
                           "savingUsd",
-                          "actualUsd"
+                          "actualUsd",
+                          "measuredUsd"
                         ]
                       }
                     }

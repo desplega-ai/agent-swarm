@@ -235,9 +235,16 @@ export type PricedWorkflow = {
   enabledOnlyRuns: number;
   capApplied: boolean;
   opsPerRun: number;
+  /** Measured spend of every run in the window: agent tasks, their reviews, LLM calls. */
+  measuredUsd: number;
+  /**
+   * Scaled estimate, not a measurement: `measuredUsd * substitutedRuns / runs`.
+   * The estimator's actual side; it assumes spend is spread evenly over runs.
+   */
   actualUsd: number;
   agentOnlyUsd: SavingsBand;
   savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`: measured hours times the substituted share. */
   actualHours: number;
   agentOnlyHours: SavingsBand;
   hoursSaved: SavingsBand;
@@ -306,6 +313,12 @@ function priceRouter(
     enabledOnlyRuns: facts.runs - v,
     capApplied: false,
     opsPerRun,
+    // Measured spend is reported; the rule subtracts nothing (v7: the jobs
+    // the router starts are priced, with their spend, on their own rows).
+    measuredUsd:
+      facts.agentUsd +
+      facts.followupUsd +
+      (facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd),
     actualUsd: 0,
     agentOnlyUsd,
     savingUsd: agentOnlyUsd,
@@ -344,7 +357,8 @@ export function priceWorkflow(
   const llmUsd = facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd;
   const keptUsd = (facts.agentUsd + facts.followupUsd) * share;
   const keptHours = (facts.agentMs / 3.6e6) * share;
-  const actualUsd = (facts.agentUsd + facts.followupUsd + llmUsd) * share;
+  const measuredUsd = facts.agentUsd + facts.followupUsd + llmUsd;
+  const actualUsd = measuredUsd * share;
   const actualHours = (facts.agentMs / 3.6e6 + facts.computeSecs / 3600) * share;
   const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
   const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
@@ -357,6 +371,7 @@ export function priceWorkflow(
     enabledOnlyRuns: runs - substituted,
     capApplied: vCap < facts.schedRuns,
     opsPerRun,
+    measuredUsd,
     actualUsd,
     agentOnlyUsd,
     savingUsd: bandOf((q) => agentOnlyUsd[q] - actualUsd),
@@ -368,8 +383,9 @@ export function priceWorkflow(
 }
 
 /**
- * Split a window's p50 saving and actual cost across the UTC days its runs
- * started on, so the days sum to `priceWorkflow` over the window. The unit
+ * Split a window's p50 saving, scaled actual cost and measured spend across
+ * the UTC days its runs started on, so the days sum to `priceWorkflow` over
+ * the window. The unit
  * cost (tau), the substituted share and the LLM source are the window's.
  * When the hourly cap or the effect rule makes the window's counted schedule
  * runs differ from the raw ones, they are spread pro rata over the days'
@@ -382,14 +398,18 @@ export function splitByDay(
   opts: { tier: SavingsTier; days: number },
   /** The window's pricing when it is already known (a cap shared with other versions). */
   pricedWindow?: PricedWorkflow,
-): { day: string; savingUsd: number; actualUsd: number }[] {
+): { day: string; savingUsd: number; actualUsd: number; measuredUsd: number }[] {
   const priced = pricedWindow ?? priceWorkflow(facts, { ...opts, band: "job" });
+  const useRecorded = facts.recordedLlmUsd > 0;
+  const measuredOf = (d: WorkflowFacts) =>
+    d.agentUsd + d.followupUsd + (useRecorded ? d.recordedLlmUsd : d.estimatedLlmUsd);
   // Enabled-only rule: each effect run is one decision at the window's unit cost.
   if (priced.enabledOnlyRule) {
     return byDay.map((d) => ({
       day: d.day,
       savingUsd: d.effectRuns * priced.agentOnlyUsdPerRun,
       actualUsd: 0,
+      measuredUsd: measuredOf(d),
     }));
   }
   const runs = facts.runs;
@@ -398,14 +418,18 @@ export function splitByDay(
   const vSched = priced.substitutedRuns - nonSched;
   // p50 agent-only cost of one substituted run (ERR_JOB.p50 is 1). The sum test pins this.
   const unitUsd = priced.agentOnlyUsdPerRun;
-  const useRecorded = facts.recordedLlmUsd > 0;
   return byDay.map((d) => {
     const substituted =
       (facts.schedRuns > 0 ? (vSched * d.schedRuns) / facts.schedRuns : 0) +
       (d.countedRuns - d.schedRuns);
-    const llmUsd = useRecorded ? d.recordedLlmUsd : d.estimatedLlmUsd;
     const keptUsd = (d.agentUsd + d.followupUsd) * share;
-    const actualUsd = (d.agentUsd + d.followupUsd + llmUsd) * share;
-    return { day: d.day, savingUsd: keptUsd + substituted * unitUsd - actualUsd, actualUsd };
+    const measuredUsd = measuredOf(d);
+    const actualUsd = measuredUsd * share;
+    return {
+      day: d.day,
+      savingUsd: keptUsd + substituted * unitUsd - actualUsd,
+      actualUsd,
+      measuredUsd,
+    };
   });
 }

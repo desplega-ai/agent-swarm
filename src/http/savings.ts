@@ -72,10 +72,19 @@ const SavingsJobRowSchema = z.object({
   enabledOnlyRuns: z.number().int(),
   capApplied: z.boolean(),
   opsPerRun: z.number(),
-  actualUsd: z.number(),
+  measuredUsd: z
+    .number()
+    .describe("Measured spend of every run in the window: agent tasks, their reviews, LLM calls."),
+  actualUsd: z
+    .number()
+    .describe(
+      "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this.",
+    ),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
-  actualHours: z.number(),
+  actualHours: z
+    .number()
+    .describe("Scaled estimate: measured hours times `substitutedRuns / runs`."),
   agentOnlyHours: SavingsBandSchema,
   hoursSaved: SavingsBandSchema,
   agentOnlyUsdPerRun: z.number(),
@@ -85,6 +94,7 @@ const SavingsTotalsSchema = z.object({
   runs: z.number().int(),
   substitutedRuns: z.number().int(),
   enabledOnlyRuns: z.number().int(),
+  measuredUsd: z.number(),
   actualUsd: z.number(),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
@@ -114,7 +124,18 @@ const SavingsJobsResponseSchema = z.object({
 const SavingsDailyResponseSchema = z.object({
   ...savingsMeta,
   /** p50 per UTC day, oldest first. The points add up to the window's p50 saving and actual cost. */
-  points: z.array(z.object({ day: z.string(), savingUsd: z.number(), actualUsd: z.number() })),
+  points: z.array(
+    z.object({
+      day: z.string(),
+      savingUsd: z.number(),
+      actualUsd: z
+        .number()
+        .describe(
+          "Scaled estimate: the day's measured spend times the window's substituted share.",
+        ),
+      measuredUsd: z.number().describe("The day's measured spend, not scaled."),
+    }),
+  ),
 });
 
 const windowQuery = {
@@ -197,6 +218,7 @@ function toRow(row: PricedWorkflow & { workflowId: string; name: string }) {
     enabledOnlyRuns: row.enabledOnlyRuns,
     capApplied: row.capApplied,
     opsPerRun: round2(row.opsPerRun),
+    measuredUsd: round2(row.measuredUsd),
     actualUsd: round2(row.actualUsd),
     agentOnlyUsd: roundBand(row.agentOnlyUsd),
     savingUsd: roundBand(row.savingUsd),
@@ -210,6 +232,7 @@ function toRow(row: PricedWorkflow & { workflowId: string; name: string }) {
 function toTotals(t: SavingsTotals) {
   return {
     ...t,
+    measuredUsd: round2(t.measuredUsd),
     actualUsd: round2(t.actualUsd),
     agentOnlyUsd: roundBand(t.agentOnlyUsd),
     savingUsd: roundBand(t.savingUsd),
@@ -277,12 +300,14 @@ export async function handleSavings(
     const points = read.complete && hasRows ? read.points : [];
     const saving = roundToTotal(points.map((p) => p.savingUsd));
     const actual = roundToTotal(points.map((p) => p.actualUsd));
+    const measured = roundToTotal(points.map((p) => p.measuredUsd));
     savingsDailyRoute.respond(res, 200, {
       ...meta(read, tier, { complete: read.complete, hasRows }),
       points: points.map((p, i) => ({
         day: p.day,
         savingUsd: saving[i] as number,
         actualUsd: actual[i] as number,
+        measuredUsd: measured[i] as number,
       })),
     });
     return true;
