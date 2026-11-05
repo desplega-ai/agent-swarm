@@ -12,7 +12,7 @@ import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
-import { monacoDarkTheme, monacoLightTheme } from "../../lib/monaco-themes";
+import { monacoSnippetDarkTheme, monacoSnippetLightTheme } from "../../lib/monaco-themes";
 import { CopyButton } from "./copy-button";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 import { SwarmLinkChip, useSwarmLinkPlugins } from "./markdown-link-chip";
@@ -39,23 +39,11 @@ function tryPrettyJson(text: string): string | null {
   return null;
 }
 
-// Snippet themes: the shared GitHub token colors on a transparent editor.
 const SNIPPET_THEME = { light: "markdown-snippet-light", dark: "markdown-snippet-dark" } as const;
-const TRANSPARENT = {
-  "editor.background": "#00000000",
-  "editor.lineHighlightBackground": "#00000000",
-  "editor.lineHighlightBorder": "#00000000",
-};
 
 function defineSnippetThemes(monaco: Monaco) {
-  monaco.editor.defineTheme(SNIPPET_THEME.light, {
-    ...monacoLightTheme,
-    colors: { ...monacoLightTheme.colors, ...TRANSPARENT },
-  });
-  monaco.editor.defineTheme(SNIPPET_THEME.dark, {
-    ...monacoDarkTheme,
-    colors: { ...monacoDarkTheme.colors, ...TRANSPARENT },
-  });
+  monaco.editor.defineTheme(SNIPPET_THEME.light, monacoSnippetLightTheme);
+  monaco.editor.defineTheme(SNIPPET_THEME.dark, monacoSnippetDarkTheme);
 }
 
 const MONACO_LINE_HEIGHT = 16;
