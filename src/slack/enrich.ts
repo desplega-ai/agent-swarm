@@ -27,10 +27,12 @@ import { type IdentityResolution, resolveIdentity } from "../be/identity";
 import { recordUnmappedIdentity } from "../be/unmapped-identities";
 import {
   findOrCreateUserByEmail,
+  findUserByEmail,
   findUserByExternalId,
   type IdentityActor,
   linkIdentity,
 } from "../be/users";
+import type { SlackParticipantTrust } from "../types";
 
 const ENRICHMENT_NAMESPACE = "integration:user-enrichment:slack";
 const ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -107,62 +109,140 @@ export async function enrichSlackUserEmail(
 const SLACK_WEBHOOK_ACTOR: IdentityActor = { kind: "system", id: "webhook:slack" };
 
 /**
- * Three-step cascade used by every Slack webhook entry point to map a Slack
- * user ID to a canonical `users.id`:
+ * Company email domains, read at call time so a config edit applies without a
+ * restart. `COMPANY_EMAIL_DOMAINS` wins; unset, it falls back to
+ * `SLACK_ALLOWED_EMAIL_DOMAINS`, which in practice lists the same domains.
+ */
+export function getCompanyEmailDomains(): string[] {
+  const raw = process.env.COMPANY_EMAIL_DOMAINS?.trim()
+    ? process.env.COMPANY_EMAIL_DOMAINS
+    : process.env.SLACK_ALLOWED_EMAIL_DOMAINS;
+  return (raw ?? "")
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isCompanyEmail(email: string, domains: string[]): boolean {
+  const domain = email.split("@").pop()?.toLowerCase();
+  return !!domain && domains.includes(domain);
+}
+
+export interface SlackParticipantResolution {
+  userId?: string;
+  trust: SlackParticipantTrust;
+}
+
+/**
+ * Map a Slack user to a canonical `users.id` and a trust level:
  *
- *   1. Look up the existing `(slack, <userId>)` mapping in `user_external_ids`.
- *   2. If missing, enrich the Slack profile to extract an email; if found,
- *      auto-link via `findOrCreateUserByEmail` + `linkIdentity`. Emits an
- *      `auto_merge` (existing user) or `identity_added` (new user) event,
- *      followed by an `identity_added` event for the Slack alias itself.
- *   3. If no email is recoverable, record into the kv unmapped tracker so the
- *      operator can triage manually. Returns `undefined` — task creation
- *      proceeds without `requestedByUserId`.
+ *   1. Existing `(slack, <userId>)` alias, else the Slack profile email.
+ *   2. A company-domain email links or creates the user (`role: "member"`);
+ *      any other email links an existing user and never creates one.
+ *   3. No email: recorded in the unmapped tracker, trust `unknown`.
  *
- * `eventContext` shapes the sample written to the unmapped tracker — the
- * sample is truncated to 100 chars inside `recordUnmappedIdentity`.
+ * Trust: `users.metadata.audience` wins; then another Slack team (`userTeam`
+ * differs from `ourTeamId`) is external; then the email domain decides, and
+ * no email is `unknown`. With no company domains configured, linked users are
+ * internal and nobody is created.
+ */
+export async function resolveSlackParticipant(
+  client: WebClient,
+  slackUserId: string,
+  eventContext: {
+    sampleEventType: string;
+    sampleContext: string;
+    userTeam?: string;
+    ourTeamId?: string;
+  },
+): Promise<SlackParticipantResolution> {
+  const domains = getCompanyEmailDomains();
+  const foreignTeam =
+    !!eventContext.userTeam &&
+    !!eventContext.ourTeamId &&
+    eventContext.userTeam !== eventContext.ourTeamId;
+
+  let user = await findUserByExternalId("slack", slackUserId);
+  const email = user?.email || (await enrichSlackUserEmail(client, slackUserId));
+
+  if (!user && email) {
+    if (!foreignTeam && isCompanyEmail(email, domains)) {
+      // Pull the cached name back out for the user-row hints. The kv read is
+      // cheap (single primary-key lookup) and avoids a second `users.info`.
+      const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
+      const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
+      user = (await findOrCreateUserByEmail(email, { name, role: "member" }, SLACK_WEBHOOK_ACTOR))
+        .user;
+    } else {
+      // Attribution only: an outside email never creates a user row.
+      user = await findUserByEmail(email);
+    }
+    if (user) {
+      // A concurrent enroll can win the `(slack, <id>)` PK; guard so the
+      // webhook does not 500, then trust the alias row below.
+      try {
+        await linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
+      } catch (error) {
+        console.warn(
+          `[Slack] linkIdentity('slack', ${slackUserId}) failed — likely a concurrent enroll`,
+          error,
+        );
+      }
+      user = (await findUserByExternalId("slack", slackUserId)) ?? user;
+    }
+  }
+
+  if (!user && !email) {
+    await recordUnmappedIdentity("slack", slackUserId, eventContext);
+  }
+
+  const audience = (user?.metadata as { audience?: unknown } | undefined)?.audience;
+  const trust: SlackParticipantTrust =
+    audience === "internal" || audience === "external"
+      ? audience
+      : foreignTeam
+        ? "external"
+        : domains.length === 0
+          ? user
+            ? "internal"
+            : email
+              ? "external"
+              : "unknown"
+          : !email
+            ? "unknown"
+            : isCompanyEmail(email, domains)
+              ? "internal"
+              : "external";
+  return { userId: user?.id, trust };
+}
+
+/**
+ * The canonical `users.id` for a Slack user, or `undefined` (task creation
+ * then proceeds without a `requestedByUserId`). See `resolveSlackParticipant`.
  */
 export async function resolveSlackUserId(
   client: WebClient,
   slackUserId: string,
   eventContext: { sampleEventType: string; sampleContext: string },
 ): Promise<string | undefined> {
-  // 1. Fast path — existing alias.
-  const existing = await findUserByExternalId("slack", slackUserId);
-  if (existing) return existing.id;
+  return (await resolveSlackParticipant(client, slackUserId, eventContext)).userId;
+}
 
-  // 2. Enrich → auto-link by email.
-  const email = await enrichSlackUserEmail(client, slackUserId);
-  if (email) {
-    // Pull the cached name back out for the user-row hints. The kv read is
-    // cheap (single primary-key lookup) and avoids a second `users.info`.
-    const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
-    const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
-
-    const { user } = await findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
-
-    // Link the Slack identity to whichever user we resolved to. PK collision
-    // on `(slack, <id>)` shouldn't happen — we just confirmed no existing
-    // mapping in step 1 — but guard defensively so a race doesn't 500 the
-    // webhook.
-    try {
-      await linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
-    } catch (error) {
-      console.warn(
-        `[Slack] linkIdentity('slack', ${slackUserId}) failed — likely a concurrent enroll`,
-        error,
-      );
-    }
-
-    // Re-read the alias after linking. If another webhook enrolled the same
-    // Slack ID between our fast-path read and `linkIdentity`, the external-ID
-    // row is authoritative even when it points at a different canonical user.
-    return (await findUserByExternalId("slack", slackUserId))?.id ?? user.id;
+/** Our own Slack team id (`auth.test`), cached per process. */
+let cachedTeamId: string | undefined;
+export async function getOurSlackTeamId(client: WebClient): Promise<string | undefined> {
+  if (cachedTeamId) return cachedTeamId;
+  try {
+    cachedTeamId = ((await client.auth.test()).team_id as string | undefined) ?? undefined;
+  } catch (error) {
+    console.error("[Slack] auth.test failed while reading the team id:", error);
   }
+  return cachedTeamId;
+}
 
-  // 3. No email — track as unmapped.
-  await recordUnmappedIdentity("slack", slackUserId, eventContext);
-  return undefined;
+/** Reset the team-id cache between tests. */
+export function resetSlackTeamIdCacheForTesting(): void {
+  cachedTeamId = undefined;
 }
 
 /**
@@ -172,7 +252,11 @@ export async function resolveSlackUserId(
  * message bodies — both are just this same token. Pure DB reads via
  * `resolveIdentity`; zero Slack API calls, no cache.
  */
-export async function rewriteSlackMentions(text: string, botUserId?: string): Promise<string> {
+export async function rewriteSlackMentions(
+  text: string,
+  botUserId?: string,
+  trust?: ReadonlyMap<string, SlackParticipantTrust>,
+): Promise<string> {
   const userIds = new Set<string>();
   for (const match of text.matchAll(/<@([A-Z0-9]+)>/g)) {
     const userId = match[1];
@@ -189,8 +273,13 @@ export async function rewriteSlackMentions(text: string, botUserId?: string): Pr
   return text.replace(/<@([A-Z0-9]+)>/g, (_match, userId: string) => {
     if (userId === botUserId) return `<@${userId}> (that's you)`;
     const resolution = resolutions.get(userId);
-    return resolution?.status === "resolved"
-      ? `<@${userId}|${resolution.name}>`
-      : `<@${userId}> (unknown user)`;
+    const level = trust?.get(userId);
+    const untrusted = level === "external" || level === "unknown" ? level : undefined;
+    if (resolution?.status === "resolved") {
+      return untrusted
+        ? `<@${userId}|${resolution.name}> (${untrusted}, untrusted)`
+        : `<@${userId}|${resolution.name}>`;
+    }
+    return untrusted ? `<@${userId}> (unknown user, untrusted)` : `<@${userId}> (unknown user)`;
   });
 }

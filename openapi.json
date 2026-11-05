@@ -279,6 +279,54 @@
           "slackUserId": {
             "type": "string"
           },
+          "slackParticipants": {
+            "type": "object",
+            "properties": {
+              "people": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slackUserId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "enum": [
+                        "internal",
+                        "external",
+                        "unknown"
+                      ]
+                    },
+                    "starter": {
+                      "type": "boolean"
+                    },
+                    "newest": {
+                      "type": "boolean"
+                    },
+                    "asked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slackUserId",
+                    "trust"
+                  ]
+                }
+              },
+              "more": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "people",
+              "more"
+            ]
+          },
           "slackReplySent": {
             "type": "boolean",
             "default": false
@@ -36869,6 +36917,87 @@
                                   "name"
                                 ]
                               },
+                              "threadParticipants": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "more": {
+                                    "type": "integer"
+                                  },
+                                  "people": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "trust": {
+                                          "type": "string",
+                                          "enum": [
+                                            "internal",
+                                            "external",
+                                            "unknown"
+                                          ]
+                                        },
+                                        "starter": {
+                                          "type": "boolean"
+                                        },
+                                        "newest": {
+                                          "type": "boolean"
+                                        },
+                                        "asked": {
+                                          "type": "boolean"
+                                        },
+                                        "language": {
+                                          "type": "string"
+                                        },
+                                        "verbosity": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "label",
+                                        "trust"
+                                      ]
+                                    }
+                                  },
+                                  "starterProfile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "email": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "notes": {
+                                        "type": "string"
+                                      },
+                                      "comms": {
+                                        "$ref": "#/components/schemas/UserCommsPrefs"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "more",
+                                  "people"
+                                ]
+                              },
                               "credentialAllowlist": {
                                 "type": "object",
                                 "additionalProperties": {
@@ -39663,6 +39792,87 @@
                               "required": [
                                 "name"
                               ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
+                              ]
                             }
                           },
                           "required": [
@@ -39764,6 +39974,87 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
                               ]
                             }
                           },

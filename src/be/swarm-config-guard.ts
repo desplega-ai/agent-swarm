@@ -406,6 +406,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
     }
   },
+  COMPANY_EMAIL_DOMAINS: (value) =>
+    typeof value === "string" &&
+    value
+      .split(",")
+      .map((domain) => domain.trim())
+      .every((domain) => domain === "" || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))
+      ? null
+      : "Invalid COMPANY_EMAIL_DOMAINS (expected comma-separated domains, e.g. example.com,example.dev)",
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";

@@ -15166,6 +15166,28 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
                                 credentialAllowlist?: {
                                     [key: string]: string[];
                                 };
@@ -16938,6 +16960,28 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
                             } | {
                                 /** @enum {string} */
                                 type: "task_assigned";
@@ -16962,6 +17006,28 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
@@ -28557,6 +28623,18 @@ export interface components {
             slackThreadTs?: string;
             slackTriggerMessageTs?: string;
             slackUserId?: string;
+            slackParticipants?: {
+                people: {
+                    slackUserId: string;
+                    userId?: string;
+                    /** @enum {string} */
+                    trust: "internal" | "external" | "unknown";
+                    starter?: boolean;
+                    newest?: boolean;
+                    asked?: boolean;
+                }[];
+                more: number;
+            };
             /** @default false */
             slackReplySent: boolean;
             slackProgressMessageTs?: string;

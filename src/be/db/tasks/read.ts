@@ -13,6 +13,7 @@ import type {
   RoutingAffinity,
   RoutingReason,
   RoutingSource,
+  TaskSlackParticipants,
 } from "../../../types";
 import {
   FallbackHopSchema,
@@ -20,6 +21,7 @@ import {
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  TaskSlackParticipantsSchema,
   TERMINAL_TASK_STATUSES,
 } from "../../../types";
 import { normalizeOutputSchema } from "../../../utils/output-schema";
@@ -70,6 +72,7 @@ export type AgentTaskRow = {
   slackThreadTs: string | null;
   slackTriggerMessageTs: string | null;
   slackUserId: string | null;
+  slackParticipants?: string | null;
   slackReplySent: number;
   slackProgressMessageTs: string | null;
   slackTreeRootMessageTs: string | null;
@@ -275,6 +278,19 @@ function parseFallbackHops(value: string | null | undefined): FallbackHop[] | un
   }
 }
 
+/** The stored participants; a value that does not parse reads as unset. */
+function parseSlackParticipants(
+  value: string | null | undefined,
+): TaskSlackParticipants | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = TaskSlackParticipantsSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
   let followUpConfig: FollowUpConfig | undefined;
   if (row.followUpConfig) {
@@ -345,6 +361,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackTriggerMessageTs: row.slackTriggerMessageTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
+    slackParticipants: parseSlackParticipants(row.slackParticipants),
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
     slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
@@ -2051,6 +2068,22 @@ export async function getLatestLeadTaskByContextKey(
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.
  */
+/** The oldest task in a Slack thread: who started the swarm's work there. */
+export async function getFirstTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       ORDER BY createdAt ASC
+       LIMIT 1`,
+    [channelId, threadTs],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 export async function getMostRecentTaskInThread(
   channelId: string,
   threadTs: string,

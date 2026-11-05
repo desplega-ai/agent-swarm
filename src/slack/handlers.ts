@@ -12,14 +12,13 @@ import {
 } from "../be/db";
 import { SteeringBlockedError } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
-import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
-import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
+import { enrichSlackUserEmail, resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
@@ -59,14 +58,11 @@ import {
   SLACK_LEFT_THREAD_CONFIRMATION,
   shouldSkipLeftSlackThread,
 } from "./left-threads";
-import {
-  collectSlackMessageFiles,
-  extractSlackMessageText,
-  slackInboundMessageText,
-} from "./message-text";
+import { collectSlackMessageFiles, slackInboundMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
+import { buildSlackThreadSnapshot, type SlackThreadSnapshot } from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
 
 /** Runtime check for `pre.slack.route` modifications (mirrors `SlackRouteModify`). */
@@ -187,6 +183,8 @@ interface MessageEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  /** The sender's Slack team; differs from ours for a Slack Connect guest. */
+  user_team?: string;
   channel_type?: string;
   files?: SlackFile[];
   assistant_thread?: Record<string, unknown>;
@@ -216,16 +214,6 @@ export function isBotMessage(
   if (event.bot_id) return true;
   if (botUserId && event.user === botUserId) return true;
   return false;
-}
-
-interface ThreadMessage {
-  user?: string;
-  bot_id?: string;
-  subtype?: string;
-  text?: string;
-  ts: string;
-  attachments?: Array<{ fallback?: string; text?: string; title?: string; pretext?: string }>;
-  blocks?: unknown[];
 }
 
 // Cache for bot's own user ID (avoids redundant auth.test calls)
@@ -325,61 +313,22 @@ async function hasSwarmThreadActivity(
 }
 
 /**
- * Fetch thread history and format as context for the task.
- * Returns empty string if not in a thread or no previous messages.
+ * Thread context and participants for a task triggered by `msg`. A top-level
+ * message has no context; its author is the only participant.
  */
-async function getThreadContext(
+function getThreadContext(
   client: WebClient,
-  channel: string,
-  threadTs: string | undefined,
-  currentTs: string,
+  msg: MessageEvent & { user: string },
   botUserId: string,
-): Promise<string> {
-  // Not in a thread - no context needed
-  if (!threadTs) return "";
-
-  try {
-    const result = await client.conversations.replies({
-      channel,
-      ts: threadTs,
-      limit: 20, // Last 20 messages max
-    });
-
-    const messages = (result.messages || []) as ThreadMessage[];
-    // Filter out the current message; include any message with extractable text
-    const previousMessages = messages.filter((m) => {
-      if (m.ts === currentTs) return false;
-      return extractSlackMessageText(m) !== "";
-    });
-
-    if (previousMessages.length === 0) return "";
-
-    // Format messages with user names or [Agent] for bot messages. Author
-    // identity is rendered via the identity primitive (resolved name or the
-    // UNKNOWN sentinel) — never a raw Slack API display name, and no
-    // `users.info` call.
-    const formattedMessages: string[] = [];
-    for (const m of previousMessages) {
-      // Check if this is a bot/agent message (multiple ways to identify)
-      const isBotMessage =
-        m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
-
-      const text = extractSlackMessageText(m);
-      if (isBotMessage) {
-        // Bot/agent message - truncate if too long
-        const truncatedText = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-        formattedMessages.push(`[Agent]: ${truncatedText}`);
-      } else {
-        const authorTag = m.user ? `<@${m.user}>` : "Unknown";
-        formattedMessages.push(`${authorTag}: ${text}`);
-      }
-    }
-
-    return await rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
-  } catch (error) {
-    console.error("[Slack] Failed to fetch thread context:", error);
-    return "";
-  }
+): Promise<SlackThreadSnapshot> {
+  return buildSlackThreadSnapshot(client, {
+    channelId: msg.channel,
+    threadTs: msg.thread_ts,
+    excludeTs: new Set([msg.ts]),
+    botUserId,
+    senders: [{ userId: msg.user, text: msg.text ?? "", userTeam: msg.user_team }],
+    sampleEventType: "thread_participant",
+  });
 }
 
 // Message deduplication (prevents duplicate event processing)
@@ -621,6 +570,7 @@ export function registerMessageHandler(app: App): void {
             msg.ts,
             messageFiles,
             botUserId,
+            msg.user_team,
           );
         }
 
@@ -664,6 +614,7 @@ export function registerMessageHandler(app: App): void {
           msg.ts,
           messageFiles,
           botUserId,
+          msg.user_team,
         );
 
         // Slack feedback: react with the accepted reaction on first buffer, buffered on appends
@@ -788,22 +739,14 @@ export function registerMessageHandler(app: App): void {
       }
 
       const threadTs = msg.thread_ts || msg.ts;
-      const threadContext = await getThreadContext(
+      const { threadContext, participants: slackParticipants } = await getThreadContext(
         client,
-        msg.channel,
-        msg.thread_ts,
-        msg.ts,
+        { ...msg, user: msg.user },
         botUserId,
       );
-      let fullTaskDescription: string;
-      if (threadContext) {
-        const ctxResult = resolveTemplate("slack.message.thread_context", {
-          thread_messages: threadContext,
-        });
-        fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
-      } else {
-        fullTaskDescription = taskDescription;
-      }
+      const fullTaskDescription = threadContext
+        ? `${threadContext}\n\n${taskDescription}`
+        : taskDescription;
 
       const lead = await getLeadAgent();
       const { task, unattached } = await createSlackTaskWithFiles(
@@ -817,6 +760,7 @@ export function registerMessageHandler(app: App): void {
           slackThreadTs: threadTs,
           slackTriggerMessageTs: msg.ts,
           slackUserId: msg.user,
+          slackParticipants,
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         },
@@ -868,22 +812,14 @@ export function registerMessageHandler(app: App): void {
     const threadTs = msg.thread_ts || msg.ts;
 
     // Fetch thread context if in a thread
-    const threadContext = await getThreadContext(
+    const { threadContext, participants: slackParticipants } = await getThreadContext(
       client,
-      msg.channel,
-      msg.thread_ts,
-      msg.ts,
+      { ...msg, user: msg.user },
       botUserId,
     );
-    let fullTaskDescription: string;
-    if (threadContext) {
-      const ctxResult = resolveTemplate("slack.message.thread_context", {
-        thread_messages: threadContext,
-      });
-      fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
-    } else {
-      fullTaskDescription = taskDescription;
-    }
+    const fullTaskDescription = threadContext
+      ? `${threadContext}\n\n${taskDescription}`
+      : taskDescription;
     const results: {
       assigned: Array<{ agentName: string; taskId: string }>;
       queued: Array<{ agentName: string; taskId: string }>;
@@ -937,10 +873,14 @@ export function registerMessageHandler(app: App): void {
               slackThreadTs: threadTs,
               slackTriggerMessageTs: msg.ts,
               slackUserId: msg.user,
+              slackParticipants,
               parentTaskId: latestTask?.id,
               // A human message in the thread: never answer it in the latest
               // thread task's structured-output contract.
               inheritParentOutputSchema: false,
+              // The sender owns this task; an unregistered one never inherits
+              // the parent's requester.
+              inheritParentRequester: false,
               requestedByUserId,
               contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
             },
@@ -966,6 +906,7 @@ export function registerMessageHandler(app: App): void {
             slackThreadTs: threadTs,
             slackTriggerMessageTs: msg.ts,
             slackUserId: msg.user,
+            slackParticipants,
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           },
