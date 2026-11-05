@@ -519,7 +519,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
-| `SessionThread` | `id` | `rootTaskId`, `placeholder`, `onDispatch`, `onRootCreated`, `onReset`, `fill`; chat-style history of a task chain with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
+| `SessionThread` | `id` | `rootTaskId`, `placeholder`, `onDispatch`, `onRootCreated`, `onReset`, `fill`; the dashboard's session conversation (the "Session about this page" panel) bound to a task chain, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
@@ -579,14 +579,15 @@ SchemaForm details:
 SessionThread details — a chat bound to a task chain (every task under `rootTaskId`, linked by `parentTaskId`):
 
 - `rootTaskId` is the chain root, usually `{ "$state": "/queries/<name>/data/0/rootTaskId" }` from a row the app owns, or stable context such as a route param. Empty or unbound means no chain yet.
-- Each turn shows the request (the `message` of an app-action input, else the task text) and its outcome. Until there is an outcome it shows "Working…" with the latest activity step while the task runs, or "Queued", "Paused", "In review" or "Draft". The newest 100 turns render; request text is cut at 4,000 characters and output at 20,000. The task detail sheet has the full text.
+- It renders the same conversation as the dashboard's "Session about this page" panel: the session turn timeline (each person message, the swarm's replies, worker steps, approvals) and the shared composer. A person bubble shows the `message` of an app-action input instead of the whole agent prompt, cut at 4,000 characters. The composer's attachments and mic are off: a message is text only.
 - Sending a message takes one of three routes:
   1. No `rootTaskId` → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates a root task. `onRootCreated` then runs with `$chain.newTaskId` set to the new task id.
-  2. Leaf task (newest in the chain) is not finished → steer it: `POST /api/tasks/<leaf>/steer` with `mode: "queue"` and `source: "app-page"`. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
-  3. Leaf task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the leaf id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
-- A bound `rootTaskId` whose chain cannot be found (deleted, or not visible to the viewer) blocks sending; `leafTaskId` is `null` only when there is no root. After a send, the composer stays locked until the new task appears in the chain (or, on the first send, until `rootTaskId` holds it).
+  2. A task in the chain is not finished → the composer steers the newest such task, on any agent, with `source: "app-page"`. It offers Queue, and Interrupt where the harness supports it. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Every task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the newest task id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
+- A bound `rootTaskId` whose chain cannot be found (deleted, or not visible to the viewer) blocks sending; `leafTaskId` is `null` only when there is no root. After a send, the composer stays busy until the new task appears in the chain (or, on the first send, until `rootTaskId` holds it), for at most 30 seconds.
 - Why `onRootCreated` is separate: a static chain cannot skip a step, so an `app.mutate` that adopts the new task as the root inside `onDispatch` would overwrite `rootTaskId` on every follow-up. Put that `app.mutate` (`values: { rootTaskId: { "$chain": "newTaskId" } }`) in `onRootCreated`. Omit it when `rootTaskId` does not come from a row the app writes.
 - `onReset` renders a Reset control once a root exists; it should clear `rootTaskId` so the next message starts a new chain.
+- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
 
 ```json
 { "type": "SessionThread", "props": {

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTaskStatus } from "@/api/types";
-import { canSteerSessionTask, canSteerTask, sessionComposerTarget } from "./task-steer";
+import {
+  anyAgentComposerTarget,
+  canSteerAnyAgentTask,
+  canSteerSessionTask,
+  canSteerTask,
+  sessionComposerTarget,
+} from "./task-steer";
 
 const STATUSES: AgentTaskStatus[] = [
   "draft",
@@ -75,5 +81,39 @@ describe("sessionComposerTarget", () => {
 
   test("an empty chain has no target", () => {
     expect(sessionComposerTarget([])).toBeNull();
+  });
+});
+
+describe("the any-agent rule (an app page's session)", () => {
+  test("steers every unfinished status, of any agent", () => {
+    const steerable = STATUSES.filter((status) => canSteerAnyAgentTask({ status }));
+    expect(steerable).toEqual([
+      "backlog",
+      "unassigned",
+      "offered",
+      "reviewing",
+      "pending",
+      "in_progress",
+      "paused",
+    ]);
+    expect(canSteerAnyAgentTask(null)).toBe(false);
+  });
+
+  test("the newest unfinished task is the target, whatever agent runs it", () => {
+    const chain = [
+      { id: "root", status: "completed" as const, createdAt: "2026-10-30 09:00:00" },
+      { id: "worker", status: "in_progress" as const, createdAt: "2026-10-30 09:05:00" },
+      { id: "done", status: "completed" as const, createdAt: "2026-10-30 09:06:00" },
+    ];
+    expect(anyAgentComposerTarget(chain)?.id).toBe("worker");
+  });
+
+  test("with nothing unfinished, the newest task is the follow-up parent", () => {
+    const chain = [
+      { id: "root", status: "completed" as const, createdAt: "2026-10-30 09:00:00" },
+      { id: "leaf", status: "failed" as const, createdAt: "2026-10-30 09:06:00" },
+    ];
+    expect(anyAgentComposerTarget(chain)?.id).toBe("leaf");
+    expect(anyAgentComposerTarget([])).toBeNull();
   });
 });

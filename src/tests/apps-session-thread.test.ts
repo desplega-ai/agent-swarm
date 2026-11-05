@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTask } from "../../apps/ui/src/api/types";
-import { extractRequestText } from "../../apps/ui/src/lib/json-render/session-thread-model";
+import { threadRequestText } from "../../apps/ui/src/lib/json-render/session-thread-model";
 import { parseAppDefinition } from "../apps/definition";
 import { resolveTemplateFromCode } from "../prompts/resolver";
 import "../prompts/session-templates";
@@ -205,7 +205,8 @@ describe("SessionThread turn text", () => {
       caller_json: JSON.stringify({ kind: "user", userId: "u1" }),
     });
     expect(text).toContain("[App action]");
-    const task = { id: "t1", task: text } as AgentTask;
-    expect(extractRequestText(task)).toBe(input.message);
+    // `app.action` creates its tasks with source "api" (src/apps/action-runner.ts).
+    const task = { id: "t1", task: text, source: "api" } as AgentTask;
+    expect(threadRequestText(task)).toBe(input.message);
   });
 });

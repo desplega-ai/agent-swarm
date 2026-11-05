@@ -42,13 +42,17 @@
  * path, so the message goes out as a follow-up task with the file. A clip
  * from the mic button is one such file: its upload to the draft task puts its
  * transcript in the task text.
+ *
+ * A json-render app page (`SessionThread`) passes `onFollowUp`: its follow-up
+ * runs the page's action chain instead of `POST /api/tasks`, so the box drops
+ * attachments and the mic. Its steers carry `steerSource: "app-page"`.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
-import type { AgentTask } from "@/api/types";
+import type { AgentTask, SteeringSource } from "@/api/types";
 import { RecordAudioButton, useAudioRecorder } from "@/components/sessions/audio-recorder";
 import {
   type ComposeAttachmentUploadResult,
@@ -107,6 +111,17 @@ export interface TaskComposerProps {
    * controls. See `ComposerDock`.
    */
   bar?: boolean;
+  /** The steering row's source, passed to `SteerComposer`. Omitted: `"ui"`. */
+  steerSource?: SteeringSource;
+  /**
+   * Hands the follow-up to the caller instead of creating the task here (a
+   * json-render app page runs its own action chain). Called with the typed
+   * text and the parent (`targetTask`, else `rootTaskId`). The draft clears
+   * when it resolves; a rejection keeps the draft and shows its message. The
+   * caller's send carries text only, so the box offers no attachments and no
+   * mic, and `renderActions` is not rendered.
+   */
+  onFollowUp?: (text: string, parentTaskId: string | undefined) => Promise<void>;
   className?: string;
 }
 
@@ -241,6 +256,8 @@ export function TaskComposer({
   renderActions,
   fullWidth,
   bar,
+  steerSource,
+  onFollowUp,
   className,
 }: TaskComposerProps) {
   const queryClient = useQueryClient();
@@ -367,9 +384,23 @@ export function TaskComposer({
     },
   });
 
+  // The caller's follow-up (`onFollowUp`): text only, no task created here.
+  const callerFollowUp = useMutation({
+    mutationFn: (input: { text: string; parentTaskId: string | undefined }) => {
+      if (!onFollowUp) throw new Error("No follow-up handler");
+      return onFollowUp(input.text, input.parentTaskId);
+    },
+    onSuccess: () => setDraft(""),
+  });
+  const sending = onFollowUp ? callerFollowUp : createTask;
+
   const submit = () => {
     const trimmed = draft.trim();
-    if (trimmed.length === 0 || createTask.isPending) return;
+    if (trimmed.length === 0 || sending.isPending) return;
+    if (onFollowUp) {
+      callerFollowUp.mutate({ text: trimmed, parentTaskId: targetTask?.id ?? rootTaskId });
+      return;
+    }
     createTask.mutate({
       task: trimmed,
       parentTaskId: targetTask?.id ?? rootTaskId,
@@ -403,7 +434,8 @@ export function TaskComposer({
     if (error) toast.error(error);
   });
 
-  const extraActions = (
+  // The caller's follow-up carries text only: no file or clip to add.
+  const extraActions = onFollowUp ? null : (
     <>
       {renderActions?.(addAttachment)}
       <RecordAudioButton recorder={recorder} disabled={!userId || createTask.isPending} bar={bar} />
@@ -429,6 +461,7 @@ export function TaskComposer({
         bar={bar}
         sendLabel={sendLabel}
         routeDetail={routeDetail}
+        source={steerSource}
         className={className}
       />
     );
@@ -440,21 +473,25 @@ export function TaskComposer({
       value={draft}
       onChange={setDraft}
       onSubmit={submit}
-      isPending={createTask.isPending}
-      isError={createTask.isError}
-      errorMessage={createTask.error instanceof Error ? createTask.error.message : "Failed to send"}
-      pendingLabel={pendingLabel}
+      isPending={sending.isPending}
+      isError={sending.isError}
+      errorMessage={sending.error instanceof Error ? sending.error.message : "Failed to send"}
+      pendingLabel={onFollowUp ? "Sending…" : pendingLabel}
       placeholder={userId ? placeholder : "Pick an identity above to send messages."}
       disabled={!userId}
       routeLabel={routeLabel}
       routeDetail={routeDetail}
       sendLabel={sendLabel}
-      attachments={attachments}
-      onAttachmentsChange={(files) => {
-        setAttachments(files);
-        setAttachmentError(null);
-      }}
-      attachmentErrorMessage={attachmentError}
+      attachments={onFollowUp ? undefined : attachments}
+      onAttachmentsChange={
+        onFollowUp
+          ? undefined
+          : (files) => {
+              setAttachments(files);
+              setAttachmentError(null);
+            }
+      }
+      attachmentErrorMessage={onFollowUp ? null : attachmentError}
       extraActions={extraActions}
       fullWidth={fullWidth}
       bar={bar}

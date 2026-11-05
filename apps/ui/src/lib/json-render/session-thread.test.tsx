@@ -9,10 +9,22 @@ const { createRoot } = await import("react-dom/client");
 const { StateProvider, ActionProvider } = await import("@json-render/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
-// The session and steer hooks are stubbed: each test sets the chain the
-// component sees and records the steers it sends.
+// The session hook is stubbed: each test sets the chain the component sees.
 let sessionChain: AgentTask[] | undefined;
-const steers: Record<string, unknown>[] = [];
+
+/** The props the thread handed the shared conversation, on its latest render. */
+type ConversationProps = {
+  rootTaskId: string;
+  timeline?: string;
+  steerTarget?: string;
+  steerSource?: string;
+  requestText?: (task: AgentTask) => string | null;
+  value?: string;
+  onValueChange?: (next: string) => void;
+  onFollowUp?: (text: string, parentTaskId: string | undefined) => Promise<void>;
+  placeholder?: string;
+};
+let conversation: ConversationProps | undefined;
 
 mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({ supported: true, requiredVersion: "1.76.0", currentVersion: "9.9.9" }),
@@ -20,42 +32,48 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
 mock.module("@/api/hooks/use-sessions", () => ({
   useSession: (rootTaskId: string | undefined) => ({
     data: rootTaskId && sessionChain ? { chain: sessionChain } : undefined,
-    isError: false,
   }),
 }));
-mock.module("@/api/hooks/use-tasks", () => ({
-  useTask: () => ({ data: undefined }),
-  useSteerTask: () => ({
-    isPending: false,
-    isError: false,
-    error: null,
-    reset: () => {},
-    mutate: (input: Record<string, unknown>) => steers.push(input),
-  }),
+// The shared conversation has its own tests; the stub records what the
+// thread hands it and shows the controlled draft.
+mock.module("@/components/sessions/session-conversation", () => ({
+  SessionConversation: (props: ConversationProps) => {
+    conversation = props;
+    return <div data-testid="conversation">{props.value}</div>;
+  },
 }));
-mock.module("@/components/sessions/task-detail-sheet", () => ({ TaskDetailSheet: () => null }));
-mock.module("@/components/sessions/task-outcome", () => ({
-  TaskOutcome: ({ task }: { task: AgentTask }) => <span>{task.output ?? task.status}</span>,
+mock.module("@/components/sessions/composer-dock", () => ({
+  ComposerDock: (props: {
+    value: string;
+    onChange: (next: string) => void;
+    onSubmit: () => void;
+    isPending: boolean;
+    isError?: boolean;
+    errorMessage?: string;
+    disabled?: boolean;
+    sendLabel?: string;
+  }) => (
+    <form>
+      <textarea value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+      <button
+        type="button"
+        aria-label={props.sendLabel}
+        disabled={props.disabled || props.isPending}
+        onClick={props.onSubmit}
+      />
+      {props.isError ? <p data-testid="dock-error">{props.errorMessage}</p> : null}
+    </form>
+  ),
 }));
-mock.module("@/components/shared/status-badge", () => ({
-  StatusBadge: ({ status }: { status: string }) => <span>{status}</span>,
-}));
-mock.module("@/components/shared/transcript/transcript-rows", () => ({
-  summarizeAgentLog: () => null,
-}));
-mock.module("@/components/steering/steer-composer", () => ({ describeOutcome: () => "sent" }));
 mock.module("@/components/ui/button", () => ({
   Button: ({ children, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
     <button {...(rest as object)}>{children}</button>
   ),
 }));
-mock.module("@/components/ui/card", () => require("../../components/ui/card"));
-mock.module("@/components/ui/textarea", () => require("../../components/ui/textarea"));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "u1" }),
 }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
-mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
 
 const { SessionThreadComponent } = await import("./session-thread");
 type ThreadProps = Parameters<typeof SessionThreadComponent>[0]["props"];
@@ -65,7 +83,7 @@ function task(overrides: Partial<AgentTask>): AgentTask {
     id: "t",
     task: "do it",
     status: "completed",
-    source: "ui",
+    source: "api",
     tags: [],
     priority: 50,
     dependsOn: [],
@@ -78,7 +96,7 @@ function task(overrides: Partial<AgentTask>): AgentTask {
 beforeEach(() => {
   document.body.innerHTML = "";
   sessionChain = undefined;
-  steers.length = 0;
+  conversation = undefined;
 });
 
 afterAll(async () => {
@@ -113,41 +131,48 @@ async function mount(props: Partial<ThreadProps>, slot: (params: Call) => Call) 
     store = useStateStore();
     return null;
   }
-  await act(async () =>
-    root.render(
-      <QueryClientProvider client={queryClient}>
-        <StateProvider initialState={{}}>
-          <ActionProvider handlers={handlers}>
-            <Capture />
-            <SessionThreadComponent
-              props={
-                {
-                  id: "chat",
-                  onDispatch: [
-                    {
-                      action: "app.action",
-                      params: {
-                        name: "ask",
-                        input: { $form: "" },
-                        parentTaskId: { $chain: "leafTaskId" },
+  const render = (next: Partial<ThreadProps>) =>
+    act(async () =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <StateProvider initialState={{}}>
+            <ActionProvider handlers={handlers}>
+              <Capture />
+              <SessionThreadComponent
+                props={
+                  {
+                    id: "chat",
+                    onDispatch: [
+                      {
+                        action: "app.action",
+                        params: {
+                          name: "ask",
+                          input: { $form: "" },
+                          parentTaskId: { $chain: "leafTaskId" },
+                        },
                       },
-                    },
-                  ],
-                  ...props,
-                } as ThreadProps
-              }
-            />
-          </ActionProvider>
-        </StateProvider>
-      </QueryClientProvider>,
-    ),
-  );
-  return { host, calls, unmount: () => act(async () => root.unmount()) };
+                    ],
+                    ...next,
+                  } as ThreadProps
+                }
+              />
+            </ActionProvider>
+          </StateProvider>
+        </QueryClientProvider>,
+      ),
+    );
+  await render(props);
+  return {
+    host,
+    calls,
+    rerender: render,
+    unmount: () => act(async () => root.unmount()),
+  };
 }
 
 const textarea = (host: HTMLElement) => host.querySelector("textarea") as HTMLTextAreaElement;
-const sendButton = (host: HTMLElement) =>
-  host.querySelector('button[aria-label="Send message"]') as HTMLButtonElement;
+const startButton = (host: HTMLElement) =>
+  host.querySelector('button[aria-label="Start session"]') as HTMLButtonElement;
 
 async function typeMessage(host: HTMLElement, value: string) {
   await act(async () => {
@@ -159,107 +184,133 @@ async function typeMessage(host: HTMLElement, value: string) {
   });
 }
 
-async function send(host: HTMLElement) {
-  await act(async () => {
-    sendButton(host).click();
-  });
-}
-
 test("a first message dispatches a root task (no parentTaskId) and clears the draft", async () => {
   const { host, calls, unmount } = await mount({}, () => ({ status: "running", taskId: "new" }));
   await typeMessage(host, "hello");
-  await send(host);
+  await act(async () => startButton(host).click());
   expect(calls).toEqual([
     { action: "app.action", params: { name: "ask", input: { message: "hello" } } },
   ]);
   expect(textarea(host).value).toBe("");
+  // No onRootCreated: nothing will bind the root, so the send does not wait.
+  expect(startButton(host).disabled).toBe(false);
+  await unmount();
+});
+
+test("a first message with onRootCreated adopts the new task and waits until it is bound", async () => {
+  const { host, calls, rerender, unmount } = await mount(
+    {
+      onRootCreated: [
+        { action: "app.mutate", params: { rootTaskId: { $chain: "newTaskId" } } },
+      ] as never,
+    },
+    () => ({ status: "running", taskId: "new" }),
+  );
+  await typeMessage(host, "hello");
+  await act(async () => startButton(host).click());
+  expect(calls.map((call) => call.action)).toEqual(["app.action", "app.mutate"]);
+  expect(calls[1]?.params).toEqual({ rootTaskId: "new" });
+  expect(startButton(host).disabled).toBe(true);
+  // The page binds the new root: the shared conversation takes over.
+  sessionChain = [task({ id: "new", status: "in_progress" })];
+  await rerender({ rootTaskId: "new" });
+  expect(conversation?.rootTaskId).toBe("new");
   await unmount();
 });
 
 test("a failed dispatch keeps the draft and shows the error", async () => {
   const { host, unmount } = await mount({}, () => ({ status: "error", error: "quota exceeded" }));
   await typeMessage(host, "hello");
-  await send(host);
+  await act(async () => startButton(host).click());
   expect(textarea(host).value).toBe("hello");
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe("quota exceeded");
+  expect(host.querySelector('[data-testid="dock-error"]')?.textContent).toBe("quota exceeded");
   await unmount();
 });
 
-test("a running leaf is steered with source app-page", async () => {
+test("a bound root renders the shared Sessions v2 conversation with the app's send contract", async () => {
   sessionChain = [task({ id: "root", status: "in_progress" })];
-  const { host, calls, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
-  expect(host.textContent).toContain("Working…");
-  await typeMessage(host, "faster");
-  await send(host);
-  expect(calls).toEqual([]);
-  expect(steers).toEqual([
-    expect.objectContaining({ id: "root", message: "faster", mode: "queue", source: "app-page" }),
-  ]);
+  const { host, unmount } = await mount({ rootTaskId: "root", placeholder: "Ask…" }, () => ({}));
+  expect(host.querySelector("textarea")).toBeNull();
+  expect(conversation).toMatchObject({
+    rootTaskId: "root",
+    timeline: "turns",
+    steerTarget: "any",
+    steerSource: "app-page",
+    placeholder: "Ask…",
+    value: "",
+  });
+  // Person bubbles show the app action's message, not the agent prompt.
+  const prompt = 'Do it.\n[App action] app=a action=ask input={"message":"make it blue"}';
+  expect(conversation?.requestText?.(task({ task: prompt }))).toBe("make it blue");
+  // The draft is the page's `/ui/<id>/value`.
+  await act(async () => conversation?.onValueChange?.("typed"));
+  expect(conversation?.value).toBe("typed");
+  expect(host.textContent).toContain("typed");
   await unmount();
 });
 
-test("a finished leaf chains the next task under it", async () => {
+test("a follow-up chains the next task under the leaf and stays pending until it shows up", async () => {
   sessionChain = [
     task({ id: "root", createdAt: "2026-11-05T00:00:00.000Z" }),
     task({ id: "leaf", createdAt: "2026-11-05T01:00:00.000Z" }),
   ];
-  const { host, calls, unmount } = await mount({ rootTaskId: "root" }, () => ({
+  const { calls, rerender, unmount } = await mount({ rootTaskId: "root" }, () => ({
     status: "running",
     taskId: "next",
   }));
-  await typeMessage(host, "again");
-  await send(host);
-  expect(calls[0]?.params.parentTaskId).toBe("leaf");
-  // The new task is not in the chain yet, so sending stays blocked.
-  await typeMessage(host, "and again");
-  expect(sendButton(host).disabled).toBe(true);
-  expect(host.textContent).toContain("Waiting for the new task to appear");
+  let settled = false;
+  await act(async () => {
+    void conversation?.onFollowUp?.("again", "leaf").then(() => {
+      settled = true;
+    });
+  });
+  expect(calls).toEqual([
+    {
+      action: "app.action",
+      params: { name: "ask", input: { message: "again" }, parentTaskId: "leaf" },
+    },
+  ]);
+  // The new task is not in the chain yet, so the send is still pending.
+  expect(settled).toBe(false);
+  sessionChain = [...sessionChain, task({ id: "next", createdAt: "2026-11-05T02:00:00.000Z" })];
+  await rerender({ rootTaskId: "root" });
+  expect(settled).toBe(true);
   await unmount();
 });
 
-test("a bound root whose chain is empty blocks sending", async () => {
+test("a bound root whose chain is empty rejects the follow-up and dispatches nothing", async () => {
   sessionChain = [];
-  const { host, calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
-  await typeMessage(host, "hello");
-  expect(sendButton(host).disabled).toBe(true);
-  expect(host.textContent).toContain("Conversation not found");
-  await send(host);
+  const { calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
+  await expect(conversation?.onFollowUp?.("hello", "gone")).rejects.toThrow(
+    "Conversation not found",
+  );
   expect(calls).toEqual([]);
   await unmount();
 });
 
-test("a paused leaf reads Paused, not Working…", async () => {
-  sessionChain = [task({ id: "root", status: "paused" })];
-  const { host, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
-  expect(host.textContent).toContain("Paused");
-  expect(host.textContent).not.toContain("Working…");
+test("Reset runs the onReset chain", async () => {
+  sessionChain = [task({ id: "root" })];
+  const { host, calls, unmount } = await mount(
+    {
+      rootTaskId: "root",
+      onReset: [{ action: "app.mutate", params: { rootTaskId: "" } }] as never,
+    },
+    () => ({}),
+  );
+  const reset = host.querySelector('button[aria-label="Reset session"]') as HTMLButtonElement;
+  await act(async () => reset.click());
+  expect(calls).toEqual([{ action: "app.mutate", params: { rootTaskId: "" } }]);
   await unmount();
 });
 
-test("the turn list opens scrolled to the newest turn and keeps its rows from shrinking", async () => {
-  sessionChain = [
-    task({ id: "a", createdAt: "2026-11-05T00:00:00.000Z" }),
-    task({ id: "b", createdAt: "2026-11-05T01:00:00.000Z" }),
-  ];
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get: () => 900,
-  });
-  const { host, unmount } = await mount({ rootTaskId: "a" }, () => ({}));
-  const list = host.querySelector<HTMLElement>('[data-slot="session-thread-turns"]');
-  expect(list?.scrollTop).toBe(900);
-  for (const row of host.querySelectorAll('[data-slot="session-thread-turn"]')) {
-    expect(row.className).toContain("shrink-0");
-  }
-  if (original) Object.defineProperty(HTMLElement.prototype, "scrollHeight", original);
-  await unmount();
-});
-
-test("the composer sits under the same turn list box when there are no turns", async () => {
-  const { host, unmount } = await mount({}, () => ({}));
-  const list = host.querySelector('[data-slot="session-thread-turns"]');
-  expect(list?.className).toContain("h-[420px]");
-  expect(list?.textContent).toContain("No session yet");
-  await unmount();
+test("the thread has a fixed height, or fills a fill-aware parent", async () => {
+  const fixed = await mount({}, () => ({}));
+  const box = fixed.host.querySelector('[data-testid="json-render-session-thread"]');
+  expect(box?.className).toContain("h-[420px]");
+  expect(fixed.host.textContent).toContain("No session yet");
+  await fixed.unmount();
+  const filled = await mount({ fill: true }, () => ({}));
+  const fillBox = filled.host.querySelector('[data-testid="json-render-session-thread"]');
+  expect(fillBox?.className).toContain("h-full");
+  await filled.unmount();
 });

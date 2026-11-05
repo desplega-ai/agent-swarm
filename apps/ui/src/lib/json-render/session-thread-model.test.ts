@@ -1,21 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTask } from "@/api/types";
 import {
-  boundTurnTask,
-  extractRequestText,
+  appActionMessage,
   isDispatchSettled,
-  isScrolledToBottom,
-  latestStepText,
-  pendingTurnLabel,
-  resolveLeafTask,
-  resolveSessionThreadRoute,
   runDispatchChain,
   runResetChain,
-  SESSION_THREAD_MAX_OUTPUT_CHARS,
   SESSION_THREAD_MAX_REQUEST_CHARS,
-  SESSION_THREAD_MAX_TURNS,
-  turnRequestText,
-  visibleTurns,
+  threadRequestText,
 } from "./session-thread-model";
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -32,119 +23,6 @@ function task(overrides: Partial<AgentTask> = {}): AgentTask {
     ...overrides,
   } as AgentTask;
 }
-
-describe("resolveLeafTask", () => {
-  test("returns undefined for an empty chain", () => {
-    expect(resolveLeafTask([])).toBeUndefined();
-  });
-
-  test("returns the single entry for a one-task chain", () => {
-    const only = task({ id: "only" });
-    expect(resolveLeafTask([only])).toBe(only);
-  });
-
-  test("returns the entry with the latest createdAt", () => {
-    const first = task({ id: "first", createdAt: "2026-10-13T00:00:00.000Z" });
-    const second = task({ id: "second", createdAt: "2026-10-13T01:00:00.000Z" });
-    const third = task({ id: "third", createdAt: "2026-10-13T00:30:00.000Z" });
-    expect(resolveLeafTask([first, second, third])).toBe(second);
-  });
-});
-
-describe("resolveSessionThreadRoute", () => {
-  test("no rootTaskId -> dispatchRoute only", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "",
-      chainLoaded: true,
-      leafTask: undefined,
-    });
-    expect(route).toEqual({
-      dispatchRoute: true,
-      steerRoute: false,
-      chainedDispatchRoute: false,
-      chainMissing: false,
-    });
-  });
-
-  test("rootTaskId set but chain still loading -> no route decided yet", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: false,
-      leafTask: undefined,
-    });
-    expect(route).toEqual({
-      dispatchRoute: false,
-      steerRoute: false,
-      chainedDispatchRoute: false,
-      chainMissing: false,
-    });
-  });
-
-  test("rootTaskId set, non-terminal leaf -> steerRoute", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: true,
-      leafTask: task({ status: "in_progress" }),
-    });
-    expect(route).toEqual({
-      dispatchRoute: false,
-      steerRoute: true,
-      chainedDispatchRoute: false,
-      chainMissing: false,
-    });
-  });
-
-  test("rootTaskId set, indeterminate (paused) leaf -> still steerRoute", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: true,
-      leafTask: task({ status: "paused" }),
-    });
-    expect(route).toEqual({
-      dispatchRoute: false,
-      steerRoute: true,
-      chainedDispatchRoute: false,
-      chainMissing: false,
-    });
-  });
-
-  for (const status of [
-    "completed",
-    "failed",
-    "cancelled",
-    "superseded",
-    "skipped",
-    "draft",
-  ] as const) {
-    test(`rootTaskId set, terminal leaf (${status}) -> chainedDispatchRoute, never steerRoute`, () => {
-      const route = resolveSessionThreadRoute({
-        rootTaskId: "root-1",
-        chainLoaded: true,
-        leafTask: task({ status }),
-      });
-      expect(route).toEqual({
-        dispatchRoute: false,
-        steerRoute: false,
-        chainedDispatchRoute: true,
-        chainMissing: false,
-      });
-    });
-  }
-
-  test("rootTaskId set, chain loaded but empty -> chainMissing, no send route", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: true,
-      leafTask: undefined,
-    });
-    expect(route).toEqual({
-      dispatchRoute: false,
-      steerRoute: false,
-      chainedDispatchRoute: false,
-      chainMissing: true,
-    });
-  });
-});
 
 describe("runDispatchChain", () => {
   test("no-op when onDispatch is empty", async () => {
@@ -284,16 +162,6 @@ describe("runDispatchChain", () => {
   test("a follow-up after the leaf completed chains under the leaf, the root id is not rewritten", async () => {
     const state: Record<string, unknown> = {};
     const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const leaf = resolveLeafTask([
-      task({ id: "root", status: "completed", createdAt: "2026-10-13T00:00:00.000Z" }),
-      task({ id: "leaf", status: "completed", createdAt: "2026-10-13T01:00:00.000Z" }),
-    ]);
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root",
-      chainLoaded: true,
-      leafTask: leaf,
-    });
-    expect(route.chainedDispatchRoute).toBe(true);
     await runDispatchChain({
       onDispatch: [
         { action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leafTaskId" } } },
@@ -302,8 +170,8 @@ describe("runDispatchChain", () => {
         { action: "app.mutate", params: { values: { rootTaskId: { $chain: "newTaskId" } } } },
       ],
       message: "again",
-      wasEmpty: route.dispatchRoute,
-      leafTaskId: leaf?.id ?? null,
+      wasEmpty: false,
+      leafTaskId: "leaf",
       execute: async (binding) => {
         executed.push(binding);
         if (binding.action === "app.action") {
@@ -438,32 +306,6 @@ describe("runResetChain", () => {
   });
 });
 
-describe("pendingTurnLabel", () => {
-  test("only in_progress reads Working…", () => {
-    expect(pendingTurnLabel("in_progress")).toBe("Working…");
-  });
-
-  for (const [status, label] of [
-    ["pending", "Queued"],
-    ["offered", "Queued"],
-    ["unassigned", "Queued"],
-    ["backlog", "Queued"],
-    ["draft", "Draft"],
-    ["paused", "Paused"],
-    ["reviewing", "In review"],
-  ] as const) {
-    test(`${status} reads ${label}`, () => {
-      expect(pendingTurnLabel(status)).toBe(label);
-    });
-  }
-
-  for (const status of ["completed", "failed", "cancelled", "superseded", "skipped"] as const) {
-    test(`${status} has an outcome, no label`, () => {
-      expect(pendingTurnLabel(status)).toBeNull();
-    });
-  }
-});
-
 describe("isDispatchSettled", () => {
   test("nothing pending is settled", () => {
     expect(isDispatchSettled({ pendingTaskId: null, rootTaskId: "", chain: [] })).toBe(true);
@@ -489,42 +331,7 @@ describe("isDispatchSettled", () => {
   });
 });
 
-describe("latestStepText", () => {
-  type Entry = { createdAt: string; text?: string };
-  const summarize = (entry: Entry) => entry.text ?? null;
-  const at = (second: number) => `2026-11-05T00:00:${String(second).padStart(2, "0")}.000Z`;
-
-  test("returns null for an empty log list", () => {
-    expect(latestStepText([], summarize)).toBeNull();
-  });
-
-  test("picks the newest step from server-ordered (newest-first) logs", () => {
-    // `GET /api/tasks/{id}` sorts logs by createdAt DESC. A newer entry with
-    // no summary must not mask "Reading files".
-    const logs: Entry[] = [
-      { createdAt: at(3) },
-      { createdAt: at(2), text: "Reading files" },
-      { createdAt: at(1), text: "Claimed" },
-      { createdAt: at(0), text: "Created" },
-    ];
-    expect(latestStepText(logs, summarize)).toBe("Reading files");
-  });
-
-  test("does not depend on array order", () => {
-    const logs: Entry[] = [
-      { createdAt: at(0), text: "Created" },
-      { createdAt: at(2), text: "Reading files" },
-      { createdAt: at(1), text: "Claimed" },
-    ];
-    expect(latestStepText(logs, summarize)).toBe("Reading files");
-  });
-
-  test("returns null when no entry summarizes", () => {
-    expect(latestStepText([{ createdAt: at(0) }, { createdAt: at(1) }], summarize)).toBeNull();
-  });
-});
-
-describe("extractRequestText", () => {
+describe("appActionMessage", () => {
   test("reads the marker when a Caller line follows it (the current template)", () => {
     const prompt = [
       "Edit the screen.",
@@ -532,7 +339,7 @@ describe("extractRequestText", () => {
       '[App action] app=a1 action=editScreen input={"message":"Make it blue"}',
       'Caller (server-verified): {"kind":"user","userId":"u1"}',
     ].join("\n");
-    expect(extractRequestText(task({ task: prompt }))).toBe("Make it blue");
+    expect(appActionMessage(task({ task: prompt }))).toBe("Make it blue");
   });
 
   test("the last marker line wins over one quoted in the configured prompt", () => {
@@ -543,97 +350,47 @@ describe("extractRequestText", () => {
       '[App action] app=a1 action=ask input={"message":"real"}',
       "Caller (server-verified): {}",
     ].join("\n");
-    expect(extractRequestText(task({ task: prompt }))).toBe("real");
+    expect(appActionMessage(task({ task: prompt }))).toBe("real");
   });
 
   test("pulls the user's message out of an app-dispatched task's trailing JSON marker", () => {
     const prompt =
       '# Edit a screen doc\n\nYou are an editing agent...\n\n\n[App action] app=663d7831-2d76-4465-930d-72662ed88a52 action=generateScreen input={"screenId":"d8d9e50d-ef22-49b5-a81a-e296477d6be9","message":"Add a card with a title \'Hello\'"}';
-    expect(extractRequestText(task({ task: prompt }))).toBe("Add a card with a title 'Hello'");
+    expect(appActionMessage(task({ task: prompt }))).toBe("Add a card with a title 'Hello'");
   });
 
-  test("falls back to the raw task text when there is no [App action] marker", () => {
-    expect(extractRequestText(task({ task: "Just steer this task directly" }))).toBe(
-      "Just steer this task directly",
-    );
+  test("null when there is no [App action] marker", () => {
+    expect(appActionMessage(task({ task: "Just steer this task directly" }))).toBeNull();
   });
 
-  test("falls back to the raw task text when the trailing JSON has no message field", () => {
+  test("null when the trailing JSON has no message field", () => {
     const prompt = '...\n\n[App action] app=a action=b input={"screenId":"s1"}';
-    expect(extractRequestText(task({ task: prompt }))).toBe(prompt);
+    expect(appActionMessage(task({ task: prompt }))).toBeNull();
   });
 
-  test("falls back to the raw task text when the trailing JSON is malformed", () => {
+  test("null when the trailing JSON is malformed", () => {
     const prompt = '...\n\n[App action] app=a action=b input={"message": unquoted}';
-    expect(extractRequestText(task({ task: prompt }))).toBe(prompt);
+    expect(appActionMessage(task({ task: prompt }))).toBeNull();
   });
 });
 
-describe("turn bounds", () => {
-  test("renders every turn of a short chain, oldest first", () => {
-    const later = task({ id: "b", createdAt: "2026-10-13T01:00:00.000Z" });
-    const earlier = task({ id: "a", createdAt: "2026-10-13T00:00:00.000Z" });
-    expect(visibleTurns([later, earlier])).toEqual({ turns: [earlier, later], hidden: 0 });
+describe("threadRequestText", () => {
+  const prompt = (message: string) =>
+    `p\n[App action] app=a action=b input=${JSON.stringify({ message })}`;
+
+  test("an api task's app action message is its person text", () => {
+    expect(threadRequestText(task({ task: prompt("hello") }))).toBe("hello");
   });
 
-  test("keeps only the latest SESSION_THREAD_MAX_TURNS turns of a long chain", () => {
-    const total = SESSION_THREAD_MAX_TURNS + 25;
-    const chain = Array.from({ length: total }, (_, i) =>
-      task({ id: `t${i}`, createdAt: new Date(Date.UTC(2026, 9, 13, 0, 0, i)).toISOString() }),
-    );
-    const { turns, hidden } = visibleTurns(chain.toReversed());
-    expect(hidden).toBe(25);
-    expect(turns).toHaveLength(SESSION_THREAD_MAX_TURNS);
-    expect(turns[0]?.id).toBe("t25");
-    expect(turns.at(-1)?.id).toBe(`t${total - 1}`);
-  });
-
-  test("caps the request text of a turn", () => {
-    const text = turnRequestText(task({ task: "x".repeat(SESSION_THREAD_MAX_REQUEST_CHARS + 50) }));
-    expect(text).toHaveLength(SESSION_THREAD_MAX_REQUEST_CHARS + 1);
-    expect(text.endsWith("…")).toBe(true);
-  });
-
-  test("caps an app-action message extracted from the marker", () => {
+  test("caps the message", () => {
     const message = "y".repeat(SESSION_THREAD_MAX_REQUEST_CHARS * 2);
-    const prompt = `p\n[App action] app=a action=b input=${JSON.stringify({ message })}`;
-    expect(turnRequestText(task({ task: prompt }))).toHaveLength(
-      SESSION_THREAD_MAX_REQUEST_CHARS + 1,
-    );
+    const text = threadRequestText(task({ task: prompt(message) }));
+    expect(text).toHaveLength(SESSION_THREAD_MAX_REQUEST_CHARS + 1);
+    expect(text?.endsWith("…")).toBe(true);
   });
 
-  test("caps output and failure reason, keeping identity when both fit", () => {
-    const small = task({ status: "completed", output: "done" });
-    expect(boundTurnTask(small)).toBe(small);
-    const big = task({
-      status: "failed",
-      output: "o".repeat(SESSION_THREAD_MAX_OUTPUT_CHARS + 10),
-      failureReason: "f".repeat(SESSION_THREAD_MAX_OUTPUT_CHARS + 10),
-    });
-    const bounded = boundTurnTask(big);
-    expect(bounded.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
-    expect(bounded.failureReason).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
-    expect(big.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 10);
-  });
-});
-
-describe("isScrolledToBottom", () => {
-  test("at the bottom, or within the slack, counts as pinned", () => {
-    expect(isScrolledToBottom({ scrollTop: 580, scrollHeight: 1000, clientHeight: 420 })).toBe(
-      true,
-    );
-    expect(isScrolledToBottom({ scrollTop: 540, scrollHeight: 1000, clientHeight: 420 })).toBe(
-      true,
-    );
-  });
-
-  test("a viewer who scrolled up is not pinned", () => {
-    expect(isScrolledToBottom({ scrollTop: 300, scrollHeight: 1000, clientHeight: 420 })).toBe(
-      false,
-    );
-  });
-
-  test("content shorter than the box is at the bottom", () => {
-    expect(isScrolledToBottom({ scrollTop: 0, scrollHeight: 200, clientHeight: 420 })).toBe(true);
+  test("a task of another source, or with no marker, is left to the timeline", () => {
+    expect(threadRequestText(task({ source: "mcp", task: prompt("quoted") }))).toBeNull();
+    expect(threadRequestText(task({ task: "plain prompt" }))).toBeNull();
   });
 });

@@ -35,3 +35,37 @@ export function sessionComposerTarget<
   const newestFirst = [...chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return newestFirst.find((task) => canSteerSessionTask(task)) ?? newestFirst[0] ?? null;
 }
+
+/**
+ * Statuses no steer can reach: the task ended, or it is a draft outside the
+ * pool. Every other status takes one: the server delivers it, queues it until
+ * the session starts, or promotes it into a follow-up task.
+ */
+const UNSTEERABLE_STATUSES = new Set<AgentTask["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "skipped",
+  "draft",
+]);
+
+/**
+ * The "any agent" steer rule, for a session whose tasks run on workers (a
+ * json-render app page dispatches its tasks to the action's agent, not the
+ * lead): any task that has not finished.
+ */
+export function canSteerAnyAgentTask(task: Pick<AgentTask, "status"> | null | undefined): boolean {
+  return !!task && !UNSTEERABLE_STATUSES.has(task.status);
+}
+
+/**
+ * The composer target under the "any agent" rule: the newest unfinished task
+ * of any agent, else the newest task (the message follows up on it).
+ */
+export function anyAgentComposerTarget<T extends Pick<AgentTask, "status" | "createdAt">>(
+  chain: readonly T[],
+): T | null {
+  const newestFirst = [...chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return newestFirst.find((task) => canSteerAnyAgentTask(task)) ?? newestFirst[0] ?? null;
+}
