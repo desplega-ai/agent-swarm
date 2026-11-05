@@ -1770,6 +1770,9 @@ export class CodexSession implements ProviderSession {
         sessionId: this._sessionId,
         cost,
         isError: true,
+        // Provider failures arrive as turn.failed / error events (terminalError,
+        // handled above); a throw with none is the app-server or MCP transport.
+        errorOrigin: "harness",
         failureReason: message,
         rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
         rateLimitWindows: this.errorTracker.getRateLimitWindows(),

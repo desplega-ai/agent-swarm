@@ -39,7 +39,7 @@ Some interrupted tasks do return to the pool, for example a resume that falls of
 
 ## Durable script-workflow step replay
 
-A one-off [script workflow run](/docs/guides/script-workflow-runs) journals every `ctx.step.*` call by label. If the process restarts or the source is re-executed from the top, a step that already completed replays its recorded result instead of running again. Long multi-step jobs therefore continue from the step that was in flight, not from the first line of the source.
+A one-off [script workflow run](/docs/guides/script-workflow-runs) journals every `ctx.step.*` call by label. If the process restarts or the source is re-executed from the top, a step that already completed replays its recorded result instead of running again.
 
 ## Resumes automatically vs needs Lead action
 
