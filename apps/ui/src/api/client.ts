@@ -160,6 +160,7 @@ import type {
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
+  SteeringSource,
   SteerMode,
   SteerResult,
   SubmitImprovementInput,
@@ -881,15 +882,21 @@ class ApiClient {
    */
   async steerTask(
     id: string,
-    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+    input: {
+      message: string;
+      mode: SteerMode;
+      requestedByUserId?: string;
+      source?: SteeringSource;
+    },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       // Identify the surface so the steering row is attributed to the dashboard
-      // rather than defaulting to a generic "api" caller.
-      body: JSON.stringify({ ...input, source: "ui" }),
+      // rather than defaulting to a generic "api" caller. A json-render app
+      // page passes "app-page".
+      body: JSON.stringify({ ...input, source: input.source ?? "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));

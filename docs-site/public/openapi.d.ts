@@ -14329,7 +14329,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
                     };
                 };
@@ -29194,7 +29194,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";

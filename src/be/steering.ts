@@ -144,6 +144,17 @@ export async function getTaskSteeringFieldsForTasks(
 }
 
 /**
+ * The task source of a promoted steer. `AgentTaskSource` has no `script` or
+ * `app-page`: a script steer becomes an `api` task and an app-page steer (a
+ * person on a json-render page) a `ui` task.
+ */
+function promotedTaskSource(source: SteeringSource): AgentTask["source"] {
+  if (source === "script") return "api";
+  if (source === "app-page") return "ui";
+  return source;
+}
+
+/**
  * Convert an undeliverable steering message into a normal follow-up task.
  * Step 2 reuses this seam for pending rows discovered during terminal sweeps.
  */
@@ -156,7 +167,7 @@ export async function promoteSteeringToTask(
     routingReason: task.agentId ? "continuity" : undefined,
     routingSource: task.agentId ? "engine_default" : undefined,
     creatorAgentId: message.createdByAgentId,
-    source: message.source === "script" ? "api" : message.source,
+    source: promotedTaskSource(message.source),
     taskType: "follow-up",
     parentTaskId: task.id,
     requestedByUserId: message.createdByUserId,

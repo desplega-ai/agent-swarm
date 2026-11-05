@@ -3163,7 +3163,8 @@
               "script",
               "slack",
               "api",
-              "chat"
+              "chat",
+              "app-page"
             ]
           },
           "senderLabel": {
@@ -35334,7 +35335,8 @@
                       "script",
                       "slack",
                       "api",
-                      "chat"
+                      "chat",
+                      "app-page"
                     ]
                   },
                   "requestedByUserId": {
