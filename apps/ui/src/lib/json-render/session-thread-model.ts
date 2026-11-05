@@ -1,8 +1,8 @@
 /**
- * `SessionThread`'s pure routing/dispatch logic — no React, no `@/`-aliased
- * imports, so it can be unit-tested without mocking the whole component's
- * hook/UI dependency tree. See `session-thread.tsx`'s module doc comment for
- * the full behavioral contract this implements.
+ * `SessionThread`'s pure routing/dispatch model — no React, and only type
+ * imports from `@/` (erased at runtime), so it stays unit-testable under
+ * `bun test` without the component's hook/UI tree. See `session-thread.tsx`'s
+ * module doc comment for the behavioral contract this implements.
  */
 
 import { getByPath } from "@json-render/core";
@@ -34,6 +34,7 @@ const TERMINAL_LEAF_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
   "draft",
 ]);
 
@@ -106,10 +107,16 @@ export function visibleTurns(chain: readonly AgentTask[]): { turns: AgentTask[];
 export interface SessionThreadRoute {
   /** No root at all — a message dispatches a brand-new, disconnected task. */
   dispatchRoute: boolean;
-  /** A bound root whose leaf can still receive a steer. */
+  /** A bound root whose leaf is not finished — a message steers it. */
   steerRoute: boolean;
-  /** A bound root whose leaf is terminal (or not yet loaded) — a message chains a new task off it. */
+  /** A bound root whose leaf is terminal — a message chains a new task off it. */
   chainedDispatchRoute: boolean;
+  /**
+   * A bound root whose loaded chain is empty (deleted, or not visible to this
+   * viewer). Sending is blocked: there is no leaf to chain under, and a
+   * dispatch would start a disconnected root the page never adopts.
+   */
+  chainMissing: boolean;
 }
 
 /**
@@ -126,17 +133,26 @@ export function resolveSessionThreadRoute(input: {
 }): SessionThreadRoute {
   const { rootTaskId, chainLoaded, leafTask } = input;
   const hasRoot = rootTaskId !== "";
-  const leafTerminal = leafTask === undefined || TERMINAL_LEAF_STATUSES.has(leafTask.status);
+  const leafKnown = hasRoot && chainLoaded && leafTask !== undefined;
+  const leafTerminal = leafTask !== undefined && TERMINAL_LEAF_STATUSES.has(leafTask.status);
   return {
     dispatchRoute: !hasRoot,
-    steerRoute: hasRoot && chainLoaded && leafTask !== undefined && !leafTerminal,
-    chainedDispatchRoute: hasRoot && chainLoaded && leafTerminal,
+    steerRoute: leafKnown && !leafTerminal,
+    chainedDispatchRoute: leafKnown && leafTerminal,
+    chainMissing: hasRoot && chainLoaded && leafTask === undefined,
   };
 }
 
 export interface DispatchChainResult {
   /** The newly created task's id, read off `/actions/<name>` after an `app.action` step — undefined if no such step ran or it hasn't landed yet. */
   newTaskId: string | undefined;
+}
+
+/** An `app.action` slot as `app-surface.tsx` writes it to `/actions/<name>`. */
+interface ActionSlotView {
+  status?: string;
+  taskId?: string;
+  error?: string;
 }
 
 /**
@@ -161,6 +177,11 @@ export async function runDispatchChain(options: {
   const { onDispatch, onRootCreated, message, wasEmpty, leafTaskId, execute, getSnapshot } =
     options;
   if (!onDispatch || onDispatch.length === 0) return { newTaskId: undefined };
+  // `null` means "no leaf" and drops `parentTaskId`, which is only right for a
+  // brand-new thread. A follow-up with no leaf would start a disconnected root.
+  if (!wasEmpty && leafTaskId === null) {
+    throw new Error("Cannot continue this conversation: its latest task is unknown");
+  }
 
   // Explicit absence: every chain key is published, `null` when there is no
   // value yet. On a brand-new thread `leafTaskId` is `null`, so a
@@ -180,7 +201,12 @@ export async function runDispatchChain(options: {
         typeof params.$app === "string"
           ? `/refs/${params.$app}/actions/${params.name}`
           : `/actions/${params.name}`;
-      const slot = getByPath(getSnapshot(), slotPath) as { taskId?: string } | undefined;
+      const slot = getByPath(getSnapshot(), slotPath) as ActionSlotView | undefined;
+      // The handler reports a failure on the slot instead of throwing; stop the
+      // chain so later steps (and `onRootCreated`) never run on a failed send.
+      if (slot?.status === "error") {
+        throw new Error(slot.error || `Action ${params.name} failed`);
+      }
       if (slot?.taskId) newTaskId = slot.taskId;
     }
   }
@@ -212,34 +238,49 @@ export async function runResetChain(options: {
 }
 
 /**
- * Display-active statuses: a turn in one of these shows a live "Working…"
- * indicator instead of `TaskOutcome`. Deliberately separate from
- * `TERMINAL_LEAF_STATUSES` above — that set governs STEER-vs-CHAIN routing
- * for the leaf; this one governs per-turn DISPLAY, and `draft` sits in both
- * (not steerable, but still shown as "waiting" rather than an outcome).
- * Mirrors `ChainOfThought`'s `ACTIVE_STATUSES` (`chain-of-thought.tsx`).
+ * The label of a turn that has no outcome yet, or `null` once it has one
+ * (`TaskOutcome` renders it). Only `in_progress` is "Working…"; a task that is
+ * waiting, paused, or in review says so. Separate from
+ * `TERMINAL_LEAF_STATUSES`, which governs steer-vs-chain routing: `draft`
+ * sits in both (not steerable, but shown as waiting rather than an outcome).
  */
-const ACTIVE_DISPLAY_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
-  "pending",
-  "offered",
-  "backlog",
-  "unassigned",
-  "draft",
-  "in_progress",
-  "paused",
-  "reviewing",
-]);
+const PENDING_TURN_LABELS: Partial<Record<AgentTaskStatus, string>> = {
+  in_progress: "Working…",
+  pending: "Queued",
+  offered: "Queued",
+  unassigned: "Queued",
+  backlog: "Queued",
+  draft: "Draft",
+  paused: "Paused",
+  reviewing: "In review",
+};
 
-/** Whether a turn should render the live "Working…" indicator rather than `TaskOutcome`. */
-export function isActiveForDisplay(status: AgentTaskStatus): boolean {
-  return ACTIVE_DISPLAY_STATUSES.has(status);
+export function pendingTurnLabel(status: AgentTaskStatus): string | null {
+  return PENDING_TURN_LABELS[status] ?? null;
+}
+
+/**
+ * Whether a send that created `pendingTaskId` has shown up: the chain holds
+ * the task, or (first send) the page bound the new root. Until then sending
+ * stays blocked, so a quick second message cannot chain off the old leaf or
+ * start a second root.
+ */
+export function isDispatchSettled(input: {
+  pendingTaskId: string | null;
+  rootTaskId: string;
+  chain: readonly AgentTask[];
+}): boolean {
+  const { pendingTaskId, rootTaskId, chain } = input;
+  if (pendingTaskId === null) return true;
+  if (rootTaskId === pendingTaskId) return true;
+  return chain.some((task) => task.id === pendingTaskId);
 }
 
 /**
  * The latest non-null summary line of an activity stream, scanning backwards,
  * or `null`: the live turn's subtitle under "Working…". The component passes
  * the dashboard transcript's `summarizeAgentLog` (which caps a progress note at
- * 140 chars); it is a parameter so this module stays free of `@/` imports.
+ * 140 chars); it is a parameter so this module has no runtime `@/` imports.
  */
 export function latestStepText<T>(
   logs: readonly T[],

@@ -1,447 +1,237 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect, mock, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { act } from "react";
 import type { AgentTask } from "@/api/types";
-import {
-  boundTurnTask,
-  extractRequestText,
-  isActiveForDisplay,
-  latestStepText,
-  resolveLeafTask,
-  resolveSessionThreadRoute,
-  runDispatchChain,
-  runResetChain,
-  SESSION_THREAD_MAX_OUTPUT_CHARS,
-  SESSION_THREAD_MAX_REQUEST_CHARS,
-  SESSION_THREAD_MAX_TURNS,
-  turnRequestText,
-  visibleTurns,
-} from "./session-thread-logic";
 
-function task(overrides: Partial<AgentTask> = {}): AgentTask {
+GlobalRegistrator.register();
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+const { createRoot } = await import("react-dom/client");
+const { StateProvider, ActionProvider } = await import("@json-render/react");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+
+// The session and steer hooks are stubbed: each test sets the chain the
+// component sees and records the steers it sends.
+let sessionChain: AgentTask[] | undefined;
+const steers: Record<string, unknown>[] = [];
+
+mock.module("@/api/hooks/use-feature-gate", () => ({
+  useFeatureGate: () => ({ supported: true, requiredVersion: "1.76.0", currentVersion: "9.9.9" }),
+}));
+mock.module("@/api/hooks/use-sessions", () => ({
+  useSession: (rootTaskId: string | undefined) => ({
+    data: rootTaskId && sessionChain ? { chain: sessionChain } : undefined,
+    isError: false,
+  }),
+}));
+mock.module("@/api/hooks/use-tasks", () => ({
+  useTask: () => ({ data: undefined }),
+  useSteerTask: () => ({
+    isPending: false,
+    isError: false,
+    error: null,
+    reset: () => {},
+    mutate: (input: Record<string, unknown>) => steers.push(input),
+  }),
+}));
+mock.module("@/components/sessions/task-detail-sheet", () => ({ TaskDetailSheet: () => null }));
+mock.module("@/components/sessions/task-outcome", () => ({
+  TaskOutcome: ({ task }: { task: AgentTask }) => <span>{task.output ?? task.status}</span>,
+}));
+mock.module("@/components/shared/status-badge", () => ({
+  StatusBadge: ({ status }: { status: string }) => <span>{status}</span>,
+}));
+mock.module("@/components/shared/transcript/transcript-rows", () => ({
+  summarizeAgentLog: () => null,
+}));
+mock.module("@/components/steering/steer-composer", () => ({ describeOutcome: () => "sent" }));
+mock.module("@/components/ui/button", () => ({
+  Button: ({ children, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
+    <button {...(rest as object)}>{children}</button>
+  ),
+}));
+mock.module("@/components/ui/card", () => require("../../components/ui/card"));
+mock.module("@/components/ui/textarea", () => require("../../components/ui/textarea"));
+mock.module("@/contexts/current-user-context", () => ({
+  useCurrentUser: () => ({ userId: "u1" }),
+}));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
+
+const { SessionThreadComponent } = await import("./session-thread");
+type ThreadProps = Parameters<typeof SessionThreadComponent>[0]["props"];
+
+function task(overrides: Partial<AgentTask>): AgentTask {
   return {
-    id: "task-1",
-    task: "do something",
-    status: "in_progress",
-    source: "api",
+    id: "t",
+    task: "do it",
+    status: "completed",
+    source: "ui",
     tags: [],
     priority: 50,
     dependsOn: [],
-    createdAt: "2026-10-13T00:00:00.000Z",
-    lastUpdatedAt: "2026-10-13T00:00:00.000Z",
+    createdAt: "2026-11-05T00:00:00.000Z",
+    lastUpdatedAt: "2026-11-05T00:00:00.000Z",
     ...overrides,
   } as AgentTask;
 }
 
-describe("resolveLeafTask", () => {
-  test("returns undefined for an empty chain", () => {
-    expect(resolveLeafTask([])).toBeUndefined();
-  });
-
-  test("returns the single entry for a one-task chain", () => {
-    const only = task({ id: "only" });
-    expect(resolveLeafTask([only])).toBe(only);
-  });
-
-  test("returns the entry with the latest createdAt", () => {
-    const first = task({ id: "first", createdAt: "2026-10-13T00:00:00.000Z" });
-    const second = task({ id: "second", createdAt: "2026-10-13T01:00:00.000Z" });
-    const third = task({ id: "third", createdAt: "2026-10-13T00:30:00.000Z" });
-    expect(resolveLeafTask([first, second, third])).toBe(second);
-  });
+beforeEach(() => {
+  document.body.innerHTML = "";
+  sessionChain = undefined;
+  steers.length = 0;
 });
 
-describe("resolveSessionThreadRoute", () => {
-  test("no rootTaskId -> dispatchRoute only", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "",
-      chainLoaded: true,
-      leafTask: undefined,
-    });
-    expect(route).toEqual({ dispatchRoute: true, steerRoute: false, chainedDispatchRoute: false });
-  });
+afterAll(async () => {
+  await GlobalRegistrator.unregister();
+});
 
-  test("rootTaskId set but chain still loading -> no route decided yet", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: false,
-      leafTask: undefined,
-    });
-    expect(route).toEqual({ dispatchRoute: false, steerRoute: false, chainedDispatchRoute: false });
-  });
+type Call = Record<string, unknown>;
 
-  test("rootTaskId set, non-terminal leaf -> steerRoute", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: true,
-      leafTask: task({ status: "in_progress" }),
-    });
-    expect(route).toEqual({ dispatchRoute: false, steerRoute: true, chainedDispatchRoute: false });
-  });
-
-  test("rootTaskId set, indeterminate (paused) leaf -> still steerRoute", () => {
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root-1",
-      chainLoaded: true,
-      leafTask: task({ status: "paused" }),
-    });
-    expect(route).toEqual({ dispatchRoute: false, steerRoute: true, chainedDispatchRoute: false });
-  });
-
-  for (const status of ["completed", "failed", "cancelled", "superseded", "draft"] as const) {
-    test(`rootTaskId set, terminal leaf (${status}) -> chainedDispatchRoute, never steerRoute`, () => {
-      const route = resolveSessionThreadRoute({
-        rootTaskId: "root-1",
-        chainLoaded: true,
-        leafTask: task({ status }),
-      });
-      expect(route).toEqual({
-        dispatchRoute: false,
-        steerRoute: false,
-        chainedDispatchRoute: true,
-      });
-    });
+/**
+ * Mounts the thread with an `app.action` handler that mimics `app-surface`:
+ * it writes the slot at `/actions/<name>` before resolving. `slot` decides
+ * what the handler writes (a created task, or an error).
+ */
+async function mount(props: Partial<ThreadProps>, slot: (params: Call) => Call) {
+  const calls: { action: string; params: Call }[] = [];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let store: { set: (path: string, value: unknown) => void } | undefined;
+  const queryClient = new QueryClient();
+  const handlers = {
+    "app.action": async (params: Call) => {
+      calls.push({ action: "app.action", params });
+      store?.set(`/actions/${String(params.name)}`, slot(params));
+    },
+    "app.mutate": async (params: Call) => {
+      calls.push({ action: "app.mutate", params });
+    },
+  };
+  const { useStateStore } = await import("@json-render/react");
+  function Capture() {
+    store = useStateStore();
+    return null;
   }
-});
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <StateProvider initialState={{}}>
+          <ActionProvider handlers={handlers}>
+            <Capture />
+            <SessionThreadComponent
+              props={
+                {
+                  id: "chat",
+                  onDispatch: [
+                    {
+                      action: "app.action",
+                      params: {
+                        name: "ask",
+                        input: { $form: "" },
+                        parentTaskId: { $chain: "leafTaskId" },
+                      },
+                    },
+                  ],
+                  ...props,
+                } as ThreadProps
+              }
+            />
+          </ActionProvider>
+        </StateProvider>
+      </QueryClientProvider>,
+    ),
+  );
+  return { host, calls, unmount: () => act(async () => root.unmount()) };
+}
 
-describe("runDispatchChain", () => {
-  test("no-op when onDispatch is empty", async () => {
-    const calls: unknown[] = [];
-    const result = await runDispatchChain({
-      onDispatch: [],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(result).toEqual({ newTaskId: undefined });
-    expect(calls).toEqual([]);
-  });
+const textarea = (host: HTMLElement) => host.querySelector("textarea") as HTMLTextAreaElement;
+const sendButton = (host: HTMLElement) =>
+  host.querySelector('button[aria-label="Send message"]') as HTMLButtonElement;
 
-  test("first-ever dispatch (wasEmpty) fires onRootCreated with the new task id", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const result = await runDispatchChain({
-      onDispatch: [
-        {
-          action: "app.action",
-          params: { name: "generateScreen", input: {}, parentTaskId: { $chain: "leafTaskId" } },
-        },
-      ],
-      onRootCreated: [
-        {
-          action: "app.mutate",
-          params: {
-            model: "screen",
-            op: "update",
-            values: { rootTaskId: { $chain: "newTaskId" } },
-          },
-        },
-      ],
-      message: "add a button",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { generateScreen: { status: "running", taskId: "new-task-99" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
-
-    expect(result).toEqual({ newTaskId: "new-task-99" });
-    expect(executed).toHaveLength(2);
-    // No leaf yet: the chain scope publishes `leafTaskId: null`, so the
-    // `$chain: "leafTaskId"` param is dropped and the task starts as a root.
-    expect(executed[0]).toEqual({
-      action: "app.action",
-      params: { name: "generateScreen", input: {} },
-    });
-    expect(Object.hasOwn(executed[0].params ?? {}, "parentTaskId")).toBe(false);
-    expect(executed[1]).toEqual({
-      action: "app.mutate",
-      params: { model: "screen", op: "update", values: { rootTaskId: "new-task-99" } },
-    });
-  });
-
-  test("follow-up dispatch (not wasEmpty) carries parentTaskId and never fires onRootCreated", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const result = await runDispatchChain({
-      onDispatch: [
-        {
-          action: "app.action",
-          params: { name: "generateScreen", input: {}, parentTaskId: { $chain: "leafTaskId" } },
-        },
-      ],
-      onRootCreated: [
-        { action: "app.mutate", params: { model: "screen", op: "update", values: {} } },
-      ],
-      message: "make it blue",
-      wasEmpty: false,
-      leafTaskId: "leaf-42",
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { generateScreen: { status: "running", taskId: "new-task-100" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
-
-    expect(result).toEqual({ newTaskId: "new-task-100" });
-    expect(executed).toHaveLength(1);
-    expect(executed[0]).toEqual({
-      action: "app.action",
-      params: { name: "generateScreen", input: {}, parentTaskId: "leaf-42" },
-    });
-  });
-
-  test("no onRootCreated chain configured -> skipped even on first-ever dispatch", async () => {
-    const state: Record<string, unknown> = {};
-    const result = await runDispatchChain({
-      onDispatch: [{ action: "app.action", params: { name: "generateScreen" } }],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async () => {
-        state.actions = { generateScreen: { status: "running", taskId: "new-task-1" } };
-      },
-      getSnapshot: () => state,
-    });
-    expect(result).toEqual({ newTaskId: "new-task-1" });
-  });
-
-  test("a misspelled $chain key stays a sentinel on a new thread (the app.action guard rejects it)", async () => {
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runDispatchChain({
-      onDispatch: [
-        {
-          action: "app.action",
-          params: { name: "generateScreen", parentTaskId: { $chain: "leaf" } },
-        },
-      ],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(executed[0]?.params?.parentTaskId).toEqual({ $chain: "leaf" });
-  });
-
-  test("a follow-up after the leaf completed chains under the leaf, the root id is not rewritten", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const leaf = resolveLeafTask([
-      task({ id: "root", status: "completed", createdAt: "2026-10-13T00:00:00.000Z" }),
-      task({ id: "leaf", status: "completed", createdAt: "2026-10-13T01:00:00.000Z" }),
-    ]);
-    const route = resolveSessionThreadRoute({
-      rootTaskId: "root",
-      chainLoaded: true,
-      leafTask: leaf,
-    });
-    expect(route.chainedDispatchRoute).toBe(true);
-    await runDispatchChain({
-      onDispatch: [
-        { action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leafTaskId" } } },
-      ],
-      onRootCreated: [
-        { action: "app.mutate", params: { values: { rootTaskId: { $chain: "newTaskId" } } } },
-      ],
-      message: "again",
-      wasEmpty: route.dispatchRoute,
-      leafTaskId: leaf?.id ?? null,
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { ask: { status: "running", taskId: "next" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
-    expect(executed).toEqual([
-      { action: "app.action", params: { name: "ask", parentTaskId: "leaf" } },
-    ]);
-  });
-});
-
-describe("runResetChain", () => {
-  test("no-op when onReset is not configured", async () => {
-    const calls: unknown[] = [];
-    await runResetChain({
-      onReset: undefined,
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(calls).toEqual([]);
-  });
-
-  test("no-op for an empty onReset chain", async () => {
-    const calls: unknown[] = [];
-    await runResetChain({
-      onReset: [],
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(calls).toEqual([]);
-  });
-
-  test("executes every onReset binding with the state scope resolved", async () => {
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runResetChain({
-      onReset: [
-        {
-          action: "app.mutate",
-          params: {
-            model: "screen",
-            op: "update",
-            id: { $state: "/route/params/screenId" },
-            values: { rootTaskId: "" },
-          },
-        },
-      ],
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({ route: { params: { screenId: "screen-7" } } }),
-    });
-
-    expect(executed).toEqual([
-      {
-        action: "app.mutate",
-        params: {
-          model: "screen",
-          op: "update",
-          id: "screen-7",
-          values: { rootTaskId: "" },
-        },
-      },
-    ]);
-  });
-});
-
-describe("isActiveForDisplay", () => {
-  for (const status of [
-    "pending",
-    "offered",
-    "backlog",
-    "unassigned",
-    "draft",
-    "in_progress",
-    "paused",
-    "reviewing",
-  ] as const) {
-    test(`${status} is active for display`, () => {
-      expect(isActiveForDisplay(status)).toBe(true);
-    });
-  }
-
-  for (const status of ["completed", "failed", "cancelled", "superseded"] as const) {
-    test(`${status} is NOT active for display`, () => {
-      expect(isActiveForDisplay(status)).toBe(false);
-    });
-  }
-});
-
-describe("latestStepText", () => {
-  const summarize = (entry: { text?: string }) => entry.text ?? null;
-
-  test("returns null for an empty log list", () => {
-    expect(latestStepText([], summarize)).toBeNull();
-  });
-
-  test("returns the latest non-null summary, scanning backwards", () => {
-    // A trailing noise entry with no summary must not mask "Reading files".
-    const logs = [{ text: "Created" }, { text: "Reading files" }, {}];
-    expect(latestStepText(logs, summarize)).toBe("Reading files");
-  });
-
-  test("returns null when no entry summarizes", () => {
-    expect(latestStepText([{}, {}], summarize)).toBeNull();
-  });
-});
-
-describe("extractRequestText", () => {
-  test("pulls the user's message out of an app-dispatched task's trailing JSON marker", () => {
-    const prompt =
-      '# Edit a screen doc\n\nYou are an editing agent...\n\n\n[App action] app=663d7831-2d76-4465-930d-72662ed88a52 action=generateScreen input={"screenId":"d8d9e50d-ef22-49b5-a81a-e296477d6be9","message":"Add a card with a title \'Hello\'"}';
-    expect(extractRequestText(task({ task: prompt }))).toBe("Add a card with a title 'Hello'");
-  });
-
-  test("falls back to the raw task text when there is no [App action] marker", () => {
-    expect(extractRequestText(task({ task: "Just steer this task directly" }))).toBe(
-      "Just steer this task directly",
+async function typeMessage(host: HTMLElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      textarea(host),
+      value,
     );
+    textarea(host).dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
 
-  test("falls back to the raw task text when the trailing JSON has no message field", () => {
-    const prompt = '...\n\n[App action] app=a action=b input={"screenId":"s1"}';
-    expect(extractRequestText(task({ task: prompt }))).toBe(prompt);
+async function send(host: HTMLElement) {
+  await act(async () => {
+    sendButton(host).click();
   });
+}
 
-  test("falls back to the raw task text when the trailing JSON is malformed", () => {
-    const prompt = '...\n\n[App action] app=a action=b input={"message": unquoted}';
-    expect(extractRequestText(task({ task: prompt }))).toBe(prompt);
-  });
+test("a first message dispatches a root task (no parentTaskId) and clears the draft", async () => {
+  const { host, calls, unmount } = await mount({}, () => ({ status: "running", taskId: "new" }));
+  await typeMessage(host, "hello");
+  await send(host);
+  expect(calls).toEqual([
+    { action: "app.action", params: { name: "ask", input: { message: "hello" } } },
+  ]);
+  expect(textarea(host).value).toBe("");
+  await unmount();
 });
 
-describe("turn bounds", () => {
-  test("renders every turn of a short chain, oldest first", () => {
-    const later = task({ id: "b", createdAt: "2026-10-13T01:00:00.000Z" });
-    const earlier = task({ id: "a", createdAt: "2026-10-13T00:00:00.000Z" });
-    expect(visibleTurns([later, earlier])).toEqual({ turns: [earlier, later], hidden: 0 });
-  });
+test("a failed dispatch keeps the draft and shows the error", async () => {
+  const { host, unmount } = await mount({}, () => ({ status: "error", error: "quota exceeded" }));
+  await typeMessage(host, "hello");
+  await send(host);
+  expect(textarea(host).value).toBe("hello");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("quota exceeded");
+  await unmount();
+});
 
-  test("keeps only the latest SESSION_THREAD_MAX_TURNS turns of a long chain", () => {
-    const total = SESSION_THREAD_MAX_TURNS + 25;
-    const chain = Array.from({ length: total }, (_, i) =>
-      task({ id: `t${i}`, createdAt: new Date(Date.UTC(2026, 9, 13, 0, 0, i)).toISOString() }),
-    );
-    const { turns, hidden } = visibleTurns(chain.toReversed());
-    expect(hidden).toBe(25);
-    expect(turns).toHaveLength(SESSION_THREAD_MAX_TURNS);
-    expect(turns[0]?.id).toBe("t25");
-    expect(turns.at(-1)?.id).toBe(`t${total - 1}`);
-  });
+test("a running leaf is steered with source app-page", async () => {
+  sessionChain = [task({ id: "root", status: "in_progress" })];
+  const { host, calls, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
+  expect(host.textContent).toContain("Working…");
+  await typeMessage(host, "faster");
+  await send(host);
+  expect(calls).toEqual([]);
+  expect(steers).toEqual([
+    expect.objectContaining({ id: "root", message: "faster", mode: "queue", source: "app-page" }),
+  ]);
+  await unmount();
+});
 
-  test("caps the request text of a turn", () => {
-    const text = turnRequestText(task({ task: "x".repeat(SESSION_THREAD_MAX_REQUEST_CHARS + 50) }));
-    expect(text).toHaveLength(SESSION_THREAD_MAX_REQUEST_CHARS + 1);
-    expect(text.endsWith("…")).toBe(true);
-  });
+test("a finished leaf chains the next task under it", async () => {
+  sessionChain = [
+    task({ id: "root", createdAt: "2026-11-05T00:00:00.000Z" }),
+    task({ id: "leaf", createdAt: "2026-11-05T01:00:00.000Z" }),
+  ];
+  const { host, calls, unmount } = await mount({ rootTaskId: "root" }, () => ({
+    status: "running",
+    taskId: "next",
+  }));
+  await typeMessage(host, "again");
+  await send(host);
+  expect(calls[0]?.params.parentTaskId).toBe("leaf");
+  // The new task is not in the chain yet, so sending stays blocked.
+  await typeMessage(host, "and again");
+  expect(sendButton(host).disabled).toBe(true);
+  expect(host.textContent).toContain("Waiting for the new task to appear");
+  await unmount();
+});
 
-  test("caps an app-action message extracted from the marker", () => {
-    const message = "y".repeat(SESSION_THREAD_MAX_REQUEST_CHARS * 2);
-    const prompt = `p\n[App action] app=a action=b input=${JSON.stringify({ message })}`;
-    expect(turnRequestText(task({ task: prompt }))).toHaveLength(
-      SESSION_THREAD_MAX_REQUEST_CHARS + 1,
-    );
-  });
+test("a bound root whose chain is empty blocks sending", async () => {
+  sessionChain = [];
+  const { host, calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
+  await typeMessage(host, "hello");
+  expect(sendButton(host).disabled).toBe(true);
+  expect(host.textContent).toContain("Conversation not found");
+  await send(host);
+  expect(calls).toEqual([]);
+  await unmount();
+});
 
-  test("caps output and failure reason, keeping identity when both fit", () => {
-    const small = task({ status: "completed", output: "done" });
-    expect(boundTurnTask(small)).toBe(small);
-    const big = task({
-      status: "failed",
-      output: "o".repeat(SESSION_THREAD_MAX_OUTPUT_CHARS + 10),
-      failureReason: "f".repeat(SESSION_THREAD_MAX_OUTPUT_CHARS + 10),
-    });
-    const bounded = boundTurnTask(big);
-    expect(bounded.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
-    expect(bounded.failureReason).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
-    expect(big.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 10);
-  });
+test("a paused leaf reads Paused, not Working…", async () => {
+  sessionChain = [task({ id: "root", status: "paused" })];
+  const { host, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
+  expect(host.textContent).toContain("Paused");
+  expect(host.textContent).not.toContain("Working…");
+  await unmount();
 });

@@ -16,7 +16,7 @@
  *     immediately after with `$chain = { newTaskId }` so the app can
  *     `app.mutate` it back onto `rootTaskId`. This is the ONLY branch that
  *     fires `onRootCreated` — every other branch already has a root.
- *   - `rootTaskId` bound AND the leaf task is non-terminal → steer it via
+ *   - `rootTaskId` bound AND the leaf task is not finished → steer it via
  *     `POST /api/tasks/<id>/steer` (the existing `useSteerTask` hook), always
  *     `mode: "queue"` (app pages never advertise per-harness interrupt
  *     capability) and `source: "app-page"`. The server live-delivers only for
@@ -27,11 +27,20 @@
  *     toast surfaces that fork, because the thread keeps showing the chain as
  *     it stood before the promotion.
  *   - `rootTaskId` bound AND the leaf task is terminal (`completed` /
- *     `failed` / `cancelled` / `superseded` / `draft`) → dispatch the
+ *     `failed` / `cancelled` / `superseded` / `skipped` / `draft`) → dispatch the
  *     `onDispatch` chain again, this time with `$chain.leafTaskId` set to the
  *     current leaf's id so the chain can pass it through as `parentTaskId`
  *     and extend the chain instead of starting a disconnected task.
  *     `onRootCreated` does NOT fire here — the root already exists.
+ *
+ *   - `rootTaskId` bound but its loaded chain is empty (deleted, or not
+ *     visible) → sending is blocked with a notice. `leafTaskId: null` is only
+ *     ever published when there is no root.
+ *
+ * After a dispatch that created a task, the session query is invalidated and
+ * sending stays blocked until the chain shows that task (or, on the first
+ * send, the page binds it as `rootTaskId`), so a quick second message cannot
+ * chain off the old leaf or start a second root.
  *
  * A static action chain cannot conditionally skip a step, so the
  * `onDispatch`/`onRootCreated` split exists specifically to keep the
@@ -55,8 +64,9 @@
 
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import { useActions, useStateStore } from "@json-render/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Maximize2, RotateCcw, Send } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession } from "@/api/hooks/use-sessions";
@@ -75,8 +85,9 @@ import { cn } from "@/lib/utils";
 import type { ActionChain, swarmCatalog } from "./catalog";
 import {
   boundTurnTask,
-  isActiveForDisplay,
+  isDispatchSettled,
   latestStepText,
+  pendingTurnLabel,
   resolveLeafTask,
   resolveSessionThreadRoute,
   runDispatchChain,
@@ -84,53 +95,64 @@ import {
   SESSION_THREAD_MAX_TURNS,
   turnRequestText,
   visibleTurns,
-} from "./session-thread-logic";
+} from "./session-thread-model";
 
 export type SessionThreadProps = InferComponentProps<typeof swarmCatalog, "SessionThread">;
 
 const SESSIONS_MIN_VERSION = "1.76.0";
 
-/** Poll interval for the live turn's latest step (the task's activity log). */
+/** Poll interval for the live leaf turn's latest step (the task's activity log). */
 const LIVE_STEP_POLL_MS = 5000;
 
 /**
- * The live indicator of an active turn: "Working…" plus the latest step from
- * the task's activity log (`latestStepText`), polled while the turn is live.
- * Its own component so only active turns fetch the task's logs.
+ * Longest wait for a sent task to show up in the chain before sending unlocks
+ * anyway, so a page that never binds the new root cannot lock the composer.
  */
-function LiveTurnStatus({ taskId }: { taskId: string }) {
-  const { data } = useTask(taskId, { refetchInterval: LIVE_STEP_POLL_MS });
-  const step = data ? latestStepText(data.logs, summarizeAgentLog) : null;
+const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
+
+/** Stable empty chain, so the memos below hold while the session loads. */
+const EMPTY_CHAIN: AgentTask[] = [];
+
+/**
+ * The status line of a turn with no outcome yet. Only an `in_progress` turn
+ * spins; the live leaf turn also polls its task for the latest activity step
+ * (`latestStepText`). Other turns show their label without fetching.
+ */
+function PendingTurnStatus({ task, live }: { task: AgentTask; live: boolean }) {
+  const label = pendingTurnLabel(task.status) ?? "Working…";
+  const working = task.status === "in_progress";
   return (
     <div className="flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">
       <div className="flex items-center gap-2">
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
-        <span className="shimmer-text truncate">Working…</span>
+        {working ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" /> : null}
+        <span className={cn("truncate", working && "shimmer-text")}>{label}</span>
       </div>
-      {step ? (
-        <span className="truncate pl-5" data-slot="session-thread-step">
-          {step}
-        </span>
-      ) : null}
+      {live && working ? <LiveStep taskId={task.id} /> : null}
     </div>
   );
 }
 
+function LiveStep({ taskId }: { taskId: string }) {
+  const { data } = useTask(taskId, { refetchInterval: LIVE_STEP_POLL_MS });
+  const step = data ? latestStepText(data.logs, summarizeAgentLog) : null;
+  if (!step) return null;
+  return (
+    <span className="truncate pl-5" data-slot="session-thread-step">
+      {step}
+    </span>
+  );
+}
+
 /**
- * One chain entry — the request text, then either a live "Working…"
- * indicator (active) or `TaskOutcome` (terminal), plus a click-through to the
- * full transcript in both cases — a WIP turn's logs are just as inspectable
- * as a finished one's. Each task IS the request+response pair
- * (`extractRequestText` pulls the user's actual message back out of
- * `task.task` — for an app-dispatched task that field is the FULL agent
- * prompt with the message JSON-embedded in a trailing marker, not the
- * message itself; `task.output`/`task.status` is the result) — there's no
- * separate user-bubble/agent-row split like the dashboard's multi-agent
- * timeline.
+ * One chain entry — the request text, then either a status line (no outcome
+ * yet) or `TaskOutcome`, plus a click-through to the full transcript in both
+ * cases. Each task IS the request+response pair (`extractRequestText` pulls
+ * the user's message back out of `task.task`, which for an app-dispatched
+ * task is the full agent prompt with the message in a trailing marker).
  */
-function SessionThreadTurn({ task }: { task: AgentTask }) {
+function SessionThreadTurn({ task, live }: { task: AgentTask; live: boolean }) {
   const [detailOpen, setDetailOpen] = useState(false);
-  const active = isActiveForDisplay(task.status);
+  const pending = pendingTurnLabel(task.status) !== null;
   const boundedTask = useMemo(() => boundTurnTask(task), [task]);
 
   return (
@@ -140,7 +162,11 @@ function SessionThreadTurn({ task }: { task: AgentTask }) {
       </p>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          {active ? <LiveTurnStatus taskId={task.id} /> : <TaskOutcome task={boundedTask} clamp />}
+          {pending ? (
+            <PendingTurnStatus task={task} live={live} />
+          ) : (
+            <TaskOutcome task={boundedTask} clamp />
+          )}
         </div>
         <Button
           type="button"
@@ -163,13 +189,19 @@ function SessionThreadTurn({ task }: { task: AgentTask }) {
   );
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function SessionThreadComponent({ props }: { props: SessionThreadProps }) {
   const { state, set, getSnapshot } = useStateStore();
   const { execute } = useActions();
   const { userId } = useCurrentUser();
+  const queryClient = useQueryClient();
   const steerTask = useSteerTask();
   const [dispatching, setDispatching] = useState(false);
-  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
 
   const draftPath = `/ui/${props.id}/value`;
   const stored = getByPath(state, draftPath);
@@ -179,29 +211,35 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
 
   // An unresolved binding arrives as undefined/null; an empty string means the
   // row column exists but no chain was started yet — both land here as "no
-  // root". Same ACCEPTED PoC WINDOW caveat as before: while the row query
-  // backing a `{ "$state": … }` rootTaskId binding is still in flight, this
-  // resolves to "no root" too — a user who types and sends inside that first
-  // poll window could start a duplicate chain even though the row already
-  // holds one. Renderer surgery to distinguish "binding loading" from
-  // "resolved to nothing" is deliberately out of scope here.
+  // root". Accepted window: while the row query backing a `{ "$state": … }`
+  // rootTaskId binding is still in flight this also reads as "no root", so a
+  // send inside that first poll could start a second chain.
   const rootTaskId =
     typeof props.rootTaskId === "string" && props.rootTaskId !== "" ? props.rootTaskId : "";
 
-  const { data: detail, isError: chainLoadFailed } = useSession(rootTaskId || undefined);
-  const chain = detail?.chain ?? [];
+  const { data: detail, isError: chainLoadFailed } = useSession(
+    gate.supported && rootTaskId ? rootTaskId : undefined,
+  );
+  const chain = detail?.chain ?? EMPTY_CHAIN;
   const { turns, hidden: hiddenTurns } = useMemo(() => visibleTurns(chain), [chain]);
-
   const leafTask = useMemo(() => resolveLeafTask(chain), [chain]);
 
   // While a bound root's chain is still loading (or failed to load), hold
   // off routing rather than guess.
   const chainLoaded = rootTaskId === "" || detail !== undefined;
-  const { dispatchRoute, steerRoute, chainedDispatchRoute } = resolveSessionThreadRoute({
-    rootTaskId,
-    chainLoaded,
-    leafTask,
-  });
+  const { dispatchRoute, steerRoute, chainedDispatchRoute, chainMissing } =
+    resolveSessionThreadRoute({ rootTaskId, chainLoaded, leafTask });
+
+  const settled = isDispatchSettled({ pendingTaskId, rootTaskId, chain });
+  useEffect(() => {
+    if (pendingTaskId === null) return;
+    if (settled) {
+      setPendingTaskId(null);
+      return;
+    }
+    const timer = setTimeout(() => setPendingTaskId(null), PENDING_DISPATCH_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [pendingTaskId, settled]);
 
   const onDispatchChain = props.onDispatch as ActionChain | undefined;
   const hasDispatchChain = Array.isArray(onDispatchChain) && onDispatchChain.length > 0;
@@ -217,46 +255,68 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const getSnapshotRef = useRef(getSnapshot);
   getSnapshotRef.current = getSnapshot;
 
-  const dispatch = async (message: string, routing: { wasEmpty: boolean; leafTaskId?: string }) => {
+  /** Clear the draft only if it still holds the message that was sent. */
+  const clearSentDraft = (message: string) => {
+    const current = getByPath(getSnapshotRef.current(), draftPath);
+    if (typeof current === "string" && current.trim() === message) set(draftPath, "");
+  };
+
+  const dispatch = async (
+    message: string,
+    routing: { wasEmpty: boolean; leafTaskId: string | null },
+  ) => {
     const bindings = propsRef.current.onDispatch as ActionChain | undefined;
     if (!bindings || bindings.length === 0) return;
+    const onRootCreated = propsRef.current.onRootCreated as ActionChain | undefined;
     setDispatching(true);
-    setDispatchError(null);
     try {
-      await runDispatchChain({
+      const { newTaskId } = await runDispatchChain({
         onDispatch: bindings,
-        onRootCreated: propsRef.current.onRootCreated as ActionChain | undefined,
+        onRootCreated,
         message,
         wasEmpty: routing.wasEmpty,
-        leafTaskId: routing.leafTaskId ?? null,
+        leafTaskId: routing.leafTaskId,
         execute: executeRef.current,
         getSnapshot: getSnapshotRef.current,
       });
-      set(draftPath, "");
+      // A first send without `onRootCreated` never binds a root, so there is
+      // nothing to wait for: the next message starts another root anyway.
+      const awaitsRoot = !routing.wasEmpty || (onRootCreated?.length ?? 0) > 0;
+      if (newTaskId && awaitsRoot) setPendingTaskId(newTaskId);
+      void queryClient.invalidateQueries({ queryKey: ["session"] });
+      clearSentDraft(message);
     } catch (error) {
-      setDispatchError(error instanceof Error ? error.message : "Failed to dispatch");
+      setSendError(errorMessage(error, "Failed to send the message"));
     } finally {
       setDispatching(false);
     }
   };
 
   const reset = async () => {
-    await runResetChain({
-      onReset: propsRef.current.onReset as ActionChain | undefined,
-      execute: executeRef.current,
-      getSnapshot: getSnapshotRef.current,
-    });
+    setSendError(null);
+    try {
+      await runResetChain({
+        onReset: propsRef.current.onReset as ActionChain | undefined,
+        execute: executeRef.current,
+        getSnapshot: getSnapshotRef.current,
+      });
+    } catch (error) {
+      setSendError(errorMessage(error, "Failed to reset the session"));
+    }
   };
 
-  const pending = steerTask.isPending || dispatching;
+  const waitingForSend = !settled;
+  const pending = steerTask.isPending || dispatching || waitingForSend;
   const canSend =
     draft.trim().length > 0 &&
     !pending &&
-    (dispatchRoute ? hasDispatchChain : chainLoaded && (steerRoute || hasDispatchChain));
+    (dispatchRoute ? hasDispatchChain : steerRoute || (chainedDispatchRoute && hasDispatchChain));
 
   const submit = () => {
     const message = draft.trim();
-    if (message.length === 0 || pending) return;
+    if (message.length === 0 || !canSend) return;
+    setSendError(null);
+    steerTask.reset();
     if (steerRoute && leafTask) {
       steerTask.mutate(
         {
@@ -269,25 +329,26 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
         {
           // `describeOutcome` (shared with the dashboard's SteerComposer)
           // matters most for `outcome === "promoted"`: the server turned the
-          // message into a follow-up task — the chain re-fetch (10s default
-          // poll) will pick up the new leaf, but the toast confirms the fork
-          // immediately instead of looking like the message vanished.
+          // message into a follow-up task, and the toast confirms it before the
+          // chain re-fetch shows the new leaf.
           onSuccess: (result) => {
             toast.success(describeOutcome(result));
-            set(draftPath, "");
+            clearSentDraft(message);
           },
         },
       );
       return;
     }
-    if (hasDispatchChain && (dispatchRoute || chainedDispatchRoute)) {
-      void dispatch(message, { wasEmpty: dispatchRoute, leafTaskId: leafTask?.id });
+    if (dispatchRoute) {
+      void dispatch(message, { wasEmpty: true, leafTaskId: null });
+    } else if (chainedDispatchRoute && leafTask) {
+      void dispatch(message, { wasEmpty: false, leafTaskId: leafTask.id });
     }
   };
 
   const steerError =
     steerTask.isError && steerTask.error instanceof Error ? steerTask.error.message : null;
-  const sendError = dispatchError ?? steerError;
+  const shownError = sendError ?? steerError;
 
   const helper = dispatchRoute
     ? hasDispatchChain
@@ -297,9 +358,13 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
       ? chainLoadFailed
         ? "The session could not be loaded — sending is disabled."
         : "Loading session…"
-      : steerRoute || hasDispatchChain
-        ? undefined
-        : "This session has finished.";
+      : chainMissing
+        ? "Conversation not found — sending is disabled."
+        : waitingForSend
+          ? "Waiting for the new task to appear…"
+          : steerRoute || hasDispatchChain
+            ? undefined
+            : "This session has finished.";
 
   const fill = props.fill === true;
 
@@ -315,7 +380,6 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
       </Card>
     );
   }
-
   return (
     <Card
       className={cn("min-w-0 gap-3 py-4", fill && "flex h-full min-h-0 flex-col")}
@@ -360,7 +424,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
               </p>
             ) : null}
             {turns.map((task) => (
-              <SessionThreadTurn key={task.id} task={task} />
+              <SessionThreadTurn key={task.id} task={task} live={task.id === leafTask?.id} />
             ))}
           </div>
         ) : (
@@ -398,8 +462,10 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
               )}
             </Button>
           </div>
-          {sendError ? (
-            <p className="text-xs text-status-error-strong">{sendError}</p>
+          {shownError ? (
+            <p className="text-xs text-status-error-strong" role="alert">
+              {shownError}
+            </p>
           ) : helper ? (
             <p className="text-xs text-muted-foreground">{helper}</p>
           ) : null}
