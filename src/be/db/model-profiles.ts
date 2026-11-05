@@ -34,6 +34,7 @@ type ModelProfileRow = {
   description: string | null;
   seededFrom: string | null;
   credentialAllowlist: string | null;
+  fallbacks: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -74,6 +75,20 @@ function serializeCredentialAllowlist(
   return value && Object.keys(value).length > 0 ? JSON.stringify(value) : null;
 }
 
+/** The stored fallback list; anything but a JSON array of names reads as none. */
+function parseFallbacks(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((name): name is string => typeof name === "string" && name.length > 0);
+    }
+  } catch {
+    // Falls through to none.
+  }
+  return [];
+}
+
 function rowToModelProfile(row: ModelProfileRow): ModelProfile {
   const allowlist = parseCredentialAllowlist(row.credentialAllowlist);
   const profile: ModelProfile = {
@@ -88,6 +103,7 @@ function rowToModelProfile(row: ModelProfileRow): ModelProfile {
     description: row.description,
     seededFrom: row.seededFrom,
     credentials: allowlist.credentials,
+    fallbacks: parseFallbacks(row.fallbacks),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -127,6 +143,8 @@ export interface ModelProfileInput {
   seededFrom?: string | null;
   /** Pooled-key allowlist, stored as `credentialAllowlist`; null uses the whole pool. */
   credentials?: ModelProfileCredentials | null;
+  /** Same-harness profiles to hop to on a provider error, in order. */
+  fallbacks?: string[];
 }
 
 /** Insert a profile. Returns null when the name is taken. */
@@ -137,8 +155,8 @@ export async function createModelProfile(
   const now = new Date().toISOString();
   const row = await getDbClient().get<ModelProfileRow>(
     `INSERT INTO model_profiles
-       (id, name, harness, model, effort, allowCustomModel, description, seededFrom, credentialAllowlist, createdAt, lastUpdatedAt, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, name, harness, model, effort, allowCustomModel, description, seededFrom, credentialAllowlist, fallbacks, createdAt, lastUpdatedAt, created_by, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(name) DO NOTHING
      RETURNING *`,
     [
@@ -151,6 +169,7 @@ export async function createModelProfile(
       input.description ?? null,
       input.seededFrom ?? null,
       serializeCredentialAllowlist(input.credentials),
+      JSON.stringify(input.fallbacks ?? []),
       now,
       now,
       audit.userId ?? null,
@@ -161,12 +180,15 @@ export async function createModelProfile(
 }
 
 export type ModelProfilePatch = Partial<
-  Pick<ModelProfileInput, "model" | "effort" | "allowCustomModel" | "description" | "credentials">
+  Pick<
+    ModelProfileInput,
+    "model" | "effort" | "allowCustomModel" | "description" | "credentials" | "fallbacks"
+  >
 >;
 
 /**
- * Update a profile's model, effort, description or credential allowlist
- * (`credentials: null` clears it). The name and harness are fixed.
+ * Update a profile's model, effort, description, credential allowlist
+ * (`credentials: null` clears it) or fallbacks. The name and harness are fixed.
  */
 export async function updateModelProfile(
   name: string,
@@ -194,6 +216,10 @@ export async function updateModelProfile(
   if (patch.credentials !== undefined) {
     sets.push("credentialAllowlist = ?");
     params.push(serializeCredentialAllowlist(patch.credentials));
+  }
+  if (patch.fallbacks !== undefined) {
+    sets.push("fallbacks = ?");
+    params.push(JSON.stringify(patch.fallbacks));
   }
   sets.push("lastUpdatedAt = ?", "updated_by = ?");
   params.push(new Date().toISOString(), audit.userId ?? null);
@@ -224,13 +250,22 @@ function repairWindowStart(): string {
   return new Date(Date.now() - SUPERSEDED_RESUME_REPAIR_WINDOW_MS).toISOString();
 }
 
+/** Profiles (alias `o`) whose fallback list names `model_profiles.name`. */
+const LISTED_AS_FALLBACK_SQL = `EXISTS (
+  SELECT 1 FROM model_profiles o, json_each(CASE WHEN json_valid(o.fallbacks) THEN o.fallbacks ELSE '[]' END) j
+   WHERE j.value = model_profiles.name AND o.name <> model_profiles.name)`;
+
 /**
  * Who still points at a profile: agents with it as default, tasks that still
- * hold it, and schedules that fire tasks with it.
+ * hold it, schedules that fire tasks with it, and profiles that list it as a
+ * fallback.
  */
-export async function modelProfileReferences(
-  name: string,
-): Promise<{ agentIds: string[]; openTaskCount: number; scheduleIds: string[] }> {
+export async function modelProfileReferences(name: string): Promise<{
+  agentIds: string[];
+  openTaskCount: number;
+  scheduleIds: string[];
+  fallbackOf: string[];
+}> {
   const agents = await getDbClient().query<{ scopeId: string }>(
     "SELECT scopeId FROM swarm_config WHERE scope = 'agent' AND key = ? AND value = ?",
     [MODEL_PROFILE_CONFIG_KEY, name],
@@ -244,10 +279,17 @@ export async function modelProfileReferences(
     "SELECT id FROM scheduled_tasks WHERE profile = ? ORDER BY id",
     [name],
   );
+  const fallbackOf = await getDbClient().query<{ name: string }>(
+    `SELECT o.name FROM model_profiles o,
+            json_each(CASE WHEN json_valid(o.fallbacks) THEN o.fallbacks ELSE '[]' END) j
+      WHERE j.value = ? AND o.name <> ? ORDER BY o.name`,
+    [name, name],
+  );
   return {
     agentIds: agents.map((a) => a.scopeId),
     openTaskCount: tasks?.n ?? 0,
     scheduleIds: schedules.map((s) => s.id),
+    fallbackOf: [...new Set(fallbackOf.map((p) => p.name))],
   };
 }
 
@@ -264,7 +306,8 @@ export function modelProfileRefError(error: unknown): "missing" | null {
  * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) as
  * its ask or as the profile claim applied (`resolvedProfile`, which a paused
  * task's resume re-reads for its credential allowlist), an
- * agent default names it, or a schedule names it. The check is part of the
+ * agent default names it, a schedule names it, or another profile lists it
+ * as a fallback. The check is part of the
  * DELETE statement, so a reference written after the caller's own count still
  * makes it `in-use`; the triggers in migrations 220 and 240 refuse the
  * opposite order (a reference written after this delete).
@@ -282,11 +325,64 @@ export async function deleteModelProfile(name: string): Promise<"deleted" | "mis
            WHERE scope = 'agent' AND key = ? AND trim(value) = model_profiles.name)
         AND NOT EXISTS (
           SELECT 1 FROM scheduled_tasks s WHERE s.profile = model_profiles.name)
+        AND NOT ${LISTED_AS_FALLBACK_SQL}
       RETURNING id`,
     [name, repairWindowStart(), MODEL_PROFILE_CONFIG_KEY],
   );
   if (row) return "deleted";
   return (await getModelProfileByName(name)) ? "in-use" : "missing";
+}
+
+/** Longest fallback list a profile may store. */
+export const MAX_MODEL_PROFILE_FALLBACKS = 10;
+
+/**
+ * Why `fallbacks` cannot be saved on profile `name` (on `harness`), or null.
+ * Every fallback must exist, run on the same harness (a hop resumes on the
+ * same agent), appear once, and not be the profile itself; and the stored
+ * fallback graph with this change must stay acyclic, so a hop chain always
+ * ends. Run it in the same transaction as the write.
+ */
+export async function modelProfileFallbacksError(
+  name: string,
+  harness: ProviderName,
+  fallbacks: string[],
+): Promise<string | null> {
+  if (fallbacks.length > MAX_MODEL_PROFILE_FALLBACKS) {
+    return `A profile lists at most ${MAX_MODEL_PROFILE_FALLBACKS} fallbacks.`;
+  }
+  const seen = new Set<string>();
+  for (const fallback of fallbacks) {
+    if (fallback === name) return `"${name}" cannot list itself as a fallback.`;
+    if (seen.has(fallback)) return `Fallback "${fallback}" is listed twice.`;
+    seen.add(fallback);
+  }
+  if (fallbacks.length === 0) return null;
+  const rows = await getDbClient().query<{ name: string; harness: string; fallbacks: string }>(
+    "SELECT name, harness, fallbacks FROM model_profiles",
+  );
+  const graph = new Map(rows.map((row) => [row.name, parseFallbacks(row.fallbacks)]));
+  const harnessOf = new Map(rows.map((row) => [row.name, row.harness]));
+  for (const fallback of fallbacks) {
+    const other = harnessOf.get(fallback);
+    if (other === undefined) return `Unknown fallback profile "${fallback}".`;
+    if (other !== harness) {
+      return `Fallback "${fallback}" runs on ${other}, not ${harness}; a fallback resumes on the same agent.`;
+    }
+  }
+  graph.set(name, fallbacks);
+  // DFS from `name`: reaching `name` again is a cycle through this change.
+  const stack = fallbacks.map((fallback) => [name, fallback]);
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const path = stack.pop() as string[];
+    const node = path[path.length - 1] as string;
+    if (node === name) return `Fallbacks would form a cycle: ${path.join(" → ")}.`;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    for (const next of graph.get(node) ?? []) stack.push([...path, next]);
+  }
+  return null;
 }
 
 /** The agent's default profile name (agent-scoped MODEL_PROFILE), or null. */
@@ -347,7 +443,10 @@ export async function taskProfileError(check: {
     return `Unknown model profile "${name}". List profiles with list-model-profiles.`;
   }
   if (!check.agentId) return null;
-  const result = await checkProfileForAgent(check.agentId, name, { vcsRepo: check.vcsRepo });
+  const result = await checkProfileForAgent(check.agentId, name, {
+    vcsRepo: check.vcsRepo,
+    fallbacks: false,
+  });
   if (!result || result.ok) return null;
   return formatProfileCheckFailures(result);
 }

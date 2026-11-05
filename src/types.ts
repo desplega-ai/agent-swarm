@@ -488,10 +488,47 @@ export const ModelProfileSchema = z.object({
   seededFrom: z.string().nullable(),
   /** Pooled-key allowlist (column `credentialAllowlist`); null uses the whole pool. */
   credentials: ModelProfileCredentialsSchema.nullable(),
+  /**
+   * Profiles on the same harness to hop to, in order, when a provider error
+   * (rate limit, seat, overload, auth, empty pool) ends a task running on
+   * this one. Empty: the task fails as before.
+   */
+  fallbacks: z.array(z.string()),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
 });
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
+
+/**
+ * Why a provider session ended in a way another profile may survive. Set by
+ * the worker's classifier (`src/commands/provider-error-class.ts`); never a
+ * task failure, tool error, context overflow, cancellation or budget refusal.
+ */
+export const ProviderErrorClassSchema = z.enum([
+  "rate_limit",
+  "model_window",
+  "seat",
+  "credits",
+  "overloaded",
+  "server_error",
+  "auth",
+  "pool_empty",
+]);
+export type ProviderErrorClass = z.infer<typeof ProviderErrorClassSchema>;
+
+/**
+ * One same-agent fallback hop: the task left `from` on `errorClass` and its
+ * resume runs `profile`. `skipped` lists the fallbacks passed over because
+ * they failed the profile check on the agent.
+ */
+export const FallbackHopSchema = z.object({
+  from: z.string(),
+  profile: z.string(),
+  errorClass: ProviderErrorClassSchema,
+  at: z.string(),
+  skipped: z.array(z.object({ profile: z.string(), reason: z.string() })).optional(),
+});
+export type FallbackHop = z.infer<typeof FallbackHopSchema>;
 
 /** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
 export const ProfileCheckStateSchema = z.enum(["pass", "warn", "fail", "unverified"]);
@@ -830,6 +867,9 @@ export const AgentTaskSchema = z
     // the agent's default). Unset when no profile applied.
     profile: z.string().optional(),
     resolvedProfile: z.string().optional(),
+    // Provider-error fallback hops so far, oldest first; carried by every
+    // resume of the same work. Unset when the work never hopped.
+    fallbackHops: z.array(FallbackHopSchema).optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -962,6 +1002,8 @@ export const CreateTaskOptionsSchema = z.object({
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
   profile: z.string().optional(),
+  /** Internal: the fallback hops a resume carries over (`createResumeFollowUp`). */
+  fallbackHops: z.array(FallbackHopSchema).optional(),
   scheduleId: z.string().optional(),
   workflowRunId: z.string().optional(),
   workflowRunStepId: z.string().optional(),
@@ -1787,6 +1829,7 @@ export const ResumeReasonSchema = z.enum([
   "context_limits", // Provider session approaching context-window limits (Phase 6)
   "manual_supersede", // Operator-triggered (e.g. dashboard button)
   "crash_recovery", // Heartbeat sweep detected dead/stalled worker (DES-523)
+  "provider_fallback", // Provider error; the resume runs the next fallback profile
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 

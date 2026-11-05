@@ -13,7 +13,9 @@ import {
   hasNonTerminalRerouteDecisionChild,
   isAgentEligibleForTask,
 } from "../be/db";
+import { getModelProfileByName } from "../be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { checkProfileForAgent } from "../be/model-profile-check";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { carryUnhandledSteering } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
@@ -27,6 +29,8 @@ import {
   type AgentTask,
   type CreateTaskOptions,
   CreateTaskOptionsSchema,
+  type FallbackHop,
+  type ProviderErrorClass,
   type ResumeReason,
   type RoutingAffinity,
   type TaskAttachment,
@@ -199,6 +203,88 @@ export function inheritedModelSelection(
     ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),
     ...(parent.profile ? { profile: parent.profile } : {}),
   };
+}
+
+/** Most hops one piece of work may take; the visited set already bounds it. */
+export const MAX_FALLBACK_HOPS = 10;
+
+/** Result of `nextFallback`. */
+export type FallbackPick =
+  | { kind: "picked"; profile: string; hop: FallbackHop }
+  /** `message` is null when no fallback was ever configured: the task fails as before. */
+  | { kind: "none"; message: string | null };
+
+/**
+ * The next profile a task that hit a provider error should resume on, on the
+ * same agent (runbooks/model-tiers.md § Fallbacks on provider errors).
+ *
+ * The chain starts at the profile claim applied (`resolvedProfile`). It walks
+ * the fallback lists of the profiles this work already ran on, the current
+ * one first and then back toward the first, so a fallback's own fallbacks
+ * come before its siblings'. A profile the work already ran on is never
+ * picked again. A candidate that fails `checkProfileForAgent` on the agent
+ * is skipped and recorded on the hop.
+ */
+export async function nextFallback(
+  parent: Pick<AgentTask, "agentId" | "resolvedProfile" | "fallbackHops" | "vcsRepo">,
+  errorClass: ProviderErrorClass,
+  options: { includeRepoSecrets?: boolean } = {},
+): Promise<FallbackPick> {
+  const current = parent.resolvedProfile;
+  if (!current || !parent.agentId) return { kind: "none", message: null };
+  const hops = parent.fallbackHops ?? [];
+  const path = hops.length > 0 ? [hops[0]!.from, ...hops.map((hop) => hop.profile)] : [current];
+  if (path[path.length - 1] !== current) path.push(current);
+  const visited = new Set(path);
+  const skipped: { profile: string; reason: string }[] = [];
+  const judged = new Set<string>();
+  let configured = hops.length > 0;
+
+  if (hops.length < MAX_FALLBACK_HOPS) {
+    for (let i = path.length - 1; i >= 0; i--) {
+      const profile = await getModelProfileByName(path[i]!);
+      for (const name of profile?.fallbacks ?? []) {
+        configured = true;
+        if (visited.has(name) || judged.has(name)) continue;
+        judged.add(name);
+        const result = await checkProfileForAgent(parent.agentId, name, {
+          vcsRepo: parent.vcsRepo,
+          includeRepoSecrets: options.includeRepoSecrets,
+          fallbacks: false,
+        });
+        if (result?.ok) {
+          return {
+            kind: "picked",
+            profile: name,
+            hop: {
+              from: current,
+              profile: name,
+              errorClass,
+              at: new Date().toISOString(),
+              ...(skipped.length > 0 ? { skipped } : {}),
+            },
+          };
+        }
+        skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
+      }
+    }
+  }
+  if (!configured) return { kind: "none", message: null };
+  const skippedText =
+    skipped.length > 0
+      ? `; skipped: ${skipped.map((s) => `${s.profile} (${s.reason})`).join(", ")}`
+      : "";
+  return {
+    kind: "none",
+    message: `${errorClass} on ${current}; no fallback left (tried: ${path.join(" → ")})${skippedText}`,
+  };
+}
+
+/** "check: detail" of the primary's first failing row. */
+function firstFailingRow(result: NonNullable<Awaited<ReturnType<typeof checkProfileForAgent>>>) {
+  const row = result.profiles[0]?.checks.find((check) => check.state === "fail");
+  if (!row) return "failed the profile check";
+  return row.detail ? `${row.check}: ${row.detail}` : row.check;
 }
 
 function attachmentPointer(a: TaskAttachment): string {
@@ -605,6 +691,11 @@ export type CreateResumeFollowUpResult =
 export async function createResumeFollowUp(args: {
   parentId: string;
   reason: ResumeReason;
+  /**
+   * With `provider_fallback`: the profile the resume runs and the hop that
+   * records why (`nextFallback`).
+   */
+  fallback?: { profile: string; hop: FallbackHop };
 }): Promise<CreateResumeFollowUpResult> {
   const parent = await getTaskById(args.parentId);
   if (!parent) return { kind: "skipped", reason: "parent_not_found" };
@@ -640,11 +731,14 @@ export async function createResumeFollowUp(args: {
       const isGracefulShutdown = args.reason === "graceful_shutdown";
       const isGracefulPin = isGracefulShutdown && isGracefulResumePinEnabled();
       const isFreshPinnedReason = !isGracefulShutdown && fresh;
+      // The fallback was judged against this agent's harness and keys, and
+      // the worker that reported the error is alive by definition.
+      const isFallbackPin = args.reason === "provider_fallback" && args.fallback !== undefined;
       // crash_recovery and graceful_shutdown pins ignore `fresh` when their
       // kill-switches are on; context_limits/manual_supersede still require it.
       if (
         hasCap &&
-        (isCrashRecovery || isGracefulPin || isFreshPinnedReason) &&
+        (isCrashRecovery || isGracefulPin || isFreshPinnedReason || isFallbackPin) &&
         (!leadOnly || candidate.isLead)
       ) {
         preferredAgentId = candidate.id;
@@ -747,7 +841,7 @@ export async function createResumeFollowUp(args: {
     // fire when this resume finishes.
     inheritParentFollowUpConfig: true,
     routingAffinity,
-    ...inheritedModelSelection(parent),
+    ...resumeModelSelection(parent, args.fallback),
   });
   // The resume continues the work, so it takes over unaccepted steering.
   await carryUnhandledSteering(parent.id, created.id);
@@ -783,6 +877,21 @@ export async function createResumeFollowUp(args: {
   }
 
   return { kind: "created", task: created };
+}
+
+/**
+ * The resume's model fields: the parent's own selection, or with a fallback
+ * the picked profile alone (a profile wins over `model` and `modelTier` at
+ * claim, and the hop replaces whatever the parent ran). The hop list carries
+ * over either way, so a later hop never picks a profile the work already ran.
+ */
+function resumeModelSelection(
+  parent: AgentTask,
+  fallback: { profile: string; hop: FallbackHop } | undefined,
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "fallbackHops"> {
+  const hops = [...(parent.fallbackHops ?? []), ...(fallback ? [fallback.hop] : [])];
+  const selection = fallback ? { profile: fallback.profile } : inheritedModelSelection(parent);
+  return { ...selection, ...(hops.length > 0 ? { fallbackHops: hops } : {}) };
 }
 
 /** Result of `createRerouteDecisionTask`. */

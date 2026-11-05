@@ -6,6 +6,7 @@ import type {
   AgentTaskStatus,
   AgentTaskSummary,
   AgentTaskTimelineItem,
+  FallbackHop,
   FollowUpConfig,
   ProviderName,
   ReasoningEffort,
@@ -14,6 +15,7 @@ import type {
   RoutingSource,
 } from "../../../types";
 import {
+  FallbackHopSchema,
   FollowUpConfigSchema,
   parseModelTier,
   ReasoningEffortSchema,
@@ -98,6 +100,7 @@ export type AgentTaskRow = {
   modelAlias?: string | null;
   profile?: string | null;
   resolvedProfile?: string | null;
+  fallbackHops?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -256,6 +259,22 @@ const LIST_COLUMNS = {
 
 type TaskListFields = keyof typeof LIST_COLUMNS;
 
+/** The stored hop list; entries that do not parse are dropped, none reads as unset. */
+function parseFallbackHops(value: string | null | undefined): FallbackHop[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return undefined;
+    const hops = parsed.flatMap((entry) => {
+      const hop = FallbackHopSchema.safeParse(entry);
+      return hop.success ? [hop.data] : [];
+    });
+    return hops.length > 0 ? hops : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
   let followUpConfig: FollowUpConfig | undefined;
   if (row.followUpConfig) {
@@ -361,6 +380,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
       : undefined,
     profile: row.profile ?? undefined,
     resolvedProfile: row.resolvedProfile ?? undefined,
+    fallbackHops: parseFallbackHops(row.fallbackHops),
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
