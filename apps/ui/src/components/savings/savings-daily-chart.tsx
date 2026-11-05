@@ -40,7 +40,8 @@ function DayTooltip({
     <div style={rechartsTooltipStyle} className="max-w-64 space-y-1 px-3 py-2">
       <p className="font-medium">{formatDay(point.day, true)}</p>
       <TooltipRow label="Saved (p50)" value={formatUsd(point.savingUsd)} strong />
-      <TooltipRow label="Actual cost" value={formatUsd(point.actualUsd)} />
+      <TooltipRow label="Measured spend" value={formatUsd(point.measuredUsd)} />
+      <TooltipRow label="Substituted-run cost (est.)" value={formatUsd(point.actualUsd)} />
       {capApplied ? (
         <p className="pt-1 text-muted-foreground">
           Scheduled runs are capped at 24 a day over the window; the counted runs are spread pro

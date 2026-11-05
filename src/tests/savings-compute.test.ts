@@ -309,14 +309,14 @@ describe("savings compute", () => {
         [workflowId],
       );
       const jobs = (await get(`workflowId=${workflowId}&days=7`)).body as {
-        rows: { savingUsd: { p50: number }; actualUsd: number }[];
+        rows: { savingUsd: { p50: number }; actualUsd: number; measuredUsd: number }[];
       };
       const { status, body } = await get(`workflowId=${workflowId}&days=7`, "daily");
       expect(status).toBe(200);
       const daily = body as {
         valid: boolean;
         tier: string;
-        points: { day: string; savingUsd: number; actualUsd: number }[];
+        points: { day: string; savingUsd: number; actualUsd: number; measuredUsd: number }[];
       };
       expect(daily.valid).toBe(true);
       expect(daily.tier).toBe("smart");
@@ -328,6 +328,9 @@ describe("savings compute", () => {
       );
       expect(cents(daily.points.map((p) => p.actualUsd))).toBe(
         Math.round((jobs.rows[0]?.actualUsd ?? Number.NaN) * 100),
+      );
+      expect(cents(daily.points.map((p) => p.measuredUsd))).toBe(
+        Math.round((jobs.rows[0]?.measuredUsd ?? Number.NaN) * 100),
       );
       expect(daily.points.filter((p) => p.savingUsd !== 0).length).toBeGreaterThan(0);
     });
