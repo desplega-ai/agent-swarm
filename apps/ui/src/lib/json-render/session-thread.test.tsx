@@ -32,6 +32,7 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
 mock.module("@/api/hooks/use-sessions", () => ({
   useSession: (rootTaskId: string | undefined) => ({
     data: rootTaskId && sessionChain ? { chain: sessionChain } : undefined,
+    isError: false,
   }),
 }));
 // The shared conversation has its own tests; the stub records what the
@@ -189,7 +190,7 @@ test("a first message dispatches a root task (no parentTaskId) and clears the dr
   await typeMessage(host, "hello");
   await act(async () => startButton(host).click());
   expect(calls).toEqual([
-    { action: "app.action", params: { name: "ask", input: { message: "hello" } } },
+    { action: "app.action", params: { name: "ask", input: { message: "hello" }, followUp: false } },
   ]);
   expect(textarea(host).value).toBe("");
   // No onRootCreated: nothing will bind the root, so the send does not wait.
@@ -267,7 +268,7 @@ test("a follow-up chains the next task under the leaf and stays pending until it
   expect(calls).toEqual([
     {
       action: "app.action",
-      params: { name: "ask", input: { message: "again" }, parentTaskId: "leaf" },
+      params: { name: "ask", input: { message: "again" }, parentTaskId: "leaf", followUp: false },
     },
   ]);
   // The new task is not in the chain yet, so the send is still pending.
@@ -278,12 +279,21 @@ test("a follow-up chains the next task under the leaf and stays pending until it
   await unmount();
 });
 
-test("a bound root whose chain is empty rejects the follow-up and dispatches nothing", async () => {
+test("a bound root shows a disabled loading state until its chain loads", async () => {
+  const { host, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
+  expect(conversation).toBeUndefined();
+  expect(host.textContent).toContain("Loading the conversation");
+  expect(host.querySelector("button")?.disabled).toBe(true);
+  await unmount();
+});
+
+test("a bound root whose loaded chain is empty says so and blocks sending", async () => {
   sessionChain = [];
-  const { calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
-  await expect(conversation?.onFollowUp?.("hello", "gone")).rejects.toThrow(
-    "Conversation not found",
-  );
+  const { host, calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
+  expect(conversation).toBeUndefined();
+  expect(host.textContent).toContain("Conversation not found");
+  expect(host.textContent).not.toContain("No session yet");
+  expect(host.querySelector("button")?.disabled).toBe(true);
   expect(calls).toEqual([]);
   await unmount();
 });

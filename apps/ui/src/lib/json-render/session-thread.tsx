@@ -24,6 +24,11 @@
  *   - person bubbles show the `input.message` of each app action prompt
  *     (`threadRequestText`), not the whole agent prompt.
  *
+ * Each `app.action` step of `onDispatch` goes out with `followUp: false`
+ * (unless the step sets `followUp`), so the Lead adds no review task to the
+ * chain. While a bound root's chain loads, or once it loads empty, the
+ * composer is disabled under a notice instead of the conversation.
+ *
  * After a dispatch that created a task, the send stays pending until the
  * chain shows that task (or, on the first send, the page binds it as
  * `rootTaskId`), up to `PENDING_DISPATCH_TIMEOUT_MS`, so a quick second
@@ -135,8 +140,21 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   // send inside that first poll could start a second chain.
   const rootTaskId =
     typeof props.rootTaskId === "string" && props.rootTaskId !== "" ? props.rootTaskId : "";
-  const { data: detail } = useSession(gate.supported && rootTaskId ? rootTaskId : undefined);
+  const { data: detail, isError: loadFailed } = useSession(
+    gate.supported && rootTaskId ? rootTaskId : undefined,
+  );
   const chain = detail?.chain ?? EMPTY_CHAIN;
+  // A bound root renders the conversation only once its chain has loaded and
+  // holds a task; until then the composer stays disabled with a notice.
+  const boundNotice = !rootTaskId
+    ? null
+    : detail
+      ? detail.chain.length > 0
+        ? null
+        : "Conversation not found — sending is disabled."
+      : loadFailed
+        ? "The conversation could not be loaded — sending is disabled."
+        : "Loading the conversation…";
   const waitForTask = useWaitForTask(rootTaskId, chain);
 
   // Stable refs so async continuations never run against a stale chain,
@@ -270,7 +288,24 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
           </Button>
         </div>
       ) : null}
-      {rootTaskId ? (
+      {boundNotice ? (
+        <>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6">
+            <p className="max-w-xs text-center text-sm text-muted-foreground" aria-live="polite">
+              {boundNotice}
+            </p>
+          </div>
+          <ComposerDock
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {}}
+            isPending={false}
+            placeholder={placeholder}
+            disabled
+            routeLabel={ROUTE_LABEL}
+          />
+        </>
+      ) : rootTaskId ? (
         <SessionConversation
           rootTaskId={rootTaskId}
           timeline="turns"

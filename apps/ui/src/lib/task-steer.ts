@@ -60,12 +60,24 @@ export function canSteerAnyAgentTask(task: Pick<AgentTask, "status"> | null | un
 }
 
 /**
- * The composer target under the "any agent" rule: the newest unfinished task
- * of any agent, else the newest task (the message follows up on it).
+ * The Lead's review of a finished worker task (`createWorkerTaskFollowUp`:
+ * a `system` task of type `follow-up`).
  */
-export function anyAgentComposerTarget<T extends Pick<AgentTask, "status" | "createdAt">>(
-  chain: readonly T[],
-): T | null {
+export function isLeadReviewTask(task: Pick<AgentTask, "source" | "taskType">): boolean {
+  return task.source === "system" && task.taskType === "follow-up";
+}
+
+/**
+ * The composer target under the "any agent" rule: the newest unfinished task
+ * of any agent, else the newest task (the message follows up on it). A Lead
+ * review is never the target while another task exists: an app page's
+ * messages steer and chain off its own tasks, not the Lead's review of them.
+ */
+export function anyAgentComposerTarget<
+  T extends Pick<AgentTask, "status" | "createdAt" | "source" | "taskType">,
+>(chain: readonly T[]): T | null {
   const newestFirst = [...chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return newestFirst.find((task) => canSteerAnyAgentTask(task)) ?? newestFirst[0] ?? null;
+  const own = newestFirst.filter((task) => !isLeadReviewTask(task));
+  const candidates = own.length > 0 ? own : newestFirst;
+  return candidates.find((task) => canSteerAnyAgentTask(task)) ?? candidates[0] ?? null;
 }

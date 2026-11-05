@@ -112,6 +112,11 @@ export async function runDispatchChain(options: {
   let newTaskId: string | undefined;
   for (const binding of onDispatch) {
     const params = resolveScopedParams(binding.params, scope);
+    // One task per message: unless the chain says otherwise, the created task
+    // gets no Lead follow-up (the review that would join the chain).
+    if (binding.action === "app.action" && !Object.hasOwn(params, "followUp")) {
+      params.followUp = false;
+    }
     await execute({ ...binding, params });
     if (binding.action === "app.action" && typeof params.name === "string") {
       const slotPath =

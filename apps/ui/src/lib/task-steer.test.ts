@@ -99,21 +99,45 @@ describe("the any-agent rule (an app page's session)", () => {
     expect(canSteerAnyAgentTask(null)).toBe(false);
   });
 
+  const appTask = (id: string, status: AgentTaskStatus, createdAt: string) => ({
+    id,
+    status,
+    createdAt,
+    source: "api" as const,
+    taskType: undefined as string | undefined,
+  });
+  const review = (id: string, status: AgentTaskStatus, createdAt: string) => ({
+    ...appTask(id, status, createdAt),
+    source: "system" as const,
+    taskType: "follow-up",
+  });
+
   test("the newest unfinished task is the target, whatever agent runs it", () => {
     const chain = [
-      { id: "root", status: "completed" as const, createdAt: "2026-10-30 09:00:00" },
-      { id: "worker", status: "in_progress" as const, createdAt: "2026-10-30 09:05:00" },
-      { id: "done", status: "completed" as const, createdAt: "2026-10-30 09:06:00" },
+      appTask("root", "completed", "2026-10-30 09:00:00"),
+      appTask("worker", "in_progress", "2026-10-30 09:05:00"),
+      appTask("done", "completed", "2026-10-30 09:06:00"),
     ];
     expect(anyAgentComposerTarget(chain)?.id).toBe("worker");
   });
 
   test("with nothing unfinished, the newest task is the follow-up parent", () => {
     const chain = [
-      { id: "root", status: "completed" as const, createdAt: "2026-10-30 09:00:00" },
-      { id: "leaf", status: "failed" as const, createdAt: "2026-10-30 09:06:00" },
+      appTask("root", "completed", "2026-10-30 09:00:00"),
+      appTask("leaf", "failed", "2026-10-30 09:06:00"),
     ];
     expect(anyAgentComposerTarget(chain)?.id).toBe("leaf");
     expect(anyAgentComposerTarget([])).toBeNull();
+  });
+
+  test("a Lead review is neither steered nor chained under", () => {
+    const chain = [
+      appTask("root", "completed", "2026-10-30 09:00:00"),
+      review("review", "in_progress", "2026-10-30 09:06:00"),
+    ];
+    expect(anyAgentComposerTarget(chain)?.id).toBe("root");
+    expect(anyAgentComposerTarget([review("only", "in_progress", "2026-10-30 09:06:00")])?.id).toBe(
+      "only",
+    );
   });
 });

@@ -80,7 +80,7 @@ describe("runDispatchChain", () => {
     // `$chain: "leafTaskId"` param is dropped and the task starts as a root.
     expect(executed[0]).toEqual({
       action: "app.action",
-      params: { name: "generateScreen", input: {} },
+      params: { name: "generateScreen", input: {}, followUp: false },
     });
     expect(Object.hasOwn(executed[0].params ?? {}, "parentTaskId")).toBe(false);
     expect(executed[1]).toEqual({
@@ -118,7 +118,7 @@ describe("runDispatchChain", () => {
     expect(executed).toHaveLength(1);
     expect(executed[0]).toEqual({
       action: "app.action",
-      params: { name: "generateScreen", input: {}, parentTaskId: "leaf-42" },
+      params: { name: "generateScreen", input: {}, parentTaskId: "leaf-42", followUp: false },
     });
   });
 
@@ -181,8 +181,40 @@ describe("runDispatchChain", () => {
       getSnapshot: () => state,
     });
     expect(executed).toEqual([
-      { action: "app.action", params: { name: "ask", parentTaskId: "leaf" } },
+      { action: "app.action", params: { name: "ask", parentTaskId: "leaf", followUp: false } },
     ]);
+  });
+});
+
+describe("runDispatchChain follow-up opt-out", () => {
+  const run = async (params: Record<string, unknown>) => {
+    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
+    await runDispatchChain({
+      onDispatch: [
+        { action: "app.action", params },
+        { action: "app.mutate", params: { model: "m" } },
+      ],
+      onRootCreated: undefined,
+      message: "hi",
+      wasEmpty: true,
+      leafTaskId: null,
+      execute: async (binding) => {
+        executed.push(binding);
+      },
+      getSnapshot: () => ({}),
+    });
+    return executed;
+  };
+
+  test("an app.action step asks for no Lead follow-up; other steps are untouched", async () => {
+    const executed = await run({ name: "ask" });
+    expect(executed[0]?.params).toEqual({ name: "ask", followUp: false });
+    expect(executed[1]?.params).toEqual({ model: "m" });
+  });
+
+  test("a followUp the chain sets explicitly wins", async () => {
+    const executed = await run({ name: "ask", followUp: true });
+    expect(executed[0]?.params).toEqual({ name: "ask", followUp: true });
   });
 });
 
