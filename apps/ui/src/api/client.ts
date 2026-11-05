@@ -123,6 +123,7 @@ import type {
   RuntimePoolRuntime,
   SavingsDailyResponse,
   SavingsJobsResponse,
+  SavingsScheduleResponse,
   SavingsTarget,
   SavingsTier,
   ScheduledTask,
@@ -4024,6 +4025,23 @@ class ApiClient {
     );
     if (!res.ok) throw new Error(`Failed to load savings: ${res.status}`);
     return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
   }
 
   /** The modelled saving of one workflow or script per UTC day, from the same rollup as `getSavingsJobs`. */

@@ -1,6 +1,6 @@
 // Automation savings, read from the hourly rollup: a run is priced on the
 // detail route right away, the daily points add up to it, the list route
-// answers, an idle workflow is not valid (never $0), the script routes answer,
+// answers, an idle workflow is not valid (never $0), the script and schedule routes answer,
 // and bad input is rejected.
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
@@ -105,6 +105,16 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [404], "daily: unknown script");
       response = await ctx.api("GET", `/api/savings/jobs?scriptName=x&workflowId=${ran}`);
       expectStatus(response, [400], "two targets");
+
+      // Schedules read the same rollup through their target.
+      response = await ctx.api("GET", "/api/savings/jobs?kind=schedule&days=7");
+      expectStatus(response, [200], "savings for every schedule");
+      json = asRecord(response.json);
+      expect(Array.isArray(json.rows) && json.total === null, `schedule list ${response.text}`);
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "unknown schedule");
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=x&workflowId=${ran}`);
+      expectStatus(response, [400], "schedule and workflow targets");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
       await deleteWorkflowQuietly(ctx, idle);
