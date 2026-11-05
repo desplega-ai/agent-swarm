@@ -277,6 +277,50 @@ describe("PiMonoSession & runner — long lead session cost preservation (#2073)
     ).toBe("server_error");
   });
 
+  function subscriptionSessionConfig(logFile: string): ProviderSessionConfig {
+    return { ...makeSessionConfig(logFile), model: "openai-codex/gpt-5.5", codexSlot: 0 };
+  }
+
+  test("an MCP 401 on a ChatGPT subscription session is a harness error and never moves the task to a fallback profile", async () => {
+    const session = new PiMonoSession(
+      erroringSession(() => {
+        throw new Error("MCP error -32000: Streamable HTTP error: HTTP 401 Unauthorized");
+      }),
+      subscriptionSessionConfig(join(tmpLogDir, `pi-mcp-401-${Date.now()}.log`)),
+      false,
+    );
+    const result = await session.waitForCompletion();
+    // The red box still names the rejected-login reading of the text.
+    expect(result.failureReason).toContain("[auth-error]");
+    expect(result.errorCategory).toBe("authentication_failed");
+    expect(result.errorOrigin).toBe("harness");
+    expect(
+      classifyProviderErrorOf(result, result.failureReason, "openai-codex/gpt-5.5"),
+    ).toBeNull();
+  });
+
+  test("control: a subscription 401 from the provider still moves the task to a fallback profile", async () => {
+    const session = new PiMonoSession(
+      erroringSession((listeners) => {
+        for (const l of listeners) {
+          l({
+            type: "auto_retry_end",
+            success: false,
+            finalError: "HTTP 401 Unauthorized: token_invalidated",
+          } as unknown as AgentSessionEvent);
+        }
+      }),
+      subscriptionSessionConfig(join(tmpLogDir, `pi-provider-401-${Date.now()}.log`)),
+      false,
+    );
+    const result = await session.waitForCompletion();
+    expect(result.failureReason).toContain("[auth-error]");
+    expect(result.errorOrigin).toBeUndefined();
+    expect(classifyProviderErrorOf(result, result.failureReason, "openai-codex/gpt-5.5")).toBe(
+      "auth",
+    );
+  });
+
   test("reconcileActiveTasks preserves task.lastCost when settling an unresponsive aborted session", async () => {
     const snapshotCost: CostData = {
       sessionId: "runner-session-1",
