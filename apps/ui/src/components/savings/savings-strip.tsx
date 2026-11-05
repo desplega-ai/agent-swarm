@@ -54,8 +54,8 @@ export function WorkflowSavingsStrip({ workflowId }: { workflowId: string }) {
         info={
           <>
             What these runs would have cost as agent tasks, minus what they cost (
-            {formatUsd(row.actualUsd)}). The range is the 80% band. Covers this workflow's own
-            runs; sub-workflow runs are not included. {note}
+            {formatUsd(row.actualUsd)}). The range is the 80% band. Covers this workflow's own runs;
+            sub-workflow runs are not included. {note}
           </>
         }
       />
