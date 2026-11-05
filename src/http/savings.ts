@@ -105,7 +105,9 @@ const SavingsJobRowSchema = z.object({
   savingUsd: SavingsBandSchema,
   actualHours: z
     .number()
-    .describe("Scaled estimate: measured hours times `substitutedRuns / runs`."),
+    .describe(
+      "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active.",
+    ),
   agentOnlyHours: SavingsBandSchema,
   hoursSaved: SavingsBandSchema,
   agentOnlyUsdPerRun: z.number(),

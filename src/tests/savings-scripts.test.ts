@@ -113,6 +113,21 @@ describe("savings scripts", () => {
       JSON.stringify({ taskId: task.id }),
       runId,
     ]);
+    // An API run at 23:59 whose task lands after midnight, with no run the next day.
+    await catalogScript("midnight-api", "await ctx.swarm.task_send({});");
+    await getDbClient().run(
+      `INSERT INTO script_runs (id, agentId, scriptName, source, status, startedAt, finishedAt, apiEndpointId)
+       VALUES ('midnight-run', ?, 'midnight-api', 'x', 'completed', ?, ?, 'endpoint-2')`,
+      [agentId, `${WEEK[3]}T23:59:00.000Z`, `${WEEK[3]}T23:59:30.000Z`],
+    );
+    const late = await createTaskExtended("savings scripts midnight fixture", { agentId });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt=? WHERE id=?", [
+      `${WEEK[4]}T00:01:00.000Z`,
+      late.id,
+    ]);
+    await getDbClient().run("UPDATE script_runs SET output=? WHERE id='midnight-run'", [
+      JSON.stringify({ taskId: late.id }),
+    ]);
     // Runs with no script name and a name missing from the catalog.
     await bulkScriptRuns(agentId, null, WEEK[1] as string, 2);
     await bulkScriptRuns(agentId, "ghost", WEEK[1] as string, 1);
@@ -157,6 +172,7 @@ describe("savings scripts", () => {
       "dispatcher-api",
       "ghost",
       "helper",
+      "midnight-api",
       "poll-sched",
     ]);
     expect(sum("poll-sched")).toMatchObject({ runs: 210, apiRuns: 0, opsSum: 4 * 210 });
@@ -187,7 +203,24 @@ describe("savings scripts", () => {
     const api = await getDbClient().get<{ n: number }>(
       "SELECT count(*) n FROM automation_savings_daily WHERE jobKind='script' AND subKind='api'",
     );
-    expect(api?.n).toBe(7);
+    // dispatcher-api on each of the 7 days, midnight-api on its run's day.
+    expect(api?.n).toBe(8);
+  });
+
+  test("an API run at 23:59 credits its after-midnight task to the run's day", async () => {
+    const buckets = await getDbClient().query<{ day: string; subKind: string; effectRuns: number }>(
+      "SELECT day, subKind, effectRuns FROM automation_savings_daily WHERE jobKind='script' AND jobName='midnight-api' ORDER BY day, subKind",
+    );
+    // No bucket on the task's day: the effect stays on the run's day.
+    expect(buckets).toEqual([
+      { day: WEEK[3] as string, subKind: "", effectRuns: 0 },
+      { day: WEEK[3] as string, subKind: "api", effectRuns: 1 },
+    ]);
+    const read = await readScriptSavings({ days: 7, tier: "smart", now: NOW });
+    const row = read.rows.find((r) => r.scriptName === "midnight-api");
+    expect(row).toMatchObject({ runs: 1, substitutedRuns: 1, effectRuns: 1 });
+    expect(row?.savingUsd.p50).toBeCloseTo(R.p50 * unit(1) + F_FOLLOWUP, 6);
+    expect(row?.hoursSaved.p50).toBeGreaterThan(0);
   });
 
   test("scheduled scripts are capped standalone tasks; agent-invoked ones are marginal turns", async () => {

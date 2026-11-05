@@ -20116,7 +20116,7 @@ export interface paths {
                                     p50: number;
                                     p90: number;
                                 };
-                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. */
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active. */
                                 actualHours: number;
                                 agentOnlyHours: {
                                     p10: number;
