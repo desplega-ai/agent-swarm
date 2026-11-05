@@ -12,7 +12,15 @@ const ERRORS: Record<number, string> = {
   409: "Your agent-fs account is not ready yet. Try again in a minute.",
   429: "Too many attempts. Wait a minute, then try again.",
   501: "This agent-fs server is too old for this link. Ask an admin to upgrade it.",
+  // Every agent-fs failure without its own status: an error answer (for
+  // example a missing or non-admin bootstrap key) or no answer at all.
+  502: "agent-fs refused the request or did not answer. Ask a swarm admin to check agent-fs and the agent-fs admin key.",
   503: "This swarm has no agent-fs set up.",
+};
+
+/** 400 errors that the API names, by their `error` code. */
+const CODED_ERRORS: Record<string, string> = {
+  org_mismatch: "This link belongs to another agent-fs organization than this swarm uses.",
 };
 
 function returnHost(raw: string | null): string | null {
@@ -25,6 +33,8 @@ function returnHost(raw: string | null): string | null {
 }
 
 function errorMessage(error: unknown): string {
+  if (error instanceof FsApiError && CODED_ERRORS[error.message])
+    return CODED_ERRORS[error.message];
   if (error instanceof FsApiError && ERRORS[error.status]) return ERRORS[error.status];
   return error instanceof Error ? error.message : String(error);
 }

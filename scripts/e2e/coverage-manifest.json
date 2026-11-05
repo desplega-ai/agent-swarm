@@ -222,7 +222,7 @@
       "scenarios": ["platformb-fs-keys"]
     },
     "agentfs-continue": {
-      "description": "Continue with your swarm: origin allowlist, a named key in the redirect fragment only, pending membership and unsupported agent-fs servers",
+      "description": "Continue with your swarm: origin allowlist, org match, a named key in the redirect fragment only, pending membership and unsupported agent-fs servers",
       "scenarios": ["platformb-fs-continue"]
     },
     "agentfs-proxy": {

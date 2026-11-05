@@ -685,6 +685,33 @@ describe("personal agent-fs identity and keys", () => {
     expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(400);
   });
 
+  test("continue refuses a link for another agent-fs org before it mints", async () => {
+    const otherOrg = crypto.randomUUID();
+    for (const path of [
+      `/file/~/${otherOrg}/${driveId}/x.md`,
+      `/detail/~/${otherOrg}/${driveId}/x.md`,
+      `/page/~/${otherOrg}/${driveId}/x.html`,
+      `/sql/~/${otherOrg}/${driveId}`,
+      `/members/~/${otherOrg}/${driveId}`,
+      `/orgs/${otherOrg}/files/x.md`,
+    ]) {
+      const response = await continueTo(`https://live.agent-fs.dev${path}`);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "org_mismatch" });
+    }
+    expect(requests).toHaveLength(0);
+
+    // This swarm's org, and a link that names no org, still continue.
+    for (const path of [
+      "/",
+      "/files",
+      `/orgs/${orgId}/files/x.md`,
+      `/members/~/${orgId}/${driveId}`,
+    ]) {
+      expect((await continueTo(`https://live.agent-fs.dev${path}`)).status).toBe(200);
+    }
+  });
+
   test("continue needs a user, fs.join.own, a ready account, and a new agent-fs", async () => {
     const target = "https://live.agent-fs.dev/file/x.md";
     expect(

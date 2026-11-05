@@ -8262,7 +8262,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL) */
+                /** @description invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org. */
                 400: {
                     headers: {
                         [name: string]: unknown;

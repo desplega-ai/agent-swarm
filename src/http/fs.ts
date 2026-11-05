@@ -11,6 +11,7 @@ import { getUserGrant } from "../be/rbac-roles";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
+  resolveAgentFsSharedContext,
 } from "../be/seed/agent-fs-provision";
 import {
   backingProviderId,
@@ -140,7 +141,8 @@ const continueToAgentFsRoute = route({
       }),
     },
     400: {
-      description: "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL)",
+      description:
+        "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org.",
     },
     401: { description: "User identity required" },
     403: { description: "Caller cannot join the shared org" },
@@ -164,6 +166,23 @@ function allowedReturnOrigin(): string | null {
   } catch {
     // An unparseable URL allows nothing.
     return null;
+  }
+}
+
+/**
+ * The agent-fs org that a live-app URL names, or null when its path names
+ * none (for example the live root, `/files`, or `/keys`). The live app puts
+ * the org in `/<view>/~/<orgId>/...` (`/file`, `/detail`, `/page`, `/sql`,
+ * `/members`) and in `/orgs/<orgId>/...`.
+ */
+export function liveAppOrgId(target: URL): string | null {
+  const segments = target.pathname.split("/").slice(1);
+  const raw = segments[1] === "~" ? segments[2] : segments[0] === "orgs" ? segments[1] : undefined;
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
   }
 }
 
@@ -571,6 +590,20 @@ export async function handleFs(
       return true;
     }
     try {
+      // A link for another org (for example one that names this swarm by
+      // mistake) must not mint a key that the live app cannot use there.
+      const linkOrgId = liveAppOrgId(target);
+      if (linkOrgId) {
+        const shared = await resolveAgentFsSharedContext();
+        if (!shared) {
+          jsonError(res, "agent_fs_not_configured", 503);
+          return true;
+        }
+        if (shared.orgId !== linkOrgId) {
+          jsonError(res, "org_mismatch", 400);
+          return true;
+        }
+      }
       const date = new Date().toISOString().slice(0, 10);
       const result = await mintUserAgentFsKey(userId, `${target.host} · ${date}`);
       if (result.status === "minted") {

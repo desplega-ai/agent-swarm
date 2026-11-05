@@ -158,6 +158,18 @@ export const platformbFsContinue: Scenario = {
       }
       expect(labels.length === 0, "A rejected origin minted a key");
 
+      // A link for another agent-fs org would mint a key that the live app cannot use there.
+      const otherOrg = await ctx.api("POST", "/api/fs/continue", {
+        apiKey: token,
+        body: { returnTo: `https://live.agent-fs.dev/file/~/${crypto.randomUUID()}/${driveId}/x.md` },
+      });
+      expectStatus(otherOrg, [400], "reject a link for another agent-fs org");
+      expect(
+        asRecord(otherOrg.json).error === "org_mismatch",
+        "The other-org error differs from the contract",
+      );
+      expect(labels.length === 0, "A link for another org minted a key");
+
       const continued = await ctx.api("POST", "/api/fs/continue", {
         apiKey: token,
         body: { returnTo: `${returnTo}#stale` },

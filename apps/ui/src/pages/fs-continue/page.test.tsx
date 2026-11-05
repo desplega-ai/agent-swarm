@@ -137,13 +137,19 @@ describe("FsContinuePage", () => {
     expect(view.querySelector('a[href="/file"]')).not.toBeNull();
   });
 
-  test("pending and old agent-fs servers get their own message", async () => {
-    for (const [status, text] of [
-      [409, "not ready yet"],
-      [501, "too old"],
+  test("pending, old, failing agent-fs servers and another org get their own message", async () => {
+    for (const [status, code, text] of [
+      [409, "x", "not ready yet"],
+      [501, "x", "too old"],
+      [
+        502,
+        "agent-fs GET /orgs/o/members failed: HTTP 403",
+        "check agent-fs and the agent-fs admin key",
+      ],
+      [400, "org_mismatch", "belongs to another agent-fs organization"],
     ] as const) {
       stubApi(async () => {
-        throw new FsApiError("x", status);
+        throw new FsApiError(code, status);
       });
       const view = await open(`/fs/continue?return_to=${encodeURIComponent(live)}`);
       await confirm(view);
