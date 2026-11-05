@@ -271,37 +271,40 @@ export const REFRESH_TTL_MS = 60_000;
  * burst or a high-volume workflow scans at most once a minute. A refresh that
  * found no newer run did no scan and is not held.
  */
-const refreshes = new Map<string, { at: number; done: Promise<unknown> }>();
+const inFlight = new Map<string, Promise<void>>();
+/** When a refresh last scanned the day, per workflow and UTC day. */
+const scannedAt = new Map<string, number>();
 
 /** Test hook: forget the refresh state. */
 export function resetSavingsRefreshCache(): void {
-  refreshes.clear();
+  inFlight.clear();
+  scannedAt.clear();
 }
 
 function refreshToday(
   workflow: Parameters<typeof refreshWorkflowToday>[0],
   now: number,
-): Promise<unknown> {
+): Promise<void> {
   const key = `${workflow.id}:${utcDay(now)}`;
-  const hit = refreshes.get(key);
-  if (hit && (hit.at === 0 || now - hit.at < REFRESH_TTL_MS)) return hit.done;
-  for (const [k, v] of refreshes) if (v.at > 0 && now - v.at >= REFRESH_TTL_MS) refreshes.delete(k);
-  const entry = { at: 0, done: Promise.resolve() as Promise<unknown> };
-  entry.done = refreshWorkflowToday(workflow, requestSql, now).then(
-    (outcome) => {
-      if (outcome === "skipped") refreshes.delete(key);
-      else entry.at = Date.now();
-    },
-    (err) => {
-      if (!(err instanceof DbQueryConcurrencyCapError || err instanceof DbQueryTimeoutError)) {
-        refreshes.delete(key);
-        throw err;
-      }
-      entry.at = Date.now();
-    },
-  );
-  refreshes.set(key, entry);
-  return entry.done;
+  const running = inFlight.get(key);
+  if (running) return running;
+  const at = scannedAt.get(key);
+  if (at !== undefined && now - at < REFRESH_TTL_MS) return Promise.resolve();
+  for (const [k, t] of scannedAt) if (now - t >= REFRESH_TTL_MS) scannedAt.delete(k);
+  const done = refreshWorkflowToday(workflow, requestSql, now)
+    .then(
+      (outcome) => {
+        if (outcome !== "skipped") scannedAt.set(key, Date.now());
+      },
+      (err) => {
+        if (!(err instanceof DbQueryConcurrencyCapError || err instanceof DbQueryTimeoutError))
+          throw err;
+        scannedAt.set(key, Date.now());
+      },
+    )
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, done);
+  return done;
 }
 
 /**
