@@ -90,7 +90,18 @@ test("Comb mints a named key per browser, then comments, replies, and resolves",
     }
     await api.post("/api/config/reload", {});
     // Provisions the swarm drive, then adds the human as an editor.
-    await api.post("/api/fs/members/invite", { email: humanEmail, role: "editor" });
+    const invited = await api.post<{ status?: string; token?: string }>("/api/fs/members/invite", {
+      email: humanEmail,
+      role: "editor",
+    });
+    // agent-fs >= 0.18.19 makes an existing account accept before it joins.
+    if (invited.status === "pending" && invited.token) {
+      const accepted = await fetch(`${baseUrl}/invites/${invited.token}/accept`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${human.apiKey}` },
+      });
+      expect(accepted.ok, "the human accepts the swarm drive invite").toBe(true);
+    }
 
     const comb = (await api.get<StatusBody>("/status")).agent_fs?.comb;
     expect(comb?.enabled).toBe(true);

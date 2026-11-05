@@ -48,6 +48,7 @@ for (const [alias, path] of [
   ["@/components/ui/badge", "../ui/badge"],
   ["@/lib/slack-icon", "../../lib/slack-icon"],
   ["@/hooks/use-autosave", "../../hooks/use-autosave"],
+  ["@/components/shared/image-with-fallback", "./image-with-fallback"],
   ["@/components/shared/status-icon", "./status-icon"],
   ["@/components/ui/button", "../ui/button"],
   ["@/components/ui/input", "../ui/input"],

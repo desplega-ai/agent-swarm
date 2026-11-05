@@ -162,9 +162,8 @@ export interface AgentAcpStatus {
   reportedAt: number;
 }
 
-/** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
- * future avatar types (emoji, image, ...) can be added with no migration —
- * server validates shape only; the UI owns the icon catalog + fallback. */
+/** The lucide branch of `MediaIcon`. Server validates shape only; the UI owns
+ * the icon catalog + fallback. */
 export interface AgentAvatarLucide {
   type: "lucide";
   /** Kebab-case lucide icon name, e.g. "rocket". Must exist in AVATAR_ICON_CATALOG to render. */
@@ -172,10 +171,21 @@ export interface AgentAvatarLucide {
   /** `#RRGGBB`. Omitted = use the deterministic color derivation. */
   color?: string;
 }
-export type AgentAvatar = AgentAvatarLucide;
+/** Mirrors `MediaIconSchema` (backend `src/types.ts`): a lucide glyph, an https
+ * image link, or an image file in agent-fs. With neither `orgId` nor `driveId`,
+ * an agent-fs icon lives on the swarm drive. */
+export type MediaIcon =
+  | AgentAvatarLucide
+  | { type: "url"; url: string }
+  // Both drive IDs or neither (neither = the swarm drive), as the API enforces.
+  | { type: "agent-fs"; path: string; orgId?: never; driveId?: never }
+  | { type: "agent-fs"; path: string; orgId: string; driveId: string };
 
-/** Apps reuse the agent avatar shape for their dashboard icon. */
-export type AppIcon = AgentAvatar;
+/** Mirrors `AgentAvatarSchema`: an agent's avatar takes the same shapes as an app icon. */
+export type AgentAvatar = MediaIcon;
+
+/** Mirrors `AppIconSchema`: an app's dashboard icon. */
+export type AppIcon = MediaIcon;
 
 /** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
 export type AgentSlackIcon =

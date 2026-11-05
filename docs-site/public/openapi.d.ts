@@ -752,6 +752,17 @@ export interface paths {
                                     type: "lucide";
                                     icon: string;
                                     color?: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "url";
+                                    /** Format: uri */
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "agent-fs";
+                                    path: string;
+                                    orgId?: string;
+                                    driveId?: string;
                                 };
                                 createdAt: string;
                                 updatedAt: string;
@@ -2876,6 +2887,17 @@ export interface paths {
                             type: "lucide";
                             icon: string;
                             color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
                         } | null;
                         slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
@@ -8477,7 +8499,7 @@ export interface paths {
         put?: never;
         /**
          * Invite an external member into the agent-fs shared org
-         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.
+         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.
          */
         post: {
             parameters: {
@@ -8511,7 +8533,7 @@ export interface paths {
                             /** @description False only when the email already holds the requested role. */
                             invited: boolean;
                             /**
-                             * @description already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.
+                             * @description already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account).
                              * @enum {string}
                              */
                             status: "already_member" | "added" | "pending";
@@ -8521,6 +8543,8 @@ export interface paths {
                             expiresAt?: string;
                             /** @description Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured. */
                             acceptUrl?: string;
+                            /** @description Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept. */
+                            token?: string;
                         };
                     };
                 };
@@ -29340,6 +29364,17 @@ export interface components {
                 type: "lucide";
                 icon: string;
                 color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
             };
             slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */

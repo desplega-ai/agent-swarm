@@ -1,0 +1,209 @@
+/* Markdown, on every surface that renders it with Streamdown.
+ *
+ * The look follows the agent-fs live viewer (Tailwind typography, `prose-sm
+ * prose-neutral`, relaxed leading): tables without an outer frame or cell
+ * walls, a bold header row over one rule and thin row separators; muted list
+ * markers; a quiet quote rule; links in the text color with an underline.
+ *
+ * Every rule keys on the `data-streamdown` attribute Streamdown stamps on each
+ * element, so a call site gets the style without passing a class. Selectors sit
+ * in `:where()` (zero specificity): a scope such as `.prose-chat` can still
+ * resize a heading, and since the file is unlayered it still beats the utility
+ * classes Streamdown ships (they live in `@layer utilities`, and our Tailwind
+ * build emits only the ones it happens to find in our own sources). Sizes are
+ * in `em`, so each surface keeps its own base font size. */
+
+/* Headings */
+:where([data-streamdown^="heading-"]) {
+  margin: 1.6em 0 0.6em;
+  color: var(--color-foreground);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+:where([data-streamdown="heading-1"]) {
+  font-size: 1.75em;
+  font-weight: 700;
+  margin-top: 0;
+}
+:where([data-streamdown="heading-2"]) {
+  font-size: 1.4em;
+}
+:where([data-streamdown="heading-3"]) {
+  font-size: 1.2em;
+}
+:where([data-streamdown="heading-4"]) {
+  font-size: 1em;
+}
+:where([data-streamdown="heading-5"], [data-streamdown="heading-6"]) {
+  font-size: 0.925em;
+  color: var(--color-muted-foreground);
+}
+:where([data-streamdown^="heading-"]):first-child {
+  margin-top: 0;
+}
+
+/* Links. `.md-link` is the same look for the renderers that replace
+ * Streamdown's `<a>` with their own (MarkdownView, Comb). */
+:where([data-streamdown="link"], .md-link) {
+  color: var(--color-foreground);
+  font-weight: 500;
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklch, var(--color-primary) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 120ms ease;
+}
+:where([data-streamdown="link"], .md-link):hover {
+  text-decoration-color: var(--color-primary);
+}
+
+/* Lists. Streamdown draws lists with `list-inside`; in a "loose" list (a blank
+ * line between items) each item's text is a <p> block, so the marker sat alone
+ * on a line above its text. Outside markers keep the bullet beside the first
+ * line, and the per-item <p> margins collapse. Scopes that set their own
+ * padding win. */
+:where([data-streamdown="unordered-list"], [data-streamdown="ordered-list"]) {
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+:where([data-streamdown="unordered-list"]) {
+  list-style-type: disc;
+}
+:where([data-streamdown="ordered-list"]) {
+  list-style-type: decimal;
+}
+:where([data-streamdown="unordered-list"] [data-streamdown="unordered-list"]) {
+  list-style-type: circle;
+}
+:where([data-streamdown="list-item"]) {
+  margin: 0.3em 0;
+  padding: 0 0 0 0.25em;
+  line-height: 1.65;
+}
+:where([data-streamdown="list-item"])::marker {
+  color: color-mix(in oklch, var(--color-muted-foreground) 75%, transparent);
+}
+:where([data-streamdown="ordered-list"] > [data-streamdown="list-item"])::marker {
+  color: var(--color-muted-foreground);
+}
+:where([data-streamdown="list-item"]) > :where(ul, ol) {
+  margin: 0.3em 0;
+}
+[data-streamdown="list-item"] > p {
+  margin: 0;
+}
+[data-streamdown="list-item"] > p + p {
+  margin-top: 0.25em;
+}
+
+/* Blockquote */
+:where([data-streamdown="blockquote"]) {
+  margin: 1em 0;
+  padding: 0 0 0 1em;
+  border-left: 3px solid color-mix(in oklch, var(--color-muted-foreground) 30%, transparent);
+  color: color-mix(in oklch, var(--color-foreground) 80%, transparent);
+  font-style: italic;
+}
+
+/* Horizontal rule */
+:where([data-streamdown="horizontal-rule"]) {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Inline code, a small chip. Renderers that replace Streamdown's inline code
+ * keep their own classes. */
+:where([data-streamdown="inline-code"]) {
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+  background: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Images */
+:where([data-streamdown="image-wrapper"]) {
+  margin: 1em 0;
+}
+:where([data-streamdown="image"]) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+
+/* Tables. Streamdown frames each table twice (a bordered card holding the
+ * toolbar, then a bordered scroll box) and fills the header row. Both frames
+ * go: the table sits on the page, and the copy / download / fullscreen toolbar
+ * floats over the header row's right end, shown on hover or keyboard focus. */
+:where([data-streamdown="table-wrapper"]) {
+  position: relative;
+  display: block;
+  margin: 1.25em 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:where([data-streamdown="table-wrapper"]) > :where(div:not(:has(> table))) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  border-radius: 0.375rem;
+  background: var(--color-background);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+:where([data-streamdown="table-wrapper"]):is(:hover, :focus-within)
+  > :where(div:not(:has(> table))) {
+  opacity: 1;
+}
+:where([data-streamdown="table-wrapper"]) > :where(div:has(> table)) {
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:where([data-streamdown="table"]) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.925em;
+  line-height: 1.6;
+  text-align: left;
+}
+:where([data-streamdown="table"]) > :where(thead, tbody) {
+  border: 0;
+}
+:where([data-streamdown="table-header"]) {
+  border-bottom: 1px solid color-mix(in oklch, var(--color-foreground) 22%, transparent);
+  background: transparent;
+}
+:where([data-streamdown="table-header-cell"]) {
+  padding: 0 1em 0.6em;
+  color: var(--color-foreground);
+  font-size: inherit;
+  font-weight: 600;
+  text-align: left;
+  vertical-align: bottom;
+}
+:where([data-streamdown="table-body"] > [data-streamdown="table-row"]) {
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+:where([data-streamdown="table-body"] > [data-streamdown="table-row"]):last-child {
+  border-bottom: 0;
+}
+:where([data-streamdown="table-cell"]) {
+  padding: 0.6em 1em;
+  font-size: inherit;
+  vertical-align: top;
+}
+:where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
+  padding-left: 0;
+}
+:where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):last-child {
+  padding-right: 0;
+}

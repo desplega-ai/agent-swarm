@@ -15,8 +15,11 @@ export interface ConnectFlowDeps {
   getMe: (apiKey: string) => Promise<MeResponse>;
   /** `ls /` on the swarm drive with `apiKey`. The paste-key fallback only. */
   ls: (apiKey: string) => Promise<unknown>;
-  /** Swarm API invite of `email` to the swarm drive. The paste-key fallback only. */
-  invite: (email: string) => Promise<unknown>;
+  /**
+   * Swarm API invite of `email` to the swarm drive, accepted with `apiKey`
+   * when pending. The paste-key fallback only.
+   */
+  invite: (email: string, apiKey: string) => Promise<unknown>;
   /** Save the credential (`useAgentFs().connect`). */
   connect: (credential: AgentFsCredential) => void;
 }
@@ -132,7 +135,7 @@ export async function connectWithKey(
     // their current role, so a viewer of the swarm drive stays a viewer.
     if (!(await hasDriveAccess(deps, apiKey))) {
       try {
-        await deps.invite(me.email);
+        await deps.invite(me.email, apiKey);
       } catch {
         throw new ConnectError(inviteMessage(me.email));
       }

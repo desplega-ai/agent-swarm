@@ -131,6 +131,14 @@ export class AgentFsClient {
     return res.json() as Promise<T>;
   }
 
+  /** Accept an org invite as this key's account (`POST /invites/{token}/accept`). */
+  async acceptInvite(token: string): Promise<void> {
+    await send(`${this.endpoint}/invites/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+      apiKey: this.#apiKey,
+    });
+  }
+
   /**
    * `GET /auth/me`. The paste-key fallback only: a key the dashboard minted
    * is scoped to the shared org, and its identity comes from the swarm.

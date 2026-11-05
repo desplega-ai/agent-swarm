@@ -1437,6 +1437,7 @@ function AppHeaderActions({
           appId={settingsApp.id}
           appName={settingsApp.name}
           appDefaultTheme={settingsApp.definition.theme}
+          appIcon={settingsApp.definition.icon}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
         />

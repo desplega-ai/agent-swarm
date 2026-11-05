@@ -241,6 +241,7 @@ export type SharedOrgInviteResult = {
   inviteId?: string;
   expiresAt?: string;
   acceptUrl?: string;
+  token?: string;
 };
 
 /** Use complete shared credentials without writes. Provision missing credentials otherwise. */
@@ -314,10 +315,12 @@ export async function syncAgentFsOrgSwarmUrl(
  * Connect-to-Drive flow) never need the bootstrap key itself — it is
  * API-only and never served over HTTP.
  *
- * agent-fs (>= 0.18.9) adds an email that has an account directly
- * (`status: "added"`) and answers an email without one with a pending invite
- * (`status: "pending"`, plus `acceptUrl` when its app URL is configured).
- * agent-fs sends no email, so the accept link is passed back to the caller.
+ * agent-fs (>= 0.18.19) adds an email that is already in the org directly
+ * (`status: "added"`) and answers any other email, with or without an account,
+ * with a pending invite (`status: "pending"`, the accept `token`, plus
+ * `acceptUrl` when its app URL is configured). agent-fs sends no email, so the
+ * token and link are passed back to the caller. Only the invited account can
+ * accept, with its own key (`POST /invites/{token}/accept`).
  */
 export async function inviteEmailToSharedOrg(
   email: string,
@@ -339,6 +342,7 @@ export async function inviteEmailToSharedOrg(
     inviteId?: unknown;
     expiresAt?: unknown;
     acceptUrl?: unknown;
+    token?: unknown;
   }>(shared.apiUrl, `/orgs/${encodeURIComponent(shared.orgId)}/members/invite`, {
     method: "POST",
     headers: shared.authHeaders,
@@ -356,6 +360,7 @@ export async function inviteEmailToSharedOrg(
     ...(typeof response.inviteId === "string" ? { inviteId: response.inviteId } : {}),
     ...(typeof response.expiresAt === "string" ? { expiresAt: response.expiresAt } : {}),
     ...(typeof response.acceptUrl === "string" ? { acceptUrl: response.acceptUrl } : {}),
+    ...(typeof response.token === "string" ? { token: response.token } : {}),
   };
 }
 
@@ -420,7 +425,13 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   const currentRoles = await getCurrentOrgMemberRoles(apiUrl, shared.authHeaders, shared.orgId);
   const currentRole = currentRoles.get(email.toLowerCase());
   if (!currentRole || roleRank(currentRole) < roleRank("editor")) {
-    await inviteToSharedOrg(apiUrl, shared.authHeaders, shared.orgId, { email, role: "editor" });
+    await inviteToSharedOrg(
+      apiUrl,
+      shared.authHeaders,
+      shared.orgId,
+      { email, role: "editor" },
+      { acceptWithApiKey: apiKey },
+    );
   }
 
   await upsertSwarmConfig({
@@ -522,14 +533,40 @@ async function inviteToSharedOrg(
   headers: Record<string, string>,
   orgId: string,
   invite: InviteTarget,
+  options: { acceptWithApiKey?: string } = {},
 ): Promise<"invited" | "no-account" | "transient-failure"> {
   try {
-    await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}/members/invite`, {
-      method: "POST",
-      headers,
-      body: invite,
-      allowConflict: true,
-    });
+    const response = await agentFsRequest<{ status?: unknown; token?: unknown }>(
+      apiUrl,
+      `/orgs/${encodeURIComponent(orgId)}/members/invite`,
+      {
+        method: "POST",
+        headers,
+        body: invite,
+        allowConflict: true,
+      },
+    );
+    // agent-fs >= 0.18.19 answers an account that is not yet in the org with a
+    // pending invite, even when the account exists. An agent account is ours,
+    // so accept it with the agent's own key; without that the agent never joins.
+    if (
+      options.acceptWithApiKey &&
+      response?.status === "pending" &&
+      typeof response.token === "string"
+    ) {
+      try {
+        await agentFsRequest(apiUrl, `/invites/${encodeURIComponent(response.token)}/accept`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${options.acceptWithApiKey}` },
+          allowConflict: true,
+        });
+      } catch (error) {
+        // The request path carries the invite token: rethrow without it.
+        throw new Error(
+          `agent-fs invite accept failed${error instanceof AgentFsRequestError ? `: HTTP ${error.status}` : ""}`,
+        );
+      }
+    }
     return "invited";
   } catch (error) {
     console.warn(

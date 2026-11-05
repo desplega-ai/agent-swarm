@@ -56,7 +56,7 @@ Reusable elements live in the versioned definition. They are private by default 
 
 `userConfig` declares typed settings, but each user's values are stored separately from the shared definition and rows. This is useful for preferences such as a default region, reporting window, or whether archived records are shown.
 
-An optional definition `theme` sets the App's default canvas preset. Viewers can override it per App without changing the shared definition. Treat the definition theme as a default, not an enforcement mechanism. An optional definition `icon` (`{ type: "lucide", icon: "<name>", color?: "#RRGGBB" }`, the same shape as agent avatars) is shown next to the App on the dashboard Apps page, which falls back to a generic icon when the name is unknown.
+An optional definition `theme` sets the App's default canvas preset. Viewers can override it per App without changing the shared definition. Treat the definition theme as a default, not an enforcement mechanism. An optional definition `icon` is shown next to the App on the dashboard Apps page. It takes the same shapes as agent avatars: a Lucide glyph (`{ type: "lucide", icon: "<name>", color?: "#RRGGBB" }`), an HTTPS image (`{ type: "url", url }`), or an image in agent-fs (`{ type: "agent-fs", path }` on the swarm drive, or with both `orgId` and `driveId` for another drive). The page shows a generic icon when the name is unknown or the image cannot load.
 
 ## Versioning, migrations, and rollback
 

@@ -1,0 +1,101 @@
+---
+title: AI operations governance for small companies
+description: Nine practical controls for running AI agents in business operations, with the documented Agent Swarm feature behind each and the limits to know.
+---
+
+A company under 100 people with a one to five person tech function does not need a governance program. It needs a written control record for each agent workflow: who owns it, what it may reach, when a person has to approve, and what happens when it fails. The nine controls below are small enough to write this quarter and each maps to a documented Agent Swarm feature; read the limits in each section as part of the policy, because product controls support a governance policy and do not replace one.
+
+## Workflow ownership
+
+**Recommendation.** Name one business owner per workflow. That owner defines the purpose, the acceptable outcomes, and the actions that need human judgment. Name a separate operator for credentials and recovery. For decisions with customer or production impact, the approver should be someone other than the person who built the workflow, and never the agent.
+
+**In Agent Swarm.** A task records a requester when one is known, a parent task when another task dispatched it, and a context key that groups related work. All three are optional: a root task has no parent, a schedule with no human creator or a system follow-up of a requester-less task starts work with no requester, and older tasks can have a null context key. Any agent can read another agent's outputs and failure reasons with the task tools. Per-user cost appears as "Cost by User" on the dashboard's Usage page; background work that no person requested shows as unattributed, so the owner is the only thing tying that spend to a decision.
+
+See [Team Collaboration](/docs/features/team-collaboration) and [Task lifecycle](/docs/concepts/task-lifecycle).
+
+## Access and least privilege
+
+**Recommendation.** Give each person and each integration the smallest set of permissions that lets it work. Write down who can create workflows and who can approve requests. Review that list when someone leaves, when a workflow is retired and when an integration changes scope. Keep production credentials separate from the ones an experiment uses.
+
+**In Agent Swarm.** RBAC is on by default through `RBAC_ENABLED`, with the `admin`, `requester` and `viewer` roles and the extra `auditor` role for read-only access to everyone's tasks and sessions. Secrets in the config store are encrypted at rest with `SECRETS_ENCRYPTION_KEY`. Scripts reach external APIs through a credential broker, so the raw secret stays out of script source and arguments and is substituted only for allowlisted hosts.
+
+See [Self-hosted SSO](/docs/guides/self-hosted-sso), [Secrets encryption](/docs/guides/secrets-encryption), [Scripts credential broker](/docs/guides/scripts-credential-broker) and [Script connections](/docs/guides/script-connections).
+
+**Limit.** Every new user is created as `admin`, and roles are assigned through the API only (`PUT /api/users/{id}/roles`), with no UI. RBAC gates requests made with user tokens; operator-key calls and agent calls are not affected. In oauth2-proxy mode every authenticated user holds the full operator key and has no per-user identity at the API or MCP layer. Treat a login proxy as a door, not as per-user authorization, and read the SSO guide before you widen access.
+
+## Source-of-truth data
+
+**Recommendation.** Name the authoritative system for every fact a workflow acts on: the CRM for the customer, the tracker for the deadline, the database for the price. Tell the workflow to read the consequential values from that system instead of a note or a cached answer. Write down what each workflow may read, what it may write, and what must never enter its context.
+
+**In Agent Swarm.** Memory is either agent-scoped or shared across the swarm, and shared memory is visible to every agent. Product telemetry is on by default and can be turned off; the documented contract excludes task descriptions, prompts, outputs, agent names, email addresses and user names, and the free text it carries is limited to values you set yourself such as `SWARM_ORG_NAME`, plus the admin email domain.
+
+See [Memory](/docs/architecture/memory) and [Telemetry](/docs/reference/telemetry).
+
+**Limit.** The `personal/` key namespace controls who may write there. It is not a privacy boundary and gives no read-visibility guarantee, so do not put sensitive content in it on the assumption that the key protects it.
+
+## Human approval thresholds
+
+**Recommendation.** Require a person before any step that cannot be undone, such as sending an external commitment or changing production. Let reversible steps run on their own once the owner has reviewed the inputs and the failure path. Write the threshold down as a rule with examples, and re-test it when the workflow's scope grows.
+
+**In Agent Swarm.** A workflow can pause on a `human-in-the-loop` node that names approvers, applies a policy, and routes a timeout to its own port, so the approved, rejected and timed-out paths are each explicit. When a workflow or agent needs a credential, a config question collects it into encrypted swarm config and the agent learns only that it was set.
+
+See [Workflows](/docs/concepts/workflows), [HITL gates](/docs/playbooks/patterns/hitl-gates) and [Approval requests](/docs/api-reference/approvalrequests).
+
+## Audit trails
+
+**Recommendation.** For each workflow, decide what evidence an operator needs to answer two questions later: who requested the run and who approved the consequential step. Give that evidence an owner and a retention period, and restrict who can read it.
+
+**In Agent Swarm.** Lifecycle events and task history record what happened to a task, including its failure reason and its output. OpenTelemetry traces and metrics can carry the same run into your observability backend, and the swarm's own exporters stay off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set. That setting covers the swarm only: [product telemetry](/docs/reference/telemetry) is on by default and is turned off separately, and a harness such as Claude Code or Codex runs its own exporters, which send to whatever endpoint the operator points them at.
+
+See [Events](/docs/api-reference/events), [Team Collaboration](/docs/features/team-collaboration) and [OpenTelemetry](/docs/guides/observability-opentelemetry).
+
+## Exception handling
+
+**Recommendation.** Write the stop and escalate rules before the workflow goes live, covering a missing input or an ignored approval. Do not auto-retry an action that creates an external effect unless repeating it is safe. Name the person who investigates a failure and where the resolution gets recorded.
+
+**In Agent Swarm.** Workflows support retries, timeouts and failure routing to separate paths. Task steering sends new instructions to work already running, and a steering request can be set to fail instead of degrading when a true interrupt is required.
+
+See [Workflows](/docs/concepts/workflows) and [Steer a running task](/docs/guides/task-steering).
+
+**Limit.** Not every harness can interrupt a running agent. Task responses advertise `supportedSteerModes`, and a `steer` request on a harness that cannot interrupt degrades to `queue` by default. For a safety-critical stop, check the mode the assigned harness supports before you rely on it.
+
+## Incident response
+
+**Recommendation.** Keep a one-page runbook: who gets paged and how to stop the workflow. Add the steps to revoke the credential it used and to restore data, and the name of the person who tells the customer if the incident reaches them. Rehearse the stop once, with the person who will actually do it.
+
+**In Agent Swarm.** An on-call playbook takes an alert from PagerDuty, Datadog, Sentry or a webhook, investigates it and waits for a person before opening a fix. A worker that loses its harness credentials parks in a waiting state instead of crash-looping, and the dashboard shows what it is blocked on.
+
+See [Open Oncall](/docs/playbooks/open-oncall) and [Worker credential recovery](/docs/guides/worker-credential-recovery).
+
+**Limit.** Migrations are forward-only, so a rollback is a restore, not a downgrade. Back up the database and its encryption key together and test the restore, because losing the key means losing every encrypted secret with no recovery path.
+
+## Vendor and model portability
+
+**Recommendation.** Keep workflow definitions and policies in a repository you own. Prefer a provider feature only when you have a tested fallback for the path that cannot pause. Budget one exercise per provider change: same input, same expected output, same approval behaviour.
+
+**In Agent Swarm.** A deployment can run several harness providers and reach models through a model gateway, and memory embeddings point at any OpenAI-compatible endpoint.
+
+See [Harness providers](/docs/guides/harness-providers), [Provider capability matrix](/docs/guides/provider-capability-matrix), [Model gateways](/docs/guides/provider-auth/model-gateways), [Harness configuration](/docs/guides/harness-configuration) and [Memory](/docs/architecture/memory).
+
+**Limit.** Providers differ in what they support, including task steering, so a switch is a change to test rather than a drop-in replacement. Check the matrix row for the feature your workflow depends on.
+
+## Periodic review
+
+**Recommendation.** Put one review on the calendar each quarter and after any significant change: owners and access first, then every other control in this guide. Re-test the approval and failure paths when a workflow changes, because a passing test from three months ago describes a different system.
+
+**In Agent Swarm.** Retention settings for logs, events and script runs are disabled until you set them, and `DB_RETENTION_DRY_RUN=true` reports what would be deleted before anything is. The review itself can run as a recurring schedule.
+
+See [Deployment](/docs/guides/deployment#database-retention) and [Scheduled tasks](/docs/concepts/scheduling).
+
+## Start with one workflow
+
+Pick the workflow with the clearest owner and the smallest blast radius, and write these six lines before you enable it:
+
+- Owner, and the operator who handles credentials and recovery.
+- Allowed data and tools, plus what must never enter its context.
+- Approval points, with the approved, rejected and timed-out path for each.
+- Failure path: who investigates, what gets retried, what gets escalated.
+- Evidence and retention: where the run history lives, who reads it, how long it stays.
+- Next review date, and the name of the person who will run that review.
+
+AI governance for a small team expands one owned, written workflow at a time.
