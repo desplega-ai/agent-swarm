@@ -293,3 +293,53 @@ describe("POST /api/apps/:id/actions/:name with parentTaskId", () => {
     expect((await getTaskById(started.body.taskId))?.parentTaskId ?? null).toBeNull();
   });
 });
+
+describe("POST /api/apps/:id/actions/:name with followUp and requestedByUserId", () => {
+  test("followUp: false creates the task with its Lead follow-up disabled", async () => {
+    const appId = await createChainedApp();
+    const started = await runAction<{ taskId: string }>(appId, { input: {}, followUp: false });
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.followUpConfig).toEqual({ disabled: true });
+  });
+
+  test("without followUp the task keeps the default Lead follow-up", async () => {
+    const appId = await createChainedApp();
+    const started = await runAction<{ taskId: string }>(appId, { input: {} });
+    expect((await getTaskById(started.body.taskId))?.followUpConfig ?? null).toBeNull();
+  });
+
+  test("a non-task action ignores followUp", async () => {
+    const appId = await createChainedApp();
+    const ran = await runAction<{ ok: boolean }>(
+      appId,
+      { input: {}, followUp: false },
+      { action: SYNC_ACTION },
+    );
+    expect(ran.status).toBe(200);
+  });
+
+  test("the shared operator key attributes the task to the picked identity", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Picked Identity" });
+    const started = await runAction<{ taskId: string }>(
+      appId,
+      { input: {}, requestedByUserId: person.id },
+      { bearer: API_KEY },
+    );
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).toBe(person.id);
+  });
+
+  test("a caller bound to a user is attributed to that user, whatever the body says", async () => {
+    const appId = await createChainedApp();
+    const other = await createUser({ name: "Someone Else" });
+    const started = await runAction<{ taskId: string }>(
+      appId,
+      { input: {}, requestedByUserId: other.id },
+      { bearer: userToken },
+    );
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).not.toBe(other.id);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).toBeTruthy();
+  });
+});

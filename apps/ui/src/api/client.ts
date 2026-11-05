@@ -4453,12 +4453,23 @@ class ApiClient {
     name: string,
     input?: Record<string, unknown>,
     parentTaskId?: string,
+    /**
+     * Task-kind actions only. `followUp: false` skips the Lead follow-up
+     * (review) of the created task; `requestedByUserId` names the picked
+     * identity, which the server honors only for a shared operator key.
+     */
+    options: { followUp?: boolean; requestedByUserId?: string } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       {
         method: "POST",
-        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+        body: JSON.stringify({
+          input: input ?? {},
+          ...(parentTaskId ? { parentTaskId } : {}),
+          ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+          ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+        }),
       },
       `Failed to run action ${name}`,
     );
