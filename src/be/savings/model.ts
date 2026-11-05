@@ -47,6 +47,10 @@ export const ERR_JOB: SavingsBand = { p10: 0.542, p50: 1.0, p90: 1.508 };
 export const ERR_FLEET: SavingsBand = { p10: 0.746, p50: 1.0, p90: 1.325 };
 /** Ops of a swarm-script node whose script is not in the catalog. */
 export const DEFAULT_OPS = 9;
+/** Ops of a script run with inline source (no catalog entry), from v7. */
+export const INLINE_OPS = 3.9;
+/** Job id of the script runs that carry no script name (inline source). */
+export const INLINE_SCRIPT_NAME = "(inline source)";
 /** Upper bound on the ops counted for one script. */
 export const MAX_SCRIPT_OPS = 100;
 /**
@@ -454,4 +458,111 @@ export function splitByDay(
       estimatedLlmUsd,
     };
   });
+}
+
+/** Tier-independent facts about one script (by name) over a window. */
+export type ScriptFacts = {
+  /** Every run that started in the window. */
+  runs: number;
+  /** Runs started through an API endpoint: enabled-only unless they had an effect. */
+  apiRuns: number;
+  /** Non-API runs whose output names an agent task created while they ran. */
+  effectRuns: number;
+  /** API runs with such an effect. */
+  apiEffectRuns: number;
+  /** Ops summed over every run (ops per run times runs). */
+  opsSum: number;
+  /** Wall time of the runs. */
+  computeSecs: number;
+};
+
+export type ScriptKind = "script-scheduled" | "script-agent-invoked";
+
+/**
+ * Price one script's facts at a tier, as v7 `scriptJobs` does. A scheduled
+ * script (a schedule targets it) is a standalone agent task with a lead
+ * review; any other script is priced as the extra turns it would add to the
+ * calling agent's session (no bootstrap, no review). Non-API runs count at
+ * most 24 a day, unless they had a downstream effect. An API run counts only
+ * when it had an effect, then as a standalone decision with a review.
+ * Scripts record no LLM spend, so their actual cost is 0.
+ */
+export function priceScript(
+  facts: ScriptFacts,
+  opts: { tier: SavingsTier; days: number; band: "job" | "fleet"; kind: ScriptKind },
+): PricedWorkflow {
+  const runs = facts.runs;
+  const nonApi = runs - facts.apiRuns;
+  const vCap = Math.min(nonApi, CAP_PER_DAY * opts.days);
+  const v = Math.max(vCap, Math.min(nonApi, facts.effectRuns));
+  const apiV = facts.apiEffectRuns;
+  const opsPerRun = runs > 0 ? facts.opsSum / runs : 0;
+  const tau = Math.min(TAU_MAX, T0 + K * opsPerRun);
+  const fullUsd = curve(tau, opts.tier, "usd");
+  const fullHrs = curve(tau, opts.tier, "hrs");
+  const scheduled = opts.kind === "script-scheduled";
+  const unitUsd = scheduled ? fullUsd : Math.max(0, fullUsd - curve(T0, opts.tier, "usd"));
+  const unitHrs = scheduled ? fullHrs : Math.max(0, fullHrs - curve(T0, opts.tier, "hrs"));
+  const review = scheduled ? F_FOLLOWUP : 0;
+  const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
+  const agentOnlyUsd = bandOf(
+    (q) => v * (R[q] * unitUsd * err[q] + review) + apiV * (R[q] * fullUsd * err[q] + F_FOLLOWUP),
+  );
+  const agentOnlyHours = bandOf(
+    (q) => v * R[q] * unitHrs * err[q] + apiV * R[q] * fullHrs * err[q],
+  );
+  // v7 scales the runs' wall time by the substituted share of non-API runs over all runs.
+  const actualHours = runs > 0 ? (facts.computeSecs / 3600) * (v / runs) : 0;
+  return {
+    enabledOnlyRule: false,
+    runs,
+    substitutedRuns: v + apiV,
+    effectRuns: v - vCap + apiV,
+    enabledOnlyRuns: runs - v - apiV,
+    capApplied: vCap < nonApi,
+    opsPerRun,
+    measuredUsd: 0,
+    estimatedLlmUsd: 0,
+    actualUsd: 0,
+    agentOnlyUsd,
+    savingUsd: agentOnlyUsd,
+    actualHours,
+    agentOnlyHours,
+    hoursSaved: bandOf((q) => agentOnlyHours[q] - actualHours),
+    agentOnlyUsdPerRun: R.p50 * unitUsd + review,
+  };
+}
+
+/**
+ * Split a script's window p50 saving across the UTC days its runs started
+ * on, so the days sum to `priceScript` over the window. Counted non-API runs
+ * are spread pro rata over the days' non-API runs; API effect runs count on
+ * their own day.
+ */
+export function splitScriptByDay(
+  facts: ScriptFacts,
+  byDay: readonly (ScriptFacts & { day: string })[],
+  priced: PricedWorkflow,
+): {
+  day: string;
+  savingUsd: number;
+  actualUsd: number;
+  measuredUsd: number;
+  estimatedLlmUsd: number;
+}[] {
+  const nonApi = facts.runs - facts.apiRuns;
+  const v = priced.substitutedRuns - facts.apiEffectRuns;
+  const apiUnit =
+    facts.apiEffectRuns > 0
+      ? (priced.agentOnlyUsd.p50 - v * priced.agentOnlyUsdPerRun) / facts.apiEffectRuns
+      : 0;
+  return byDay.map((d) => ({
+    day: d.day,
+    savingUsd:
+      (nonApi > 0 ? (v * (d.runs - d.apiRuns)) / nonApi : 0) * priced.agentOnlyUsdPerRun +
+      d.apiEffectRuns * apiUnit,
+    actualUsd: 0,
+    measuredUsd: 0,
+    estimatedLlmUsd: 0,
+  }));
 }

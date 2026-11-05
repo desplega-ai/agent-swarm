@@ -5,12 +5,18 @@ import {
   curve,
   DEFAULT_OPS,
   F_FOLLOWUP,
+  INLINE_OPS,
   isEnabledOnlyRouter,
   jobKey,
   nodeOpsOf,
+  priceScript,
   priceWorkflow,
+  R,
   SAVINGS_TIERS,
+  type ScriptFacts,
   splitByDay,
+  splitScriptByDay,
+  T0,
   type WorkflowFacts,
 } from "../be/savings/model";
 
@@ -313,5 +319,93 @@ describe("savings model", () => {
     // Schedule-triggered high volume is the cap's job, not the rule's.
     const poll = facts({ runs: 9000, countedRuns: 9000, schedRuns: 9000 });
     expect(isEnabledOnlyRouter(poll, 30)).toBe(false);
+  });
+
+  describe("scripts", () => {
+    const script = (over: Partial<ScriptFacts> = {}): ScriptFacts => ({
+      runs: 0,
+      apiRuns: 0,
+      effectRuns: 0,
+      apiEffectRuns: 0,
+      opsSum: 0,
+      computeSecs: 0,
+      ...over,
+    });
+    const p50 = (f: ScriptFacts, kind: "script-scheduled" | "script-agent-invoked") =>
+      Math.round(
+        priceScript(f, { tier: "smart", days: 30, band: "job", kind }).savingUsd.p50 * 100,
+      ) / 100;
+
+    test("matches the v7 estimator run rows at smart over 30 days", () => {
+      // Scheduled and capped at 720 (client-seven-pct-page, 28 ops).
+      expect(p50(script({ runs: 1983, opsSum: 28 * 1983 }), "script-scheduled")).toBe(475.98);
+      // Scheduled, under the cap (github-insights-page-refresh, 30 ops).
+      expect(p50(script({ runs: 499, opsSum: 30 * 499 }), "script-scheduled")).toBe(338.85);
+      // Agent-invoked marginal turns, capped (dispatch-preflight, 48 ops).
+      expect(p50(script({ runs: 4164, opsSum: 48 * 4164 }), "script-agent-invoked")).toBe(378.15);
+      // Inline source at INLINE_OPS.
+      expect(p50(script({ runs: 15114, opsSum: INLINE_OPS * 15114 }), "script-agent-invoked")).toBe(
+        22.05,
+      );
+    });
+
+    test("agent-invoked runs are marginal turns with no bootstrap and no review", () => {
+      const f = script({ runs: 10, opsSum: 10 * 20 });
+      const tau = T0 + 0.2753 * 20;
+      const agent = priceScript(f, {
+        tier: "smart",
+        days: 30,
+        band: "job",
+        kind: "script-agent-invoked",
+      });
+      const sched = priceScript(f, {
+        tier: "smart",
+        days: 30,
+        band: "job",
+        kind: "script-scheduled",
+      });
+      expect(agent.agentOnlyUsdPerRun).toBeCloseTo(
+        R.p50 * (curve(tau, "smart", "usd") - curve(T0, "smart", "usd")),
+        9,
+      );
+      expect(sched.agentOnlyUsdPerRun).toBeCloseTo(
+        R.p50 * curve(tau, "smart", "usd") + F_FOLLOWUP,
+        9,
+      );
+      expect(agent.actualUsd).toBe(0);
+      expect(agent.substitutedRuns).toBe(10);
+    });
+
+    test("API runs count only with an effect; non-API effect runs lift the cap", () => {
+      const priced = priceScript(
+        script({ runs: 1000, apiRuns: 100, apiEffectRuns: 4, effectRuns: 800, opsSum: 1000 * 10 }),
+        { tier: "smart", days: 30, band: "job", kind: "script-scheduled" },
+      );
+      // max(min(900, 720), 800) non-API runs + 4 API effect runs.
+      expect(priced.substitutedRuns).toBe(804);
+      expect(priced.effectRuns).toBe(84);
+      expect(priced.enabledOnlyRuns).toBe(196);
+      expect(priced.capApplied).toBe(true);
+      const tau = T0 + 0.2753 * 10;
+      const unit = R.p50 * curve(tau, "smart", "usd") + F_FOLLOWUP;
+      expect(priced.savingUsd.p50).toBeCloseTo(804 * unit, 6);
+    });
+
+    test("daily split sums to the window saving", () => {
+      const days = [
+        { day: "2026-10-01", ...script({ runs: 900, opsSum: 900 * 5 }) },
+        { day: "2026-10-02", ...script({ runs: 100, apiRuns: 10, apiEffectRuns: 2, opsSum: 500 }) },
+      ];
+      const f = script({ runs: 1000, apiRuns: 10, apiEffectRuns: 2, opsSum: 5000 });
+      const priced = priceScript(f, {
+        tier: "smart",
+        days: 30,
+        band: "job",
+        kind: "script-scheduled",
+      });
+      const split = splitScriptByDay(f, days, priced);
+      expect(split.reduce((s, d) => s + d.savingUsd, 0)).toBeCloseTo(priced.savingUsd.p50, 6);
+      expect(split.every((d) => d.actualUsd === 0)).toBe(true);
+    });
   });
 });

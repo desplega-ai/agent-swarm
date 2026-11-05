@@ -10,7 +10,13 @@ import {
   SAVINGS_TIERS,
   type SavingsBand,
 } from "../be/savings/model";
-import { readWorkflowSavings, type SavingsTotals } from "../be/savings/read";
+import {
+  isKnownScriptName,
+  readScriptSavings,
+  readWorkflowSavings,
+  type SavingsTotals,
+  type WorkflowSavingsRead,
+} from "../be/savings/read";
 import { refreshWorkflowToday, utcDay } from "../be/savings/rollup";
 import { executeReadOnlyQueryGated } from "./db-query";
 import {
@@ -60,8 +66,16 @@ export const savingsRollupSql: SavingsSql = async <T>(sql: string, params: DbPar
 const SavingsBandSchema = z.object({ p10: z.number(), p50: z.number(), p90: z.number() });
 
 const SavingsJobRowSchema = z.object({
-  kind: z.literal("workflow"),
-  workflowId: z.string(),
+  /**
+   * `script-scheduled`: a schedule targets the script, priced as a standalone
+   * agent task. `script-agent-invoked`: priced as the extra turns it adds to
+   * the calling agent's session.
+   */
+  kind: z.enum(["workflow", "script-scheduled", "script-agent-invoked"]),
+  /** Set on workflow rows. */
+  workflowId: z.string().optional(),
+  /** Set on script rows. Scripts are keyed by name across scopes. */
+  scriptName: z.string().optional(),
   name: z.string(),
   basis: z.literal("modelled"),
   /** True when the enabled-only rule priced only the runs with a downstream effect (an event router). */
@@ -159,19 +173,23 @@ const savingsJobsRoute = route({
   method: "get",
   path: "/api/savings/jobs",
   pattern: ["api", "savings", "jobs"],
-  summary: "Estimated automation savings per workflow",
+  summary: "Estimated automation savings per workflow or script",
   description:
-    "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+    "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1).optional(),
-    kind: z.enum(["workflow"]).optional(),
+    scriptName: z.string().min(1).optional(),
+    kind: z.enum(["workflow", "script"]).optional(),
     ...windowQuery,
   }),
   responses: {
     200: { description: "Savings rows", schema: SavingsJobsResponseSchema },
-    400: { description: "Neither workflowId nor kind, or an unknown days or tier value" },
-    404: { description: "Workflow not found" },
+    400: {
+      description:
+        "Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value",
+    },
+    404: { description: "Workflow or script not found" },
   },
 });
 
@@ -179,15 +197,21 @@ const savingsDailyRoute = route({
   method: "get",
   path: "/api/savings/daily",
   pattern: ["api", "savings", "daily"],
-  summary: "Daily automation savings of a workflow",
+  summary: "Daily automation savings of a workflow or script",
   description:
-    "The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
+    "The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.",
   tags: ["Savings"],
-  query: z.object({ workflowId: z.string().min(1), ...windowQuery }),
+  query: z.object({
+    workflowId: z.string().min(1).optional(),
+    scriptName: z.string().min(1).optional(),
+    ...windowQuery,
+  }),
   responses: {
     200: { description: "Daily savings points", schema: SavingsDailyResponseSchema },
-    400: { description: "Missing workflowId, or an unknown days or tier value" },
-    404: { description: "Workflow not found" },
+    400: {
+      description: "Not exactly one of workflowId and scriptName, or an unknown days or tier value",
+    },
+    404: { description: "Workflow or script not found" },
   },
 });
 
@@ -217,10 +241,16 @@ export function roundToTotal(values: number[]): number[] {
   return floors.map((c) => c / 100);
 }
 
-function toRow(row: PricedWorkflow & { workflowId: string; name: string }) {
+type ReadRow = PricedWorkflow & { name: string } & (
+    | { workflowId: string; kind?: undefined }
+    | { scriptName: string; kind: "script-scheduled" | "script-agent-invoked" }
+  );
+
+function toRow(row: ReadRow) {
   return {
-    kind: "workflow" as const,
-    workflowId: row.workflowId,
+    ...("workflowId" in row
+      ? { kind: "workflow" as const, workflowId: row.workflowId }
+      : { kind: row.kind, scriptName: row.scriptName }),
     name: row.name,
     basis: "modelled" as const,
     enabledOnlyRule: row.enabledOnlyRule,
@@ -255,9 +285,25 @@ function toTotals(t: SavingsTotals) {
   };
 }
 
-function notFound(res: ServerResponse): true {
+function notFound(res: ServerResponse, what: "Workflow" | "Script" = "Workflow"): true {
   res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "Workflow not found" }));
+  res.end(JSON.stringify({ error: `${what} not found` }));
+  return true;
+}
+
+/**
+ * One script. No on-request refresh: the hourly bucket is served.
+ * shortcut: scripts skip the workflow page's live refresh of today's bucket
+ * (an agent-invoked script can run thousands of times a day and its effect
+ * probe is a LIKE scan); add one if a detail page needs minute-fresh numbers.
+ */
+async function readScript(scriptName: string, days: number, tier: (typeof SAVINGS_TIERS)[number]) {
+  if (!(await isKnownScriptName(scriptName))) return null;
+  return readScriptSavings({ days, tier, now: Date.now(), scriptName });
+}
+
+function badTarget(res: ServerResponse, message: string): true {
+  json(res, { error: message }, 400);
   return true;
 }
 
@@ -348,9 +394,12 @@ export async function handleSavings(
   if (savingsDailyRoute.match(req.method, pathSegments)) {
     const parsed = await savingsDailyRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const { workflowId, days, tier } = parsed.query;
-    const read = await readOne(workflowId, days, tier);
-    if (!read) return notFound(res);
+    const { workflowId, scriptName, days, tier } = parsed.query;
+    if (!workflowId === !scriptName) return badTarget(res, "Pass workflowId or scriptName");
+    const read = workflowId
+      ? await readOne(workflowId, days, tier)
+      : await readScript(scriptName as string, days, tier);
+    if (!read) return notFound(res, workflowId ? "Workflow" : "Script");
     const hasRows = read.rows.length > 0;
     const points = read.complete && hasRows ? read.points : [];
     const saving = roundToTotal(points.map((p) => p.savingUsd));
@@ -373,15 +422,18 @@ export async function handleSavings(
   if (!savingsJobsRoute.match(req.method, pathSegments)) return false;
   const parsed = await savingsJobsRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
-  const { workflowId, kind, days, tier } = parsed.query;
-  if (!workflowId && !kind) {
-    json(res, { error: "Pass workflowId or kind=workflow" }, 400);
-    return true;
+  const { workflowId, scriptName, kind, days, tier } = parsed.query;
+  if ([workflowId, scriptName, kind].filter(Boolean).length !== 1) {
+    return badTarget(res, "Pass one of workflowId, scriptName, kind=workflow or kind=script");
   }
-  const read = workflowId
+  const read: (Omit<WorkflowSavingsRead, "rows"> & { rows: ReadRow[] }) | null = workflowId
     ? await readOne(workflowId, days, tier)
-    : await readWorkflowSavings({ days, tier, now: Date.now() });
-  if (!read) return notFound(res);
+    : scriptName
+      ? await readScript(scriptName, days, tier)
+      : kind === "script"
+        ? await readScriptSavings({ days, tier, now: Date.now() })
+        : await readWorkflowSavings({ days, tier, now: Date.now() });
+  if (!read) return notFound(res, scriptName ? "Script" : "Workflow");
   const show = read.complete;
   savingsJobsRoute.respond(res, 200, {
     ...meta(read, tier, { complete: read.complete, hasRows: read.rows.length > 0 }),

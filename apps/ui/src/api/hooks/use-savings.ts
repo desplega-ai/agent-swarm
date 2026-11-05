@@ -1,23 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../client";
+import type { SavingsTarget } from "../types";
 
 /** Savings come from an hourly rollup; 10 minutes is fresh enough. */
-export function useWorkflowSavings(workflowId: string | undefined) {
+const STALE_MS = 10 * 60 * 1000;
+
+/** Saving of one workflow or script over the last 30 days. */
+export function useJobSavings(target: SavingsTarget | undefined) {
   return useQuery({
-    queryKey: ["savings", "workflow", workflowId],
-    queryFn: () => api.getWorkflowSavings(workflowId as string),
-    enabled: !!workflowId,
-    staleTime: 10 * 60 * 1000,
+    queryKey: ["savings", "job", target],
+    queryFn: () => api.getSavingsJobs(target as SavingsTarget),
+    enabled: !!target,
+    staleTime: STALE_MS,
     retry: false,
   });
 }
 
-export function useWorkflowSavingsDaily(workflowId: string | undefined, enabled = true) {
+export function useJobSavingsDaily(target: SavingsTarget | undefined, enabled = true) {
   return useQuery({
-    queryKey: ["savings", "workflow-daily", workflowId],
-    queryFn: () => api.getWorkflowSavingsDaily(workflowId as string),
-    enabled: !!workflowId && enabled,
-    staleTime: 10 * 60 * 1000,
+    queryKey: ["savings", "job-daily", target],
+    queryFn: () => api.getSavingsDaily(target as SavingsTarget),
+    enabled: !!target && enabled,
+    staleTime: STALE_MS,
     retry: false,
   });
 }
@@ -26,8 +30,18 @@ export function useWorkflowSavingsDaily(workflowId: string | undefined, enabled 
 export function useWorkflowsSavings() {
   return useQuery({
     queryKey: ["savings", "workflows"],
-    queryFn: () => api.getWorkflowsSavings({ days: 30 }),
-    staleTime: 10 * 60 * 1000,
+    queryFn: () => api.getSavingsJobs({ kind: "workflow" }, { days: 30 }),
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}
+
+/** Saving of every script name over the last 30 days, for the scripts list. */
+export function useScriptsSavings() {
+  return useQuery({
+    queryKey: ["savings", "scripts"],
+    queryFn: () => api.getSavingsJobs({ kind: "script" }, { days: 30 }),
+    staleTime: STALE_MS,
     retry: false,
   });
 }

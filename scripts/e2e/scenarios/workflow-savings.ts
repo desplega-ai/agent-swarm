@@ -1,6 +1,7 @@
 // Automation savings, read from the hourly rollup: a run is priced on the
 // detail route right away, the daily points add up to it, the list route
-// answers, an idle workflow is not valid (never $0), and bad input is rejected.
+// answers, an idle workflow is not valid (never $0), the script routes answer,
+// and bad input is rejected.
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -56,7 +57,12 @@ export const workflowSavings: Scenario = {
         `daily points sum to the p50 saving ${pointCents} vs ${band.p50}`,
       );
 
-      response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
+      // The default 30-day window is valid once the tick reaches its oldest day;
+      // workflow and script days share the tick, newest first.
+      await pollUntil(async () => {
+        response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
+        return asRecord(response.json).reason !== "not-computed";
+      }, 30_000);
       expectStatus(response, [200], "daily savings for an idle workflow");
       json = asRecord(response.json);
       expect(
@@ -84,6 +90,21 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [400], "unknown tier");
       response = await ctx.api("GET", "/api/savings/jobs");
       expectStatus(response, [400], "neither workflowId nor kind");
+
+      // Scripts read the same rollup, keyed by script name.
+      response = await ctx.api("GET", "/api/savings/jobs?kind=script&days=7");
+      expectStatus(response, [200], "savings for every script");
+      json = asRecord(response.json);
+      expect(
+        Array.isArray(json.rows) && json.reason !== "not-computed",
+        `script list computed ${response.text}`,
+      );
+      response = await ctx.api("GET", `/api/savings/jobs?scriptName=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "unknown script");
+      response = await ctx.api("GET", `/api/savings/daily?scriptName=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "daily: unknown script");
+      response = await ctx.api("GET", `/api/savings/jobs?scriptName=x&workflowId=${ran}`);
+      expectStatus(response, [400], "two targets");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
       await deleteWorkflowQuietly(ctx, idle);

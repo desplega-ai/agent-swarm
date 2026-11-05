@@ -1,7 +1,8 @@
 /**
  * Hourly rollup of the savings model into `automation_savings_daily`: one row
  * per workflow per UTC day with the tier-independent facts of
- * `computeWorkflowWindow`. Each tick recomputes the days that are not final
+ * `computeWorkflowWindow`, and per script name the facts of
+ * `computeScriptWindow` (subKind '' for non-API runs, 'api' for API runs). Each tick recomputes the days that are not final
  * yet (today and yesterday), days computed under an older MODEL_VERSION, and
  * missing days of the last ROLLUP_DAYS, newest first, within a time budget.
  * Same shape as `db-retention.ts`: single-flight tick, abort on stop, unref'd
@@ -9,8 +10,9 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDbClient } from "../db";
-import { computeWorkflowWindow, type SavingsSql } from "./compute";
-import { jobKey, MODEL_VERSION, type WorkflowFacts } from "./model";
+import type { DbExecutor } from "../db-client";
+import { computeScriptWindow, computeWorkflowWindow, type SavingsSql } from "./compute";
+import { jobKey, MODEL_VERSION, type ScriptFacts, type WorkflowFacts } from "./model";
 
 const DAY_MS = 86_400_000;
 /** Days kept and backfilled: the longest window the API serves. */
@@ -68,16 +70,18 @@ async function listWorkflows(): Promise<WorkflowRow[]> {
   return rows.map((w) => ({ ...w, definition: parseDefinition(w.definition) }));
 }
 
+export type SavingsJobKind = "workflow" | "script";
+
 /** Days of the last ROLLUP_DAYS that need a (re)computation, newest first. */
-export async function workflowDaysToCompute(now: number): Promise<string[]> {
+export async function daysToCompute(kind: SavingsJobKind, now: number): Promise<string[]> {
   const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
   const markers = await getDbClient().query<{
     day: string;
     modelVersion: number;
     computedAt: string;
   }>(
-    "SELECT day, modelVersion, computedAt FROM automation_savings_days WHERE jobKind='workflow' AND day>=?",
-    [oldest],
+    "SELECT day, modelVersion, computedAt FROM automation_savings_days WHERE jobKind=? AND day>=?",
+    [kind, oldest],
   );
   const byDay = new Map(markers.map((m) => [m.day, m]));
   const days: string[] = [];
@@ -90,6 +94,9 @@ export async function workflowDaysToCompute(now: number): Promise<string[]> {
   }
   return days;
 }
+
+export const workflowDaysToCompute = (now: number): Promise<string[]> =>
+  daysToCompute("workflow", now);
 
 /** Facts of every workflow with runs on `day`. */
 export async function computeWorkflowDay(
@@ -134,11 +141,92 @@ export async function writeWorkflowDay(
   await getDbClient().transaction(async (tx) => {
     await tx.run("DELETE FROM automation_savings_daily WHERE day=? AND jobKind='workflow'", [day]);
     for (const b of buckets) await tx.run(INSERT_BUCKET, bucketParams(day, b, computedAt));
-    await tx.run(
-      `INSERT INTO automation_savings_days (day, jobKind, modelVersion, computedAt) VALUES (?, 'workflow', ?, ?)
-       ON CONFLICT(day, jobKind) DO UPDATE SET modelVersion=excluded.modelVersion, computedAt=excluded.computedAt`,
-      [day, MODEL_VERSION, computedAt],
-    );
+    await markDay(tx, day, "workflow", computedAt);
+  });
+}
+
+async function markDay(
+  tx: DbExecutor,
+  day: string,
+  kind: SavingsJobKind,
+  computedAt: string,
+): Promise<void> {
+  await tx.run(
+    `INSERT INTO automation_savings_days (day, jobKind, modelVersion, computedAt) VALUES (?, ?, ?, ?)
+     ON CONFLICT(day, jobKind) DO UPDATE SET modelVersion=excluded.modelVersion, computedAt=excluded.computedAt`,
+    [day, kind, MODEL_VERSION, computedAt],
+  );
+}
+
+export type ScriptBucket = { scriptName: string; facts: ScriptFacts };
+
+/** Facts of every script name with runs on `day`. */
+export async function computeScriptDay(day: string, sql: SavingsSql): Promise<ScriptBucket[]> {
+  const window = { start: dayStartIso(day), end: dayStartIso(utcDay(dayStartMs(day) + DAY_MS)) };
+  const out: ScriptBucket[] = [];
+  for (const s of await computeScriptWindow(window, sql)) {
+    const facts: ScriptFacts = {
+      runs: 0,
+      apiRuns: 0,
+      effectRuns: 0,
+      apiEffectRuns: 0,
+      opsSum: 0,
+      computeSecs: 0,
+    };
+    for (const d of s.byDay) {
+      for (const k of Object.keys(facts) as (keyof ScriptFacts)[]) facts[k] += d[k];
+    }
+    if (facts.runs > 0) out.push({ scriptName: s.scriptName, facts });
+  }
+  return out;
+}
+
+const INSERT_SCRIPT_BUCKET = `INSERT OR REPLACE INTO automation_savings_daily
+  (day, jobKind, jobId, jobKey, jobName, subKind, runs, countedRuns, effectRuns, opsSum, computeSecs, modelVersion, computedAt)
+  VALUES (?, 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/**
+ * Replace one day's script buckets and mark the day computed, atomically.
+ * Each script gets a subKind '' row for its non-API runs (with the wall time
+ * of all its runs) and, when it had API runs, an 'api' row for those.
+ */
+export async function writeScriptDay(
+  day: string,
+  buckets: ScriptBucket[],
+  computedAt: string,
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run("DELETE FROM automation_savings_daily WHERE day=? AND jobKind='script'", [day]);
+    for (const { scriptName, facts } of buckets) {
+      const perRun = facts.runs > 0 ? facts.opsSum / facts.runs : 0;
+      const nonApi = facts.runs - facts.apiRuns;
+      const base = [day, scriptName, scriptName, scriptName];
+      await tx.run(INSERT_SCRIPT_BUCKET, [
+        ...base,
+        "",
+        nonApi,
+        nonApi,
+        facts.effectRuns,
+        perRun * nonApi,
+        facts.computeSecs,
+        MODEL_VERSION,
+        computedAt,
+      ]);
+      if (facts.apiRuns > 0) {
+        await tx.run(INSERT_SCRIPT_BUCKET, [
+          ...base,
+          "api",
+          facts.apiRuns,
+          facts.apiRuns,
+          facts.apiEffectRuns,
+          perRun * facts.apiRuns,
+          0,
+          MODEL_VERSION,
+          computedAt,
+        ]);
+      }
+    }
+    await markDay(tx, day, "script", computedAt);
   });
 }
 
@@ -242,13 +330,19 @@ export function runSavingsRollupTick(
     const budget = options.budgetMs ?? DEFAULT_TICK_BUDGET_MS;
     stats = { ...stats, ticks: stats.ticks + 1, lastTickAt: new Date(startedAt).toISOString() };
     let computed = 0;
-    let pending: string[] = [];
+    let pending: { kind: SavingsJobKind; day: string }[] = [];
     let lastError: string | null = null;
     try {
       const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
       await getDbClient().run("DELETE FROM automation_savings_daily WHERE day<?", [oldest]);
       await getDbClient().run("DELETE FROM automation_savings_days WHERE day<?", [oldest]);
-      pending = await workflowDaysToCompute(now);
+      const wf = await daysToCompute("workflow", now);
+      const sc = await daysToCompute("script", now);
+      // Newest day first; a day's workflows before its scripts.
+      pending = [
+        ...wf.map((day) => ({ kind: "workflow" as const, day })),
+        ...sc.map((day) => ({ kind: "script" as const, day })),
+      ].sort((a, b) => b.day.localeCompare(a.day) || (a.kind === "workflow" ? -1 : 1));
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
@@ -256,15 +350,21 @@ export function runSavingsRollupTick(
     // never blocks the older days behind it.
     const failed: string[] = [];
     while (pending.length > 0 && !controller.signal.aborted && Date.now() - startedAt <= budget) {
-      const day = pending.shift() as string;
+      const { kind, day } = pending.shift() as { kind: SavingsJobKind; day: string };
       try {
-        const buckets = await computeWorkflowDay(day, sql, controller.signal);
-        await writeWorkflowDay(day, buckets, new Date(options.now ?? Date.now()).toISOString());
+        const at = () => new Date(options.now ?? Date.now()).toISOString();
+        if (kind === "workflow") {
+          const buckets = await computeWorkflowDay(day, sql, controller.signal);
+          await writeWorkflowDay(day, buckets, at());
+        } else {
+          const buckets = await computeScriptDay(day, sql);
+          await writeScriptDay(day, buckets, at());
+        }
         computed += 1;
       } catch (err) {
         if (controller.signal.aborted) break;
-        failed.push(day);
-        lastError = `${day}: ${err instanceof Error ? err.message : String(err)}`;
+        failed.push(`${kind}:${day}`);
+        lastError = `${kind} ${day}: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
     if (lastError) console.warn(`[savings-rollup] ${lastError.slice(0, 300)}`);

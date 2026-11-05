@@ -8,14 +8,19 @@ import { getDbClient } from "../db";
 import type { DbParam } from "../db-client";
 import {
   allocateSchedule,
+  INLINE_SCRIPT_NAME,
   isEnabledOnlyRouter,
   MODEL_VERSION,
   type PricedWorkflow,
+  priceScript,
   priceWorkflow,
   type SavingsBand,
   type SavingsTier,
   type ScheduleAllocation,
+  type ScriptFacts,
+  type ScriptKind,
   splitByDay,
+  splitScriptByDay,
   type WorkflowFacts,
 } from "./model";
 import { dayStartIso, SAVINGS_FACT_COLUMNS, utcDay } from "./rollup";
@@ -249,13 +254,162 @@ function dailyPoints(
   windowDays: number,
   tier: SavingsTier,
 ): SavingsDailyPoint[] {
-  const split = new Map(
-    splitByDay(job.facts, job.days, { tier, days: windowDays }, priced).map((p) => [p.day, p]),
+  return fillDays(
+    splitByDay(job.facts, job.days, { tier, days: windowDays }, priced),
+    firstDay,
+    windowDays,
   );
+}
+
+function fillDays(
+  points: SavingsDailyPoint[],
+  firstDay: string,
+  windowDays: number,
+): SavingsDailyPoint[] {
+  const split = new Map(points.map((p) => [p.day, p]));
   return Array.from({ length: windowDays }, (_, i) => {
     const day = utcDay(Date.parse(dayStartIso(firstDay)) + i * DAY_MS);
     return (
       split.get(day) ?? { day, savingUsd: 0, actualUsd: 0, measuredUsd: 0, estimatedLlmUsd: 0 }
     );
   });
+}
+
+export type ScriptSavingsRow = PricedWorkflow & {
+  kind: ScriptKind;
+  scriptName: string;
+  name: string;
+};
+
+export type ScriptSavingsRead = Omit<WorkflowSavingsRead, "rows"> & { rows: ScriptSavingsRow[] };
+
+/** A script name the savings route answers for: one in the catalog, or the inline-source bucket. */
+export async function isKnownScriptName(name: string): Promise<boolean> {
+  if (name === INLINE_SCRIPT_NAME) return true;
+  return !!(await getDbClient().get<{ n: number }>("SELECT 1 n FROM scripts WHERE name=? LIMIT 1", [
+    name,
+  ]));
+}
+
+const zeroScriptFacts = (): ScriptFacts => ({
+  runs: 0,
+  apiRuns: 0,
+  effectRuns: 0,
+  apiEffectRuns: 0,
+  opsSum: 0,
+  computeSecs: 0,
+});
+
+type ScriptBucketRow = {
+  day: string;
+  jobId: string;
+  subKind: string;
+  computedAt: string;
+  runs: number;
+  effectRuns: number;
+  opsSum: number;
+  computeSecs: number;
+};
+
+/** Fold a bucket row (subKind '' = non-API runs, 'api' = API runs) into script facts. */
+function addScriptBucket(into: ScriptFacts, b: ScriptBucketRow): void {
+  const runs = Number(b.runs) || 0;
+  const effect = Number(b.effectRuns) || 0;
+  into.runs += runs;
+  into.opsSum += Number(b.opsSum) || 0;
+  into.computeSecs += Number(b.computeSecs) || 0;
+  if (b.subKind === "api") {
+    into.apiRuns += runs;
+    into.apiEffectRuns += effect;
+  } else {
+    into.effectRuns += effect;
+  }
+}
+
+/**
+ * Price the scripts of a window from the rollup: every script name when
+ * `scriptName` is absent, else that one. A script is "scheduled" when a
+ * schedule targets it now (v7 reads the same at run time); scripts are keyed
+ * by name, so an agent-scoped and a global script of one name share a row.
+ */
+export async function readScriptSavings(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+  scriptName?: string;
+}): Promise<ScriptSavingsRead> {
+  const client = getDbClient();
+  const { firstDay, ...window } = savingsWindow(opts.days, opts.now);
+  const lastDay = utcDay(opts.now);
+  const marker = await client.get<{ n: number; at: string | null }>(
+    "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
+    [MODEL_VERSION, firstDay, lastDay],
+  );
+  const complete = Number(marker?.n) >= opts.days;
+  const params: DbParam[] = [MODEL_VERSION, firstDay, lastDay];
+  if (opts.scriptName !== undefined) params.push(opts.scriptName);
+  const buckets = await client.query<ScriptBucketRow>(
+    `SELECT day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs
+     FROM automation_savings_daily
+     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${opts.scriptName !== undefined ? "AND jobId=?" : ""}
+     ORDER BY day`,
+    params,
+  );
+  let computedAt = marker?.at ?? null;
+  const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
+  for (const b of buckets) {
+    if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
+    let job = jobs.get(b.jobId);
+    if (!job) {
+      job = { facts: zeroScriptFacts(), days: new Map() };
+      jobs.set(b.jobId, job);
+    }
+    addScriptBucket(job.facts, b);
+    const day = job.days.get(b.day) ?? zeroScriptFacts();
+    addScriptBucket(day, b);
+    job.days.set(b.day, day);
+  }
+  const scheduled = new Set(
+    (
+      await client.query<{ scriptName: string }>(
+        "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL",
+      )
+    ).map((r) => r.scriptName),
+  );
+
+  const band = jobs.size === 1 ? "job" : "fleet";
+  const rows: ScriptSavingsRow[] = [];
+  const totalParts: PricedWorkflow[] = [];
+  for (const [scriptName, job] of jobs) {
+    const kind: ScriptKind = scheduled.has(scriptName)
+      ? "script-scheduled"
+      : "script-agent-invoked";
+    const pricing = { tier: opts.tier, days: opts.days, kind };
+    const priced = priceScript(job.facts, { ...pricing, band: "job" });
+    rows.push({ ...priced, kind, scriptName, name: scriptName });
+    totalParts.push(band === "job" ? priced : priceScript(job.facts, { ...pricing, band }));
+  }
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+
+  const [only] = jobs.values();
+  const points =
+    jobs.size === 1 && only && rows[0]
+      ? fillDays(
+          splitScriptByDay(
+            only.facts,
+            [...only.days].map(([day, f]) => ({ ...f, day })),
+            rows[0],
+          ),
+          firstDay,
+          opts.days,
+        )
+      : [];
+  return {
+    window,
+    computedAt,
+    complete,
+    rows,
+    total: totalParts.length > 0 ? sumTotals(totalParts) : null,
+    points,
+  };
 }
