@@ -94,13 +94,16 @@ export function MediaIconField({ value, onSave, uploadPrefix, fallback }: MediaI
   const preview: MediaIcon | null | undefined =
     tab === "upload" && filePreview ? { type: "url", url: filePreview } : value;
 
-  async function save(icon: MediaIcon | null) {
+  /** Returns whether the save landed; failures are reported with a toast. */
+  async function save(icon: MediaIcon | null): Promise<boolean> {
     setSaving(true);
     try {
       await onSave(icon);
       toast.success(icon ? "Icon saved" : "Icon reset");
+      return true;
     } catch (error) {
       toast.error(errorMessage(error));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -120,7 +123,10 @@ export function MediaIconField({ value, onSave, uploadPrefix, fallback }: MediaI
       return;
     }
     lastCommittedLink.current = trimmed;
-    void save(parsed.icon);
+    void save(parsed.icon).then((saved) => {
+      // A failed save must not block retrying the same link.
+      if (!saved && lastCommittedLink.current === trimmed) lastCommittedLink.current = undefined;
+    });
   }
 
   async function pickFile(next: File | null | undefined) {

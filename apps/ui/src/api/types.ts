@@ -175,7 +175,9 @@ export interface AgentAvatarLucide {
 export type MediaIcon =
   | AgentAvatarLucide
   | { type: "url"; url: string }
-  | { type: "agent-fs"; path: string; orgId?: string; driveId?: string };
+  // Both drive IDs or neither (neither = the swarm drive), as the API enforces.
+  | { type: "agent-fs"; path: string; orgId?: never; driveId?: never }
+  | { type: "agent-fs"; path: string; orgId: string; driveId: string };
 
 /** Mirrors `AgentAvatarSchema`: an agent's avatar takes the same shapes as an app icon. */
 export type AgentAvatar = MediaIcon;
