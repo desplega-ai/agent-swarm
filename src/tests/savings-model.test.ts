@@ -33,6 +33,8 @@ const facts = (over: Partial<WorkflowFacts> = {}): WorkflowFacts => ({
   agentUsd: 0,
   agentMs: 0,
   followupUsd: 0,
+  childTaskUsd: 0,
+  childTaskMs: 0,
   recordedLlmUsd: 0,
   estimatedLlmUsd: 0,
   computeSecs: 0,
@@ -99,6 +101,22 @@ describe("savings model", () => {
     expect(job.savingUsd.p10).toBeLessThan(fleet.savingUsd.p10);
     expect(job.savingUsd.p90).toBeGreaterThan(fleet.savingUsd.p90);
     expect(job.hoursSaved.p10).toBeLessThan(job.hoursSaved.p50);
+  });
+
+  test("unowned task spend is kept on both sides and leaves the saving unchanged", () => {
+    const base = facts({ runs: 4, countedRuns: 4, opsSum: 40, agentUsd: 1, agentTasks: 1 });
+    const own = priceWorkflow(base, { tier: "smart", days: 30, band: "job" });
+    const withTasks = priceWorkflow(
+      { ...base, childTaskUsd: 5, childTaskMs: 3_600_000 },
+      { tier: "smart", days: 30, band: "job" },
+    );
+    expect(withTasks.measuredUsd).toBeCloseTo(own.measuredUsd + 5, 6);
+    expect(withTasks.actualUsd).toBeCloseTo(own.actualUsd + 5, 6);
+    expect(withTasks.agentOnlyUsd.p50).toBeCloseTo(own.agentOnlyUsd.p50 + 5, 6);
+    for (const q of ["p10", "p50", "p90"] as const) {
+      expect(withTasks.savingUsd[q]).toBeCloseTo(own.savingUsd[q], 6);
+    }
+    expect(withTasks.hoursSaved.p50).toBeCloseTo(own.hoursSaved.p50, 6);
   });
 
   test("kept agent spend appears on both sides; actual spend is per substituted run", () => {

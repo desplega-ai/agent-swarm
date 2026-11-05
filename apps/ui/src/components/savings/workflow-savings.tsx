@@ -1,10 +1,31 @@
 import { PiggyBank } from "lucide-react";
-import type { ReactNode } from "react";
-import { useJobSavings, useJobSavingsDaily } from "@/api/hooks/use-savings";
-import type { SavingsJobRow, SavingsJobsResponse, SavingsTarget, SavingsTier } from "@/api/types";
+import { type ReactNode, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  useJobSavings,
+  useJobSavingsDaily,
+  useWorkflowSavingsComponents,
+} from "@/api/hooks/use-savings";
+import type {
+  SavingsComponent,
+  SavingsJobRow,
+  SavingsJobsResponse,
+  SavingsTarget,
+  SavingsTier,
+  SavingsTotals,
+} from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatPanel } from "@/components/ui/stat-panel";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCount, formatUsd } from "@/pages/usage/usage-format";
 import { SavingsDailyChart } from "./savings-daily-chart";
@@ -156,8 +177,10 @@ function WorkflowMethod() {
         apart.
       </p>
       <p>
-        Covers this workflow's own runs; sub-workflow runs are not included. Scheduled runs count at
-        most 24 a day unless they started an agent task or a workflow.
+        Own runs covers this workflow's runs and the agent tasks they caused, including tasks below
+        them and tasks its scripts created. With components adds the workflow runs and nested script
+        runs below it, each priced as on its own row. Scheduled runs count at most 24 a day unless
+        they started an agent task or a workflow.
       </p>
     </>
   );
@@ -184,14 +207,147 @@ function ScriptMethod({ row }: { row: SavingsJobRow }) {
   );
 }
 
+type SavingsScope = "own" | "components";
+
+const LINK_LABEL: Record<SavingsComponent["linkKind"], string> = {
+  "sub-workflow": "Sub-workflow",
+  "step-workflow": "Started by a script step",
+  "step-script": "Called by a script step",
+  "step-task": "Created by a script step",
+  "descendant-task": "Below its agent tasks",
+};
+
+const formatRuns = (runs: number) =>
+  Number.isInteger(runs) ? formatCount(runs) : `≈${formatCount(Math.round(runs))}`;
+
+function ComponentsKpis({
+  own,
+  totals,
+  components,
+  note,
+  days,
+}: {
+  own: SavingsJobRow;
+  totals: SavingsTotals;
+  components: SavingsComponent[];
+  note: string;
+  days: number;
+}) {
+  const priced = components.filter((c) => !c.inOwnRow);
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <StatPanel
+        label={`Saved with components (${days}d)`}
+        value={<span className="font-mono tabular-nums">{formatUsd(totals.savingUsd.p50)}</span>}
+        detail={`${formatUsd(totals.savingUsd.p10)} to ${formatUsd(totals.savingUsd.p90)}`}
+        info={`Own runs plus every workflow run and nested script run below them, each priced as on its own row. Already counted on each component's own row, so it never adds to a list or the fleet total. ${note}`}
+      />
+      <StatPanel
+        label="Agent-hours saved"
+        value={<span className="font-mono tabular-nums">{formatHours(totals.hoursSaved.p50)}</span>}
+        detail={`${formatHours(totals.hoursSaved.p10)} to ${formatHours(totals.hoursSaved.p90)}`}
+        info={`Own runs plus components. ${note}`}
+      />
+      <StatPanel
+        label="Own runs"
+        value={<span className="font-mono tabular-nums">{formatUsd(own.savingUsd.p50)}</span>}
+        detail={`+ ${formatUsd(totals.savingUsd.p50 - own.savingUsd.p50)} from components`}
+        info="The saving of this workflow's own runs, as in the header and the workflows list."
+      />
+      <StatPanel
+        label="Components"
+        value={<span className="font-mono tabular-nums">{formatCount(priced.length)}</span>}
+        detail={`${formatRuns(priced.reduce((s, c) => s + c.runs, 0))} runs below this workflow`}
+        info="Workflows and scripts this workflow's runs started, directly or further down."
+      />
+    </div>
+  );
+}
+
+function ComponentsCard({ components }: { components: SavingsComponent[] }) {
+  return (
+    <Card className="gap-2 py-4">
+      <CardHeader className="px-5">
+        <CardTitle>Components</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Already counted on each component's own row.
+        </p>
+      </CardHeader>
+      <CardContent className="px-5">
+        {components.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No workflow runs, scripts or tasks below this workflow's runs in the window.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Component</TableHead>
+                <TableHead>How</TableHead>
+                <TableHead className="text-right">Runs</TableHead>
+                <TableHead className="text-right">Saved</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {components.map((c) => (
+                <TableRow key={`${c.kind}:${c.workflowId ?? c.scriptName ?? c.linkKind}`}>
+                  <TableCell className="font-medium">
+                    <span style={{ paddingLeft: `${(c.depth - 1) * 12}px` }}>
+                      {c.workflowId ? (
+                        <Link to={`/workflows/${c.workflowId}`} className="hover:underline">
+                          {c.name}
+                        </Link>
+                      ) : (
+                        c.name
+                      )}
+                    </span>
+                    {c.kind === "script" ? (
+                      <span className="ml-1.5 text-xs text-muted-foreground">script</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {LINK_LABEL[c.linkKind]}
+                    {c.depth > 1 ? ` (level ${c.depth})` : ""}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {formatRuns(c.runs)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {c.inOwnRow ? (
+                      <span className="text-xs text-muted-foreground">in own runs</span>
+                    ) : (
+                      formatUsd(c.savingUsd.p50)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {formatUsd(c.actualUsd)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /**
  * The Savings tab: KPIs, the daily chart, the details and the method note
- * for the workflow's or script's last 30 days.
+ * for the workflow's or script's last 30 days. A workflow can switch to "With
+ * components": its runs plus the runs below them; the header stays own runs.
  */
 export function SavingsTab({ target }: { target: SavingsTarget }) {
   const { data, isLoading, isError } = useJobSavings(target);
   const row = data?.valid ? data.rows[0] : undefined;
   const daily = useJobSavingsDaily(target, !!row);
+  const [scope, setScope] = useState<SavingsScope>("own");
+  const workflowId = "workflowId" in target ? target.workflowId : undefined;
+  const tree = useWorkflowSavingsComponents(
+    workflowId ?? "",
+    !!workflowId && !!row && scope === "components",
+  );
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError || !data) {
     return <p className="text-sm text-muted-foreground">Could not load the saving. Try again.</p>;
@@ -213,9 +369,50 @@ export function SavingsTab({ target }: { target: SavingsTarget }) {
     );
   }
   const note = calibrationNote(data);
+  const withComponents = scope === "components" ? tree.data?.withComponents : undefined;
+  const components = tree.data?.components ?? [];
   return (
     <div className="flex flex-col gap-4 overflow-y-auto pb-4">
-      <SavingsKpis row={row} note={note} days={days} />
+      {workflowId ? (
+        <SegmentedControl
+          aria-label="Savings scope"
+          size="sm"
+          className="self-start"
+          value={scope}
+          onValueChange={setScope}
+          options={[
+            {
+              value: "own",
+              label: "Own runs",
+              tooltip: "This workflow's runs, as in the header and the workflows list.",
+            },
+            {
+              value: "components",
+              label: "With components",
+              tooltip:
+                "Plus the workflow runs and script runs below them. Already counted on each component's own row.",
+            },
+          ]}
+        />
+      ) : null}
+      {scope === "components" && workflowId ? (
+        tree.isLoading ? (
+          <Skeleton className="h-28 w-full" />
+        ) : withComponents ? (
+          <ComponentsKpis
+            own={row}
+            totals={withComponents}
+            components={components}
+            note={note}
+            days={days}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">Could not load the components. Try again.</p>
+        )
+      ) : (
+        <SavingsKpis row={row} note={note} days={days} />
+      )}
+      {scope === "components" && withComponents ? <ComponentsCard components={components} /> : null}
       {daily.isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : daily.data?.valid ? (

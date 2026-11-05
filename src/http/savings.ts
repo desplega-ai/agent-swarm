@@ -13,7 +13,9 @@ import {
 import {
   isKnownScriptName,
   readScriptSavings,
+  readWorkflowComponents,
   readWorkflowSavings,
+  type SavingsComponent,
   type SavingsTotals,
   type WorkflowSavingsRead,
 } from "../be/savings/read";
@@ -126,6 +128,39 @@ const SavingsTotalsSchema = z.object({
   hoursSaved: SavingsBandSchema,
 });
 
+const SavingsComponentSchema = z.object({
+  kind: z.enum(["workflow", "script", "task"]),
+  workflowId: z.string().optional(),
+  scriptName: z.string().optional(),
+  name: z.string(),
+  /**
+   * `sub-workflow`: a sub-workflow node's child run. `step-workflow`,
+   * `step-script`, `step-task`: a run, nested script run or task a
+   * swarm-script step made. `descendant-task`: a task below an agent-task node's task.
+   */
+  linkKind: z.enum([
+    "sub-workflow",
+    "step-workflow",
+    "step-script",
+    "step-task",
+    "descendant-task",
+  ]),
+  /** 1 for a direct child of the workflow. */
+  depth: z.number().int(),
+  runs: z
+    .number()
+    .describe("Runs (tasks for a task component) in this tree. Fractional below the first level."),
+  actualUsd: z.number(),
+  agentOnlyUsd: SavingsBandSchema,
+  savingUsd: SavingsBandSchema,
+  hoursSaved: SavingsBandSchema,
+  inOwnRow: z
+    .boolean()
+    .describe(
+      "True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`.",
+    ),
+});
+
 const savingsMeta = {
   window: z.object({ start: z.string(), end: z.string(), days: z.number().int() }),
   tier: z.enum(SAVINGS_TIERS),
@@ -143,6 +178,13 @@ const SavingsJobsResponseSchema = z.object({
   rows: z.array(SavingsJobRowSchema),
   /** Sum of `rows`; the band is the single-job spread for one row and the fleet spread for more. */
   total: SavingsTotalsSchema.nullable(),
+  /** With `components=true`: what the workflow's runs caused, each priced as on its own row. */
+  components: z.array(SavingsComponentSchema).optional(),
+  /**
+   * With `components=true`: own runs plus every component. Each component is
+   * already counted on its own row, so never add this to a list or fleet total.
+   */
+  withComponents: SavingsTotalsSchema.nullable().optional(),
 });
 
 const SavingsDailyResponseSchema = z.object({
@@ -177,19 +219,23 @@ const savingsJobsRoute = route({
   pattern: ["api", "savings", "jobs"],
   summary: "Estimated automation savings per workflow or script",
   description:
-    "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+    "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1).optional(),
     scriptName: z.string().min(1).optional(),
     kind: z.enum(["workflow", "script"]).optional(),
+    components: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
     ...windowQuery,
   }),
   responses: {
     200: { description: "Savings rows", schema: SavingsJobsResponseSchema },
     400: {
       description:
-        "Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value",
+        "Not exactly one of workflowId, scriptName and kind, `components=true` without workflowId, or an unknown days or tier value",
     },
     404: { description: "Workflow or script not found" },
   },
@@ -274,9 +320,24 @@ function toRow(row: ReadRow) {
   };
 }
 
+function toComponent(c: SavingsComponent) {
+  return {
+    ...c,
+    runs: round2(c.runs),
+    actualUsd: round2(c.actualUsd),
+    agentOnlyUsd: roundBand(c.agentOnlyUsd),
+    savingUsd: roundBand(c.savingUsd),
+    hoursSaved: roundBand(c.hoursSaved),
+  };
+}
+
 function toTotals(t: SavingsTotals) {
   return {
     ...t,
+    // A component's share of a child's runs is fractional below the first level.
+    runs: Math.round(t.runs),
+    substitutedRuns: Math.round(t.substitutedRuns),
+    enabledOnlyRuns: Math.round(t.enabledOnlyRuns),
     measuredUsd: round2(t.measuredUsd),
     estimatedLlmUsd: round2(t.estimatedLlmUsd),
     actualUsd: round2(t.actualUsd),
@@ -424,9 +485,12 @@ export async function handleSavings(
   if (!savingsJobsRoute.match(req.method, pathSegments)) return false;
   const parsed = await savingsJobsRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
-  const { workflowId, scriptName, kind, days, tier } = parsed.query;
+  const { workflowId, scriptName, kind, days, tier, components } = parsed.query;
   if ([workflowId, scriptName, kind].filter(Boolean).length !== 1) {
     return badTarget(res, "Pass one of workflowId, scriptName, kind=workflow or kind=script");
+  }
+  if (components && !workflowId) {
+    return badTarget(res, "components=true needs workflowId; lists count own runs only");
   }
   const read: (Omit<WorkflowSavingsRead, "rows"> & { rows: ReadRow[] }) | null = workflowId
     ? await readOne(workflowId, days, tier)
@@ -437,10 +501,27 @@ export async function handleSavings(
         : await readWorkflowSavings({ days, tier, now: Date.now() });
   if (!read) return notFound(res, scriptName ? "Script" : "Workflow");
   const show = read.complete;
+  const own = show && workflowId ? read.rows[0] : undefined;
+  const tree =
+    components && own && "workflowId" in own
+      ? await readWorkflowComponents({
+          days,
+          tier,
+          now: Date.now(),
+          workflowId: own.workflowId,
+          own,
+        })
+      : null;
   savingsJobsRoute.respond(res, 200, {
     ...meta(read, tier, { complete: read.complete, hasRows: read.rows.length > 0 }),
     rows: show ? read.rows.map(toRow) : [],
     total: show && read.total ? toTotals(read.total) : null,
+    ...(components
+      ? {
+          components: tree ? tree.components.map(toComponent) : [],
+          withComponents: tree?.withComponents ? toTotals(tree.withComponents) : null,
+        }
+      : {}),
   });
   return true;
 }

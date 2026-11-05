@@ -11,7 +11,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDbClient } from "../db";
 import type { DbExecutor } from "../db-client";
-import { computeScriptWindow, computeWorkflowWindow, type SavingsSql } from "./compute";
+import {
+  computeScriptWindow,
+  computeWorkflowLinksDay,
+  computeWorkflowWindow,
+  type SavingsLink,
+  type SavingsSql,
+} from "./compute";
 import { jobKey, MODEL_VERSION, type ScriptFacts, type WorkflowFacts } from "./model";
 
 const DAY_MS = 86_400_000;
@@ -45,6 +51,8 @@ const FACT_COLUMNS = [
   "agentUsd",
   "agentMs",
   "followupUsd",
+  "childTaskUsd",
+  "childTaskMs",
   "recordedLlmUsd",
   "estimatedLlmUsd",
   "computeSecs",
@@ -53,6 +61,7 @@ export { FACT_COLUMNS as SAVINGS_FACT_COLUMNS };
 
 type WorkflowRow = { id: string; name: string; definition: unknown };
 export type WorkflowBucket = { workflowId: string; name: string; facts: WorkflowFacts };
+export type WorkflowDay = { buckets: WorkflowBucket[]; links: SavingsLink[] };
 
 function parseDefinition(definition: unknown): unknown {
   if (typeof definition !== "string") return definition ?? {};
@@ -98,15 +107,20 @@ export async function daysToCompute(kind: SavingsJobKind, now: number): Promise<
 export const workflowDaysToCompute = (now: number): Promise<string[]> =>
   daysToCompute("workflow", now);
 
-/** Facts of every workflow with runs on `day`. */
+/**
+ * Facts of every workflow with runs on `day`, and the day's links from
+ * workflows to what their runs caused (`computeWorkflowLinksDay`). The spend
+ * of tasks a workflow caused without owning them goes into its bucket.
+ */
 export async function computeWorkflowDay(
   day: string,
   sql: SavingsSql,
   signal?: AbortSignal,
-): Promise<WorkflowBucket[]> {
+): Promise<WorkflowDay> {
   const window = { start: dayStartIso(day), end: dayStartIso(utcDay(dayStartMs(day) + DAY_MS)) };
   const buckets: WorkflowBucket[] = [];
-  for (const w of await listWorkflows()) {
+  const workflows = await listWorkflows();
+  for (const w of workflows) {
     signal?.throwIfAborted();
     const out = await computeWorkflowWindow(w, window, sql, {
       maxRuns: Number.POSITIVE_INFINITY,
@@ -115,7 +129,19 @@ export async function computeWorkflowDay(
       buckets.push({ workflowId: w.id, name: w.name, facts: out.facts });
     }
   }
-  return buckets;
+  signal?.throwIfAborted();
+  const { links, childTasks } = await computeWorkflowLinksDay(window, workflows, sql);
+  for (const b of buckets) {
+    const spend = childTasks.get(b.workflowId);
+    if (!spend) continue;
+    b.facts.childTaskUsd += spend.usd;
+    b.facts.childTaskMs += spend.ms;
+  }
+  // shortcut: unowned task spend of a workflow with no run that day (a task
+  // created after midnight by a run that started before) is dropped from its
+  // kept cost; it is kept on both sides, so the saving does not move. Carry it
+  // to the run's day if the actual figure needs it.
+  return { buckets, links };
 }
 
 const INSERT_BUCKET = `INSERT OR REPLACE INTO automation_savings_daily
@@ -132,15 +158,36 @@ const bucketParams = (day: string, b: WorkflowBucket, computedAt: string) => [
   computedAt,
 ];
 
-/** Replace one day's workflow buckets and mark the day computed, atomically. */
+const INSERT_LINK = `INSERT OR REPLACE INTO automation_savings_links
+  (day, parentJobId, childKind, childJobId, linkKind, n, actualUsd, keptUsd, modelVersion, computedAt)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/** Replace one day's workflow buckets and links and mark the day computed, atomically. */
 export async function writeWorkflowDay(
   day: string,
-  buckets: WorkflowBucket[],
+  workflowDay: WorkflowDay,
   computedAt: string,
 ): Promise<void> {
   await getDbClient().transaction(async (tx) => {
     await tx.run("DELETE FROM automation_savings_daily WHERE day=? AND jobKind='workflow'", [day]);
-    for (const b of buckets) await tx.run(INSERT_BUCKET, bucketParams(day, b, computedAt));
+    await tx.run("DELETE FROM automation_savings_links WHERE day=?", [day]);
+    for (const b of workflowDay.buckets) {
+      await tx.run(INSERT_BUCKET, bucketParams(day, b, computedAt));
+    }
+    for (const l of workflowDay.links) {
+      await tx.run(INSERT_LINK, [
+        day,
+        l.parentJobId,
+        l.childKind,
+        l.childJobId,
+        l.linkKind,
+        l.n,
+        l.actualUsd,
+        l.keptUsd,
+        MODEL_VERSION,
+        computedAt,
+      ]);
+    }
     await markDay(tx, day, "workflow", computedAt);
   });
 }
@@ -249,8 +296,12 @@ export async function refreshWorkflowToday(
     [day, MODEL_VERSION],
   );
   if (!marker) return "skipped";
-  const bucket = await client.get<{ computedAt: string }>(
-    "SELECT computedAt FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=? AND subKind=''",
+  const bucket = await client.get<{
+    computedAt: string;
+    childTaskUsd: number;
+    childTaskMs: number;
+  }>(
+    "SELECT computedAt, childTaskUsd, childTaskMs FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=? AND subKind=''",
     [day, workflow.id],
   );
   const since =
@@ -266,6 +317,9 @@ export async function refreshWorkflowToday(
     sql,
   );
   if (out.status !== "ok") return "refused";
+  // Unowned task spend comes from the hourly day pass; keep it.
+  out.facts.childTaskUsd = Number(bucket?.childTaskUsd) || 0;
+  out.facts.childTaskMs = Number(bucket?.childTaskMs) || 0;
   const computedAt = new Date(now).toISOString();
   await client.run(
     INSERT_BUCKET,
@@ -336,6 +390,7 @@ export function runSavingsRollupTick(
       const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
       await getDbClient().run("DELETE FROM automation_savings_daily WHERE day<?", [oldest]);
       await getDbClient().run("DELETE FROM automation_savings_days WHERE day<?", [oldest]);
+      await getDbClient().run("DELETE FROM automation_savings_links WHERE day<?", [oldest]);
       const wf = await daysToCompute("workflow", now);
       const sc = await daysToCompute("script", now);
       // Newest day first; a day's workflows before its scripts.
@@ -354,8 +409,8 @@ export function runSavingsRollupTick(
       try {
         const at = () => new Date(options.now ?? Date.now()).toISOString();
         if (kind === "workflow") {
-          const buckets = await computeWorkflowDay(day, sql, controller.signal);
-          await writeWorkflowDay(day, buckets, at());
+          const workflowDay = await computeWorkflowDay(day, sql, controller.signal);
+          await writeWorkflowDay(day, workflowDay, at());
         } else {
           const buckets = await computeScriptDay(day, sql);
           await writeScriptDay(day, buckets, at());

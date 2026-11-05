@@ -16,6 +16,17 @@ export function useJobSavings(target: SavingsTarget | undefined) {
   });
 }
 
+/** One workflow's saving with its components (child runs, nested scripts, tasks), for the Savings tab toggle. */
+export function useWorkflowSavingsComponents(workflowId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["savings", "components", workflowId],
+    queryFn: () => api.getSavingsJobs({ workflowId }, { components: true }),
+    enabled,
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}
+
 export function useJobSavingsDaily(target: SavingsTarget | undefined, enabled = true) {
   return useQuery({
     queryKey: ["savings", "job-daily", target],

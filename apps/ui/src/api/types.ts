@@ -4499,6 +4499,29 @@ export interface SavingsJobsResponse {
   reason: "not-computed" | "no-runs" | null;
   rows: SavingsJobRow[];
   total: SavingsTotals | null;
+  /** With `components=true`: what the workflow's runs caused, each priced as on its own row. */
+  components?: SavingsComponent[];
+  /** With `components=true`: own runs plus every component. Never part of a list or fleet total. */
+  withComponents?: SavingsTotals | null;
+}
+
+/** A child workflow, nested script or unowned tasks below a workflow's runs. */
+export interface SavingsComponent {
+  kind: "workflow" | "script" | "task";
+  workflowId?: string;
+  scriptName?: string;
+  name: string;
+  linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+  /** 1 for a direct child. */
+  depth: number;
+  /** Runs (tasks for a task component) in this tree; fractional below the first level. */
+  runs: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  hoursSaved: SavingsBand;
+  /** Unowned tasks: their spend is already in the workflow's own row. */
+  inOwnRow: boolean;
 }
 
 /** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */

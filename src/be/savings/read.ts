@@ -86,6 +86,8 @@ const zeroFacts = (): WorkflowFacts => ({
   agentUsd: 0,
   agentMs: 0,
   followupUsd: 0,
+  childTaskUsd: 0,
+  childTaskMs: 0,
   recordedLlmUsd: 0,
   estimatedLlmUsd: 0,
   computeSecs: 0,
@@ -412,4 +414,196 @@ export async function readScriptSavings(opts: {
     total: totalParts.length > 0 ? sumTotals(totalParts) : null,
     points,
   };
+}
+
+/** Deepest run tree the "with components" view follows. */
+export const MAX_COMPONENT_DEPTH = 10;
+
+export type SavingsComponent = {
+  kind: "workflow" | "script" | "task";
+  /** Set for workflow components. */
+  workflowId?: string;
+  /** Set for script components. */
+  scriptName?: string;
+  name: string;
+  /** How the nearest occurrence below the root is linked. */
+  linkKind: SavingsLinkKind;
+  /** 1 for a direct child of the root. */
+  depth: number;
+  /** Runs (tasks for a task component) in this tree. Fractional below the first level. */
+  runs: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  hoursSaved: SavingsBand;
+  /**
+   * Tasks the root caused without owning them: their spend is already in the
+   * root's own row, on both sides, so they add nothing here.
+   */
+  inOwnRow: boolean;
+};
+
+type SavingsLinkKind =
+  | "sub-workflow"
+  | "step-workflow"
+  | "step-script"
+  | "step-task"
+  | "descendant-task";
+
+export type WorkflowComponentsRead = {
+  components: SavingsComponent[];
+  /** Own runs plus every component's share; null when the root has no row. */
+  withComponents: SavingsTotals | null;
+};
+
+const scaleBand = (b: SavingsBand, f: number): SavingsBand => ({
+  p10: b.p10 * f,
+  p50: b.p50 * f,
+  p90: b.p90 * f,
+});
+
+/** A share `f` of a priced row: its per-run figures times the linked runs. */
+function scaleRow(row: PricedWorkflow, f: number): PricedWorkflow {
+  return {
+    ...row,
+    runs: row.runs * f,
+    substitutedRuns: row.substitutedRuns * f,
+    enabledOnlyRuns: row.enabledOnlyRuns * f,
+    effectRuns: row.effectRuns * f,
+    measuredUsd: row.measuredUsd * f,
+    estimatedLlmUsd: row.estimatedLlmUsd * f,
+    actualUsd: row.actualUsd * f,
+    agentOnlyUsd: scaleBand(row.agentOnlyUsd, f),
+    savingUsd: scaleBand(row.savingUsd, f),
+    actualHours: row.actualHours * f,
+    agentOnlyHours: scaleBand(row.agentOnlyHours, f),
+    hoursSaved: scaleBand(row.hoursSaved, f),
+  };
+}
+
+const zeroBand = (): SavingsBand => ({ p10: 0, p50: 0, p90: 0 });
+const addBand = (a: SavingsBand, b: SavingsBand): SavingsBand => ({
+  p10: a.p10 + b.p10,
+  p50: a.p50 + b.p50,
+  p90: a.p90 + b.p90,
+});
+
+/**
+ * The workflow's run tree for the window: every workflow run, nested script
+ * run and unowned task its runs caused, recursively (depth at most
+ * MAX_COMPONENT_DEPTH, never re-entering a workflow already on the path).
+ * Each component is priced as on its own row: that row's figures per run
+ * times the runs linked into this tree. A child workflow's own links count in
+ * the share of its runs this tree started. The sum is a read-time view: no
+ * list or fleet total adds it, since every component is on its own row.
+ */
+export async function readWorkflowComponents(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+  workflowId: string;
+  /** The root's own row, as the single-workflow read priced it. */
+  own: WorkflowSavingsRow;
+}): Promise<WorkflowComponentsRead> {
+  const { firstDay } = savingsWindow(opts.days, opts.now);
+  const lastDay = utcDay(opts.now);
+  const [workflows, scripts, links] = await Promise.all([
+    readWorkflowSavings({ days: opts.days, tier: opts.tier, now: opts.now }),
+    readScriptSavings({ days: opts.days, tier: opts.tier, now: opts.now }),
+    getDbClient().query<{
+      parentJobId: string;
+      childKind: "workflow" | "script" | "task";
+      childJobId: string;
+      linkKind: SavingsLinkKind;
+      n: number;
+      usd: number;
+    }>(
+      `SELECT parentJobId, childKind, childJobId, linkKind, sum(n) n, sum(actualUsd) usd
+       FROM automation_savings_links WHERE modelVersion=? AND day>=? AND day<=?
+       GROUP BY 1,2,3,4 ORDER BY 1,2,3,4`,
+      [MODEL_VERSION, firstDay, lastDay],
+    ),
+  ]);
+  const workflowRows = new Map(workflows.rows.map((r) => [r.workflowId, r]));
+  workflowRows.set(opts.workflowId, opts.own);
+  const scriptRows = new Map(scripts.rows.map((r) => [r.scriptName, r]));
+  const children = new Map<string, typeof links>();
+  for (const l of links) children.set(l.parentJobId, [...(children.get(l.parentJobId) ?? []), l]);
+
+  const components = new Map<string, SavingsComponent>();
+  const parts: PricedWorkflow[] = [];
+  const addComponent = (
+    c: Omit<SavingsComponent, "actualUsd" | "agentOnlyUsd" | "savingUsd" | "hoursSaved">,
+    priced: PricedWorkflow | null,
+    taskUsd = 0,
+  ) => {
+    const key = `${c.kind}\u0000${c.workflowId ?? c.scriptName ?? c.linkKind}`;
+    const prev = components.get(key);
+    components.set(key, {
+      ...c,
+      linkKind: prev && prev.depth <= c.depth ? prev.linkKind : c.linkKind,
+      depth: Math.min(prev?.depth ?? c.depth, c.depth),
+      runs: (prev?.runs ?? 0) + c.runs,
+      actualUsd: (prev?.actualUsd ?? 0) + (priced?.actualUsd ?? taskUsd),
+      agentOnlyUsd: addBand(prev?.agentOnlyUsd ?? zeroBand(), priced?.agentOnlyUsd ?? zeroBand()),
+      savingUsd: addBand(prev?.savingUsd ?? zeroBand(), priced?.savingUsd ?? zeroBand()),
+      hoursSaved: addBand(prev?.hoursSaved ?? zeroBand(), priced?.hoursSaved ?? zeroBand()),
+    });
+    if (priced) parts.push(priced);
+  };
+
+  const walk = (parent: string, share: number, depth: number, path: Set<string>) => {
+    for (const l of children.get(parent) ?? []) {
+      const linked = Number(l.n) * share;
+      if (l.childKind === "task") {
+        // Only the root's: a child workflow's unowned tasks are in its row already.
+        if (depth === 1 && linked > 0) {
+          addComponent(
+            {
+              kind: "task",
+              name:
+                l.linkKind === "step-task"
+                  ? "Tasks its script steps created"
+                  : "Tasks below its agent tasks",
+              linkKind: l.linkKind,
+              depth,
+              runs: linked,
+              inOwnRow: true,
+            },
+            null,
+            Number(l.usd) * share,
+          );
+        }
+        continue;
+      }
+      // A cycle back to a workflow on the path is that workflow's own row: skip it.
+      if (linked <= 0 || (l.childKind === "workflow" && path.has(l.childJobId))) continue;
+      const row =
+        l.childKind === "workflow" ? workflowRows.get(l.childJobId) : scriptRows.get(l.childJobId);
+      const f = row && row.runs > 0 ? linked / row.runs : 0;
+      addComponent(
+        {
+          kind: l.childKind,
+          ...(l.childKind === "workflow"
+            ? { workflowId: l.childJobId }
+            : { scriptName: l.childJobId }),
+          name: row?.name ?? l.childJobId,
+          linkKind: l.linkKind,
+          depth,
+          runs: linked,
+          inOwnRow: false,
+        },
+        row ? scaleRow(row, f) : null,
+      );
+      if (l.childKind === "workflow" && f > 0 && depth < MAX_COMPONENT_DEPTH) {
+        walk(l.childJobId, Math.min(1, f), depth + 1, new Set([...path, l.childJobId]));
+      }
+    }
+  };
+  walk(opts.workflowId, 1, 1, new Set([opts.workflowId]));
+
+  const list = [...components.values()].sort(
+    (a, b) => Number(a.inOwnRow) - Number(b.inOwnRow) || b.savingUsd.p50 - a.savingUsd.p50,
+  );
+  return { components: list, withComponents: sumTotals([opts.own, ...parts]) };
 }
