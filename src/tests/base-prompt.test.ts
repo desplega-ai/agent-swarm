@@ -1148,21 +1148,22 @@ describe("truncateRepoClaudeMd", () => {
 describe("getBasePrompt: size budget", () => {
   // Include task-output budget, exceptions, and the two citation-scoping lines (when to cite, when not to).
   // Keep tight role-specific ceilings to catch unrelated prompt growth.
-  test("a fresh claude worker stays under 5,750 characters", async () => {
+  // +150 for the multi-person thread line in the communication block (~105 chars).
+  test("a fresh claude worker stays under 5,900 characters", async () => {
     const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
-    expect(result.length).toBeLessThan(5_750);
+    expect(result.length).toBeLessThan(5_900);
   });
 
   // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
   // while the skill list is still unknown.
-  test("a fresh claude lead stays under 6,100 characters", async () => {
+  test("a fresh claude lead stays under 6,250 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(6_100);
+    expect(result.length).toBeLessThan(6_250);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {
