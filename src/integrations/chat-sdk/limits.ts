@@ -62,7 +62,12 @@ export function splitChatMessage(text: string, limit: number): string[] {
       cut = limit;
       // Never split a surrogate pair (emoji and other astral characters).
       const code = rest.charCodeAt(cut - 1);
-      if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+      if (code >= 0xd800 && code <= 0xdbff) {
+        // A limit smaller than one code point cannot honor both "within the
+        // limit" and "no split pairs"; keep the pair whole so the cut still
+        // advances (cut would otherwise become 0 and loop forever).
+        cut = cut > 1 ? cut - 1 : cut + 1;
+      }
     }
     chunks.push(rest.slice(0, cut).trimEnd());
     rest = rest.slice(cut).replace(/^[\n ]+/, "");
