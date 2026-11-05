@@ -5,7 +5,7 @@ import { parseSkillContent } from "../be/skill-parser";
 // ─── Valid Parsing ──────────────────────────────────────────────────────────
 
 describe("parseSkillContent — valid inputs", () => {
-  test.each([">", "|", ">-", "|-"])("parses ponytail block description %s", (style) => {
+  test.each([">", "|", ">-", "|-", ">+", "|+"])("parses ponytail block description %s", (style) => {
     const lines = [
       "Lazy senior dev mode: the smallest change that fully solves the task, and a",
       "reply a busy human understands in one read. Use on any coding task (writing,",
@@ -28,6 +28,27 @@ license: MIT
     expect(result.name).toBe("ponytail");
     expect(result.body).toBe("# Ponytail");
   });
+
+  for (const style of ["|", ">", "|-", ">-", "|+", ">+"]) {
+    test.each([0, 2])(`preserves following metadata with ${style} at indentation %i`, (indent) => {
+      const padding = " ".repeat(indent);
+      const result = parseSkillContent(
+        `---\n${padding}name: test\n${padding}description: ${style}\n${padding}  Hello\n${padding}    model: part of the description\n\n${padding}model: opus\n${padding}effort: high\n---\nBody`,
+      );
+      const ending = style.endsWith("-") ? "" : style.endsWith("+") ? "\n\n" : "\n";
+      expect(result.description).toBe(`Hello\n  model: part of the description${ending}`);
+      expect(result.model).toBe("opus");
+      expect(result.effort).toBe("high");
+    });
+
+    test.each([false, true])(`honors ${style} trailing blank lines, last field: %s`, (last) => {
+      const result = parseSkillContent(
+        `---\nname: test\ndescription: ${style}\n  Hello\n  world\n\n\n${last ? "" : "model: opus\n"}---\nBody`,
+      );
+      const ending = style.endsWith("-") ? "" : style.endsWith("+") ? "\n\n\n" : "\n";
+      expect(result.description).toBe(`Hello${style.startsWith(">") ? " " : "\n"}world${ending}`);
+    });
+  }
 
   test("parses minimal frontmatter with body", () => {
     const content = `---

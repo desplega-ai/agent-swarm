@@ -43,15 +43,17 @@ export function parseSkillContent(content: string): ParsedSkill {
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     let value = line.slice(colonIdx + 1).trim();
-    if (/^[>|]-?$/.test(value)) {
+    if (/^[>|][-+]?$/.test(value)) {
       const start = i;
-      while (i + 1 < lines.length && /^(?:\s|$)/.test(lines[i + 1] as string)) {
+      const indentation = line.length - line.trimStart().length;
+      while (i + 1 < lines.length) {
+        const next = lines[i + 1] as string;
+        if (next.trim() && next.length - next.trimStart().length <= indentation) break;
         i++;
       }
-      const block = Bun.YAML.parse(`${lines.slice(start, i + 1).join("\n")}\n`) as Record<
-        string,
-        string
-      >;
+      // The final split entry already represents the frontmatter's terminating newline.
+      const scalar = lines.slice(start, i + 1).join("\n") + (i < lines.length - 1 ? "\n" : "");
+      const block = Bun.YAML.parse(scalar) as Record<string, string>;
       value = block[key] ?? "";
     } else if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
       // Preserve the existing JSON-unescaping and malformed-quote fallback.
