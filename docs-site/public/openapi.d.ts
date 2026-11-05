@@ -752,6 +752,17 @@ export interface paths {
                                     type: "lucide";
                                     icon: string;
                                     color?: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "url";
+                                    /** Format: uri */
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "agent-fs";
+                                    path: string;
+                                    orgId?: string;
+                                    driveId?: string;
                                 };
                                 createdAt: string;
                                 updatedAt: string;
@@ -2876,6 +2887,17 @@ export interface paths {
                             type: "lucide";
                             icon: string;
                             color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
                         } | null;
                         slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
@@ -28788,6 +28810,17 @@ export interface components {
                 type: "lucide";
                 icon: string;
                 color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
             };
             slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */

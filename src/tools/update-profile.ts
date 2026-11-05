@@ -159,7 +159,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         avatar: AgentAvatarSchema.nullable()
           .optional()
           .describe(
-            "Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color.",
+            "Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/agents/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). An image that cannot load falls back to the default glyph. Pass null to reset to the default deterministic icon/color.",
           ),
         slackIcon: AgentSlackIconSchema.nullable()
           .optional()
