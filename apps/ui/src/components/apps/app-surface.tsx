@@ -51,6 +51,11 @@
  *   - default      → normal SPA chrome (PageHeader + action cluster).
  *   - ?mode=full   → full-viewport overlay with a slim header.
  *   - ?mode=chromeless → the rendered page only (embed surface, no header).
+ *
+ * `layout: "sidebar"` wraps the page in `<AppShell>` (page sidebar + sticky
+ * page header) in every mode: inside the bordered canvas (default), under the
+ * slim bar (full), and as the whole viewport (chromeless), where the sidebar
+ * also names the app. Below `md` the sidebar folds into a header menu.
  */
 
 import type { StateStore } from "@json-render/core";
@@ -92,6 +97,7 @@ import {
 } from "@/api/hooks/use-apps";
 import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import { AppShell, shellNavItems } from "@/components/apps/app-shell";
 import {
   buildQuerySlot,
   errorMessage,
@@ -620,6 +626,15 @@ export function AppSurface({
     [app, activePageName, resolvedApps, pendingAppIds],
   );
   const activeSpec = assembled.spec;
+  // `layout: "sidebar"`: the page's `headerActions` subtree, rendered as a
+  // second root (same elements, same state) in the shell's sticky header.
+  const headerSpec = useMemo(
+    () =>
+      assembled.spec && assembled.headerRoot
+        ? { root: assembled.headerRoot, elements: assembled.spec.elements }
+        : null,
+    [assembled],
+  );
 
   // Named queries, each with the route params its `$param` filters need. A
   // query missing one is parked (not executed) and gets an explicit error slot.
@@ -1150,8 +1165,19 @@ export function AppSurface({
   // navigating back. Owned by the runtime (not the definition) so every app
   // gets it for free — including `?mode=chromeless`, where the dashboard
   // breadcrumb bar doesn't exist and this is the only way back.
+  // The sidebar layout (`layout: "sidebar"`) lists the pages itself, so its
+  // header keeps crumbs only for pages the sidebar does not list.
+  const shellHref = (page: string) =>
+    page === defaultPage
+      ? `/apps/${encodeURIComponent(app.id)}${modeParam ? `?${new URLSearchParams({ mode: modeParam })}` : ""}`
+      : appPagePath(app.id, page, undefined, modeParam);
+  const shellItems =
+    definition.layout === "sidebar" && activePage ? shellNavItems(pages, shellHref) : null;
   const showPageCrumbs =
-    Boolean(activePage) && Object.keys(pages).length > 1 && activePageName !== defaultPage;
+    Boolean(activePage) &&
+    Object.keys(pages).length > 1 &&
+    activePageName !== defaultPage &&
+    !shellItems?.some((item) => item.name === activePageName);
   const pageCrumbs = showPageCrumbs ? (
     <nav
       aria-label="App pages"
@@ -1194,9 +1220,62 @@ export function AppSurface({
     </JsonRenderThemeProvider>
   );
 
+  // Sidebar layout: the same providers around the shell, so the header's
+  // actions slot reads and writes the page's state and runs its actions.
+  const shellSurface =
+    shellItems && activePage ? (
+      <JsonRenderThemeProvider value={appThemeAttr ?? null}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>
+              <AppShell
+                items={shellItems}
+                activePage={activePageName}
+                onNavigate={(href) => navigate(href)}
+                // The dashboard header names the app in the default view only.
+                appName={mode === "default" ? undefined : app.name}
+                title={activePage.title ?? activePageName}
+                description={activePage.description}
+                crumbs={pageCrumbs}
+                actions={
+                  headerSpec ? (
+                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                  ) : null
+                }
+                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                scrollRef={scrollRef}
+              >
+                {actionError && (
+                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                    {actionError}
+                  </AlertCallout>
+                )}
+                {renderedSpec}
+              </AppShell>
+            </ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </JsonRenderThemeProvider>
+    ) : null;
+
   // Embed surface: the rendered page and nothing else — no SPA chrome, no
   // header, no debug drawer. Covers the layout so an iframe gets the full
-  // viewport.
+  // viewport. A sidebar-layout app keeps its shell here: it is the app's own
+  // navigation, and the only way between pages inside an iframe.
+  if (mode === "chromeless" && shellSurface) {
+    return (
+      <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
+        className="fixed inset-0 z-50 flex flex-col bg-background"
+        data-testid="app-runtime"
+        data-theme={appThemeAttr}
+      >
+        {shellSurface}
+      </div>
+    );
+  }
   if (mode === "chromeless") {
     return (
       <div
@@ -1239,9 +1318,11 @@ export function AppSurface({
             </Link>
           </Button>
         </div>
-        <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
-          {surface}
-        </div>
+        {shellSurface ?? (
+          <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
+            {surface}
+          </div>
+        )}
       </div>
     );
   }
@@ -1274,9 +1355,12 @@ export function AppSurface({
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}
       <div
-        ref={scrollRef}
+        // The shell owns the scroll column (and `scrollRef`) in the sidebar layout.
+        ref={shellSurface ? undefined : scrollRef}
         className={cn(
-          "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          shellSurface
+            ? "flex flex-1 min-h-0 overflow-hidden rounded-lg border border-border"
+            : "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
           // Below md the canvas bleeds through `<main>`'s gutter to the screen
           // edges, so a phone gives the app its full width.
           "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
@@ -1286,7 +1370,7 @@ export function AppSurface({
         )}
         data-theme={appThemeAttr}
       >
-        {surface}
+        {shellSurface ?? surface}
       </div>
       {lastResponse !== undefined && (
         <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
