@@ -208,9 +208,16 @@ export type PricedWorkflow = {
   enabledOnlyRuns: number;
   capApplied: boolean;
   opsPerRun: number;
+  /** Measured spend of every run in the window: agent tasks, their reviews, LLM calls. */
+  measuredUsd: number;
+  /**
+   * Scaled estimate, not a measurement: `measuredUsd * substitutedRuns / runs`.
+   * The estimator's actual side; it assumes spend is spread evenly over runs.
+   */
   actualUsd: number;
   agentOnlyUsd: SavingsBand;
   savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`: measured hours times the substituted share. */
   actualHours: number;
   agentOnlyHours: SavingsBand;
   hoursSaved: SavingsBand;
@@ -249,7 +256,8 @@ export function priceWorkflow(
   const llmUsd = facts.recordedLlmUsd > 0 ? facts.recordedLlmUsd : facts.estimatedLlmUsd;
   const keptUsd = (facts.agentUsd + facts.followupUsd) * share;
   const keptHours = (facts.agentMs / 3.6e6) * share;
-  const actualUsd = (facts.agentUsd + facts.followupUsd + llmUsd) * share;
+  const measuredUsd = facts.agentUsd + facts.followupUsd + llmUsd;
+  const actualUsd = measuredUsd * share;
   const actualHours = (facts.agentMs / 3.6e6 + facts.computeSecs / 3600) * share;
   const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
   const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
@@ -261,6 +269,7 @@ export function priceWorkflow(
     enabledOnlyRuns: runs - substituted,
     capApplied: facts.schedRuns > cap,
     opsPerRun,
+    measuredUsd,
     actualUsd,
     agentOnlyUsd,
     savingUsd: bandOf((q) => agentOnlyUsd[q] - actualUsd),
@@ -272,8 +281,9 @@ export function priceWorkflow(
 }
 
 /**
- * Split a window's p50 saving and actual cost across the UTC days its runs
- * started on, so the days sum to `priceWorkflow` over the window. The unit
+ * Split a window's p50 saving, scaled actual cost and measured spend across
+ * the UTC days its runs started on, so the days sum to `priceWorkflow` over
+ * the window. The unit
  * cost (tau), the substituted share and the LLM source are the window's.
  * When the hourly cap or the effect rule makes the window's counted schedule
  * runs differ from the raw ones, they are spread pro rata over the days'
@@ -283,7 +293,7 @@ export function splitByDay(
   facts: WorkflowFacts,
   byDay: readonly (WorkflowFacts & { day: string })[],
   opts: { tier: SavingsTier; days: number },
-): { day: string; savingUsd: number; actualUsd: number }[] {
+): { day: string; savingUsd: number; actualUsd: number; measuredUsd: number }[] {
   const priced = priceWorkflow(facts, { ...opts, band: "job" });
   const runs = facts.runs;
   const share = runs > 0 ? priced.substitutedRuns / runs : 0;
@@ -298,7 +308,13 @@ export function splitByDay(
       (d.countedRuns - d.schedRuns);
     const llmUsd = useRecorded ? d.recordedLlmUsd : d.estimatedLlmUsd;
     const keptUsd = (d.agentUsd + d.followupUsd) * share;
-    const actualUsd = (d.agentUsd + d.followupUsd + llmUsd) * share;
-    return { day: d.day, savingUsd: keptUsd + substituted * unitUsd - actualUsd, actualUsd };
+    const measuredUsd = d.agentUsd + d.followupUsd + llmUsd;
+    const actualUsd = measuredUsd * share;
+    return {
+      day: d.day,
+      savingUsd: keptUsd + substituted * unitUsd - actualUsd,
+      actualUsd,
+      measuredUsd,
+    };
   });
 }
