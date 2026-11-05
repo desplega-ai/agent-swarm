@@ -96,6 +96,7 @@ type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
 type:PendingChatRelay
+type:PinnedWorkflowDefinition
 type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
@@ -131,6 +132,7 @@ value:ExtensionAgentAssignmentError
 value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
 value:NOT_EXTENSION_AGENT_SQL
+value:PINNED_WORKFLOW_KEYS
 value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
@@ -388,6 +390,7 @@ value:getResolvableDeferralOutcomes
 value:getResolvedConfig
 value:getRetryableSteps
 value:getRootTaskChain
+value:getRunWorkflow
 value:getRunningScriptRuns
 value:getScheduledTaskById
 value:getScheduledTaskByName
@@ -545,6 +548,7 @@ value:normalizeSkillFilePath
 value:noteSlackOutcomeDeliveryFailure
 value:overwriteTerminalTaskResultText
 value:pauseTask
+value:pinWorkflowDefinition
 value:postMessage
 value:promoteAbandonedDraftTasks
 value:promoteDraftTask
@@ -600,6 +604,7 @@ value:startTask
 value:supersedeTask
 value:sweepExpiredKv
 value:sweepExpiredKvPrefix
+value:toPinnedDefinition
 value:toggleAgentSkill
 value:uninstallMcpServer
 value:uninstallSkill

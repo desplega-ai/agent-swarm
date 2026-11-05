@@ -549,6 +549,7 @@ describe("workflow agent-task node", () => {
       db: {
         getTaskByWorkflowRunStepId: async () => null,
         getWorkflow: async () => null,
+        getRunWorkflow: async () => null,
         createTaskExtended: async () => ({ id: crypto.randomUUID() }),
       },
     } as unknown as ConstructorParameters<typeof AgentTaskExecutor>[0];
@@ -704,6 +705,7 @@ describe("harness compatibility at every create entry point", () => {
       db: {
         getTaskByWorkflowRunStepId: async () => null,
         getWorkflow: async () => null,
+        getRunWorkflow: async () => null,
         createTaskExtended: async () => ({ id: crypto.randomUUID() }),
       },
     } as unknown as ConstructorParameters<typeof AgentTaskExecutor>[0];

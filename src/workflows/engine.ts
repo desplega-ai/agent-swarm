@@ -18,6 +18,7 @@ import {
   getStepCountForNode,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
+  pinWorkflowDefinition,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -61,7 +62,8 @@ import { runStepValidation, type ValidationRunResult } from "./validation";
 // `process.env`, so a module-level const would permanently ignore DB-saved
 // limits. Functions let a config reload take effect without a restart.
 function maxIterations(): number {
-  return Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
+  const value = Number(process.env.WORKFLOW_MAX_ITERATIONS);
+  return Number.isInteger(value) && value > 0 ? value : 100;
 }
 
 export interface WorkflowExecutionOptions {
@@ -131,6 +133,9 @@ export async function startWorkflowExecution(
   registry: ExecutorRegistry,
   options: WorkflowExecutionOptions = {},
 ): Promise<string> {
+  // The run pins the definition exactly as the caller read it, before token
+  // rendering: resume paths read the pin back raw, as they read the live row.
+  const pinSource = workflow;
   const preflight = preflightAutomation(
     workflowPreflightInput(workflow),
     await getAutomationSetupStates(),
@@ -198,6 +203,7 @@ export async function startWorkflowExecution(
       options,
       initial,
       newRunId,
+      pinSource,
     );
     if (!created) return runId;
     if (initial.status === "failed" && initial.preflight) {
@@ -317,6 +323,7 @@ async function createRunWithInitialState(
   options: WorkflowExecutionOptions,
   initial: InitialRunState,
   runId: string,
+  pinSource: Workflow,
 ): Promise<{
   runId: string;
   created: boolean;
@@ -343,6 +350,7 @@ async function createRunWithInitialState(
       (await shouldSkipCooldown(workflow.id, workflow.cooldown))
         ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
         : initial;
+    const definitionHash = await pinWorkflowDefinition(pinSource);
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -352,6 +360,7 @@ async function createRunWithInitialState(
       parentStepId,
       parentStepAttempt: parentStepId ? attempt : undefined,
       triggeredByAgentId: options.triggeredByAgentId,
+      definitionHash,
     });
     await updateWorkflowRun(
       runId,
