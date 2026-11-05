@@ -584,11 +584,12 @@ SchemaForm details:
 SessionThread details — a chat bound to a task chain (every task under `rootTaskId`, linked by `parentTaskId`):
 
 - `rootTaskId` is the chain root, usually `{ "$state": "/queries/<name>/data/0/rootTaskId" }` from a row the app owns, or stable context such as a route param. Empty or unbound means no chain yet.
-- Each turn shows the request (the `message` of an app-action input, else the task text) and its outcome, or "Working…" with the latest activity step while the task runs. The newest 100 turns render; request text is cut at 4,000 characters and output at 20,000. The task detail sheet has the full text.
+- Each turn shows the request (the `message` of an app-action input, else the task text) and its outcome. Until there is an outcome it shows "Working…" with the latest activity step while the task runs, or "Queued", "Paused", "In review" or "Draft". The newest 100 turns render; request text is cut at 4,000 characters and output at 20,000. The task detail sheet has the full text.
 - Sending a message takes one of three routes:
   1. No `rootTaskId` → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates a root task. `onRootCreated` then runs with `$chain.newTaskId` set to the new task id.
-  2. Leaf task (newest in the chain) is running, paused, or reviewing → steer it: `POST /api/tasks/<leaf>/steer` with `mode: "queue"` and `source: "app-page"`. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
-  3. Leaf task is completed, failed, cancelled, superseded, or draft → run `onDispatch` again with `$chain.leafTaskId` set to the leaf id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
+  2. Leaf task (newest in the chain) is not finished → steer it: `POST /api/tasks/<leaf>/steer` with `mode: "queue"` and `source: "app-page"`. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Leaf task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the leaf id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
+- A bound `rootTaskId` whose chain cannot be found (deleted, or not visible to the viewer) blocks sending; `leafTaskId` is `null` only when there is no root. After a send, the composer stays locked until the new task appears in the chain (or, on the first send, until `rootTaskId` holds it).
 - Why `onRootCreated` is separate: a static chain cannot skip a step, so an `app.mutate` that adopts the new task as the root inside `onDispatch` would overwrite `rootTaskId` on every follow-up. Put that `app.mutate` (`values: { rootTaskId: { "$chain": "newTaskId" } }`) in `onRootCreated`. Omit it when `rootTaskId` does not come from a row the app writes.
 - `onReset` renders a Reset control once a root exists; it should clear `rootTaskId` so the next message starts a new chain.
 
