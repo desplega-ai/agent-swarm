@@ -96,21 +96,35 @@ export function chartValueFormatter(
   return (value) => formatter.format(value);
 }
 
-/** Date label for a time axis: a day label when the points span two days or more, else a clock time. */
+function isLocalMidnight(ms: number): boolean {
+  const date = new Date(ms);
+  return date.getHours() === 0 && date.getMinutes() === 0;
+}
+
+function localDayKey(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/**
+ * Date label for a time axis. Points within one local day show the clock
+ * only. Once they cross a day, every tick carries its date (a midnight tick
+ * shows just the date), so two consecutive days never share a label.
+ */
 export function timeTickFormatter(points: readonly ChartPoint[]): (ms: number) => string {
   const first = points[0]?.__x;
   const last = points[points.length - 1]?.__x;
-  const spanMs = typeof first === "number" && typeof last === "number" ? last - first : 0;
-  const pattern = spanMs >= 2 * 24 * 60 * 60 * 1000 ? "MMM d" : "HH:mm";
-  return (ms) => formatDate(ms, pattern);
+  const crossesDays =
+    typeof first === "number" &&
+    typeof last === "number" &&
+    localDayKey(first) !== localDayKey(last);
+  if (!crossesDays) return (ms) => formatDate(ms, "HH:mm");
+  return (ms) => formatDate(ms, isLocalMidnight(ms) ? "MMM d" : "MMM d HH:mm");
 }
 
 /** Tooltip date: drops the clock when every point sits on local midnight. */
 export function timeLabelFormatter(points: readonly ChartPoint[]): (ms: number) => string {
-  const allMidnight = points.every((point) => {
-    const date = new Date(point.__x as number);
-    return date.getHours() === 0 && date.getMinutes() === 0;
-  });
+  const allMidnight = points.every((point) => isLocalMidnight(point.__x as number));
   return (ms) => formatDate(ms, allMidnight ? "MMM d, yyyy" : "MMM d, yyyy HH:mm");
 }
 

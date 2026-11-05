@@ -108,7 +108,7 @@ test("existing definitions (no layout opt-in) render the plain canvas in every m
   }
 });
 
-test("layout: sidebar lists navigable pages, marks the active one and fills the sticky header", async () => {
+test("layout: sidebar lists navigable pages, marks the active one and fills the header", async () => {
   const definition = await definitionOf("app-shell-charts-definition.json.txt");
   const host = await mountApp(definition);
 
@@ -123,7 +123,14 @@ test("layout: sidebar lists navigable pages, marks the active one and fills the 
   expect(sidebar.textContent).not.toContain("Factory");
 
   const header = host.querySelector('[data-testid="app-shell-header"]')!;
-  expect(header.className).toContain("sticky top-0");
+  // The header sits outside the scroll container; the body below it scrolls
+  // with a bounded height, so a `fill` Stack gets independent panes.
+  expect(header.className).toContain("shrink-0");
+  const body = host.querySelector('[data-testid="app-shell-body"]')!;
+  expect(header.nextElementSibling).toBe(body);
+  expect(body.className).toContain("min-h-0 flex-1");
+  expect(body.className).toContain("overflow-y-auto");
+  expect(header.parentElement?.className).not.toContain("overflow");
   expect(header.querySelector("h2")?.textContent).toBe("Overview");
   expect(header.textContent).toContain("Deploys, failures and spend");
   expect(header.querySelector('[data-testid="app-shell-actions"]')?.textContent).toContain(

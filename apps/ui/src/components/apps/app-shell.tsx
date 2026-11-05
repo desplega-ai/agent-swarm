@@ -1,6 +1,6 @@
 /**
  * App shell for `layout: "sidebar"` swarm apps: a left sidebar listing the
- * app's pages and a sticky page header (title, description, actions slot)
+ * app's pages and a fixed page header (title, description, actions slot)
  * over the scrolling page body. Below `md` the sidebar folds into a menu
  * button in the header. The runtime (`app-surface.tsx`) owns routing; this
  * file is layout only.
@@ -74,7 +74,7 @@ export function AppShell({
   description?: string;
   crumbs?: ReactNode;
   actions?: ReactNode;
-  /** Background of the canvas, repeated on the sticky header so content scrolls under it. */
+  /** Background of the canvas, repeated on the header. */
   surfaceClass: string;
   scrollRef?: Ref<HTMLDivElement>;
   children: ReactNode;
@@ -121,10 +121,10 @@ export function AppShell({
           link(item, "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors"),
         )}
       </nav>
-      <div ref={scrollRef} className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header
           className={cn(
-            "sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border px-4 py-3",
+            "flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3",
             surfaceClass,
           )}
           data-testid="app-shell-header"
@@ -172,7 +172,16 @@ export function AppShell({
             </div>
           ) : null}
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-4">{children}</div>
+        {/* The body is the scroll container, with the same classes as the plain
+            canvas: a bounded height lets a `fill` Stack take the remaining space
+            and scroll its own panes, while ordinary content scrolls the body. */}
+        <div
+          ref={scrollRef}
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+          data-testid="app-shell-body"
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

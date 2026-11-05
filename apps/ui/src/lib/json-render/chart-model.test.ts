@@ -3,6 +3,7 @@ import {
   chartValueFormatter,
   seriesColor,
   sparklineValues,
+  timeTickFormatter,
   toChartPoints,
   toTimestamp,
 } from "./chart-model";
@@ -63,5 +64,30 @@ describe("sparklineValues", () => {
     expect(sparklineValues([1, null], undefined)).toEqual([]);
     expect(sparklineValues([{ v: 1 }, { v: 2 }], undefined)).toEqual([]);
     expect(sparklineValues("1,2", undefined)).toEqual([]);
+  });
+});
+
+describe("timeTickFormatter", () => {
+  // Local-time constructors keep these independent of the runner's TZ.
+  const at = (day: number, hour = 0, minute = 0) => new Date(2026, 10, day, hour, minute).getTime();
+  const ticks = (xs: number[]) => {
+    const format = timeTickFormatter(xs.map((x) => ({ __x: x })));
+    return xs.map(format);
+  };
+
+  test("two consecutive daily points get distinct date labels", () => {
+    expect(ticks([at(3), at(4)])).toEqual(["Nov 3", "Nov 4"]);
+  });
+
+  test("points crossing midnight within a day carry the date on every tick", () => {
+    expect(ticks([at(3, 22), at(4, 0), at(4, 2, 30)])).toEqual([
+      "Nov 3 22:00",
+      "Nov 4",
+      "Nov 4 02:30",
+    ]);
+  });
+
+  test("points within one day show the clock only", () => {
+    expect(ticks([at(3, 9), at(3, 17, 45)])).toEqual(["09:00", "17:45"]);
   });
 });
