@@ -4430,3 +4430,45 @@ export interface FleetBenchmarkResponse {
   generatedAt: string | null;
   comparisons: FleetComparison[];
 }
+
+// ─── Automation savings (GET /api/savings/jobs) ─────────────────────────────
+
+export type SavingsTier = "smol" | "regular" | "smart" | "ultra";
+
+/** An 80% range: p10 and p90 around the p50 point estimate. */
+export interface SavingsBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+export interface SavingsJobRow {
+  kind: "workflow";
+  workflowId: string;
+  name: string;
+  basis: "modelled";
+  runs: number;
+  substitutedRuns: number;
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  agentOnlyUsdPerRun: number;
+}
+
+export interface SavingsJobsResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  computedAt: string;
+  valid: boolean;
+  reason: "no-runs" | "too-many-runs" | null;
+  rows: SavingsJobRow[];
+}

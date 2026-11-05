@@ -43,6 +43,7 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
+import { WorkflowSavingsStrip } from "@/components/savings/savings-strip";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
@@ -366,6 +367,10 @@ export default function WorkflowDetailPage() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="shrink-0">
+        <WorkflowSavingsStrip workflowId={workflow.id} />
       </div>
 
       {/* Tabs */}

@@ -41,6 +41,7 @@
     "repos",
     "rooms",
     "runtime-pools",
+    "savings",
     "schedules",
     "script-connections",
     "script-runs",
