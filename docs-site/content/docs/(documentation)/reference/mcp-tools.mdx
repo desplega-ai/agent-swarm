@@ -154,6 +154,15 @@ List model profiles: named harness + model + effort combinations. Pass a profile
 |-----------|------|----------|-------------|
 | `harness` | string | No | Only profiles for this harness (`claude`, `codex`, `pi`, ...) |
 
+### check-model-profile
+
+Check whether an agent can run a model profile before you pass it as `profile` or set it as the agent's default. It judges the harness, the model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; only a fail blocks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | string | Yes | The agent that would run the profile |
+| `profile` | string | Yes | Model profile name (see `list-model-profiles`) |
+
 ### get-task-details
 
 Returns detailed information about a specific task, including output, failure reason, and log history.
@@ -868,7 +877,7 @@ Get an app by ID, including its models, queries, actions, reusable elements, pag
 
 ### app-upsert
 
-Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported.
+Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. An optional top-level `icon` (`{ type: "lucide", icon: "<kebab-case lucide name>", color?: "#RRGGBB" }`) sets the app's icon on the dashboard Apps page; omit it, or use an unrecognized name, for a generic default.
 
 ### app-patch
 
