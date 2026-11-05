@@ -24,7 +24,7 @@ agent-fs 0.14.0 still works: Comb shows files and comments, and every other part
 
 ## Turn on Comb
 
-Comb is on whenever `AGENT_FS_API_URL` is set. `COMB_ENABLED=false` turns it off. There is no check that a browser can reach the agent-fs address: the browser uses `AGENT_FS_PUBLIC_URL` when it is set (direct browser access), else the API's `/agentfs` proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`) at `<public API URL>/agentfs`.
+Comb needs `AGENT_FS_API_URL`. With `COMB_ENABLED` unset, Comb is on when the browser has an agent-fs address: `AGENT_FS_PUBLIC_URL` (direct browser access), or the API's `/agentfs` proxy at `<public API URL>/agentfs` (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`). With `AGENT_FS_PROXY=false` and no `AGENT_FS_PUBLIC_URL`, Comb stays off until you set `COMB_ENABLED=true`. `COMB_ENABLED=false` turns it off. There is no check that a browser can open the address.
 
 When Comb is off, `GET /status` reports why in `agent_fs.comb.reason`.
 
@@ -32,10 +32,10 @@ Set these on the API server, in **Settings → Configuration** or in the deploym
 
 | Key | Value |
 | --- | --- |
-| `COMB_ENABLED` | Optional. `false` turns Comb off. Unset or `true`, Comb is on when `AGENT_FS_API_URL` is set. |
+| `COMB_ENABLED` | Optional. `false` turns Comb off. `true` turns it on when `AGENT_FS_API_URL` is set. Unset, Comb is on when `AGENT_FS_API_URL` is set and `AGENT_FS_PUBLIC_URL` or the proxy gives the browser an address. |
 | `AGENT_FS_PUBLIC_URL` | Optional. The agent-fs URL that browsers use directly. Unset, browsers go through the API proxy (`<public API URL>/agentfs`). |
 | `APP_URL` | The dashboard URL. Slack messages and lead prompts link to Comb only when it is set. |
-| `AGENT_FS_PROXY` | Optional, on by default when `AGENT_FS_API_URL` is set. The API serves agent-fs at `/agentfs`, so the browser reaches agent-fs through the API and agent-fs needs no public port. Comb uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. `false` turns the proxy off, and Comb then uses `AGENT_FS_API_URL` itself. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api). |
+| `AGENT_FS_PROXY` | Optional, on by default when `AGENT_FS_API_URL` is set. The API serves agent-fs at `/agentfs`, so the browser reaches agent-fs through the API and agent-fs needs no public port. Comb uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. `false` turns the proxy off. Comb then uses `AGENT_FS_API_URL` itself, and it is on only with `AGENT_FS_PUBLIC_URL` or `COMB_ENABLED=true`. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api). |
 
 A saved value reloads the API. The dashboard reads the new state on its next status poll, 30 seconds at most. The sidebar then shows **Comb**, and `/file` opens the swarm drive.
 
@@ -259,7 +259,7 @@ Agents deliver results as Markdown files, not Pages. They make a Page only when 
 
 ## Turn off Comb
 
-Set `COMB_ENABLED` to `false`. An existing swarm that never set it gets Comb on as soon as `AGENT_FS_API_URL` is set, so this is the way to keep the old behavior. Within one status poll (30 seconds at most):
+Set `COMB_ENABLED` to `false`. An existing swarm that never set it gets Comb on as soon as `AGENT_FS_API_URL` is set and the browser has an agent-fs address, so this is the way to keep the old behavior. Within one status poll (30 seconds at most):
 
 - The sidebar hides **Comb**.
 - `/file` shows "Comb is off". A file route also shows **Open in agent-fs**.
@@ -280,7 +280,7 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 ## Troubleshooting
 
-**"Comb is off".** Read `agent_fs.comb.reason` in `GET /status`. It names the missing piece: `AGENT_FS_API_URL` is not set, or `COMB_ENABLED` is `false`. After a change, the dashboard needs up to 30 seconds to poll.
+**"Comb is off".** Read `agent_fs.comb.reason` in `GET /status`. It names the missing piece: `AGENT_FS_API_URL` is not set, `COMB_ENABLED` is `false`, or `AGENT_FS_PROXY` is `false` with no `AGENT_FS_PUBLIC_URL`. After a change, the dashboard needs up to 30 seconds to poll.
 
 **"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL` (or `<public API URL>/agentfs` with `AGENT_FS_PROXY=true`). Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
 

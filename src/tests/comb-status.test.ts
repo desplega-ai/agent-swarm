@@ -62,9 +62,19 @@ afterEach(() => {
 });
 
 describe("/status agent_fs.comb", () => {
-  test("proxy disabled and an internal AGENT_FS_API_URL: still on, the browser gets that URL", async () => {
+  test("proxy disabled, no public URL, COMB_ENABLED unset: off, and says why", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.AGENT_FS_PROXY = "false";
+    const result = await comb();
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toContain("AGENT_FS_PUBLIC_URL is not set");
+    expect(result.api_url).toBe("http://agent-fs:7433");
+  });
+
+  test("proxy disabled and COMB_ENABLED=true: on, the browser gets AGENT_FS_API_URL", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PROXY = "false";
+    process.env.COMB_ENABLED = "true";
     const result = await comb();
     expect(result.enabled).toBe(true);
     expect(result.reason).toBeNull();

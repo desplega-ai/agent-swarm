@@ -230,11 +230,11 @@ export interface CombState {
 }
 
 /**
- * Comb (the agent-fs review space in the dashboard). An explicit
- * `COMB_ENABLED=false` turns it off. Otherwise it is on whenever
- * `AGENT_FS_API_URL` is set: the browser reaches agent-fs through
- * `AGENT_FS_PUBLIC_URL` when set, else through the API's `/agentfs` proxy
- * (on by default with `AGENT_FS_API_URL`), so no reachability check is needed.
+ * Comb (the agent-fs review space in the dashboard). It always needs
+ * `AGENT_FS_API_URL`, and an explicit `COMB_ENABLED=false` turns it off. An
+ * explicit `COMB_ENABLED=true` turns it on. Unset, it is on only when the
+ * browser has an agent-fs address: `AGENT_FS_PUBLIC_URL`, or the API's
+ * `/agentfs` proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`).
  * Reads `process.env` per call, so a config reload applies without a restart.
  */
 export function getCombState(): CombState {
@@ -244,6 +244,14 @@ export function getCombState(): CombState {
     return { enabled: false, explicit, reason: "COMB_ENABLED is false." };
   }
   if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
+  if (!explicit && !process.env.AGENT_FS_PUBLIC_URL?.trim() && !isAgentFsProxyEnabled()) {
+    return {
+      enabled: false,
+      explicit,
+      reason:
+        "AGENT_FS_PROXY is false and AGENT_FS_PUBLIC_URL is not set, so a browser has no agent-fs address.",
+    };
+  }
   return { enabled: true, explicit, reason: null };
 }
 

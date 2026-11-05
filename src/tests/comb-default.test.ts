@@ -66,15 +66,35 @@ describe("getCombState", () => {
     expect(getCombState()).toMatchObject({ enabled: false, explicit: true });
   });
 
-  test("unset: on whenever AGENT_FS_API_URL is set, with no reachability check", () => {
+  test("unset: on with AGENT_FS_API_URL and the default proxy, with no reachability check", () => {
     for (const url of ["http://agent-fs:7433", "http://10.0.0.5:7433", "http://fs.svc:7433"]) {
       process.env.AGENT_FS_API_URL = url;
       expect(getCombState()).toEqual({ enabled: true, explicit: false, reason: null });
     }
     process.env.MCP_BASE_URL = "http://api:3013";
     expect(isCombEnabled()).toBe(true);
+  });
+
+  test("unset with the proxy off: on only with AGENT_FS_PUBLIC_URL", () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.AGENT_FS_PROXY = "false";
-    expect(isCombEnabled()).toBe(true);
+    expect(getCombState()).toEqual({
+      enabled: false,
+      explicit: false,
+      reason:
+        "AGENT_FS_PROXY is false and AGENT_FS_PUBLIC_URL is not set, so a browser has no agent-fs address.",
+    });
+    process.env.AGENT_FS_PUBLIC_URL = "  ";
+    expect(isCombEnabled()).toBe(false);
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
+    expect(getCombState()).toEqual({ enabled: true, explicit: false, reason: null });
+  });
+
+  test("explicit true with the proxy off and no public URL: on", () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:7433";
+    process.env.AGENT_FS_PROXY = "false";
+    process.env.COMB_ENABLED = "true";
+    expect(getCombState()).toEqual({ enabled: true, explicit: true, reason: null });
   });
 
   test("an unrecognized COMB_ENABLED counts as unset", () => {

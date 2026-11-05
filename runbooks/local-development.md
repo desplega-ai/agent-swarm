@@ -78,7 +78,7 @@ OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md]
 
 ## Files (Comb) and agent-fs
 
-Files in the dashboard (Comb) is on whenever `AGENT_FS_API_URL` is set. `COMB_ENABLED=false` turns it off. There is no browser-reachability check anymore. The browser address of agent-fs is `AGENT_FS_PUBLIC_URL` when it is set (direct browser access), else `<PUBLIC_MCP_BASE_URL>/agentfs` through the API proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`). With the proxy explicitly off and no public URL, the browser gets `AGENT_FS_API_URL` itself.
+Files in the dashboard (Comb) needs `AGENT_FS_API_URL`. Unset, `COMB_ENABLED` defaults on when `AGENT_FS_PUBLIC_URL` is set or the proxy is on. `COMB_ENABLED=false` turns it off. There is no browser-reachability check anymore. The browser address of agent-fs is `AGENT_FS_PUBLIC_URL` when it is set (direct browser access), else `<PUBLIC_MCP_BASE_URL>/agentfs` through the API proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`). With the proxy explicitly off and no public URL, Comb stays off unless `COMB_ENABLED=true`, and then the browser gets `AGENT_FS_API_URL` itself.
 
 Each browser gets its own named agent-fs key with no click: the dashboard calls `POST /api/fs/keys` (label `Swarm dashboard · <browser> on <OS> · <date>`) when it has no saved key or agent-fs rejects the saved one, and keeps the key in localStorage. The swarm stores none of these keys. A key that a browser already holds keeps working. An agent-fs older than 0.18.17 answers `501`, and Files falls back to the paste-key form. Local QA: run `ghcr.io/desplega-ai/agent-fs:0.18.17` on a free port and set `AGENT_FS_API_URL` to it.
 
