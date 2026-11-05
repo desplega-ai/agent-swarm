@@ -15,14 +15,61 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "./breadcrumbs";
 import { HealthBadge } from "./health-badge";
+import { PhoneHeaderMenu } from "./phone-header-menu";
 
+/** Phones (below `md`) get their own three-zone bar; `md` and up the full one. */
 export function AppHeader() {
+  return useIsPhone() ? <PhoneHeader /> : <DesktopHeader />;
+}
+
+/**
+ * The phone bar, laid out like a native navigation bar: the menu leads, the
+ * page name owns the middle, search, the bell and one "more" sheet trail.
+ * Every control is a 44 px ghost icon button. Health shows here only when it
+ * needs a person; the rest of the desktop cluster lives in the sheet
+ * (`PhoneHeaderMenu`). The safe-area padding keeps it clear of the notch
+ * when the page runs edge to edge (an installed web app).
+ */
+function PhoneHeader() {
+  const { data: status } = useStatusContext();
+  const openCommandMenu = useOpenCommandMenu();
+
+  return (
+    <header className="flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-0.5 bg-background pt-[env(safe-area-inset-top)] pr-[max(0.25rem,env(safe-area-inset-right))] pl-[max(0.25rem,env(safe-area-inset-left))]">
+      <SidebarTrigger className="size-11 [&_svg]:size-5" />
+      {isDemoMode ? (
+        <span className="rounded-sm bg-status-info px-1.5 py-0.5 text-[10px] font-medium text-status-info-foreground">
+          Demo
+        </span>
+      ) : null}
+      <div className="flex min-w-0 flex-1 items-center">
+        <Breadcrumbs />
+      </div>
+      {status && status.health !== "ok" ? <HealthBadge status={status} /> : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={openCommandMenu}
+        aria-label="Search"
+        aria-keyshortcuts="Meta+K Control+K"
+        className="size-11"
+      >
+        <Search className="size-5" />
+      </Button>
+      <NotificationBell className="size-11 [&_svg]:size-5 [&_[data-slot=badge]]:top-1.5 [&_[data-slot=badge]]:right-1" />
+      <PhoneHeaderMenu />
+    </header>
+  );
+}
+
+function DesktopHeader() {
   const { theme, toggleTheme } = useTheme();
   const { data: health, isError, error: healthError } = useHealth();
   const stats = useStats();

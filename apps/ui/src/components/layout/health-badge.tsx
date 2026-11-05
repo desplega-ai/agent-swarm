@@ -50,13 +50,13 @@ import {
   workerStartCommand,
 } from "@/lib/worker-start-commands";
 
-const HEALTH_DOT_CLASS: Record<StatusHealth, string> = {
+export const HEALTH_DOT_CLASS: Record<StatusHealth, string> = {
   ok: "bg-status-success",
   degraded: "bg-status-pending",
   broken: "bg-status-error",
 };
 
-const HEALTH_LABEL: Record<StatusHealth, string> = {
+export const HEALTH_LABEL: Record<StatusHealth, string> = {
   ok: "All systems go",
   degraded: "Needs attention",
   broken: "Setup required",

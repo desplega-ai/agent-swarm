@@ -69,6 +69,8 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
+  RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -78,6 +80,7 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AppQueryPlan } from "@/api/hooks/use-apps";
 import {
@@ -97,6 +100,8 @@ import {
 } from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
+import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
+import { PageActions } from "@/components/shared/page-actions";
 import {
   showVersionUpdatedToast,
   useVersionUpdateToast,
@@ -1253,12 +1258,17 @@ export function AppSurface({
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
-        // Below sm the actions take their own row under a full-width
-        // description; side by side they squeezed it to one word per line.
-        className="max-sm:flex-col max-sm:items-stretch"
+        // A phone folds the actions into one "more" button beside the
+        // description (`PageActions`), so the row stays a single line.
         title={app.name}
         description={app.description ?? undefined}
-        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
+        action={
+          <AppHeaderActions
+            title={app.name}
+            appIds={[...definitionsByApp.keys()]}
+            settingsApp={app}
+          />
+        }
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
@@ -1301,14 +1311,18 @@ export function AppSurface({
  * override, plus the declared `userConfig` fields when the app has any.
  */
 function AppHeaderActions({
+  title,
   appIds,
   settingsApp,
 }: {
+  /** The app's name: names the phone action sheet. */
+  title: string;
   appIds: string[];
   settingsApp: AppDetail | null;
 }) {
   const refresh = useAppRefresh(appIds);
   const location = useLocation();
+  const navigate = useNavigate();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1328,60 +1342,105 @@ function AppHeaderActions({
   const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
-        All apps
-      </Link>
-      <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
-        <Link to={fullUrl}>
-          <Maximize2 className="size-3.5" />
-          Open full
-        </Link>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Copy a header-less URL for embedding this app"
-        onClick={() => copy(chromelessUrl)}
+    <>
+      <PageActions
+        title={title}
+        more={
+          <>
+            <ActionSheetItem
+              icon={Maximize2}
+              label="Open full"
+              onSelect={() => void navigate(fullUrl)}
+            />
+            <ActionSheetItem
+              icon={Copy}
+              label="Copy chromeless link"
+              // The sheet closes on tap, so the toast is the confirmation.
+              onSelect={() =>
+                void copy(chromelessUrl).then((ok) =>
+                  ok
+                    ? toast.success("Chromeless link copied")
+                    : toast.error("Could not copy the link"),
+                )
+              }
+            />
+            <ActionSheetItem
+              icon={RefreshCw}
+              label="Refresh"
+              disabled={refreshing}
+              onSelect={() => void handleRefresh()}
+            />
+            {settingsApp ? (
+              <ActionSheetItem
+                icon={Settings}
+                label="App settings"
+                onSelect={() => setSettingsOpen(true)}
+              />
+            ) : null}
+            <ActionSheetItem
+              icon={LayoutGrid}
+              label="All apps"
+              onSelect={() => void navigate("/apps")}
+            />
+          </>
+        }
       >
-        {copied ? (
-          <Check className="size-3.5 text-status-success-strong" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-        {copied ? "Copied" : "Copy chromeless link"}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Re-read the app definition and re-run every query"
-        disabled={refreshing}
-        onClick={handleRefresh}
-      >
-        <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
-        Refresh
-      </Button>
-      {settingsApp && (
-        <>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
+            All apps
+          </Link>
+          <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
+            <Link to={fullUrl}>
+              <Maximize2 className="size-3.5" />
+              Open full
+            </Link>
+          </Button>
           <Button
             variant="outline"
-            size="icon"
-            aria-label="App settings"
-            title="Your settings for this app"
-            data-testid="app-settings-open"
-            onClick={() => setSettingsOpen(true)}
+            size="sm"
+            title="Copy a header-less URL for embedding this app"
+            onClick={() => copy(chromelessUrl)}
           >
-            <SettingsIcon size={14} />
+            {copied ? (
+              <Check className="size-3.5 text-status-success-strong" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            {copied ? "Copied" : "Copy chromeless link"}
           </Button>
-          <AppSettingsDrawer
-            appId={settingsApp.id}
-            appName={settingsApp.name}
-            appDefaultTheme={settingsApp.definition.theme}
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-          />
-        </>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Re-read the app definition and re-run every query"
+            disabled={refreshing}
+            onClick={handleRefresh}
+          >
+            <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+          {settingsApp && (
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="App settings"
+              title="Your settings for this app"
+              data-testid="app-settings-open"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <SettingsIcon size={14} />
+            </Button>
+          )}
+        </div>
+      </PageActions>
+      {settingsApp && (
+        <AppSettingsDrawer
+          appId={settingsApp.id}
+          appName={settingsApp.name}
+          appDefaultTheme={settingsApp.definition.theme}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
       )}
-    </div>
+    </>
   );
 }
