@@ -14,7 +14,7 @@ const me = {
 
 /** Fakes that succeed. `ls` answers each call from `lsResults` in order ("ok" or a status). */
 function fakeDeps(overrides: Partial<ConnectFlowDeps> = {}, lsResults: Array<"ok" | number> = []) {
-  const calls = { register: 0, getMe: 0, ls: 0, invite: [] as string[] };
+  const calls = { register: 0, getMe: 0, ls: 0, invite: [] as string[], inviteKeys: [] as string[] };
   const connected: AgentFsCredential[] = [];
   const deps: ConnectFlowDeps = {
     register: async () => {
@@ -30,8 +30,9 @@ function fakeDeps(overrides: Partial<ConnectFlowDeps> = {}, lsResults: Array<"ok
       if (result !== "ok") throw new AgentFsError(result, "ERR", `ls failed: ${result}`);
       return { entries: [] };
     },
-    invite: async (email) => {
+    invite: async (email, apiKey) => {
       calls.invite.push(email);
+      calls.inviteKeys.push(apiKey);
     },
     connect: (credential) => {
       connected.push(credential);
@@ -60,6 +61,8 @@ describe("connect flow", () => {
       const { deps, calls, connected } = fakeDeps({}, [status, "ok"]);
       expect(await connectWithKey(deps, KEY)).toEqual({ kind: "connected" });
       expect(calls.invite).toEqual(["human@example.com"]);
+      // The connecting key accepts a pending invite (agent-fs >= 0.18.19).
+      expect(calls.inviteKeys).toEqual([KEY]);
       expect(calls.ls).toBe(2);
       expect(connected).toHaveLength(1);
     }

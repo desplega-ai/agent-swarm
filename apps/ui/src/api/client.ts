@@ -1212,7 +1212,7 @@ class ApiClient {
   async inviteAgentFsMember(data: {
     email: string;
     role: "viewer" | "editor" | "admin";
-  }): Promise<{ orgId: string; invited: boolean }> {
+  }): Promise<{ orgId: string; invited: boolean; status?: string; token?: string }> {
     const url = `${this.getBaseUrl()}/api/fs/members/invite`;
     const res = await fetch(url, {
       method: "POST",

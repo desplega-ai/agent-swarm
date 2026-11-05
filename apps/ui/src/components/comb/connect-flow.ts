@@ -12,8 +12,8 @@ export interface ConnectFlowDeps {
   getMe: (apiKey: string) => Promise<MeResponse>;
   /** `ls /` on the swarm drive with `apiKey`. */
   ls: (apiKey: string) => Promise<unknown>;
-  /** Swarm API invite of `email` to the swarm drive. */
-  invite: (email: string) => Promise<unknown>;
+  /** Swarm API invite of `email` to the swarm drive, accepted with `apiKey` when pending. */
+  invite: (email: string, apiKey: string) => Promise<unknown>;
   /** Save the verified credential (`useAgentFs().connect`). */
   connect: (credential: AgentFsCredential) => void;
 }
@@ -51,7 +51,7 @@ async function finish(deps: ConnectFlowDeps, apiKey: string): Promise<void> {
   // (read-only) instead of becoming an editor.
   if (!(await hasDriveAccess(deps, apiKey))) {
     try {
-      await deps.invite(me.email);
+      await deps.invite(me.email, apiKey);
     } catch {
       throw new ConnectError(inviteMessage(me.email));
     }
