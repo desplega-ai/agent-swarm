@@ -8,7 +8,14 @@ import {
   type TierPrices,
   trimmedMean,
 } from "../../scripts/calibrate-savings-curve";
-import { CURVE, parseCalibration, SAVINGS_TIERS, type SavingsTier } from "../be/savings/model";
+import {
+  CURVE,
+  parseCalibration,
+  priceWorkflow,
+  SAVINGS_TIERS,
+  type SavingsTier,
+  type WorkflowFacts,
+} from "../be/savings/model";
 
 const PRICES: Record<SavingsTier, TierPrices> = {
   smol: { input: 0.1, output: 0.5, cached_input: 0.01, cache_write_1h: 0.2 },
@@ -24,10 +31,10 @@ const costAt = (s: Omit<OpusSession, "costUsd" | "otherUsd">, p: TierPrices) =>
     s.cacheWriteTokens * p.cache_write_1h) /
   1e6;
 
-/** `per` sessions at each of 1..61 turns whose tokens grow linearly with the turn count. */
-function sessions(per: number, outlier = true): OpusSession[] {
+/** `per` sessions at each of `from`..`to` turns whose tokens grow linearly with the turn count. */
+function sessions(per: number, outlier = true, from = 1, to = 61): OpusSession[] {
   const out: OpusSession[] = [];
-  for (let turns = 1; turns <= 61; turns++) {
+  for (let turns = from; turns <= to; turns++) {
     for (let k = 0; k < per; k++) {
       const base = {
         turns,
@@ -104,6 +111,72 @@ describe("calibrate-savings-curve", () => {
     expect(() => deriveCurves(input(sessions(20).slice(0, MIN_SESSIONS - 1)))).toThrow(
       /only \d+ opus sessions/,
     );
+  });
+
+  // Dollar figures below are the session curve's own unit, before R, the review cost and the error band.
+  test("negative control: 300 five-turn sessions do not become a flat curve", () => {
+    // Without a coverage rule this prices a 2-turn job like a 5-turn one (the 5-turn point at every turn).
+    const fiveTurn = sessions(300, false, 5, 5);
+    expect(fiveTurn).toHaveLength(300);
+    expect(() => deriveCurves(input(fiveTurn))).toThrow(/turn coverage too thin/);
+  });
+
+  test("refuses a window that misses the bottom or the top of the turn range", () => {
+    expect(() => deriveCurves(input(sessions(20, false, 6, 61)))).toThrow(
+      /reaching turn 3 or lower/,
+    );
+    expect(() => deriveCurves(input(sessions(40, false, 2, 19)))).toThrow(/turn 20 or higher/);
+    // 7 supported turn counts spanning 2..30: both ends reached, too few points between them.
+    const gappy = sessions(60, false, 2, 30).filter(
+      (s) => s.turns === 2 || s.turns === 30 || s.turns % 5 === 0,
+    );
+    expect(() => deriveCurves(input(gappy))).toThrow(/need at least 15/);
+  });
+
+  test("past the data the shipped shape is used, scaled to the last supported turn", () => {
+    const out = deriveCurves(input(sessions(20, false, 2, 30)));
+    for (const tier of SAVINGS_TIERS) {
+      const usd = out.curve[tier].usd;
+      const scale = (usd[29] as number) / CURVE[tier].usd[29];
+      for (const turns of [31, 45, 61]) {
+        expect(usd[turns - 1] as number).toBeCloseTo(CURVE[tier].usd[turns - 1] * scale, 3);
+      }
+      // Not flat: the tail keeps climbing.
+      expect(usd[60] as number).toBeGreaterThan((usd[29] as number) * 1.5);
+    }
+  });
+
+  test("below the data the shipped shape is used, scaled to the first supported turn", () => {
+    const out = deriveCurves(input(sessions(20, false, 3, 61)));
+    for (const tier of SAVINGS_TIERS) {
+      const usd = out.curve[tier].usd;
+      const scale = (usd[2] as number) / CURVE[tier].usd[2];
+      expect(usd[1] as number).toBeCloseTo(CURVE[tier].usd[1] * scale, 3);
+      expect(usd[1] as number).toBeLessThan(usd[2] as number);
+    }
+  });
+
+  test("a sparse-tail curve still prices more ops higher, past the data too", () => {
+    const out = deriveCurves(input(sessions(20, false, 2, 30)));
+    const facts = (opsSum: number): WorkflowFacts => ({
+      runs: 100,
+      schedRuns: 0,
+      schedEffectRuns: 0,
+      countedRuns: 100,
+      opsSum,
+      agentTasks: 0,
+      agentUsd: 0,
+      followupUsd: 0,
+      agentMs: 0,
+      recordedLlmUsd: 0,
+      estimatedLlmUsd: 0,
+      computeSecs: 0,
+    });
+    const perRun = (ops: number) =>
+      priceWorkflow(facts(ops * 100), { tier: "smart", days: 30, band: "job", curve: out.curve })
+        .agentOnlyUsdPerRun;
+    expect(perRun(1)).toBeLessThan(perRun(60));
+    expect(perRun(120)).toBeGreaterThan(perRun(60));
   });
 
   test("compareToShipped is 1.0 on the shipped curve and flags a doubled one", () => {

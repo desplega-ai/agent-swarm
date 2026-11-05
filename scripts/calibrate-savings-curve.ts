@@ -21,6 +21,10 @@
  *   non-decreasing.
  * - hrs(t, tier): the same for agent-active hours (durationMs) on opus,
  *   times the tier's speed against opus (median ms per turn).
+ * - Coverage: a turn count with fewer than MIN_SESSIONS_PER_TURN sessions is unsupported.
+ *   Gaps between supported turn counts are interpolated. The curve is refused unless the
+ *   supported counts reach MIN_LOW_TURN at the bottom and MIN_HIGH_TURN at the top. Past the
+ *   outermost supported count the shipped curve's shape is used, scaled to meet that count.
  */
 import { parseArgs } from "node:util";
 import {
@@ -55,6 +59,12 @@ const TRIM = 0.1;
 const SMOOTH_HALF_WIDTH = 2;
 /** Fewer sessions than this at one turn count: the point is filled from its neighbours. */
 const MIN_SESSIONS_PER_TURN = 5;
+/** Refuse a curve whose lowest supported turn count is above this: short jobs are what the model prices most. */
+export const MIN_LOW_TURN = 3;
+/** Refuse a curve whose highest supported turn count is below this (tau 20 is 65 ops per run). */
+export const MIN_HIGH_TURN = 20;
+/** Refuse a curve built on fewer supported turn counts than this (of 60). */
+export const MIN_SUPPORTED_TURNS = 15;
 /** Fewer opus sessions than this in the window: refuse to calibrate. */
 export const MIN_SESSIONS = 300;
 /** Fewer sessions than this for a tier model: use SPEED_FALLBACK. */
@@ -131,16 +141,23 @@ function smooth(series: (number | undefined)[], half: number): (number | undefin
   });
 }
 
-/** Linear fill of the gaps, flat past the ends, then non-decreasing. */
-function fillMonotone(series: (number | undefined)[]): number[] {
+/**
+ * Fill the gaps, then make the series non-decreasing. Between two known points the fill is
+ * linear. Past the first or last known point it follows `reference` (the shipped curve) scaled
+ * to meet that point, because a flat extension would price every turn count beyond the data
+ * at the edge's level.
+ */
+function fillMonotone(series: (number | undefined)[], reference: readonly number[]): number[] {
   const known = series.flatMap((v, i) => (v === undefined ? [] : [i]));
   const first = known[0] as number;
   const last = known[known.length - 1] as number;
+  const scaled = (i: number, anchor: number) =>
+    (series[anchor] as number) * ((reference[i] as number) / (reference[anchor] as number));
   let floor = 0;
   return series.map((_, i) => {
     let v: number;
-    if (i <= first) v = series[first] as number;
-    else if (i >= last) v = series[last] as number;
+    if (i < first) v = scaled(i, first);
+    else if (i > last) v = scaled(i, last);
     else {
       const lo = known.filter((k) => k <= i).at(-1) as number;
       const hi = known.find((k) => k >= i) as number;
@@ -153,8 +170,15 @@ function fillMonotone(series: (number | undefined)[]): number[] {
   });
 }
 
-/** One value per turn count 1..TAU_MAX: a trimmed mean of `value`, smoothed and non-decreasing. */
-function curveOf(sessions: OpusSession[], value: (s: OpusSession) => number): number[] {
+/**
+ * One value per turn count 1..TAU_MAX: a trimmed mean of `value`, smoothed and non-decreasing.
+ * `reference` is the shipped series of the same quantity, used past the supported turn counts.
+ */
+function curveOf(
+  sessions: OpusSession[],
+  value: (s: OpusSession) => number,
+  reference: readonly number[],
+): number[] {
   const byTurns = new Map<number, number[]>();
   for (const s of sessions) {
     if (s.turns < 1 || s.turns > TAU_MAX) continue;
@@ -166,11 +190,23 @@ function curveOf(sessions: OpusSession[], value: (s: OpusSession) => number): nu
   });
   // shortcut: turn 1 is never read (tau >= T0 = 2), so it takes the value of turn 2 instead of a noisy estimate.
   raw[0] = undefined;
-  const smoothed = smooth(raw.slice(1), SMOOTH_HALF_WIDTH);
-  if (smoothed.every((v) => v === undefined)) {
-    throw new Error("no turn count has enough sessions to calibrate");
+  const supported = raw.flatMap((v, i) => (v === undefined ? [] : [i + 1]));
+  const lo = supported[0];
+  const hi = supported[supported.length - 1];
+  if (
+    lo === undefined ||
+    hi === undefined ||
+    lo > MIN_LOW_TURN ||
+    hi < MIN_HIGH_TURN ||
+    supported.length < MIN_SUPPORTED_TURNS
+  ) {
+    throw new Error(
+      `turn coverage too thin: ${supported.length} of ${TAU_MAX - 1} turn counts have ${MIN_SESSIONS_PER_TURN}+ sessions` +
+        `${lo === undefined ? "" : ` (turns ${lo}..${hi})`}; need at least ${MIN_SUPPORTED_TURNS}, reaching turn ${MIN_LOW_TURN} or lower and turn ${MIN_HIGH_TURN} or higher`,
+    );
   }
-  const filled = fillMonotone(smoothed);
+  const smoothed = smooth(raw.slice(1), SMOOTH_HALF_WIDTH);
+  const filled = fillMonotone(smoothed, reference.slice(1));
   return [filled[0] as number, ...filled];
 }
 
@@ -197,7 +233,7 @@ export function deriveCurves(input: DeriveInput): DerivedCalibration {
     usable.filter((s) => Math.abs(opusCost(s) - s.costUsd) <= 0.01 * s.costUsd).length /
     usable.length;
 
-  const opusHrs = curveOf(usable, (s) => s.durationMs / 3.6e6);
+  const opusHrs = curveOf(usable, (s) => s.durationMs / 3.6e6, CURVE.smart.hrs);
   const perTurn = (rows: TurnDuration[]) =>
     median(
       rows.filter((r) => r.turns >= 3 && r.turns <= TAU_MAX).map((r) => r.durationMs / r.turns),
@@ -220,7 +256,7 @@ export function deriveCurves(input: DeriveInput): DerivedCalibration {
     SAVINGS_TIERS.map((tier) => [
       tier,
       {
-        usd: curveOf(usable, price(prices[tier])).map((v) => round(v, 4)),
+        usd: curveOf(usable, price(prices[tier]), CURVE[tier].usd).map((v) => round(v, 4)),
         hrs: opusHrs.map((v) => round(v * speed[tier], 5)),
       },
     ]),
