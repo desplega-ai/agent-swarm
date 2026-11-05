@@ -341,8 +341,13 @@ completion, foreach drives and restart recovery.
 - Retry re-runs on the pinned definition. To pick up an edit, trigger a new run.
 - Two reads stay live: a `swarm-script` node resolves its script when the step runs, and a
   `sub-workflow` node reads the child's definition when the child starts (the child then pins it).
-- `deleteWorkflow` removes snapshots no remaining run references. A new `WorkflowSnapshot`
-  field must be classified in `PINNED_WORKFLOW_KEYS` (`src/be/db/workflow-run-definitions.ts`).
+- `deleteWorkflow` collects the distinct hashes of its runs before deleting them. In the
+  same transaction, it checks only those snapshots in batches of 100 and removes each one
+  only if no remaining run references it, regardless of status. Shared snapshots and
+  unrelated orphans stay untouched. This optimizes deletion, but adds no run retention or
+  periodic snapshot sweep. A live workflow still retains the snapshots its runs reference.
+- A new `WorkflowSnapshot` field must be classified in `PINNED_WORKFLOW_KEYS`
+  (`src/be/db/workflow-run-definitions.ts`).
 
 ## Cancelling a run
 

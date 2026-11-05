@@ -7963,8 +7963,13 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     [id],
   );
   // 3. Delete runs (they reference workflow)
+  const definitionHashes = await client.query<{ definitionHash: string }>(
+    `SELECT DISTINCT definitionHash FROM workflow_runs
+      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
+    [id],
+  );
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
-  await deleteOrphanedRunDefinitions();
+  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
