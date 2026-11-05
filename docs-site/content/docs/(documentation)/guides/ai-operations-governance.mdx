@@ -9,7 +9,7 @@ A company under 100 people with a one to five person tech function does not need
 
 **Recommendation.** Name one business owner per workflow. That owner defines the purpose, the acceptable outcomes, and the actions that need human judgment. Name a separate operator for credentials and recovery. For decisions with customer or production impact, the approver should be someone other than the person who built the workflow, and never the agent.
 
-**In Agent Swarm.** Every task records a requester, a parent task and a context key, and any agent can read another agent's outputs and failure reasons with the task tools. Per-user cost appears as "Cost by User" on the dashboard's Usage page; background work that no person requested shows as unattributed, so the owner is the only thing tying that spend to a decision.
+**In Agent Swarm.** A task records a requester when one is known, a parent task when another task dispatched it, and a context key that groups related work. All three are optional: a root task has no parent, a schedule with no human creator or a system follow-up of a requester-less task starts work with no requester, and older tasks can have a null context key. Any agent can read another agent's outputs and failure reasons with the task tools. Per-user cost appears as "Cost by User" on the dashboard's Usage page; background work that no person requested shows as unattributed, so the owner is the only thing tying that spend to a decision.
 
 See [Team Collaboration](/docs/features/team-collaboration) and [Task lifecycle](/docs/concepts/task-lifecycle).
 
@@ -45,7 +45,7 @@ See [Workflows](/docs/concepts/workflows), [HITL gates](/docs/playbooks/patterns
 
 **Recommendation.** For each workflow, decide what evidence an operator needs to answer two questions later: who requested the run and who approved the consequential step. Give that evidence an owner and a retention period, and restrict who can read it.
 
-**In Agent Swarm.** Lifecycle events and task history record what happened to a task, including its failure reason and its output. OpenTelemetry traces and metrics can carry the same run into your observability backend, and both stay off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so nothing leaves the deployment by accident.
+**In Agent Swarm.** Lifecycle events and task history record what happened to a task, including its failure reason and its output. OpenTelemetry traces and metrics can carry the same run into your observability backend, and the swarm's own exporters stay off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set. That setting covers the swarm only: [product telemetry](/docs/reference/telemetry) is on by default and is turned off separately, and a harness such as Claude Code or Codex runs its own exporters, which send to whatever endpoint the operator points them at.
 
 See [Events](/docs/api-reference/events), [Team Collaboration](/docs/features/team-collaboration) and [OpenTelemetry](/docs/guides/observability-opentelemetry).
 
