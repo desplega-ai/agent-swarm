@@ -41,7 +41,8 @@
         "approval-requests",
         "schedules",
         "scheduled-tasks",
-        "webhooks"
+        "webhooks",
+        "savings"
       ],
       "tools": [
         "*-workflow",
@@ -504,6 +505,10 @@
         "workflow-engine-system-one",
         "workflow-script-node"
       ]
+    },
+    "workflow-savings": {
+      "description": "A workflow run is priced as automation savings with an ordered 80% band, and its daily series sums to the same p50; an idle workflow is not valid, never $0; unknown workflow and bad input are rejected",
+      "scenarios": ["workflow-savings"]
     },
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
