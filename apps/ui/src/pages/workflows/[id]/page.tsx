@@ -43,7 +43,10 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
-import { WorkflowSavingsStrip } from "@/components/savings/savings-strip";
+import {
+  WorkflowSavingsHeaderAmount,
+  WorkflowSavingsTab,
+} from "@/components/savings/workflow-savings";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
@@ -310,6 +313,10 @@ export default function WorkflowDetailPage() {
           <Badge variant="outline" size="tag">
             {workflow.definition.edges?.length ?? 0} edges
           </Badge>
+          <WorkflowSavingsHeaderAmount
+            workflowId={workflow.id}
+            onOpen={() => setActiveTab("savings")}
+          />
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             <FavoriteButton
               favorite={workflow.favorite}
@@ -369,10 +376,6 @@ export default function WorkflowDetailPage() {
         )}
       </div>
 
-      <div className="shrink-0">
-        <WorkflowSavingsStrip workflowId={workflow.id} />
-      </div>
-
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
@@ -380,6 +383,7 @@ export default function WorkflowDetailPage() {
           <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
           <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
+          <TabsTrigger value="savings">Savings</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
@@ -494,6 +498,11 @@ export default function WorkflowDetailPage() {
             }
             emptyLabel="0 runs"
           />
+        </TabsContent>
+
+        {/* Savings tab */}
+        <TabsContent value="savings" className="flex flex-col flex-1 min-h-0">
+          <WorkflowSavingsTab workflowId={workflow.id} />
         </TabsContent>
 
         {/* Versions tab */}
