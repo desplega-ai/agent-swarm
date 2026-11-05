@@ -86,6 +86,7 @@ import type { ActionChain, swarmCatalog } from "./catalog";
 import {
   boundTurnTask,
   isDispatchSettled,
+  isScrolledToBottom,
   latestStepText,
   pendingTurnLabel,
   resolveLeafTask,
@@ -235,16 +236,31 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const { dispatchRoute, steerRoute, chainedDispatchRoute, chainMissing } =
     resolveSessionThreadRoute({ rootTaskId, chainLoaded, leafTask });
 
-  // Like a chat: open at the newest turn, and follow it when a turn is added
-  // or the newest one changes status (its outcome lands).
+  // Like a chat: open at the newest turn and stay pinned to the bottom while
+  // content settles (markdown, Show more toggles, a landing outcome all grow
+  // the list after the first paint). Scrolling up unpins; scrolling back to
+  // the bottom, or a new newest turn, pins again.
   const turnListRef = useRef<HTMLDivElement>(null);
+  const turnContentRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
   const newestTurn = turns.at(-1);
   const newestTurnKey = newestTurn ? `${newestTurn.id}:${newestTurn.status}` : "";
   useLayoutEffect(() => {
     if (!newestTurnKey) return;
+    pinnedRef.current = true;
     const list = turnListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [newestTurnKey]);
+  useEffect(() => {
+    const list = turnListRef.current;
+    const content = turnContentRef.current;
+    if (!list || !content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   const settled = isDispatchSettled({ pendingTaskId, rootTaskId, chain });
   useEffect(() => {
@@ -426,25 +442,30 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
         <div
           ref={turnListRef}
           data-slot="session-thread-turns"
-          className={cn(
-            "flex min-h-0 flex-col gap-3 overflow-y-auto px-1 py-1",
-            fill ? "flex-1" : "h-[420px]",
-          )}
+          onScroll={(event) => {
+            pinnedRef.current = isScrolledToBottom(event.currentTarget);
+          }}
+          className={cn("min-h-0 overflow-y-auto px-1 py-1", fill ? "flex-1" : "h-[420px]")}
         >
-          {turns.length > 0 ? null : (
-            <p className="py-1 text-sm text-muted-foreground">
-              No session yet — send a message to get started.
-            </p>
-          )}
-          {hiddenTurns > 0 ? (
-            <p className="px-1 text-xs text-muted-foreground" data-slot="session-thread-truncated">
-              Showing the latest {SESSION_THREAD_MAX_TURNS.toLocaleString()} turns (
-              {hiddenTurns.toLocaleString()} older hidden)
-            </p>
-          ) : null}
-          {turns.map((task) => (
-            <SessionThreadTurn key={task.id} task={task} live={task.id === leafTask?.id} />
-          ))}
+          <div ref={turnContentRef} className="flex flex-col gap-3">
+            {turns.length > 0 ? null : (
+              <p className="py-1 text-sm text-muted-foreground">
+                No session yet — send a message to get started.
+              </p>
+            )}
+            {hiddenTurns > 0 ? (
+              <p
+                className="px-1 text-xs text-muted-foreground"
+                data-slot="session-thread-truncated"
+              >
+                Showing the latest {SESSION_THREAD_MAX_TURNS.toLocaleString()} turns (
+                {hiddenTurns.toLocaleString()} older hidden)
+              </p>
+            ) : null}
+            {turns.map((task) => (
+              <SessionThreadTurn key={task.id} task={task} live={task.id === leafTask?.id} />
+            ))}
+          </div>
         </div>
         <div className={cn("flex flex-col gap-1.5", fill && "shrink-0")}>
           <div className="flex items-end gap-2">

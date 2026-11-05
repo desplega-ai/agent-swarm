@@ -4,6 +4,7 @@ import {
   boundTurnTask,
   extractRequestText,
   isDispatchSettled,
+  isScrolledToBottom,
   latestStepText,
   pendingTurnLabel,
   resolveLeafTask,
@@ -613,5 +614,26 @@ describe("turn bounds", () => {
     expect(bounded.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
     expect(bounded.failureReason).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 1);
     expect(big.output).toHaveLength(SESSION_THREAD_MAX_OUTPUT_CHARS + 10);
+  });
+});
+
+describe("isScrolledToBottom", () => {
+  test("at the bottom, or within the slack, counts as pinned", () => {
+    expect(isScrolledToBottom({ scrollTop: 580, scrollHeight: 1000, clientHeight: 420 })).toBe(
+      true,
+    );
+    expect(isScrolledToBottom({ scrollTop: 540, scrollHeight: 1000, clientHeight: 420 })).toBe(
+      true,
+    );
+  });
+
+  test("a viewer who scrolled up is not pinned", () => {
+    expect(isScrolledToBottom({ scrollTop: 300, scrollHeight: 1000, clientHeight: 420 })).toBe(
+      false,
+    );
+  });
+
+  test("content shorter than the box is at the bottom", () => {
+    expect(isScrolledToBottom({ scrollTop: 0, scrollHeight: 200, clientHeight: 420 })).toBe(true);
   });
 });

@@ -301,3 +301,19 @@ export function latestStepText<T extends { createdAt: string }>(
   }
   return newest?.text ?? null;
 }
+
+/** How far from the bottom (px) a turn list still counts as "at the bottom". */
+export const SESSION_THREAD_BOTTOM_SLACK_PX = 48;
+
+/**
+ * Whether a scroll box is at (or within `SESSION_THREAD_BOTTOM_SLACK_PX` of)
+ * its bottom. While it is, the thread keeps it pinned there as content grows;
+ * a viewer who scrolled further up is left alone.
+ */
+export function isScrolledToBottom(box: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= SESSION_THREAD_BOTTOM_SLACK_PX;
+}
