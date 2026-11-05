@@ -21,8 +21,11 @@ const defaultSql: SavingsSql = (sql, params) => getDbClient().query(sql, params)
 export const LIVE_MAX_RUNS = 10_000;
 
 export type WorkflowWindow =
-  | { status: "ok"; facts: WorkflowFacts }
+  | { status: "ok"; facts: WorkflowFacts; byDay: DayFacts[] }
   | { status: "too-many-runs"; runs: number };
+
+/** One UTC day's facts. The window's facts are the sum over its days. */
+export type DayFacts = WorkflowFacts & { day: string };
 
 // A run "caused a downstream effect" when it created an agent task or started a child workflow run.
 const EFFECT_SQL =
@@ -59,6 +62,10 @@ async function scriptOps(names: string[], sql: SavingsSql): Promise<Map<string, 
   return ops;
 }
 
+/** UTC day (`YYYY-MM-DD`) of an ISO `startedAt`. */
+const DAY_SQL = "substr(r.startedAt,1,10)";
+
+/** Every run's facts, grouped by the UTC day it started; the window facts are their sum. */
 export async function computeWorkflowWindow(
   workflow: { id: string; definition: unknown },
   window: { start: string; end: string },
@@ -74,28 +81,43 @@ export async function computeWorkflowWindow(
       )
     )[0]?.n,
   );
-  if (total === 0) return { status: "ok", facts: emptyFacts(0) };
+  if (total === 0) return { status: "ok", facts: emptyFacts(0), byDay: [] };
   if (total > LIVE_MAX_RUNS) return { status: "too-many-runs", runs: total };
 
-  const byTrigger = await sql<{ tt: string; st: string; n: number }>(
-    "SELECT triggerType tt, status st, count(*) n FROM workflow_runs WHERE workflowId=? AND startedAt>=? AND startedAt<? GROUP BY 1,2",
+  const days = new Map<string, DayFacts>();
+  const dayOf = (d: unknown): DayFacts => {
+    const key = String(d);
+    let f = days.get(key);
+    if (!f) {
+      f = { day: key, ...emptyFacts(0) };
+      days.set(key, f);
+    }
+    return f;
+  };
+
+  const byTrigger = await sql<{ d: string; tt: string; st: string; n: number }>(
+    `SELECT ${DAY_SQL} d, r.triggerType tt, r.status st, count(*) n FROM workflow_runs r WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1,2,3`,
     span,
   );
-  const runs = byTrigger.reduce((s, r) => s + num(r.n), 0);
-  const counted = byTrigger.filter((r) => r.st !== "skipped" && r.st !== "cancelled");
-  const countedRuns = counted.reduce((s, r) => s + num(r.n), 0);
-  const schedRuns = counted.filter((r) => r.tt === "schedule").reduce((s, r) => s + num(r.n), 0);
-  const schedEffectRuns =
-    schedRuns > 0
-      ? num(
-          (
-            await sql<{ n: number }>(
-              `SELECT count(*) n FROM workflow_runs r WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? AND r.triggerType='schedule' AND r.status NOT IN ('skipped','cancelled') AND ${EFFECT_SQL}`,
-              span,
-            )
-          )[0]?.n,
-        )
-      : 0;
+  let schedRuns = 0;
+  for (const row of byTrigger) {
+    const f = dayOf(row.d);
+    const n = num(row.n);
+    f.runs += n;
+    if (row.st === "skipped" || row.st === "cancelled") continue;
+    f.countedRuns += n;
+    if (row.tt === "schedule") {
+      f.schedRuns += n;
+      schedRuns += n;
+    }
+  }
+  if (schedRuns > 0) {
+    const effect = await sql<{ d: string; n: number }>(
+      `SELECT ${DAY_SQL} d, count(*) n FROM workflow_runs r WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? AND r.triggerType='schedule' AND r.status NOT IN ('skipped','cancelled') AND ${EFFECT_SQL} GROUP BY 1`,
+      span,
+    );
+    for (const row of effect) dayOf(row.d).schedEffectRuns += num(row.n);
+  }
 
   const definition = (workflow.definition ?? {}) as {
     nodes?: { id: string; type: string; config?: Record<string, unknown> }[];
@@ -107,6 +129,7 @@ export async function computeWorkflowWindow(
   const nodeOps = nodeOpsOf(definition, await scriptOps(scriptNames, sql));
 
   const steps = await sql<{
+    d: string;
     nid: string;
     n: number;
     secs: number | null;
@@ -115,47 +138,45 @@ export async function computeWorkflowWindow(
     jev: number | null;
     clairic: number | null;
   }>(
-    `SELECT s.nodeId nid, count(*) n, sum(CASE WHEN s.nodeType NOT IN ('agent-task','wait','human-in-the-loop','foreach','sub-workflow') THEN (julianday(coalesce(s.finishedAt,s.startedAt))-julianday(s.startedAt))*86400 ELSE 0 END) secs,
+    `SELECT ${DAY_SQL} d, s.nodeId nid, count(*) n, sum(CASE WHEN s.nodeType NOT IN ('agent-task','wait','human-in-the-loop','foreach','sub-workflow') THEN (julianday(coalesce(s.finishedAt,s.startedAt))-julianday(s.startedAt))*86400 ELSE 0 END) secs,
       sum(CASE WHEN s.nodeType LIKE 'system-one%' THEN json_extract(s.output,'$.usage.input_tokens') END) itok,
       sum(CASE WHEN s.nodeType='raw-llm' THEN length(json_extract(s.output,'$.result')) END) rchars,
       sum(CASE WHEN s.nodeId='report' THEN json_extract(s.output,'$.result.summary.jevCostUsd') END) jev,
       sum(CASE WHEN s.nodeId='report' THEN json_extract(s.output,'$.result.cost.clairicUsd') END) clairic
-      FROM workflow_runs r JOIN workflow_run_steps s ON s.runId=r.id WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1`,
+      FROM workflow_runs r JOIN workflow_run_steps s ON s.runId=r.id WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1,2`,
     span,
   );
-  const agent =
-    (
-      await sql<{ tasks: number; usd: number | null; ms: number | null; fup: number | null }>(
-        `SELECT count(DISTINCT t.id) tasks, sum(c.u) usd, sum(c.ms) ms,
-      (SELECT sum(c2.totalCostUsd) FROM workflow_runs r2 JOIN agent_tasks t2 ON t2.workflowRunId=r2.id JOIN agent_tasks k ON k.parentTaskId=t2.id AND (k.task LIKE 'Worker task completed%' OR k.task LIKE 'Worker task failed%') JOIN session_costs c2 ON c2.taskId=k.id WHERE r2.workflowId=? AND r2.startedAt>=? AND r2.startedAt<?) fup
-      FROM workflow_runs r JOIN agent_tasks t ON t.workflowRunId=r.id LEFT JOIN (SELECT taskId, sum(totalCostUsd) u, sum(durationMs) ms FROM session_costs GROUP BY taskId) c ON c.taskId=t.id
-      WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<?`,
-        [...span, ...span],
-      )
-    )[0] ?? null;
+  for (const x of steps) {
+    const f = dayOf(x.d);
+    // foreach iterations store `<nodeId>#<i>`.
+    f.opsSum += (nodeOps.get(String(x.nid).split("#")[0] ?? "") ?? 0) * num(x.n);
+    f.recordedLlmUsd += num(x.jev) + num(x.clairic);
+    f.estimatedLlmUsd += (num(x.itok) / 1e6) * JEV_PER_M + (num(x.rchars) * (1.2 / 4 + 0.3)) / 1e6;
+    f.computeSecs += num(x.secs);
+  }
 
-  return {
-    status: "ok",
-    facts: {
-      runs,
-      countedRuns,
-      schedRuns,
-      schedEffectRuns,
-      // foreach iterations store `<nodeId>#<i>`.
-      opsSum: steps.reduce(
-        (s, x) => s + (nodeOps.get(String(x.nid).split("#")[0] ?? "") ?? 0) * num(x.n),
-        0,
-      ),
-      agentTasks: num(agent?.tasks),
-      agentUsd: num(agent?.usd),
-      agentMs: num(agent?.ms),
-      followupUsd: num(agent?.fup),
-      recordedLlmUsd: steps.reduce((s, x) => s + num(x.jev) + num(x.clairic), 0),
-      estimatedLlmUsd: steps.reduce(
-        (s, x) => s + (num(x.itok) / 1e6) * JEV_PER_M + (num(x.rchars) * (1.2 / 4 + 0.3)) / 1e6,
-        0,
-      ),
-      computeSecs: steps.reduce((s, x) => s + num(x.secs), 0),
-    },
-  };
+  const agent = await sql<{ d: string; tasks: number; usd: number | null; ms: number | null }>(
+    `SELECT ${DAY_SQL} d, count(DISTINCT t.id) tasks, sum(c.u) usd, sum(c.ms) ms
+      FROM workflow_runs r JOIN agent_tasks t ON t.workflowRunId=r.id LEFT JOIN (SELECT taskId, sum(totalCostUsd) u, sum(durationMs) ms FROM session_costs GROUP BY taskId) c ON c.taskId=t.id
+      WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1`,
+    span,
+  );
+  for (const row of agent) {
+    const f = dayOf(row.d);
+    f.agentTasks += num(row.tasks);
+    f.agentUsd += num(row.usd);
+    f.agentMs += num(row.ms);
+  }
+  const followups = await sql<{ d: string; fup: number | null }>(
+    `SELECT ${DAY_SQL} d, sum(c2.totalCostUsd) fup FROM workflow_runs r JOIN agent_tasks t2 ON t2.workflowRunId=r.id JOIN agent_tasks k ON k.parentTaskId=t2.id AND (k.task LIKE 'Worker task completed%' OR k.task LIKE 'Worker task failed%') JOIN session_costs c2 ON c2.taskId=k.id WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1`,
+    span,
+  );
+  for (const row of followups) dayOf(row.d).followupUsd += num(row.fup);
+
+  const byDay = [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
+  const facts = emptyFacts(0);
+  for (const f of byDay) {
+    for (const k of Object.keys(facts) as (keyof WorkflowFacts)[]) facts[k] += f[k];
+  }
+  return { status: "ok", facts, byDay };
 }

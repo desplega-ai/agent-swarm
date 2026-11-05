@@ -20169,6 +20169,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings for a workflow
+         * @description The workflow's p50 saving and actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points for the workflow */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            computedAt: string;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "no-runs" | "too-many-runs" | null;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                actualUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Missing workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A savings query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many concurrent database queries; retry shortly */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/tokens": {
         parameters: {
             query?: never;
