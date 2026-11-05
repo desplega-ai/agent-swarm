@@ -161,7 +161,9 @@ export const platformbFsContinue: Scenario = {
       // A link for another agent-fs org would mint a key that the live app cannot use there.
       const otherOrg = await ctx.api("POST", "/api/fs/continue", {
         apiKey: token,
-        body: { returnTo: `https://live.agent-fs.dev/file/~/${crypto.randomUUID()}/${driveId}/x.md` },
+        body: {
+          returnTo: `https://live.agent-fs.dev/file/~/${crypto.randomUUID()}/${driveId}/x.md`,
+        },
       });
       expectStatus(otherOrg, [400], "reject a link for another agent-fs org");
       expect(
@@ -183,8 +185,10 @@ export const platformbFsContinue: Scenario = {
       );
       expect(continued.headers.get("cache-control") === "no-store", "The redirect is cacheable");
       expect(!continued.text.includes(bootstrapKey), "The response exposed the bootstrap key");
+      // A fresh copy: the earlier asserts narrowed labels.length to 0.
+      const minted = [...labels];
       expect(
-        labels.length === 1 && /^live\.agent-fs\.dev · \d{4}-\d{2}-\d{2}$/.test(labels[0] ?? ""),
+        minted.length === 1 && /^live\.agent-fs\.dev · \d{4}-\d{2}-\d{2}$/.test(minted[0] ?? ""),
         "The minted key label differs from the contract",
       );
 
