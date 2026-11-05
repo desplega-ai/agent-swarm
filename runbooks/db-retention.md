@@ -24,6 +24,11 @@ The server sweeps only this closed code-reviewed list:
 
 Table and column names never come from configuration. An operator can set a retention value only. An unset key disables that table's sweep.
 
+Workflow runs and their definition snapshots are outside this list. Deleting a workflow
+cleans only snapshots referenced by its deleted runs, after checking that no other run
+still references them. This cleanup does not expire old runs or sweep unrelated orphan
+snapshots. Run retention and periodic snapshot reclamation require a separate policy.
+
 - **age**: the value is whole days from 1 through 1,000,000. Rows older than the horizon are deleted, oldest first. Use at least seven days unless you have verified that a shorter window is suitable for your deployment.
 - **keep latest**: the value is a count from 1 through 1,000,000. Within each `(agentId, field)`, only the newest N rows by `version` are kept. Age plays no part, so the only version of a rarely edited field is never deleted. The floor of 1 means the newest version of every field always survives, so the next edit still numbers itself from it. Each sweep deletes the deepest history first, so an interrupted sweep leaves every field's surviving versions contiguous. A version can be hundreds of KB, so this table's batches start at 50 rows and never exceed 100.
 - **age, finished runs only** (`script_runs`): the value is whole days, measured on `startedAt`. Only rows whose `status` is `completed`, `failed`, `cancelled` or `aborted_limit` are eligible. A `running` or `paused` run is never deleted, however old, so the supervisor can still resume it. A run with an `idempotencyKey` is never deleted either, so a retried launch with the same key still gets its 409 instead of running twice. Workflow runs store `startedAt` as `YYYY-MM-DD HH:MM:SS` and inline runs as ISO strings, so the cutoff uses the space-separated form: a space-format row is compared exactly, and an ISO row dated on the cutoff's own day is kept until the next day's ticks, never deleted early. `script_run_journal` rows leave with their run through `ON DELETE CASCADE`, looked up on `idx_srj_runId`. Rows average about 30 KB and reach about 1.3 MB, so batches start at 100 rows and never exceed 500.
