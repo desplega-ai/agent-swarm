@@ -270,3 +270,35 @@ export function priceWorkflow(
     agentOnlyUsdPerRun: R.p50 * unitUsd + review,
   };
 }
+
+/**
+ * Split a window's p50 saving and actual cost across the UTC days its runs
+ * started on, so the days sum to `priceWorkflow` over the window. The unit
+ * cost (tau), the substituted share and the LLM source are the window's.
+ * When the hourly cap or the effect rule makes the window's counted schedule
+ * runs differ from the raw ones, they are spread pro rata over the days'
+ * schedule runs.
+ */
+export function splitByDay(
+  facts: WorkflowFacts,
+  byDay: readonly (WorkflowFacts & { day: string })[],
+  opts: { tier: SavingsTier; days: number },
+): { day: string; savingUsd: number; actualUsd: number }[] {
+  const priced = priceWorkflow(facts, { ...opts, band: "job" });
+  const runs = facts.runs;
+  const share = runs > 0 ? priced.substitutedRuns / runs : 0;
+  const nonSched = facts.countedRuns - facts.schedRuns;
+  const vSched = priced.substitutedRuns - nonSched;
+  // p50 agent-only cost of one substituted run (ERR_JOB.p50 is 1). The sum test pins this.
+  const unitUsd = priced.agentOnlyUsdPerRun;
+  const useRecorded = facts.recordedLlmUsd > 0;
+  return byDay.map((d) => {
+    const substituted =
+      (facts.schedRuns > 0 ? (vSched * d.schedRuns) / facts.schedRuns : 0) +
+      (d.countedRuns - d.schedRuns);
+    const llmUsd = useRecorded ? d.recordedLlmUsd : d.estimatedLlmUsd;
+    const keptUsd = (d.agentUsd + d.followupUsd) * share;
+    const actualUsd = (d.agentUsd + d.followupUsd + llmUsd) * share;
+    return { day: d.day, savingUsd: keptUsd + substituted * unitUsd - actualUsd, actualUsd };
+  });
+}

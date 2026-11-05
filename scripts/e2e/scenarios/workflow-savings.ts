@@ -1,5 +1,5 @@
-// Automation savings for one workflow: a run is priced, an idle workflow is not
-// valid (never $0), and bad input is rejected.
+// Automation savings for one workflow: a run is priced, its daily series sums to
+// the same saving, an idle workflow is not valid (never $0), and bad input is rejected.
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -37,6 +37,28 @@ export const workflowSavings: Scenario = {
         Number(band.p10) < Number(band.p50) && Number(band.p50) < Number(band.p90),
         `saving band ordered ${JSON.stringify(band)}`,
       );
+
+      // The daily series sums to the same p50 saving.
+      response = await ctx.api("GET", `/api/savings/daily?workflowId=${ran}&days=7&tier=smart`);
+      expectStatus(response, [200], "daily savings for a workflow with a run");
+      const daily = asRecord(response.json);
+      const points = asRecords(daily, "points");
+      expect(daily.valid === true && points.length === 8, `8 daily points ${response.text}`);
+      const pointCents = Math.round(points.reduce((s, p) => s + Number(p.savingUsd), 0) * 100);
+      expect(
+        pointCents === Math.round(Number(band.p50) * 100),
+        `daily points sum to the p50 saving ${pointCents} vs ${band.p50}`,
+      );
+
+      response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
+      expectStatus(response, [200], "daily savings for an idle workflow");
+      json = asRecord(response.json);
+      expect(
+        json.valid === false && json.reason === "no-runs" && asRecords(json, "points").length === 0,
+        `idle workflow has no daily points ${response.text}`,
+      );
+      response = await ctx.api("GET", `/api/savings/daily?workflowId=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "daily: unknown workflow");
 
       response = await ctx.api("GET", `/api/savings/jobs?workflowId=${idle}`);
       expectStatus(response, [200], "savings for an idle workflow");

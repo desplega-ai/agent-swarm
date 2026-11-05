@@ -8,6 +8,7 @@ import {
   priceWorkflow,
   SAVINGS_TIERS,
   type SavingsBand,
+  splitByDay,
 } from "../be/savings/model";
 import { executeReadOnlyQueryGated } from "./db-query";
 import {
@@ -89,6 +90,50 @@ const savingsJobsRoute = route({
   },
 });
 
+const SavingsDailyResponseSchema = z.object({
+  window: z.object({ start: z.string(), end: z.string(), days: z.number().int() }),
+  tier: z.enum(SAVINGS_TIERS),
+  calibrationModel: z.string(),
+  calibratedAt: z.string(),
+  computedAt: z.string(),
+  valid: z.boolean(),
+  reason: z.enum(["no-runs", "too-many-runs"]).nullable(),
+  /** One point per UTC day in the window, oldest first; empty when not valid. */
+  points: z.array(
+    z.object({
+      day: z.string(),
+      /** p50; the points sum to the p50 saving of `/api/savings/jobs`. */
+      savingUsd: z.number(),
+      actualUsd: z.number(),
+    }),
+  ),
+});
+
+const savingsDailyRoute = route({
+  method: "get",
+  path: "/api/savings/daily",
+  pattern: ["api", "savings", "daily"],
+  summary: "Daily automation savings for a workflow",
+  description:
+    "The workflow's p50 saving and actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+  tags: ["Savings"],
+  query: z.object({
+    workflowId: z.string().min(1),
+    days: z.enum(["7", "30", "90"]).default("30").transform(Number),
+    tier: z.enum(SAVINGS_TIERS).default("smart"),
+  }),
+  responses: {
+    200: {
+      description: "Daily savings points for the workflow",
+      schema: SavingsDailyResponseSchema,
+    },
+    400: { description: "Missing workflowId, or an unknown days or tier value" },
+    404: { description: "Workflow not found" },
+    408: { description: "A savings query ran past its time budget" },
+    429: { description: "Too many concurrent database queries; retry shortly" },
+  },
+});
+
 type CachedFacts = { at: number; start: string; end: string; result: Promise<WorkflowWindow> };
 const factsCache = new Map<string, CachedFacts>();
 
@@ -126,14 +171,45 @@ const roundBand = (b: SavingsBand): SavingsBand => ({
   p90: round2(b.p90),
 });
 
+/**
+ * Round each value to cents so the rounded values sum to the rounded total
+ * (largest remainder), keeping the chart equal to the header amount.
+ */
+export function roundToTotal(values: number[]): number[] {
+  const cents = values.map((v) => v * 100);
+  const floors = cents.map(Math.floor);
+  let left = Math.round(cents.reduce((s, c) => s + c, 0)) - floors.reduce((s, c) => s + c, 0);
+  const order = cents
+    .map((c, i) => ({ i, r: c - (floors[i] as number) }))
+    .sort((a, b) => b.r - a.r);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    floors[i] = (floors[i] as number) + 1;
+    left--;
+  }
+  return floors.map((c) => c / 100);
+}
+
+/** Every UTC day from `start` to `end`, both inclusive. */
+function utcDays(start: string, end: string): string[] {
+  const out: string[] = [];
+  for (let t = Date.parse(start.slice(0, 10)); t <= Date.parse(end); t += 86_400_000) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 export async function handleSavings(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (!savingsJobsRoute.match(req.method, pathSegments)) return false;
-  const parsed = await savingsJobsRoute.parse(req, res, pathSegments, queryParams);
+  const isJobs = savingsJobsRoute.match(req.method, pathSegments);
+  if (!isJobs && !savingsDailyRoute.match(req.method, pathSegments)) return false;
+  const parsed = isJobs
+    ? await savingsJobsRoute.parse(req, res, pathSegments, queryParams)
+    : await savingsDailyRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
   const { workflowId, days, tier } = parsed.query;
   const workflow = await getWorkflow(workflowId);
@@ -166,14 +242,32 @@ export async function handleSavings(
     computedAt: new Date(entry.at).toISOString(),
   };
   if (result.status === "too-many-runs" || result.facts.runs === 0) {
-    savingsJobsRoute.respond(res, 200, {
+    const reason = result.status === "too-many-runs" ? "too-many-runs" : "no-runs";
+    if (isJobs) savingsJobsRoute.respond(res, 200, { ...base, valid: false, reason, rows: [] });
+    else savingsDailyRoute.respond(res, 200, { ...base, valid: false, reason, points: [] });
+    return true;
+  }
+
+  if (!isJobs) {
+    const split = new Map(
+      splitByDay(result.facts, result.byDay, { tier, days }).map((p) => [p.day, p]),
+    );
+    const dayList = utcDays(entry.start, entry.end);
+    const saving = roundToTotal(dayList.map((d) => split.get(d)?.savingUsd ?? 0));
+    const actual = roundToTotal(dayList.map((d) => split.get(d)?.actualUsd ?? 0));
+    savingsDailyRoute.respond(res, 200, {
       ...base,
-      valid: false,
-      reason: result.status === "too-many-runs" ? "too-many-runs" : "no-runs",
-      rows: [],
+      valid: true,
+      reason: null,
+      points: dayList.map((day, i) => ({
+        day,
+        savingUsd: saving[i] as number,
+        actualUsd: actual[i] as number,
+      })),
     });
     return true;
   }
+
   const priced = priceWorkflow(result.facts, { tier, days, band: "job" });
   savingsJobsRoute.respond(res, 200, {
     ...base,
