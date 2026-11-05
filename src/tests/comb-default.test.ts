@@ -75,18 +75,24 @@ describe("isBrowserReachableUrl", () => {
       "http://172.31.255.255",
       "http://192.168.1.10:7433",
       "http://169.254.169.254",
+      "http://0.0.0.0:7433",
       "http://[fd00::1]:7433",
       "http://[fe80::1]:7433",
       "http://[::ffff:10.0.0.5]:7433",
       "http://[::ffff:192.168.1.10]:7433",
       "http://[::ffff:172.16.0.1]:7433",
       "http://[::ffff:169.254.169.254]",
+      "http://[::ffff:0.0.0.0]:7433",
       "http://[::]:7433",
       "http://[ff02::1]:7433",
       "http://[ff00::1]:7433",
     ]) {
       expect(isBrowserReachableUrl(url)).toBe(false);
     }
+  });
+
+  test("treats 0.0.0.0 as unreachable", () => {
+    expect(isBrowserReachableUrl("http://0.0.0.0:7433")).toBe(false);
   });
 
   test("an unparseable value is not reachable", () => {
