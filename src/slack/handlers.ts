@@ -491,6 +491,7 @@ export function registerMessageHandler(app: App): void {
     const requestedByUserId = await resolveSlackUserId(client, msg.user, {
       sampleEventType: "message",
       sampleContext: msg.text ?? "",
+      userTeam: msg.user_team,
     });
 
     // Keep channel/user for legacy consumers and channelId/userId for the extension contract.

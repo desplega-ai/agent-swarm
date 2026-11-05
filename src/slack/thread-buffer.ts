@@ -26,7 +26,7 @@ import { isSlackThreadLeft } from "./left-threads";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
-import { buildSlackThreadSnapshot } from "./thread-participants";
+import { buildSlackThreadSnapshot, formatAuthoredMessage } from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
 
 interface BufferedMessage {
@@ -176,6 +176,7 @@ async function slackFlush(
     ? await resolveSlackUserId(app.client, originalRequesterId, {
         sampleEventType: "buffered_thread_reply",
         sampleContext: items[0]!.text,
+        userTeam: items[0]!.userTeam,
       })
     : (await findUserByExternalId("slack", originalRequesterId))?.id;
 
@@ -261,7 +262,9 @@ async function slackFlush(
     : undefined;
   // Each item names its sender; untrusted senders are tagged.
   const labelledText = await rewriteSlackMentions(
-    items.map((item, index) => `<@${item.userId}>: ${itemTexts[index]}`).join("\n---\n"),
+    items
+      .map((item, index) => formatAuthoredMessage(`<@${item.userId}>`, itemTexts[index]!))
+      .join("\n---\n"),
     botUserId,
     snapshot?.trust,
   );
