@@ -1415,8 +1415,9 @@ jobs:
     needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
-    # No checkout, no API calls; the job only inspects `needs` results.
-    permissions: {}
+    # No checkout. checks: read lets the last step read the PR Body check.
+    permissions:
+      checks: read
 
     steps:
       - name: Check results
@@ -1428,3 +1429,9 @@ jobs:
             exit 1
           fi
           echo "All jobs passed or were skipped."
+
+      # Merge Gate is the only required check, so a red PR Body (pr-body.yml)
+      # blocks the merge here. A description edit re-runs this job from
+      # pr-body.yml's sync-gate job. Skips on merge_group.
+      - name: Require a green PR Body
+        uses: desplega-ai/.github/actions/require-pr-body@aa9436df8f0ef570f033e78dc68d1ef052add22c
