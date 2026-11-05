@@ -41,6 +41,9 @@ function DayTooltip({
       <p className="font-medium">{formatDay(point.day, true)}</p>
       <TooltipRow label="Saved (p50)" value={formatUsd(point.savingUsd)} strong />
       <TooltipRow label="Measured spend" value={formatUsd(point.measuredUsd)} />
+      {point.estimatedLlmUsd > 0 ? (
+        <TooltipRow label="LLM spend (est.)" value={formatUsd(point.estimatedLlmUsd)} />
+      ) : null}
       <TooltipRow label="Substituted-run cost (est.)" value={formatUsd(point.actualUsd)} />
       {capApplied ? (
         <p className="pt-1 text-muted-foreground">

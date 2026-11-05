@@ -4455,7 +4455,12 @@ export interface SavingsJobRow {
   opsPerRun: number;
   /** Measured spend of every run in the window. */
   measuredUsd: number;
-  /** Scaled estimate: `measuredUsd * substitutedRuns / runs`, the cost the saving subtracts. */
+  /** LLM spend estimated from tokens and output size, not measured; 0 when recorded. */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate: `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`,
+   * the cost the saving subtracts.
+   */
   actualUsd: number;
   agentOnlyUsd: SavingsBand;
   savingUsd: SavingsBand;
@@ -4481,10 +4486,12 @@ export interface SavingsJobsResponse {
 export interface SavingsDailyPoint {
   day: string;
   savingUsd: number;
-  /** Scaled estimate: the day's measured spend times the window's substituted share. */
+  /** Scaled estimate: the day's measured and estimated spend times the substituted share. */
   actualUsd: number;
   /** The day's measured spend. */
   measuredUsd: number;
+  /** The day's LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
 }
 
 export interface SavingsDailyResponse {
