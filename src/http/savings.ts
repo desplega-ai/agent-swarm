@@ -486,13 +486,15 @@ export async function handleSavings(
   if (scheduleId || kind === "schedule") {
     const read = await readScheduleSavings({ days, tier, now: Date.now(), scheduleId });
     if (!read) return notFound(res, "Schedule");
+    // Measured rows are read live, so they show even while the modelled rollup is incomplete.
+    const rows = read.complete ? read.rows : read.rows.filter((r) => r.basis === "measured");
     savingsJobsRoute.respond(res, 200, {
       ...meta(read, tier, {
-        complete: read.complete,
-        hasRows: read.rows.length > 0,
+        complete: read.complete || rows.length > 0,
+        hasRows: rows.length > 0,
         targetMissing: read.targetMissing,
       }),
-      rows: read.complete ? read.rows.map(toScheduleRow) : [],
+      rows: rows.map(toScheduleRow),
       total: null,
     });
     return true;

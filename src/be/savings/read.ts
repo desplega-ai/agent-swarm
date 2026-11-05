@@ -554,13 +554,14 @@ export async function readScheduleSavings(opts: {
 }
 
 async function targetExists(s: ScheduleTarget): Promise<boolean> {
+  // A schedule with no target configured has nothing that could be gone.
   if (s.targetType === "workflow") {
     return (
-      !!s.workflowId &&
+      !s.workflowId ||
       !!(await getDbClient().get("SELECT 1 FROM workflows WHERE id=?", [s.workflowId]))
     );
   }
-  return !!s.scriptName && (await isKnownScriptName(s.scriptName));
+  return !s.scriptName || (await isKnownScriptName(s.scriptName));
 }
 
 /** Tasks created by schedules in the window and their recorded cost: all schedules, or one. */

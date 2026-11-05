@@ -90,6 +90,15 @@ export function ScheduleSavingsStats({ scheduleId }: { scheduleId: string }) {
         }
       />
       <QuickStat
+        label="Agent-only $/run"
+        mono
+        value={
+          <span title="What one run would cost if an agent did the work instead of the automation.">
+            {formatUsd(row.agentOnlyUsdPerRun)}
+          </span>
+        }
+      />
+      <QuickStat
         label="Substituted runs"
         mono
         value={

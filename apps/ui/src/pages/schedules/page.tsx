@@ -596,10 +596,10 @@ export default function SchedulesPage() {
           if (row.basis === "measured") {
             return (
               <span
-                className="text-muted-foreground"
-                title={`Agent-task schedule: ${formatUsd(row.actualUsd)} spent on ${row.runs.toLocaleString("en-US")} tasks, no saving to model`}
+                className="font-mono tabular-nums text-muted-foreground"
+                title={`Already agent work: ${formatUsd(row.actualUsd)} spent on ${row.runs.toLocaleString("en-US")} tasks, no saving to model`}
               >
-                —
+                {formatUsd(row.actualUsd)}
               </span>
             );
           }

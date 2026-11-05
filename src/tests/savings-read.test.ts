@@ -146,6 +146,21 @@ describe("savings read for schedules", () => {
         workflowId: crypto.randomUUID(),
       })
     ).id;
+    // Configured with no workflow at all (the CHECK rejects it, so skip it for the insert):
+    // empty, not a deleted target.
+    ids.unsetWorkflow = (
+      await createScheduledTask({
+        ...base,
+        name: "unset-workflow-schedule",
+        targetType: "workflow",
+        workflowId: crypto.randomUUID(),
+      })
+    ).id;
+    await getDbClient().transaction(async (tx) => {
+      await tx.run("PRAGMA ignore_check_constraints=ON");
+      await tx.run("UPDATE scheduled_tasks SET workflowId=NULL WHERE id=?", [ids.unsetWorkflow]);
+      await tx.run("PRAGMA ignore_check_constraints=OFF");
+    });
     ids.agentTask = (
       await createScheduledTask({ ...base, name: "agent-schedule", taskTemplate: "do the thing" })
     ).id;
@@ -302,6 +317,12 @@ describe("savings read for schedules", () => {
     }
   });
 
+  test("a workflow schedule with no workflow is empty, not a gone target", async () => {
+    const { status, body } = await get(`scheduleId=${ids.unsetWorkflow}&days=7`);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ valid: false, reason: "no-runs", rows: [], total: null });
+  });
+
   test("an unknown schedule is a 404 and a second target parameter a 400", async () => {
     expect((await get("scheduleId=nope&days=7")).status).toBe(404);
     expect((await get(`scheduleId=${ids.script}&kind=schedule`)).status).toBe(400);
@@ -326,11 +347,21 @@ describe("savings read for schedules", () => {
     expect(body.rows.at(-1).basis).toBe("measured");
   });
 
-  test("before the first tick the schedule window is not computed", async () => {
+  test("before the first tick the list keeps measured rows and drops modelled ones", async () => {
     await getDbClient().run("DELETE FROM automation_savings_days");
     const read = await readScheduleSavings({ days: 7, tier: "smart", now: NOW });
     expect(read?.complete).toBe(false);
     const { body } = await get("kind=schedule&days=7");
-    expect(body).toMatchObject({ valid: false, reason: "not-computed", rows: [] });
+    expect(body.valid).toBe(true);
+    expect(body.rows.map((r: { scheduleName: string }) => r.scheduleName)).toEqual([
+      "agent-schedule",
+    ]);
+    expect(body.rows[0].basis).toBe("measured");
+    // One modelled schedule alone is still not computed.
+    expect((await get(`scheduleId=${ids.workflow}&days=7`)).body).toMatchObject({
+      valid: false,
+      reason: "not-computed",
+      rows: [],
+    });
   });
 });
