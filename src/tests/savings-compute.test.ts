@@ -29,6 +29,13 @@ const DEFINITION = {
   ],
 };
 
+// The preload swaps file DBs for an in-memory template copy; the route's
+// bounded executor reads the DB file from a child process, so opt out here.
+const testGlobals = globalThis as typeof globalThis & {
+  __testMigrationTemplate?: Uint8Array;
+  __savedSavingsTemplate?: Uint8Array;
+};
+
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -94,6 +101,8 @@ describe("savings compute", () => {
   }
 
   beforeAll(async () => {
+    testGlobals.__savedSavingsTemplate = testGlobals.__testMigrationTemplate;
+    testGlobals.__testMigrationTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);
     initDb(TEST_DB_PATH);
     agentId = (await createAgent({ name: "savings-agent", isLead: false, status: "idle" })).id;
@@ -174,6 +183,8 @@ describe("savings compute", () => {
   afterAll(async () => {
     server?.close();
     closeDb();
+    testGlobals.__testMigrationTemplate = testGlobals.__savedSavingsTemplate;
+    testGlobals.__savedSavingsTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);
   });
 
@@ -239,6 +250,17 @@ describe("savings compute", () => {
       expect((await get(`workflowId=${workflowId}&tier=huge`)).status).toBe(400);
       expect((await get(`workflowId=${workflowId}&days=12`)).status).toBe(400);
       expect((await get("")).status).toBe(400);
+    });
+
+    test("scans run in the bounded executor: a spent budget is a 408, not a blocked API", async () => {
+      const saved = process.env.DB_QUERY_HTTP_BUDGET_MS;
+      process.env.DB_QUERY_HTTP_BUDGET_MS = "1";
+      try {
+        expect((await get(`workflowId=${workflowId}`)).status).toBe(408);
+      } finally {
+        if (saved === undefined) delete process.env.DB_QUERY_HTTP_BUDGET_MS;
+        else process.env.DB_QUERY_HTTP_BUDGET_MS = saved;
+      }
     });
 
     test("a workflow with runs returns one priced row", async () => {
