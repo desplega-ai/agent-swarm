@@ -9,17 +9,20 @@ import {
   createWorkflow,
   createWorkflowRun,
   getDbClient,
+  getWorkflow,
   initDb,
 } from "../be/db";
-import type { SavingsSql } from "../be/savings/compute";
-import { MODEL_VERSION } from "../be/savings/model";
-import { readWorkflowSavings } from "../be/savings/read";
+import { computeWorkflowWindow, type SavingsSql } from "../be/savings/compute";
+import { MODEL_VERSION, priceWorkflow } from "../be/savings/model";
+import { readWorkflowSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   getSavingsRollupStats,
   ROLLUP_DAYS,
+  refreshWorkflowToday,
   resetSavingsRollupForTests,
   runSavingsRollupTick,
   stopSavingsRollup,
+  utcDay,
   workflowDaysToCompute,
 } from "../be/savings/rollup";
 import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
@@ -28,6 +31,7 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-savings-rollup.sqlite";
 const NOW = Date.parse("2026-10-31T12:00:00.000Z");
+const HOUR = 3_600_000;
 const WEEK = ["25", "26", "27", "28", "29", "30", "31"].map((d) => `2026-10-${d}`);
 const DEFINITION = { nodes: [{ id: "hello", type: "notify", config: {} }] };
 
@@ -66,6 +70,20 @@ async function bulkRuns(workflowId: string, trigger: string, day: string, count:
      FROM workflow_runs WHERE workflowId=? AND startedAt>=? AND startedAt<?`,
     [workflowId, `${day}T00:00:00.000Z`, `${day}T23:59:59.999Z`],
   );
+}
+
+/** One run with one notify step, started at `startedAt`. */
+async function runAt(workflowId: string, startedAt: string): Promise<string> {
+  const id = `${workflowId}-${startedAt}`;
+  await getDbClient().run(
+    "INSERT INTO workflow_runs (id, workflowId, triggerType, status, startedAt) VALUES (?, ?, 'manual', 'completed', ?)",
+    [id, workflowId, startedAt],
+  );
+  await getDbClient().run(
+    "INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, finishedAt) VALUES (?, ?, 'hello', 'notify', 'completed', ?, ?)",
+    [`${id}-s`, id, startedAt, startedAt],
+  );
+  return id;
 }
 
 describe("savings rollup", () => {
@@ -153,7 +171,7 @@ describe("savings rollup", () => {
     expect(read).toMatchObject({ complete: false, computedAt: null, rows: [], total: null });
   });
 
-  test("the first tick backfills every day; later ticks redo only days that are not final", async () => {
+  test("the first tick backfills every day; an hour later only days that are not final are due", async () => {
     const stats = await runSavingsRollupTick(inProcessSql, { now: NOW });
     expect(stats.lastError).toBeNull();
     expect(stats.daysPending).toBe(0);
@@ -162,8 +180,10 @@ describe("savings rollup", () => {
       [MODEL_VERSION],
     );
     expect(marked?.n).toBe(ROLLUP_DAYS);
+    // Just computed: nothing is due until the next hourly tick.
+    expect(await workflowDaysToCompute(NOW)).toEqual([]);
     // Today and yesterday were computed less than a day after they ended.
-    expect(await workflowDaysToCompute(NOW)).toEqual(["2026-10-31", "2026-10-30"]);
+    expect(await workflowDaysToCompute(NOW + HOUR)).toEqual(["2026-10-31", "2026-10-30"]);
     const buckets = await getDbClient().get<{ n: number }>(
       "SELECT count(*) n FROM automation_savings_daily",
     );
@@ -240,8 +260,9 @@ describe("savings rollup", () => {
     });
     const row = read.rows[0];
     expect(row && row.actualUsd > 0).toBe(true);
-    expect(read.points).toHaveLength(30);
-    expect(read.points[0]?.day).toBe("2026-10-02");
+    // The rolling window touches 31 UTC days; the first starts at noon.
+    expect(read.points).toHaveLength(31);
+    expect(read.points[0]?.day).toBe("2026-10-01");
     const saving = read.points.reduce((s, p) => s + p.savingUsd, 0);
     const actual = read.points.reduce((s, p) => s + p.actualUsd, 0);
     expect(saving).toBeCloseTo(row?.savingUsd.p50 ?? Number.NaN, 6);
@@ -253,6 +274,121 @@ describe("savings rollup", () => {
     // 14 effect tasks at $0.50 each, unscaled.
     expect(row?.measuredUsd).toBeCloseTo(7, 6);
     expect(read.points.filter((p) => p.savingUsd > 0).map((p) => p.day)).toEqual(WEEK);
+  });
+
+  describe("rolling window", () => {
+    let rolling: string;
+    // 02:00 cuts the first day of the fixture week: 180 of the router's 300 runs that day are inside.
+    const NOW2 = Date.parse("2026-11-01T02:00:00.000Z");
+
+    /** The rollup read of one workflow equals the live computation over the same window. */
+    async function reconcile(workflowId: string, days: number, now: number) {
+      const read = await readWorkflowSavings({ days, tier: "smart", now, workflowId });
+      const live = await computeWorkflowWindow(
+        { id: workflowId, definition: (await getWorkflow(workflowId))?.definition },
+        { start: read.window.start, end: read.window.end },
+        inProcessSql,
+      );
+      if (live.status !== "ok") throw new Error("the live computation refused");
+      const priced = priceWorkflow(live.facts, { tier: "smart", days, band: "job" });
+      const row = read.rows[0];
+      expect(read.complete).toBe(true);
+      expect(read.boundaryEstimated).toBe(false);
+      expect(read.rows).toHaveLength(1);
+      expect(row?.runs).toBe(live.facts.runs);
+      expect(row?.substitutedRuns).toBe(priced.substitutedRuns);
+      expect(row?.enabledOnlyRule).toBe(priced.enabledOnlyRule);
+      for (const k of ["measuredUsd", "estimatedLlmUsd", "actualUsd", "actualHours"] as const) {
+        expect(row?.[k]).toBeCloseTo(priced[k], 9);
+      }
+      for (const q of ["p10", "p50", "p90"] as const) {
+        expect(row?.savingUsd[q]).toBeCloseTo(priced.savingUsd[q], 9);
+        expect(row?.hoursSaved[q]).toBeCloseTo(priced.hoursSaved[q], 9);
+      }
+      expect(read.total?.savingUsd.p50).toBeCloseTo(priced.savingUsd.p50, 9);
+      return read;
+    }
+
+    beforeAll(async () => {
+      rolling = (await createWorkflow({ name: "rolling-window", definition: DEFINITION })).id;
+      // A 7-day window ending at noon starts at noon: 11:00 that day is outside, 13:00 inside.
+      await runAt(rolling, "2026-10-24T11:00:00.000Z");
+      const inside = await runAt(rolling, "2026-10-24T13:00:00.000Z");
+      await runAt(rolling, "2026-10-28T10:00:00.000Z");
+      await runAt(rolling, "2026-10-31T11:00:00.000Z");
+      await effectTask(inside, 0.25);
+      await getDbClient().run(
+        "DELETE FROM automation_savings_days WHERE day IN ('2026-10-24', '2026-10-28', '2026-10-31')",
+      );
+      await runSavingsRollupTick(inProcessSql, { now: NOW });
+    });
+
+    test("a window starting at noon keeps the runs of its first half day", async () => {
+      const read = await reconcile(rolling, 7, NOW);
+      expect(read.window.start).toBe("2026-10-24T12:00:00.000Z");
+      expect(read.rows[0]?.runs).toBe(3);
+      expect(read.rows[0]?.measuredUsd).toBeCloseTo(0.25, 9);
+      expect(read.points.map((p) => p.day)).toEqual(["2026-10-24", ...WEEK]);
+    });
+
+    test("a boundary inside a busy day matches the live computation", async () => {
+      await runSavingsRollupTick(inProcessSql, { now: NOW2 });
+      const router7 = await reconcile(router, 7, NOW2);
+      expect(router7.rows[0]).toMatchObject({ runs: 180 + 300 * 6, enabledOnlyRule: true });
+      // All 50 of the first day's runs fall before 02:00.
+      expect((await reconcile(oncall, 7, NOW2)).rows[0]?.runs).toBe(50 * 6);
+      expect((await reconcile(rolling, 30, NOW2)).rows[0]?.runs).toBe(4);
+    });
+
+    test("a first day that cannot be scanned is scaled to the window and flagged", async () => {
+      resetSavingsReadCache();
+      const busy: SavingsSql = async () => {
+        throw new Error("database is busy");
+      };
+      const read = await readWorkflowSavings({
+        days: 7,
+        tier: "smart",
+        now: NOW2,
+        workflowId: router,
+        sql: busy,
+      });
+      expect(read.boundaryEstimated).toBe(true);
+      // 22 of the first day's 24 hours are inside the window: 275 of its 300 runs.
+      expect(read.rows[0]?.runs).toBe(275 + 300 * 6);
+      resetSavingsReadCache();
+    });
+  });
+
+  test("catch-up ticks backfill older days when today and yesterday take the whole budget", async () => {
+    await getDbClient().run(
+      "DELETE FROM automation_savings_days WHERE day IN ('2026-10-20', '2026-10-21', '2026-10-22')",
+    );
+    await getDbClient().run(
+      "UPDATE automation_savings_days SET computedAt=? WHERE day IN ('2026-10-30', '2026-10-31')",
+      [new Date(NOW - 2 * HOUR).toISOString()],
+    );
+    const due = await workflowDaysToCompute(NOW);
+    expect(due.slice(0, 5)).toEqual([
+      "2026-10-31",
+      "2026-10-30",
+      "2026-10-22",
+      "2026-10-21",
+      "2026-10-20",
+    ]);
+    // Every scan takes a few ms against a 1 ms budget: one day per tick, a
+    // minute apart like catch-up ticks.
+    const slowSql: SavingsSql = async (sql, params) => {
+      await Bun.sleep(2);
+      return inProcessSql(sql, params);
+    };
+    for (let i = 0; i < due.length; i++) {
+      const stats = await runSavingsRollupTick(slowSql, {
+        now: NOW + i * 60_000,
+        budgetMs: 1,
+      });
+      expect(stats.lastError).toBeNull();
+    }
+    expect(await workflowDaysToCompute(NOW + due.length * 60_000)).toEqual([]);
   });
 
   describe("routes", () => {
@@ -295,13 +431,18 @@ describe("savings rollup", () => {
         points: { day: string; savingUsd: number }[];
       };
       expect(daily.valid).toBe(true);
-      expect(daily.points).toHaveLength(7);
+      // Seven rolling days touch eight UTC days.
+      expect(daily.points).toHaveLength(8);
       // Rounded to the cent so the points add up to the header amount exactly.
       expect(Math.round(daily.points.reduce((s, p) => s + p.savingUsd, 0) * 100)).toBe(
         Math.round((band?.p50 as number) * 100),
       );
 
-      // The list reads the hourly buckets: the next tick adds the workflow.
+      // The list reads the hourly buckets: the next hourly tick adds the workflow.
+      await getDbClient().run("UPDATE automation_savings_days SET computedAt=? WHERE day=?", [
+        new Date(Date.now() - HOUR).toISOString(),
+        utcDay(Date.now()),
+      ]);
       await runSavingsRollupTick(inProcessSql);
       const list = (await get("/api/savings/jobs?kind=workflow&days=7")).body as {
         valid: boolean;
@@ -339,6 +480,77 @@ describe("savings rollup", () => {
       expect((await get("/api/savings/daily")).status).toBe(400);
       expect((await get(`/api/savings/jobs?workflowId=${capLive}&tier=huge`)).status).toBe(400);
       expect((await get("/api/savings/jobs?kind=workflow&days=12")).status).toBe(400);
+    });
+  });
+  describe("rollup and refresh writes interleaved", () => {
+    let wf: string;
+    const today = () => utcDay(Date.now());
+    /** An hour later: today is due on the next tick. */
+    const ageToday = () =>
+      getDbClient().run("UPDATE automation_savings_days SET computedAt=? WHERE day=?", [
+        new Date(Date.now() - HOUR).toISOString(),
+        today(),
+      ]);
+    const bucketRuns = async () =>
+      Number(
+        (
+          await getDbClient().get<{ runs: number }>(
+            "SELECT runs FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=?",
+            [today(), wf],
+          )
+        )?.runs ?? 0,
+      );
+    const workflowRow = async () => {
+      const row = await getWorkflow(wf);
+      if (!row) throw new Error("workflow missing");
+      return row;
+    };
+    /** Runs `during` once: after the rollup's scan of `wf` ends, before the day is written. */
+    const afterScanOf = (during: () => Promise<void>): SavingsSql => {
+      let fired = false;
+      return async (sql, params) => {
+        const rows = await inProcessSql(sql, params);
+        if (!fired && sql.includes("WITH e AS") && params[0] === wf) {
+          fired = true;
+          await during();
+        }
+        return rows;
+      };
+    };
+    const newRun = async () => {
+      await Bun.sleep(2);
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+      await Bun.sleep(2);
+    };
+
+    beforeAll(async () => {
+      wf = (await createWorkflow({ name: "rollup-interleave", definition: DEFINITION })).id;
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+    });
+
+    test("a run that starts during the rollup's scan is found by the next refresh", async () => {
+      await ageToday();
+      await runSavingsRollupTick(afterScanOf(newRun));
+      expect(await bucketRuns()).toBe(1);
+      expect(await refreshWorkflowToday(await workflowRow(), inProcessSql, Date.now())).toBe(
+        "computed",
+      );
+      expect(await bucketRuns()).toBe(2);
+    });
+
+    test("a refresh during the rollup's scan keeps its newer bucket", async () => {
+      await ageToday();
+      const row = await workflowRow();
+      let refreshed: string | null = null;
+      await runSavingsRollupTick(
+        afterScanOf(async () => {
+          await newRun();
+          refreshed = await refreshWorkflowToday(row, inProcessSql, Date.now());
+        }),
+      );
+      expect(refreshed).toBe("computed");
+      // The rollup scanned before the third run; its later write keeps the refresh's bucket.
+      expect(await bucketRuns()).toBe(3);
     });
   });
 });

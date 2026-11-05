@@ -2,8 +2,9 @@
  * Hourly rollup of the savings model into `automation_savings_daily`: one row
  * per workflow per UTC day with the tier-independent facts of
  * `computeWorkflowWindow`. Each tick recomputes the days that are not final
- * yet (today and yesterday), days computed under an older MODEL_VERSION, and
- * missing days of the last ROLLUP_DAYS, newest first, within a time budget.
+ * yet (today and yesterday) once they are RECOMPUTE_AFTER_MS old, days computed
+ * under an older MODEL_VERSION, and missing days of the last ROLLUP_DAYS,
+ * newest first, within a time budget.
  * Same shape as `db-retention.ts`: single-flight tick, abort on stop, unref'd
  * timers, a catch-up tick while work is left.
  */
@@ -13,9 +14,25 @@ import { computeWorkflowWindow, type SavingsSql } from "./compute";
 import { jobKey, MODEL_VERSION, type WorkflowFacts } from "./model";
 
 const DAY_MS = 86_400_000;
-/** Days kept and backfilled: the longest window the API serves. */
-export const ROLLUP_DAYS = 90;
+/**
+ * Days kept and backfilled: the longest window the API serves (90 days,
+ * rolling) touches 91 UTC days.
+ */
+export const ROLLUP_DAYS = 91;
 const ROLLUP_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * A day that is not final yet is recomputed once its last computation is this
+ * old: every hourly tick redoes it, while a catch-up tick a minute later moves
+ * on to the days still missing instead of redoing it.
+ */
+export const RECOMPUTE_AFTER_MS = 30 * 60 * 1000;
+/**
+ * Bucket and marker `computedAt` is the time the scan started, not the time of
+ * the write. A run that commits a little after its `startedAt` can still miss
+ * a scan that started after that `startedAt`, so the refresh looks back this
+ * far before the watermark for runs newer than the last scan.
+ */
+export const WATERMARK_SLACK_MS = 30_000;
 const CATCHUP_INTERVAL_MS = 60 * 1000;
 const DEFAULT_TICK_BUDGET_MS = 5 * 60 * 1000;
 
@@ -84,9 +101,11 @@ export async function workflowDaysToCompute(now: number): Promise<string[]> {
   for (let i = 0; i < ROLLUP_DAYS; i++) {
     const day = utcDay(now - i * DAY_MS);
     const m = byDay.get(day);
-    if (!m || Number(m.modelVersion) !== MODEL_VERSION || !isFinalDay(day, m.computedAt)) {
-      days.push(day);
-    }
+    const due =
+      !m ||
+      Number(m.modelVersion) !== MODEL_VERSION ||
+      (!isFinalDay(day, m.computedAt) && now - Date.parse(m.computedAt) >= RECOMPUTE_AFTER_MS);
+    if (due) days.push(day);
   }
   return days;
 }
@@ -111,9 +130,20 @@ export async function computeWorkflowDay(
   return buckets;
 }
 
-const INSERT_BUCKET = `INSERT OR REPLACE INTO automation_savings_daily
+/**
+ * Upsert one bucket unless the stored one comes from a newer scan: a refresh
+ * that scanned after the rollup's scan began keeps its bucket when the rollup
+ * writes later, and the other way round.
+ */
+const UPSERT_BUCKET = `INSERT INTO automation_savings_daily
   (day, jobKind, jobId, jobKey, jobName, subKind, ${FACT_COLUMNS.join(", ")}, modelVersion, computedAt)
-  VALUES (?, 'workflow', ?, ?, ?, '', ${FACT_COLUMNS.map(() => "?").join(", ")}, ?, ?)`;
+  VALUES (?, 'workflow', ?, ?, ?, '', ${FACT_COLUMNS.map(() => "?").join(", ")}, ?, ?)
+  ON CONFLICT(day, jobKind, jobId, subKind) DO UPDATE SET
+    jobKey=excluded.jobKey, jobName=excluded.jobName,
+    ${FACT_COLUMNS.map((c) => `${c}=excluded.${c}`).join(", ")},
+    modelVersion=excluded.modelVersion, computedAt=excluded.computedAt
+  WHERE excluded.computedAt >= automation_savings_daily.computedAt
+    OR automation_savings_daily.modelVersion <> excluded.modelVersion`;
 
 const bucketParams = (day: string, b: WorkflowBucket, computedAt: string) => [
   day,
@@ -125,19 +155,28 @@ const bucketParams = (day: string, b: WorkflowBucket, computedAt: string) => [
   computedAt,
 ];
 
-/** Replace one day's workflow buckets and mark the day computed, atomically. */
+/**
+ * Replace one day's workflow buckets and mark the day computed, atomically.
+ * `scannedAt` is when the day's scan started. Buckets a refresh wrote from a
+ * later scan stay; every other bucket of the day is replaced.
+ */
 export async function writeWorkflowDay(
   day: string,
   buckets: WorkflowBucket[],
-  computedAt: string,
+  scannedAt: string,
 ): Promise<void> {
   await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM automation_savings_daily WHERE day=? AND jobKind='workflow'", [day]);
-    for (const b of buckets) await tx.run(INSERT_BUCKET, bucketParams(day, b, computedAt));
+    await tx.run(
+      "DELETE FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND (computedAt<=? OR modelVersion<>?)",
+      [day, scannedAt, MODEL_VERSION],
+    );
+    for (const b of buckets) await tx.run(UPSERT_BUCKET, bucketParams(day, b, scannedAt));
     await tx.run(
       `INSERT INTO automation_savings_days (day, jobKind, modelVersion, computedAt) VALUES (?, 'workflow', ?, ?)
-       ON CONFLICT(day, jobKind) DO UPDATE SET modelVersion=excluded.modelVersion, computedAt=excluded.computedAt`,
-      [day, MODEL_VERSION, computedAt],
+       ON CONFLICT(day, jobKind) DO UPDATE SET modelVersion=excluded.modelVersion, computedAt=excluded.computedAt
+       WHERE excluded.computedAt >= automation_savings_days.computedAt
+         OR automation_savings_days.modelVersion <> excluded.modelVersion`,
+      [day, MODEL_VERSION, scannedAt],
     );
   });
 }
@@ -147,7 +186,8 @@ export async function writeWorkflowDay(
  * last rollup of today, so a detail page shows a run within seconds instead of
  * an hour. Skipped above LIVE_MAX_RUNS runs today (the hourly tick covers
  * those) and before the rollup has computed today at all. `skipped` means no
- * scan ran; `computed` and `refused` mean the day's scans ran.
+ * scan ran; `computed` and `refused` mean the day's scans ran. `now` must be
+ * taken before the scan: it becomes the bucket's watermark.
  */
 export async function refreshWorkflowToday(
   workflow: WorkflowRow,
@@ -169,7 +209,7 @@ export async function refreshWorkflowToday(
     bucket && bucket.computedAt > marker.computedAt ? bucket.computedAt : marker.computedAt;
   const newer = await client.get<{ n: number }>(
     "SELECT count(*) n FROM workflow_runs WHERE workflowId=? AND startedAt>=?",
-    [workflow.id, since],
+    [workflow.id, new Date(Date.parse(since) - WATERMARK_SLACK_MS).toISOString()],
   );
   if (!Number(newer?.n)) return "skipped";
   const out = await computeWorkflowWindow(
@@ -180,7 +220,7 @@ export async function refreshWorkflowToday(
   if (out.status !== "ok") return "refused";
   const computedAt = new Date(now).toISOString();
   await client.run(
-    INSERT_BUCKET,
+    UPSERT_BUCKET,
     bucketParams(
       day,
       { workflowId: workflow.id, name: workflow.name, facts: out.facts },
@@ -209,6 +249,8 @@ let rollupTimer: ReturnType<typeof setInterval> | null = null;
 let catchupTimer: ReturnType<typeof setTimeout> | null = null;
 let tickPromise: Promise<SavingsRollupStats> | null = null;
 let abortController: AbortController | null = null;
+/** When a day last failed; it waits behind the other due days for an hour. */
+const failedAt = new Map<string, number>();
 let stats: SavingsRollupStats = {
   ticks: 0,
   lastTickAt: null,
@@ -249,21 +291,36 @@ export function runSavingsRollupTick(
       await getDbClient().run("DELETE FROM automation_savings_daily WHERE day<?", [oldest]);
       await getDbClient().run("DELETE FROM automation_savings_days WHERE day<?", [oldest]);
       pending = await workflowDaysToCompute(now);
+      // A day that failed recently goes last, so a day that keeps failing
+      // cannot spend every tick's budget ahead of the days behind it.
+      const recentlyFailed = (d: string) =>
+        now - (failedAt.get(d) ?? -Infinity) < ROLLUP_INTERVAL_MS;
+      pending = [...pending.filter((d) => !recentlyFailed(d)), ...pending.filter(recentlyFailed)];
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
     }
     // A day that fails (a query over its budget) is retried next hour; it
     // never blocks the older days behind it.
     const failed: string[] = [];
-    while (pending.length > 0 && !controller.signal.aborted && Date.now() - startedAt <= budget) {
+    // Every tick attempts at least one day, so a short budget still makes progress.
+    while (
+      pending.length > 0 &&
+      !controller.signal.aborted &&
+      (computed + failed.length === 0 || Date.now() - startedAt <= budget)
+    ) {
       const day = pending.shift() as string;
       try {
+        // The watermark is taken before the scan: a run that starts during the
+        // scan is newer than the marker, so the detail refresh still finds it.
+        const scannedAt = new Date(options.now ?? Date.now()).toISOString();
         const buckets = await computeWorkflowDay(day, sql, controller.signal);
-        await writeWorkflowDay(day, buckets, new Date(options.now ?? Date.now()).toISOString());
+        await writeWorkflowDay(day, buckets, scannedAt);
+        failedAt.delete(day);
         computed += 1;
       } catch (err) {
         if (controller.signal.aborted) break;
         failed.push(day);
+        failedAt.set(day, now);
         lastError = `${day}: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
@@ -326,5 +383,6 @@ export async function stopSavingsRollup(): Promise<void> {
 export async function resetSavingsRollupForTests(): Promise<void> {
   await stopSavingsRollup();
   rollupSql = null;
+  failedAt.clear();
   stats = { ticks: 0, lastTickAt: null, daysComputed: 0, daysPending: 0, lastError: null };
 }
