@@ -1,0 +1,13 @@
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../client";
+
+/** The server caches live savings for 10 minutes; match it here. */
+export function useWorkflowSavings(workflowId: string | undefined) {
+  return useQuery({
+    queryKey: ["savings", "workflow", workflowId],
+    queryFn: () => api.getWorkflowSavings(workflowId as string),
+    enabled: !!workflowId,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+}

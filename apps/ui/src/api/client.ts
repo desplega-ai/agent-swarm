@@ -121,6 +121,8 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsJobsResponse,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -4004,6 +4006,21 @@ class ApiClient {
     const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
     return (await res.json()) as { enabled: false };
+  }
+
+  /** Modelled saving of one workflow against doing its runs with agent tasks. */
+  async getWorkflowSavings(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsJobsResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */

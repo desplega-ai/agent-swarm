@@ -20039,6 +20039,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings for a workflow
+         * @description What the workflow's runs in the window would have cost as agent tasks, minus what they cost. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows for the workflow */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            computedAt: string;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "no-runs" | "too-many-runs" | null;
+                            rows: {
+                                /** @enum {string} */
+                                kind: "workflow";
+                                workflowId: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Missing workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/tokens": {
         parameters: {
             query?: never;
