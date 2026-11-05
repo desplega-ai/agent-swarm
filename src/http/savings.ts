@@ -47,10 +47,19 @@ const SavingsJobRowSchema = z.object({
   enabledOnlyRuns: z.number().int(),
   capApplied: z.boolean(),
   opsPerRun: z.number(),
-  actualUsd: z.number(),
+  measuredUsd: z
+    .number()
+    .describe("Measured spend of every run in the window: agent tasks, their reviews, LLM calls."),
+  actualUsd: z
+    .number()
+    .describe(
+      "Scaled estimate, not a measurement: `measuredUsd` times `substitutedRuns / runs`. The saving subtracts this.",
+    ),
   agentOnlyUsd: SavingsBandSchema,
   savingUsd: SavingsBandSchema,
-  actualHours: z.number(),
+  actualHours: z
+    .number()
+    .describe("Scaled estimate: measured hours times `substitutedRuns / runs`."),
   agentOnlyHours: SavingsBandSchema,
   hoursSaved: SavingsBandSchema,
   agentOnlyUsdPerRun: z.number(),
@@ -74,7 +83,7 @@ const savingsJobsRoute = route({
   pattern: ["api", "savings", "jobs"],
   summary: "Estimated automation savings for a workflow",
   description:
-    "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend; `actualUsd` is that spend scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1),
@@ -104,7 +113,14 @@ const SavingsDailyResponseSchema = z.object({
       day: z.string(),
       /** p50; the points sum to the p50 saving of `/api/savings/jobs`. */
       savingUsd: z.number(),
-      actualUsd: z.number(),
+      /** Scaled estimate; the points sum to the jobs row's `actualUsd`. */
+      actualUsd: z
+        .number()
+        .describe(
+          "Scaled estimate: the day's measured spend times the window's substituted share.",
+        ),
+      /** Measured; the points sum to the jobs row's `measuredUsd`. */
+      measuredUsd: z.number().describe("The day's measured spend, not scaled."),
     }),
   ),
 });
@@ -115,7 +131,7 @@ const savingsDailyRoute = route({
   pattern: ["api", "savings", "daily"],
   summary: "Daily automation savings for a workflow",
   description:
-    "The workflow's p50 saving and actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+    "The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1),
@@ -255,6 +271,7 @@ export async function handleSavings(
     const dayList = utcDays(entry.start, entry.end);
     const saving = roundToTotal(dayList.map((d) => split.get(d)?.savingUsd ?? 0));
     const actual = roundToTotal(dayList.map((d) => split.get(d)?.actualUsd ?? 0));
+    const measured = roundToTotal(dayList.map((d) => split.get(d)?.measuredUsd ?? 0));
     savingsDailyRoute.respond(res, 200, {
       ...base,
       valid: true,
@@ -263,6 +280,7 @@ export async function handleSavings(
         day,
         savingUsd: saving[i] as number,
         actualUsd: actual[i] as number,
+        measuredUsd: measured[i] as number,
       })),
     });
     return true;
@@ -285,6 +303,7 @@ export async function handleSavings(
         enabledOnlyRuns: priced.enabledOnlyRuns,
         capApplied: priced.capApplied,
         opsPerRun: round2(priced.opsPerRun),
+        measuredUsd: round2(priced.measuredUsd),
         actualUsd: round2(priced.actualUsd),
         agentOnlyUsd: roundBand(priced.agentOnlyUsd),
         savingUsd: roundBand(priced.savingUsd),
