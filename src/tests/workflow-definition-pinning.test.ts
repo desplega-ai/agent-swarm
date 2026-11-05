@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import * as db from "../be/db";
@@ -20,7 +20,12 @@ import {
   resolveWaitState,
   toPinnedDefinition,
 } from "../be/db";
-import { hashPinnedDefinition, mergePinnedDefinition } from "../be/db/workflow-run-definitions";
+import {
+  getPinnedRunDefinition,
+  hashPinnedDefinition,
+  mergePinnedDefinition,
+} from "../be/db/workflow-run-definitions";
+import type { DbParam } from "../be/db-client";
 import {
   type ExecutorMeta,
   type Workflow,
@@ -577,7 +582,14 @@ describe("pinned definition storage", () => {
     expect(rowsAfter?.n).toBe(rowsBefore?.n);
   });
 
-  test("deleteWorkflow drops only the definition rows no remaining run references", async () => {
+  test.each([
+    "running",
+    "waiting",
+    "completed",
+    "failed",
+    "skipped",
+    "cancelled",
+  ] as const)("deleteWorkflow preserves unrelated snapshots and snapshots shared with a %s run", async (status) => {
     const wf1 = await makeWorkflow(twoNode("A", agentTaskFirst));
     const wf2 = await makeWorkflow(twoNode("A", agentTaskFirst));
     const run1 = await startOnA(wf1);
@@ -585,9 +597,11 @@ describe("pinned definition storage", () => {
     const run3 = await startOnA(wf2);
     const h1 = (await pinHash(run1))!;
     const h2 = (await pinHash(run2))!;
+    const unrelated = await pinWorkflowDefinition({ ...wf1, name: "unrelated orphan" });
     expect(h1).not.toBe(h2);
     // A wf2 run shares wf1's snapshot row, as identical content does.
     await getDbClient().run("UPDATE workflow_runs SET definitionHash = ? WHERE id = ?", [h1, run3]);
+    await db.updateWorkflowRun(run3, { status });
     const exists = async (hash: string) =>
       (await getDbClient().get("SELECT 1 FROM workflow_run_definitions WHERE hash = ?", [hash])) !=
       null;
@@ -595,10 +609,121 @@ describe("pinned definition storage", () => {
     await deleteWorkflow(wf1.id);
     expect(await exists(h1)).toBe(true);
     expect(await exists(h2)).toBe(true);
+    expect(await exists(unrelated)).toBe(true);
 
     await deleteWorkflow(wf2.id);
     expect(await exists(h1)).toBe(false);
     expect(await exists(h2)).toBe(false);
+    expect(await exists(unrelated)).toBe(true);
+  });
+
+  test.each([
+    "no runs",
+    "unpinned run",
+    "missing workflow",
+  ])("deleteWorkflow leaves unrelated snapshots alone with %s", async (scenario) => {
+    const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
+    const unrelated = await pinWorkflowDefinition(workflow);
+    if (scenario === "unpinned run") {
+      await db.createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow.id });
+    }
+
+    expect(
+      await deleteWorkflow(scenario === "missing workflow" ? crypto.randomUUID() : workflow.id),
+    ).toBe(scenario !== "missing workflow");
+    expect(
+      await getDbClient().get("SELECT 1 FROM workflow_run_definitions WHERE hash = ?", [unrelated]),
+    ).not.toBeNull();
+  });
+
+  test("deleteWorkflow uses indexed snapshot cleanup across many definitions, including FK checks", async () => {
+    const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
+    const client = getDbClient();
+    const hashes: string[] = [];
+    await client.transaction(async () => {
+      for (let version = 0; version < 121; version++) {
+        const definitionHash = await pinWorkflowDefinition({
+          ...workflow,
+          description: `v${version}`,
+        });
+        hashes.push(definitionHash);
+        await db.createWorkflowRun({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          definitionHash,
+        });
+      }
+    });
+
+    // Explain the statements actually used by the public delete path. The
+    // spies pass through to the real database, including its FK enforcement.
+    const querySpy = spyOn(client, "query");
+    const runSpy = spyOn(client, "run");
+    let queries: typeof querySpy.mock.calls = [];
+    let deletes: typeof runSpy.mock.calls = [];
+    try {
+      expect(await deleteWorkflow(workflow.id)).toBe(true);
+      queries = querySpy.mock.calls.filter(([sql]) => sql.includes("definitionHash"));
+      deletes = runSpy.mock.calls.filter(([sql]) =>
+        sql.includes("DELETE FROM workflow_run_definitions"),
+      );
+    } finally {
+      querySpy.mockRestore();
+      runSpy.mockRestore();
+    }
+
+    const explain = (sql: string, params: DbParam[] = []) => {
+      // Finalize EXPLAIN explicitly: Bun 1.4.4 can leave a cached DELETE plan
+      // active after .all(), which blocks later transaction commits.
+      const statement = db
+        .getDb()
+        .prepare<{ detail: string }, DbParam[]>(`EXPLAIN QUERY PLAN ${sql}`);
+      try {
+        return statement
+          .all(...params)
+          .map((row) => row.detail)
+          .join("\n");
+      } finally {
+        statement.finalize();
+      }
+    };
+    expect(deletes.length).toBeGreaterThan(0);
+    for (const [sql, params] of deletes) {
+      const plan = explain(sql, params);
+      expect(plan).toMatch(/SEARCH workflow_run_definitions USING (COVERING )?INDEX .*\(hash=\?\)/);
+      expect(plan).toContain("SEARCH r USING COVERING INDEX idx_workflow_runs_definitionHash");
+      expect(plan).toContain(
+        "SEARCH workflow_runs USING COVERING INDEX idx_workflow_runs_definitionHash",
+      );
+      expect(plan).not.toMatch(/SCAN (workflow_run_definitions|workflow_runs|r)\b/);
+    }
+    expect(queries.length).toBeGreaterThan(0);
+    for (const [sql, params] of queries) {
+      const plan = explain(sql, params);
+      expect(plan).toMatch(/SEARCH workflow_runs USING INDEX .*\(workflowId=\?\)/);
+      expect(plan).not.toContain("SCAN workflow_runs");
+    }
+    for (const hash of hashes) {
+      expect(
+        await client.get("SELECT 1 FROM workflow_run_definitions WHERE hash = ?", [hash]),
+      ).toBeNull();
+    }
+  });
+
+  test("deleteWorkflow rolls snapshot cleanup back with the runs", async () => {
+    const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
+    const runId = await startOnA(workflow);
+    const hash = await pinHash(runId);
+    await expect(
+      getDbClient().transaction(async () => {
+        await deleteWorkflow(workflow.id);
+        throw new Error("abort delete");
+      }),
+    ).rejects.toThrow("abort delete");
+
+    expect(await getWorkflow(workflow.id)).not.toBeNull();
+    expect(await pinHash(runId)).toBe(hash);
+    expect(await getPinnedRunDefinition(runId)).not.toBeNull();
   });
 });
 

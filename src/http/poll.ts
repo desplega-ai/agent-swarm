@@ -628,6 +628,7 @@ export async function handlePoll(
               const result = await checkProfileForAgent(myAgentId, profile, {
                 vcsRepo,
                 includeRepoSecrets,
+                fallbacks: false,
               });
               const ok = result?.ok !== false;
               profileOk.set(memoKey, ok);

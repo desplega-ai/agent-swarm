@@ -1,6 +1,7 @@
 import { Lightbulb, Plus } from "lucide-react";
 import { useState } from "react";
 import { useImprovements } from "@/api/hooks/use-improvements";
+import type { Improvement } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCan } from "@/lib/use-can";
@@ -69,4 +70,11 @@ export function ImprovementHeaderButton() {
       <ImprovementDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
   );
+}
+
+/** The drafts waiting for a person, or `null` while improvements are off. */
+export function useWaitingImprovements(): Improvement[] | null {
+  const { data } = useImprovements();
+  if (!data?.enabled) return null;
+  return data.improvements.filter(isActionableImprovement);
 }

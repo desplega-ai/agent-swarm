@@ -72,7 +72,6 @@ export const platformbTrackers: Scenario = {
       {
         method: "GET",
         path: "/api/trackers/linear/authorize",
-        public: true,
         status: 503,
         error: linearNotConfigured,
       },
@@ -110,7 +109,6 @@ export const platformbTrackers: Scenario = {
       {
         method: "GET",
         path: "/api/trackers/jira/authorize",
-        public: true,
         status: 503,
         error: jiraNotConfigured,
       },
@@ -155,9 +153,11 @@ export const platformbTrackers: Scenario = {
 
     // The routes that do need the operator key refuse a request without it.
     for (const [method, path] of [
+      ["GET", "/api/trackers/linear/authorize"],
       ["GET", "/api/trackers/linear/status"],
       ["POST", "/api/trackers/linear/refresh"],
       ["DELETE", "/api/trackers/linear/disconnect"],
+      ["GET", "/api/trackers/jira/authorize"],
       ["GET", "/api/trackers/jira/status"],
       ["POST", "/api/trackers/jira/refresh"],
       ["POST", "/api/trackers/jira/webhook-register"],

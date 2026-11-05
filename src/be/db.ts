@@ -2963,9 +2963,9 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -3009,6 +3009,7 @@ export async function createTaskExtended(
         options?.modelTier ?? null,
         options?.effort ?? null,
         options?.profile?.trim() || null,
+        options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
         options?.scheduleId ?? null,
         options?.workflowRunId ?? null,
         options?.workflowRunStepId ?? null,
@@ -7963,8 +7964,13 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     [id],
   );
   // 3. Delete runs (they reference workflow)
+  const definitionHashes = await client.query<{ definitionHash: string }>(
+    `SELECT DISTINCT definitionHash FROM workflow_runs
+      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
+    [id],
+  );
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
-  await deleteOrphanedRunDefinitions();
+  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);

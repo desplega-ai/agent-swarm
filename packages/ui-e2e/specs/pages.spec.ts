@@ -312,13 +312,24 @@ test.describe("phone header", () => {
       await page.goto(`/pages/${created.id}`);
       const summary = page.getByRole("button", { name: description });
       await expect(summary).toBeVisible();
-      // Below sm the slug leaves the row; the actions stay on the same line.
+      // Below sm the slug leaves the row. On a phone the actions fold into
+      // one "More actions" button, which stays on the summary's line.
       await expect(summary.getByText(slug, { exact: true })).toBeHidden();
-      const openBox = await page.getByRole("link", { name: "Open", exact: true }).boundingBox();
+      const more = page.getByRole("button", { name: "More actions", exact: true });
+      const moreBox = await more.boundingBox();
       const summaryBox = await summary.boundingBox();
       expect(
-        Math.abs(openBox!.y + openBox!.height / 2 - (summaryBox!.y + summaryBox!.height / 2)),
+        Math.abs(moreBox!.y + moreBox!.height / 2 - (summaryBox!.y + summaryBox!.height / 2)),
       ).toBeLessThan(8);
+      await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveCount(0);
+      // The folded actions are one tap away, in the bottom sheet.
+      await more.tap();
+      const sheet = page.getByRole("dialog", { name: "e2e phone header" });
+      for (const action of ["Open in a new tab", "Export PDF", "Saved room state", "Full screen"]) {
+        await expect(sheet.getByRole("button", { name: action, exact: true })).toBeVisible();
+      }
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
 
       await summary.tap();
       const details = page.getByRole("dialog");

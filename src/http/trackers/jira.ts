@@ -15,6 +15,11 @@ import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
+import {
+  ensureTrackerAuthorizeAdmin,
+  TrackerAuthorizeQuerySchema,
+  TrackerAuthorizeUrlSchema,
+} from "./authorize-gate";
 
 const MANUAL_WEBHOOK_INSTRUCTIONS =
   "See docs-site/.../integrations/jira.mdx for manual webhook registration steps.";
@@ -80,12 +85,20 @@ const jiraAuthorize = route({
   method: "get",
   path: "/api/trackers/jira/authorize",
   pattern: ["api", "trackers", "jira", "authorize"],
-  summary: "Redirect to Atlassian OAuth consent screen",
+  summary: "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
   tags: ["Trackers"],
-  auth: { apiKey: false },
-  query: z.object({ redirect: z.string().optional() }),
+  // Bearer-required (route default) and gated on oauth-authorization.manage:
+  // the grant lands on the swarm-wide default authorization. Only the
+  // provider callback below stays public.
+  query: TrackerAuthorizeQuerySchema,
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
+    200: {
+      description: "Consent URL (format=json), for clients that navigate themselves",
+      schema: TrackerAuthorizeUrlSchema,
+    },
     302: { description: "Redirect to Atlassian OAuth" },
+    403: { description: "Caller lacks oauth-authorization.manage" },
     500: { description: "Failed to generate authorization URL" },
     503: { description: "Jira integration not configured" },
   },
@@ -273,6 +286,8 @@ export async function handleJiraTracker(
     const queryParams = parseQueryParams(req.url || "");
     const parsed = await jiraAuthorize.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const initiator = await ensureTrackerAuthorizeAdmin(req, res, "Jira");
+    if (!initiator) return true;
     if (!isJiraEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Jira integration not configured" }));
@@ -280,13 +295,20 @@ export async function handleJiraTracker(
     }
 
     try {
-      const url = await getJiraAuthorizationUrl(allowedCredentialRedirect(parsed.query.redirect));
+      const url = await getJiraAuthorizationUrl(
+        allowedCredentialRedirect(parsed.query.redirect),
+        initiator.userId,
+      );
       if (!url) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Failed to generate authorization URL" }));
         return true;
       }
 
+      if (parsed.query.format === "json") {
+        jiraAuthorize.respond(res, 200, { authorizeUrl: url });
+        return true;
+      }
       res.writeHead(302, { Location: url });
       res.end();
     } catch (err) {

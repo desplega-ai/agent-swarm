@@ -19,6 +19,10 @@
 
 ARG PREK_VERSION=0.4.5
 ARG SKILLS_CLI_VERSION=1.5.20
+# context-mode pins BOTH the global CLI/MCP server (worker-base) and the
+# Claude/Codex plugin marketplaces (worker-full-base). Global so the two
+# stages cannot drift; each stage re-declares it.
+ARG CONTEXT_MODE_VERSION=1.0.169
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
@@ -221,9 +225,11 @@ USER worker
 # plugin). The Claude/Codex plugin installs (worker-full-base) provide the
 # hooks; this provides the CLI binary + package importability. Disable
 # per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-ARG CONTEXT_MODE_VERSION=1.0.169
+# Version: global ARG at the top of this file.
+ARG CONTEXT_MODE_VERSION
 USER root
-RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
@@ -574,9 +580,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793804260-g12625e
-ARG AMP_SHA512_AMD64=315a9862e8838d25b5da2496e42dc15de33221b9661bb785e768ff7039e8a8be20d07e3e5f1d9fb14b3c8ae878cd000815958ae385fd28847a402177c1557f8a
-ARG AMP_SHA512_ARM64=743b2a02a4aca6dceaa79903640971fbd412fb766d12fc0ea6deb87dfacd2fbee37edf9781214c9b7c3e62b9a68c137d8594c1e1ccc1b0dac2bf734f2b8f95eb
+ARG AMP_VERSION=0.0.1793851242-g61361b
+ARG AMP_SHA512_AMD64=d30c895cfb32b3688bdb42e2e0f0de45edcf4f28155efad5c486afd16871e483e63ad423706f62df6214fe5ec73b92f3036c34be7e47e7a8c4ac9c8ce434817e
+ARG AMP_SHA512_ARM64=8704f310b49982d324139b00254c5d543092942986691642fc8cdf57b9cc9ae7b151f9abc6282ee15c03c6969c4689f0589550fe9f48eed748301a3d64244cbc
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -611,7 +617,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.66.0
+ARG GEMINI_CLI_VERSION=0.67.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -822,21 +828,28 @@ USER root
 
 # Install the context-mode plugins for Claude + Codex (build-time cache).
 # These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
-# skills-only installer cannot replace. NOTE: the Claude plugin tracks the
-# marketplace HEAD and is NOT version-pinned. A build-time `git checkout
-# v${CONTEXT_MODE_VERSION}` in the marketplace clone does not work (git
-# rejects it with "dubious ownership" and the clone is shallow without tags),
-# so we don't attempt it. The ctx_* TOOLS are served by the globally-installed
-# CLI (npm i -g context-mode in worker-base), which IS pinned; only the hook
-# bundle floats — acceptable since the hooks are backward-compatible.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build.
+# skills-only installer cannot replace. Both marketplaces are PINNED to the
+# v${CONTEXT_MODE_VERSION} tag, the same version as the global CLI/MCP server
+# (npm i -g context-mode in worker-base). Never leave them unpinned: upstream
+# v2.0.0 raised engines.node to >=24.15.0, and on this image's Node 22 the
+# newer hook denies EVERY Bash call with NODE_TOO_OLD. Bump the tag only
+# together with NODE_VERSION when the target release needs a newer Node.
+# The ref persists (Claude: known_marketplaces.json + settings.json
+# extraKnownMarketplaces; Codex: config.toml `ref`), so a runtime marketplace
+# refresh stays on the tag. Plugin auto-update is also off at runtime:
+# DISABLE_AUTOUPDATER=1 (worker-base ENV) disables it in Claude Code.
+# Guarded with || true so a marketplace/registry hiccup can't fail the build;
+# the leading `test -n` is NOT guarded, so an ARG that fails to reach this
+# stage fails the build instead of installing an unpinned or empty ref.
 # CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
 # `bun install` under the hood and previously left an 880 MB cache in a layer.
+ARG CONTEXT_MODE_VERSION
 USER worker
-RUN claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@context-mode --scope user || true \
-    && codex plugin marketplace add mksglu/context-mode || true \
-    && codex plugin add context-mode@context-mode || true \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && { claude plugin marketplace add "mksglu/claude-context-mode#v${CONTEXT_MODE_VERSION}" || true; } \
+    && { claude plugin install context-mode@context-mode --scope user || true; } \
+    && { codex plugin marketplace add mksglu/context-mode --ref "v${CONTEXT_MODE_VERSION}" || true; } \
+    && { codex plugin add context-mode@context-mode || true; } \
     && rm -rf /home/worker/.bun/install/cache
 
 USER root

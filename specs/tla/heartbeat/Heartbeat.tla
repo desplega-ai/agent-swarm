@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ ba5bb0d7. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 7dc87f45. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -221,8 +221,8 @@ Complete(w, t) ==
                    hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
-\* reconcileActiveTasks, runner.ts:5357): cancelled on every poll via
-\* /cancelled-tasks (core.ts:693), failed/superseded on a 30 s status read.
+\* reconcileActiveTasks, runner.ts:5401): cancelled on every poll via
+\* /cancelled-tasks (core.ts:699), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal

@@ -11707,6 +11707,7 @@ export interface paths {
                                 credentials: {
                                     [key: string]: string[];
                                 } | null;
+                                fallbacks: string[];
                                 createdAt: string;
                                 lastUpdatedAt: string;
                             }[];
@@ -11718,7 +11719,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -11742,6 +11743,7 @@ export interface paths {
                         credentials?: {
                             [key: string]: string[];
                         } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11766,6 +11768,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11845,6 +11848,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11865,7 +11869,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -11923,7 +11927,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model profile
-         * @description Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).
+         * @description Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).
          */
         patch: {
             parameters: {
@@ -11945,6 +11949,7 @@ export interface paths {
                         credentials?: {
                             [key: string]: string[];
                         } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11969,6 +11974,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -15846,7 +15852,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -15861,7 +15867,9 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery";
+                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback";
+                        /** @enum {string} */
+                        errorClass?: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
                     };
                 };
             };
@@ -15876,11 +15884,12 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                             /** @enum {string} */
-                            kind: "alreadyFinished" | "workflow-failed" | "resumed";
+                            kind: "alreadyFinished" | "workflow-failed" | "resumed" | "noFallback";
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
                             resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            failureReason?: string | null;
                         };
                     };
                 };
@@ -23977,11 +23986,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Atlassian OAuth consent screen */
+        /** Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23989,12 +23999,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Atlassian OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -24476,11 +24506,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Linear OAuth consent screen */
+        /** Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -24488,12 +24519,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Linear OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -29069,6 +29120,17 @@ export interface components {
             resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             profile?: string;
             resolvedProfile?: string;
+            fallbackHops?: {
+                from: string;
+                profile: string;
+                /** @enum {string} */
+                errorClass: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
+                at: string;
+                skipped?: {
+                    profile: string;
+                    reason: string;
+                }[];
+            }[];
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;

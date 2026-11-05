@@ -474,7 +474,7 @@ A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integratio
 4. Enable "Agent session events" in webhook settings
 5. Set Webhook URL to your `/api/trackers/linear/webhook` endpoint
 6. Copy Client ID, Client Secret, and Webhook Signing Secret
-7. Start the server, then visit `/api/trackers/linear/authorize` to complete OAuth
+7. Start the server, then click **Connect to Linear** in the dashboard (or open the URL from `GET /api/trackers/linear/authorize?format=json`, which requires the swarm API key) to complete OAuth
 
 With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback`
 
@@ -495,7 +495,7 @@ With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/tra
 3. Set the callback URL to your `/api/trackers/jira/callback` endpoint
 4. Copy the Client ID and Client Secret
 5. Generate a webhook token (`openssl rand -hex 32`) and set `JIRA_WEBHOOK_TOKEN`
-6. Start the server, then visit `/api/trackers/jira/authorize` to complete OAuth
+6. Start the server, then click **Authorize** in the dashboard (or open the URL from `GET /api/trackers/jira/authorize?format=json`, which requires the swarm API key) to complete OAuth
 7. Register the dynamic webhook via `POST /api/trackers/jira/webhook-register` (admin, requires the swarm API key)
 
 See the [Jira Integration guide](/docs/integrations/jira) for the full walkthrough, webhook lifecycle, and known limitations.

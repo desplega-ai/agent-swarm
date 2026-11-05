@@ -1,7 +1,10 @@
 # Docker Compose for Agent Swarm
 #
 # Usage:
-#   docker-compose -f docker-compose.example.yml --env-file .env up -d
+#   docker compose -f docker-compose.example.yml --env-file .env up -d
+# Local embeddings with TEI (optional):
+#   docker compose -f docker-compose.example.yml -f docker-compose.tei.yml --env-file .env up -d
+# Procedure: skills/agent-swarm/references/embeddings.md
 #
 # What it does:
 #  - Sets up an API service and multiple worker/lead agents

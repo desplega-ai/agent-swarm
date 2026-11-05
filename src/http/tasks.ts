@@ -63,7 +63,11 @@ import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
-import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
+import {
+  createResumeFollowUp,
+  createWorkerTaskFollowUp,
+  nextFallback,
+} from "../tasks/worker-follow-up";
 import {
   AgentLogSchema,
   type AgentTask,
@@ -73,10 +77,12 @@ import {
   type AgentTaskStatus,
   AgentTaskStatusSchema,
   AssetKeySchema,
+  type FallbackHop,
   isTerminalTaskStatus,
   ModelProfileCredentialsSchema,
   ModelTierSchema,
   OnUnsupportedSchema,
+  ProviderErrorClassSchema,
   ProviderNameSchema,
   ReasoningEffortSchema,
   ResumeReasonSchema,
@@ -92,6 +98,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { readsRepoSecrets } from "./config";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
@@ -226,10 +233,12 @@ const FinishTaskConflictSchema = z.object({
 
 const SupersedeTaskResponseSchema = z.object({
   success: z.literal(true),
-  kind: z.enum(["alreadyFinished", "workflow-failed", "resumed"]),
+  kind: z.enum(["alreadyFinished", "workflow-failed", "resumed", "noFallback"]),
   task: AgentTaskSchema.nullable(),
   resumeTaskId: z.string().nullable(),
   resumeTaskStatus: AgentTaskStatusSchema.optional(),
+  /** `noFallback` only: why the chain ended, to lead the worker's failure reason. */
+  failureReason: z.string().nullable().optional(),
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -765,10 +774,15 @@ const supersedeTaskRoute = route({
   session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
-    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies.',
+    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.',
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({ reason: ResumeReasonSchema }),
+  body: z
+    .object({ reason: ResumeReasonSchema, errorClass: ProviderErrorClassSchema.optional() })
+    .refine((body) => (body.reason === "provider_fallback") === (body.errorClass !== undefined), {
+      message: "`errorClass` is required with `reason: provider_fallback` and only allowed with it",
+      path: ["errorClass"],
+    }),
   auth: { apiKey: true, agentId: true },
   responses: {
     200: {
@@ -2146,6 +2160,33 @@ export async function handleTasks(
       return true;
     }
 
+    // Provider error: pick the next fallback before touching the task. No
+    // pick (or a workflow step, whose engine owns retries) leaves it running,
+    // and the worker fails it with the real error, as without fallbacks.
+    let fallback: { profile: string; hop: FallbackHop } | undefined;
+    if (parsed.body.reason === "provider_fallback" && parsed.body.errorClass) {
+      const pick =
+        task.workflowRunStepId == null
+          ? await nextFallback(task, parsed.body.errorClass, {
+              includeRepoSecrets: readsRepoSecrets(
+                getRequestAuth(req),
+                task.agentId ? await getAgentById(task.agentId) : null,
+              ),
+            })
+          : ({ kind: "none", message: null } as const);
+      if (pick.kind === "none") {
+        supersedeTaskRoute.respond(res, 200, {
+          success: true,
+          kind: "noFallback",
+          task,
+          resumeTaskId: null,
+          failureReason: pick.message,
+        });
+        return true;
+      }
+      fallback = { profile: pick.profile, hop: pick.hop };
+    }
+
     // Workflow-step tasks: fail back to the engine instead of superseding.
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
@@ -2205,6 +2246,7 @@ export async function handleTasks(
     const followUp = await createResumeFollowUp({
       parentId: parsed.params.id,
       reason: parsed.body.reason,
+      fallback,
     });
 
     // `workflow-skip` is unreachable here (workflow-step path branched above).

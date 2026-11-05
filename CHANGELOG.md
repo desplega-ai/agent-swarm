@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-05
+
+### Added
+- UI: native-style phone header and page action sheets (#2735).
+
+### Changed
+- Docker: bumped amp, gemini and the claude-managed SDK (#2743).
+
+### Fixed
+- Docker: the v2.8.0 full worker image installed the context-mode Claude and Codex plugin marketplaces unpinned and baked plugin 2.1.0, which requires Node 24.15.0 or later. The image ships Node 22, so the plugin's hook denied every Bash call in sessions with context-mode on. Both marketplaces are now pinned to v1.0.169, the same version as the context-mode CLI. Upgrade from 2.8.0 if you run workers with context-mode on. Releases before 2.8.0 are not affected: their images were built before upstream moved to its Node 24 line (#2741).
+- Scripts: a native run ends when the script's default export resolves (#2737).
+
+## [2.8.0] - 2026-11-05
+
+### Added
+- Workflows: each run is pinned to the workflow definition it started with (#2727).
+- Models: profile validity check (`check-model-profile` MCP tool), credential allowlist, tier alias and a profile picker (#2219).
+- Tasks: a `store-progress` completion can hand its follow-up to a live chained child via `chainedTaskId` (#2699).
+- Memory: learnings use a line-2 rule format with a write-time noise floor (#2697); dreaming triages learnings into `/longterm` before their TTL (#2696).
+- UI: preview agent-fs files and pages in a side panel from task and session pages (#2709); entity versions refresh in open views (#2712).
+- Apps: an app icon (`icon` on `app-upsert`) and a Table | Tiles toggle on the Apps page (#2686).
+- Claude: SDK interrupt and redirect support (#2695).
+- Docker: kiro-cli migrated to 3.0.0 (#2703).
+- Docs: worker recovery guide (#2723), choosing an AI operating model guide (#2722), small-company workflows atlas (#2724) and the boxd runtime provider page (#2708).
+
+### Changed
+- agent-fs pins bumped 0.18.16 -> 0.18.17 (#2719) and 0.18.17 -> 0.18.18 (server image, worker CLI, skill tag, `@desplega.ai/agent-fs-just-bash`).
+- Docker: bumped claude-code, cursor, qwen, amp (#2702), dsh and amp (#2728), and agent-browser to 0.41.2 (#2704).
+- CI: a red PR Body check blocks merges (#2725); TLC workers are capped in the heartbeat `tlc.sh` spec (#2706).
+
+### Fixed
+- Memory: learnings dedup against all of `/longterm` and expire after 30 days (#2677).
+- Slack: inbound deliveries from other workspaces are dropped (#2682).
+- Workflows: deployment circuit-breaker limits are validated (#2730); a Slack notify whose client is not ready fails instead of reporting success (#2705) and is not posted after the step deadline aborts the readiness wait (#2707).
+- Providers: the default prompt-size cap applies when `MAX_SKILL_CHARS` is non-finite (#2731).
+- Heartbeat: non-finite `HEARTBEAT_INTERVAL_MS` values are rejected (#2721).
+- agent-fs: ambiguous stored keys are rejected and a bad `Content-Length` is omitted (#2673).
+- Scripts: bridged tool refusals report outer `success: false` (#2701).
+- ACP: mixed-type JSON env-key arrays are rejected (#2700).
+- UI: readable model column with a model details card (#2726), compact page header without the top gap (#2710), page header summary opens by tap and keyboard (#2716), and consistent toast offsets (#2711, #2718).
+- Tests: the human-free batch-boundary test no longer depends on sibling order (#2717).
+
 ## [2.7.10] - 2026-11-04
 
 ### Added

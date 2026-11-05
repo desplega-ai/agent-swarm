@@ -106,12 +106,23 @@ export async function getRunWorkflow(run: {
   return pinned ? mergePinnedDefinition(live, pinned) : live;
 }
 
-/** Remove snapshots no run references any more. Call after deleting runs. */
-export async function deleteOrphanedRunDefinitions(): Promise<void> {
-  await getDbClient().run(
-    `DELETE FROM workflow_run_definitions
-      WHERE NOT EXISTS (
-        SELECT 1 FROM workflow_runs r WHERE r.definitionHash = workflow_run_definitions.hash
-      )`,
-  );
+/**
+ * Remove only the supplied snapshots that no run references. Collect the
+ * hashes before deleting runs, then call this within the same transaction.
+ */
+export async function deleteOrphanedRunDefinitions(hashes: readonly string[]): Promise<void> {
+  // Snapshots can be large. Bound each statement's rows and bind parameters,
+  // and seek by hash instead of scanning unrelated definitions.
+  const batchSize = 100;
+  for (let offset = 0; offset < hashes.length; offset += batchSize) {
+    const batch = hashes.slice(offset, offset + batchSize);
+    await getDbClient().run(
+      `DELETE FROM workflow_run_definitions
+        WHERE hash IN (${batch.map(() => "?").join(", ")})
+          AND NOT EXISTS (
+            SELECT 1 FROM workflow_runs r WHERE r.definitionHash = workflow_run_definitions.hash
+          )`,
+      batch,
+    );
+  }
 }

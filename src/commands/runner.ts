@@ -68,6 +68,7 @@ import {
   type DeliveryMode,
   isTerminalTaskStatus,
   type ModelTierOverrides,
+  type ProviderErrorClass,
   type ProviderName,
   parseWorkerModelTierOverrides,
   type ReasoningEffort,
@@ -156,6 +157,7 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
+import { classifyProviderErrorOf } from "./provider-error-class.ts";
 import {
   RunnerPushDelivery,
   shouldRunDeliveryLoop,
@@ -2364,12 +2366,57 @@ export async function createSessionReportingAuthFailure(
  * back to the legacy `pauseTaskViaAPI` (handles partial-deploy windows where
  * the API is older than the worker).
  */
+/**
+ * Ask the API to move a task that hit a provider error to its next fallback
+ * profile (runbooks/model-tiers.md § Fallbacks on provider errors). Only a
+ * task claim gave a profile (`resolvedProfile`) can hop. `superseded`: the
+ * task is terminal and its resume runs the fallback, so the caller must not
+ * finish it. Otherwise the caller fails it as usual, led by `failureReason`
+ * when the API says why the chain ended. An older API rejects the reason
+ * (4xx) and the task fails as before.
+ */
+export async function requestProviderFallback(
+  config: ApiConfig,
+  role: string,
+  taskId: string,
+  input: {
+    resolvedProfile?: string;
+    errorClass: ProviderErrorClass | null;
+    failureReason?: string;
+  },
+): Promise<{ superseded: boolean; failureReason?: string }> {
+  if (!input.resolvedProfile || !input.errorClass) return { superseded: false };
+  const outcome = await supersedeTaskViaAPI(config, role, taskId, "provider_fallback", {
+    errorClass: input.errorClass,
+  });
+  if (!outcome.ok) return { superseded: false };
+  if (outcome.kind === "resumed") {
+    console.log(
+      `[${role}] Task ${taskId.slice(0, 8)} hit ${input.errorClass} on ${input.resolvedProfile}; resuming on the next fallback profile`,
+    );
+    return { superseded: true };
+  }
+  if (outcome.kind === "noFallback" && outcome.failureReason) {
+    return {
+      superseded: false,
+      failureReason: input.failureReason
+        ? `${outcome.failureReason}\n\n${input.failureReason}`
+        : outcome.failureReason,
+    };
+  }
+  return { superseded: false };
+}
+
 async function supersedeTaskViaAPI(
   config: ApiConfig,
   role: string,
   taskId: string,
-  reason: "graceful_shutdown" | "context_limits" | "manual_supersede",
-): Promise<{ ok: true; resumeTaskId: string | null; kind: string } | { ok: false }> {
+  reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "provider_fallback",
+  extra: { errorClass?: ProviderErrorClass } = {},
+): Promise<
+  | { ok: true; resumeTaskId: string | null; kind: string; failureReason?: string | null }
+  | { ok: false }
+> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
     "Content-Type": "application/json",
@@ -2382,13 +2429,14 @@ async function supersedeTaskViaAPI(
     const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, ...extra }),
     });
 
     if (response.ok) {
       const body = (await response.json().catch(() => null)) as {
         resumeTaskId?: string | null;
         kind?: string;
+        failureReason?: string | null;
       } | null;
       const resumeTaskId = body?.resumeTaskId ?? null;
       const kind = body?.kind ?? "resumed";
@@ -2397,7 +2445,7 @@ async function supersedeTaskViaAPI(
           resumeTaskId ? resumeTaskId.slice(0, 8) : "none"
         })`,
       );
-      return { ok: true, resumeTaskId, kind };
+      return { ok: true, resumeTaskId, kind, failureReason: body?.failureReason ?? null };
     }
 
     // 404 / 405 — the route doesn't exist on this API server. Happens during
@@ -2788,6 +2836,11 @@ export interface RunningTask {
   harnessVariantMeta?: Record<string, unknown>;
   /** Resolved model used for the provider session, when configured */
   model?: string;
+  /**
+   * The profile claim applied (`task.resolvedProfile`). A provider error on a
+   * task with one asks the API for the next fallback profile.
+   */
+  resolvedProfile?: string;
   /**
    * Last non-empty assistant text captured from `message` events, shared by
    * reference with the `onEvent` closure. Fallback `providerOutput` when the
@@ -4361,15 +4414,24 @@ export async function spawnProviderProcess(
     ) {
       const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
-      await ensureTaskFinished(
-        { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
-        opts.role,
-        realTaskId,
-        1,
-        reason,
-        undefined,
-        opts.harnessProvider,
-      );
+      const apiConfig = { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId };
+      // No usable key for this profile right now: its fallback may have one.
+      const fallback = await requestProviderFallback(apiConfig, opts.role, realTaskId, {
+        resolvedProfile: opts.resolvedProfile,
+        errorClass: "pool_empty",
+        failureReason: reason,
+      });
+      if (!fallback.superseded) {
+        await ensureTaskFinished(
+          apiConfig,
+          opts.role,
+          realTaskId,
+          1,
+          fallback.failureReason ?? reason,
+          undefined,
+          opts.harnessProvider,
+        );
+      }
     }
     throw err;
   }
@@ -5307,6 +5369,7 @@ export async function spawnProviderProcess(
     harnessProvider: opts.harnessProvider,
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
+    resolvedProfile: opts.resolvedProfile,
     assistantText: assistantTextHolder,
     finalProgress: finalProgressHolder,
     lastCost: lastCostHolder,
@@ -5547,6 +5610,7 @@ export async function checkCompletedProcesses(
     harnessVariant?: string;
     harnessVariantMeta?: Record<string, unknown>;
     model?: string;
+    resolvedProfile?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
     finalProgress?: RunningTask["finalProgress"];
@@ -5573,6 +5637,7 @@ export async function checkCompletedProcesses(
         harnessVariant: task.harnessVariant,
         harnessVariantMeta: task.harnessVariantMeta,
         model: task.model,
+        resolvedProfile: task.resolvedProfile,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
         finalProgress: task.finalProgress,
@@ -5598,6 +5663,7 @@ export async function checkCompletedProcesses(
         harnessVariant,
         harnessVariantMeta,
         model,
+        resolvedProfile,
         durationMs,
         assistantText,
         finalProgress,
@@ -5703,13 +5769,28 @@ export async function checkCompletedProcesses(
                 codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
                 modelWindowBlocks: state.modelWindowBlocks,
               },
-              () =>
-                ensureTaskFinished(
+              async () => {
+                // A provider error on a profile task: the API resumes it on
+                // the next fallback profile, or says why none is left.
+                const fallback = await requestProviderFallback(apiConfig, role, taskId, {
+                  resolvedProfile,
+                  failureReason,
+                  errorClass: resolvedProfile
+                    ? classifyProviderErrorOf(
+                        result,
+                        failureReason,
+                        model,
+                        state.codexCreditsExhaustedCooldownMs,
+                      )
+                    : null,
+                });
+                if (fallback.superseded) return;
+                await ensureTaskFinished(
                   apiConfig,
                   role,
                   taskId,
                   result.exitCode,
-                  failureReason,
+                  fallback.failureReason ?? failureReason,
                   // Runner-buffered last assistant text is a harness-agnostic fallback
                   // for adapters that never populate `ProviderResult.output` (Codex
                   // today, any future adapter). Empty buffer -> `undefined`, byte
@@ -5719,7 +5800,8 @@ export async function checkCompletedProcesses(
                   bridgeFailureDiagnostics,
                   finalProgress?.value,
                   deadline,
-                ),
+                );
+              },
             );
 
             const sessionTriggerSurface = workerTriggerSurface(triggerSurface);

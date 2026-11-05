@@ -9,11 +9,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
+import { getDbClient } from "../be/db";
 import {
   createModelProfile,
   deleteModelProfile,
   getModelProfileByName,
   listModelProfiles,
+  MAX_MODEL_PROFILE_FALLBACKS,
+  modelProfileFallbacksError,
   modelProfileReferences,
   updateModelProfile,
 } from "../be/db/model-profiles";
@@ -71,7 +74,7 @@ const createProfile = route({
   pattern: ["api", "model-profiles"],
   summary: "Create a model profile",
   description:
-    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).",
+    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   body: z.object({
@@ -82,6 +85,7 @@ const createProfile = route({
     allowCustomModel: z.boolean().optional().default(false),
     description: z.string().trim().max(500).nullable().optional(),
     credentials: ModelProfileCredentialsSchema.nullable().optional(),
+    fallbacks: z.array(ModelProfileNameSchema).max(MAX_MODEL_PROFILE_FALLBACKS).optional(),
   }),
   responses: {
     201: { description: "Profile created", schema: ModelProfileSchema },
@@ -97,7 +101,7 @@ const updateProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Update a model profile",
   description:
-    "Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).",
+    "Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -107,6 +111,7 @@ const updateProfile = route({
     allowCustomModel: z.boolean().optional(),
     description: z.string().trim().max(500).nullable().optional(),
     credentials: ModelProfileCredentialsSchema.nullable().optional(),
+    fallbacks: z.array(ModelProfileNameSchema).max(MAX_MODEL_PROFILE_FALLBACKS).optional(),
   }),
   responses: {
     200: { description: "Profile updated", schema: ModelProfileSchema },
@@ -122,7 +127,7 @@ const deleteProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Delete a model profile",
   description:
-    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -258,9 +263,21 @@ export async function handleModelProfiles(
       jsonError(res, error, 400);
       return true;
     }
-    const created = await createModelProfile(body, {
-      userId: await resolveHttpAuditUserId(req, myAgentId),
+    const userId = await resolveHttpAuditUserId(req, myAgentId);
+    // The fallback graph check and the write share one transaction, so two
+    // concurrent saves cannot each pass and together form a cycle.
+    const outcome = await getDbClient().transaction(async () => {
+      const fallbackError = body.fallbacks
+        ? await modelProfileFallbacksError(body.name, body.harness, body.fallbacks)
+        : null;
+      if (fallbackError) return { error: fallbackError };
+      return { created: await createModelProfile(body, { userId }) };
     });
+    if (typeof outcome.error === "string") {
+      jsonError(res, outcome.error, 400);
+      return true;
+    }
+    const created = outcome.created;
     if (!created) {
       jsonError(res, `Model profile "${body.name}" already exists`, 409);
       return true;
@@ -290,9 +307,19 @@ export async function handleModelProfiles(
       jsonError(res, error, 400);
       return true;
     }
-    const updated = await updateModelProfile(current.name, body, {
-      userId: await resolveHttpAuditUserId(req, myAgentId),
+    const userId = await resolveHttpAuditUserId(req, myAgentId);
+    const outcome = await getDbClient().transaction(async () => {
+      const fallbackError = body.fallbacks
+        ? await modelProfileFallbacksError(current.name, current.harness, body.fallbacks)
+        : null;
+      if (fallbackError) return { error: fallbackError };
+      return { updated: await updateModelProfile(current.name, body, { userId }) };
     });
+    if (typeof outcome.error === "string") {
+      jsonError(res, outcome.error, 400);
+      return true;
+    }
+    const updated = outcome.updated;
     if (!updated) {
       jsonError(res, "Model profile not found", 404);
       return true;
@@ -319,11 +346,17 @@ export async function handleModelProfiles(
       return true;
     }
     const refs = await modelProfileReferences(current.name);
-    if (refs.agentIds.length > 0 || refs.openTaskCount > 0 || refs.scheduleIds.length > 0) {
+    if (
+      refs.agentIds.length > 0 ||
+      refs.openTaskCount > 0 ||
+      refs.scheduleIds.length > 0 ||
+      refs.fallbackOf.length > 0
+    ) {
       const schedules = refs.scheduleIds.length > 0 ? ` (${refs.scheduleIds.join(", ")})` : "";
+      const fallbackOf = refs.fallbackOf.length > 0 ? ` (${refs.fallbackOf.join(", ")})` : "";
       jsonError(
         res,
-        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), held by ${refs.openTaskCount} unfinished or awaiting-resume task(s), named by ${refs.scheduleIds.length} schedule(s)${schedules}.`,
+        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), held by ${refs.openTaskCount} unfinished or awaiting-resume task(s), named by ${refs.scheduleIds.length} schedule(s)${schedules}, a fallback of ${refs.fallbackOf.length} profile(s)${fallbackOf}.`,
         409,
       );
       return true;
@@ -334,7 +367,7 @@ export async function handleModelProfiles(
     if (outcome === "in-use") {
       jsonError(
         res,
-        `"${current.name}" is in use by a task, a schedule or an agent default created just now.`,
+        `"${current.name}" is in use by a task, a schedule, an agent default or a fallback list written just now.`,
         409,
       );
       return true;
