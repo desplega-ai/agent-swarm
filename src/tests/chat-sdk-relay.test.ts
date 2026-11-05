@@ -180,6 +180,18 @@ describe("chat relay text", () => {
     expect(chunks.join(" ")).toBe(words);
     expect(splitChatMessage("short", 4096)).toEqual(["short"]);
   });
+
+  test("splitChatMessage does not loop on a surrogate pair at a tiny limit", () => {
+    // A one-code-unit limit is smaller than an emoji: keep the pair whole.
+    expect(splitChatMessage("😀", 1)).toEqual(["😀"]);
+    // The cut still advances when text continues past the pair.
+    expect(splitChatMessage("a😀b", 1)).toEqual(["a", "😀", "b"]);
+    // A limit-wide window still never splits a pair.
+    const emojiChunks = splitChatMessage("😀😀😀", 2);
+    expect(emojiChunks).toEqual(["😀", "😀", "😀"]);
+    // A pair straddling the window edge moves the cut back, not to zero.
+    expect(splitChatMessage("ab😀cd", 3)).toEqual(["ab", "😀c", "d"]);
+  });
 });
 
 describe("chat relay watcher", () => {
