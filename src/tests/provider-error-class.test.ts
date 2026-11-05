@@ -89,6 +89,22 @@ describe("classifyProviderErrorOf: provider errors per harness", () => {
       "openrouter/deepseek/deepseek-v4.1-flash",
       "server_error",
     ],
+    // Every provider 5xx, not just 500-504.
+    [
+      "gateway 521",
+      "provider returned error: 521 web server is down",
+      {},
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "server_error",
+    ],
+    [
+      "gateway 507",
+      "upstream error: HTTP 507 Insufficient Storage",
+      {},
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "server_error",
+    ],
+    ["api 599", "API Error: status 599", {}, "claude-opus-5-5", "server_error"],
     [
       "auth error wrapper",
       "Authentication error: Authentication failed: invalid key",
@@ -116,6 +132,20 @@ describe("never a fallback", () => {
     ["cancellation", "Rate limit hit", { errorCategory: "cancelled" }],
     ["transient codex refresh lock", "[auth-error] waiting for the refresh lock", {}],
     ["no reason", undefined, {}],
+    // A 5xx-looking number that is not a status.
+    ["5xx-looking count", "Error: wrote 521 lines, then the test failed", {}],
+    // Harness-side exceptions (MCP / transport): their text never decides.
+    [
+      "MCP transport 503",
+      "MCP error -32000: HTTP 503 Service Unavailable",
+      { errorOrigin: "harness" },
+    ],
+    [
+      "MCP tool 429",
+      "429 Too Many Requests from the GitHub MCP server",
+      { errorOrigin: "harness" },
+    ],
+    ["MCP tool 401", "HTTP 401 Unauthorized", { errorOrigin: "harness" }],
   ];
   for (const [name, reason, extra] of cases) {
     test(name, () => {

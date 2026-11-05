@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { classifyProviderErrorOf } from "../commands/provider-error-class";
 import {
   type ReconcileActiveTasksOptions,
   type RunnerState,
@@ -204,6 +205,76 @@ describe("PiMonoSession & runner — long lead session cost preservation (#2073)
     expect(result.cost?.isError).toBe(true);
     expect(result.cost?.totalCostUsd).toBe(0.41);
     expect(result.cost?.inputTokens).toBe(9000);
+  });
+
+  function erroringSession(prompt: (listeners: Array<(e: AgentSessionEvent) => void>) => void) {
+    const listeners: Array<(event: AgentSessionEvent) => void> = [];
+    return {
+      sessionId: "pi-origin-session",
+      isStreaming: false,
+      model: { provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" },
+      subscribe(listener: (event: AgentSessionEvent) => void) {
+        listeners.push(listener);
+        return () => {};
+      },
+      async prompt() {
+        prompt(listeners);
+      },
+      getContextUsage: () => null,
+      getSessionStats: () => ({
+        tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, total: 2 },
+        cost: 0,
+        userMessages: 1,
+        assistantMessages: 1,
+      }),
+      abort: async () => {},
+      dispose: () => {},
+    } as unknown as AgentSession;
+  }
+
+  test("an MCP transport exception is a harness error and never moves the task to a fallback profile", async () => {
+    const session = new PiMonoSession(
+      erroringSession(() => {
+        throw new Error("MCP error -32000: Streamable HTTP error: HTTP 503 Service Unavailable");
+      }),
+      makeSessionConfig(join(tmpLogDir, `pi-mcp-503-${Date.now()}.log`)),
+      false,
+    );
+    const result = await session.waitForCompletion();
+    expect(result.failureReason).toContain("HTTP 503");
+    expect(result.errorOrigin).toBe("harness");
+    expect(
+      classifyProviderErrorOf(
+        result,
+        result.failureReason,
+        "openrouter/deepseek/deepseek-v4.1-flash",
+      ),
+    ).toBeNull();
+  });
+
+  test("control: a provider 503 after pi's retries still moves the task to a fallback profile", async () => {
+    const session = new PiMonoSession(
+      erroringSession((listeners) => {
+        for (const l of listeners) {
+          l({
+            type: "auto_retry_end",
+            success: false,
+            finalError: "503 service unavailable",
+          } as unknown as AgentSessionEvent);
+        }
+      }),
+      makeSessionConfig(join(tmpLogDir, `pi-provider-503-${Date.now()}.log`)),
+      false,
+    );
+    const result = await session.waitForCompletion();
+    expect(result.errorOrigin).toBeUndefined();
+    expect(
+      classifyProviderErrorOf(
+        result,
+        result.failureReason,
+        "openrouter/deepseek/deepseek-v4.1-flash",
+      ),
+    ).toBe("server_error");
   });
 
   test("reconcileActiveTasks preserves task.lastCost when settling an unresponsive aborted session", async () => {

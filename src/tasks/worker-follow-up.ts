@@ -205,9 +205,6 @@ export function inheritedModelSelection(
   };
 }
 
-/** Most hops one piece of work may take; the visited set already bounds it. */
-export const MAX_FALLBACK_HOPS = 10;
-
 /** Result of `nextFallback`. */
 export type FallbackPick =
   | { kind: "picked"; profile: string; hop: FallbackHop }
@@ -223,10 +220,24 @@ export type FallbackPick =
  * one first and then back toward the first, so a fallback's own fallbacks
  * come before its siblings'. A profile the work already ran on is never
  * picked again. A candidate that fails `checkProfileForAgent` on the agent
- * is skipped and recorded on the hop.
+ * is skipped and recorded on the hop. There is no hop cap: every hop adds a
+ * profile to the visited set and the saved fallback graph is acyclic, so the
+ * walk ends once every reachable profile has run.
+ *
+ * The pick is judged against this agent only, so the resume is always pinned
+ * to it (`createResumeFollowUp`). Lead-only work on an agent that cannot hold
+ * a lead-only pin would be rerouted to another agent, so it never hops.
  */
 export async function nextFallback(
-  parent: Pick<AgentTask, "agentId" | "resolvedProfile" | "fallbackHops" | "vcsRepo">,
+  parent: Pick<
+    AgentTask,
+    | "agentId"
+    | "resolvedProfile"
+    | "fallbackHops"
+    | "vcsRepo"
+    | "routingAffinity"
+    | "routingAffinityInvalid"
+  >,
   errorClass: ProviderErrorClass,
   options: { includeRepoSecrets?: boolean } = {},
 ): Promise<FallbackPick> {
@@ -240,33 +251,43 @@ export async function nextFallback(
   const judged = new Set<string>();
   let configured = hops.length > 0;
 
-  if (hops.length < MAX_FALLBACK_HOPS) {
-    for (let i = path.length - 1; i >= 0; i--) {
-      const profile = await getModelProfileByName(path[i]!);
-      for (const name of profile?.fallbacks ?? []) {
-        configured = true;
-        if (visited.has(name) || judged.has(name)) continue;
-        judged.add(name);
-        const result = await checkProfileForAgent(parent.agentId, name, {
-          vcsRepo: parent.vcsRepo,
-          includeRepoSecrets: options.includeRepoSecrets,
-          fallbacks: false,
-        });
-        if (result?.ok) {
-          return {
-            kind: "picked",
+  if (parent.routingAffinity?.leadOnly) {
+    const agent = await getAgentById(parent.agentId);
+    if (!agent?.isLead || !isAgentEligibleForTask(agent, parent)) {
+      const listsFallbacks = (await getModelProfileByName(current))?.fallbacks.length ?? 0;
+      if (!configured && listsFallbacks === 0) return { kind: "none", message: null };
+      return {
+        kind: "none",
+        message: `${errorClass} on ${current}; no fallback: lead-only work cannot resume on agent ${parent.agentId}`,
+      };
+    }
+  }
+
+  for (let i = path.length - 1; i >= 0; i--) {
+    const profile = await getModelProfileByName(path[i]!);
+    for (const name of profile?.fallbacks ?? []) {
+      configured = true;
+      if (visited.has(name) || judged.has(name)) continue;
+      judged.add(name);
+      const result = await checkProfileForAgent(parent.agentId, name, {
+        vcsRepo: parent.vcsRepo,
+        includeRepoSecrets: options.includeRepoSecrets,
+        fallbacks: false,
+      });
+      if (result?.ok) {
+        return {
+          kind: "picked",
+          profile: name,
+          hop: {
+            from: current,
             profile: name,
-            hop: {
-              from: current,
-              profile: name,
-              errorClass,
-              at: new Date().toISOString(),
-              ...(skipped.length > 0 ? { skipped } : {}),
-            },
-          };
-        }
-        skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
+            errorClass,
+            at: new Date().toISOString(),
+            ...(skipped.length > 0 ? { skipped } : {}),
+          },
+        };
       }
+      skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
     }
   }
   if (!configured) return { kind: "none", message: null };
@@ -718,7 +739,19 @@ export async function createResumeFollowUp(args: {
     | "escalated_unassigned"
     | undefined;
   const leadOnly = parent.routingAffinity?.leadOnly === true;
-  if (parent.agentId) {
+  // A fallback profile was judged against this agent alone (`nextFallback`,
+  // which also refuses lead-only work a non-Lead holds), so its resume never
+  // leaves it: not for a full slot (another claim can take the parent's freed
+  // one first), and not for a stale status, since the agent that asked for
+  // the fallback is alive. The pending pin waits for a free slot.
+  const fallbackPin =
+    args.reason === "provider_fallback" && args.fallback !== undefined && parent.agentId
+      ? parent.agentId
+      : undefined;
+  if (fallbackPin) {
+    preferredAgentId = fallbackPin;
+    if (leadOnly) authorizationDecision = "source_lead_pin";
+  } else if (parent.agentId) {
     const candidate = await getPinCandidateAgent(parent.agentId);
     if (candidate) {
       const lastActivity = candidate.lastActivityAt ? Date.parse(candidate.lastActivityAt) : 0;
@@ -731,14 +764,11 @@ export async function createResumeFollowUp(args: {
       const isGracefulShutdown = args.reason === "graceful_shutdown";
       const isGracefulPin = isGracefulShutdown && isGracefulResumePinEnabled();
       const isFreshPinnedReason = !isGracefulShutdown && fresh;
-      // The fallback was judged against this agent's harness and keys, and
-      // the worker that reported the error is alive by definition.
-      const isFallbackPin = args.reason === "provider_fallback" && args.fallback !== undefined;
       // crash_recovery and graceful_shutdown pins ignore `fresh` when their
       // kill-switches are on; context_limits/manual_supersede still require it.
       if (
         hasCap &&
-        (isCrashRecovery || isGracefulPin || isFreshPinnedReason || isFallbackPin) &&
+        (isCrashRecovery || isGracefulPin || isFreshPinnedReason) &&
         (!leadOnly || candidate.isLead)
       ) {
         preferredAgentId = candidate.id;
@@ -756,7 +786,7 @@ export async function createResumeFollowUp(args: {
   // Apply the same Lead-only recovery decision used by reboot recovery. A
   // non-Lead source can never win the earlier pin attempt, so this chooses a
   // Lead reroute or an authorization-gated unassigned fallback.
-  if (leadOnly) {
+  if (leadOnly && !fallbackPin) {
     const source = preferredAgentId ? await getAgentById(preferredAgentId) : null;
     const resolution = await resolveLeadOnlyRecoveryAssignment(parent, source);
     preferredAgentId = resolution.agentId;

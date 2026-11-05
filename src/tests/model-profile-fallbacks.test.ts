@@ -21,7 +21,7 @@ import { checkProfileForAgent } from "../be/model-profile-check";
 import { recordClaimModelResolution } from "../be/model-tier-resolution";
 import { handleModelProfiles } from "../http/model-profiles";
 import { handleTasks } from "../http/tasks";
-import { MAX_FALLBACK_HOPS, nextFallback } from "../tasks/worker-follow-up";
+import { nextFallback } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
@@ -87,7 +87,7 @@ beforeEach(async () => {
   );
   await getDbClient().run("DELETE FROM model_profiles");
   // Agent heartbeat: the resume pin reads it.
-  await getDbClient().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [
+  await getDbClient().run("UPDATE agents SET status = 'idle', lastActivityAt = ? WHERE id = ?", [
     new Date().toISOString(),
     CLAUDE_ID,
   ]);
@@ -298,17 +298,49 @@ describe("nextFallback", () => {
     ).toEqual({ kind: "none", message: null });
   });
 
-  test("the hop cap ends any chain", async () => {
-    await seedChain();
-    const task = await runningTask("claude-a");
-    const hops = Array.from({ length: MAX_FALLBACK_HOPS }, (_, i) => ({
+  test("an eleven-hop chain still reaches its last unvisited fallback", async () => {
+    // p0 → p1 → … → p11, created from the end so each fallback exists.
+    for (let i = 11; i >= 0; i--) {
+      await createModelProfile({
+        name: `p${i}`,
+        harness: "claude",
+        model: "sonnet",
+        fallbacks: i === 11 ? [] : [`p${i + 1}`],
+      });
+    }
+    const task = await runningTask("p10");
+    const hops = Array.from({ length: 10 }, (_, i) => ({
       from: `p${i}`,
-      profile: i === MAX_FALLBACK_HOPS - 1 ? "claude-a" : `p${i + 1}`,
+      profile: `p${i + 1}`,
       errorClass: "rate_limit" as const,
       at: "t",
     }));
     const pick = await nextFallback({ ...task, fallbackHops: hops }, "rate_limit");
+    expect(pick).toMatchObject({ kind: "picked", profile: "p11" });
+    // Control: once p11 ran too, the acyclic chain ends by itself.
+    const done = await nextFallback(
+      {
+        ...task,
+        resolvedProfile: "p11",
+        fallbackHops: [
+          ...hops,
+          { from: "p10", profile: "p11", errorClass: "rate_limit" as const, at: "t" },
+        ],
+      },
+      "rate_limit",
+    );
+    expect(done.kind).toBe("none");
+  });
+
+  test("lead-only work on an agent that cannot hold a lead-only pin never hops", async () => {
+    await seedChain();
+    const task = await runningTask("claude-a");
+    const pick = await nextFallback(
+      { ...task, routingAffinity: { capabilities: [], leadOnly: true } },
+      "rate_limit",
+    );
     expect(pick.kind).toBe("none");
+    expect(pick.kind === "none" && pick.message).toContain("lead-only");
   });
 });
 
@@ -376,6 +408,40 @@ describe("supersede with provider_fallback", () => {
     // The worker fails it itself: the task is untouched and has no resume.
     expect((await getTaskById(third!.id))?.status).toBe("in_progress");
     expect(await resumeOf(third!.id)).toBeNull();
+  });
+
+  test("the resume stays on the agent when a competing claim fills the freed slot", async () => {
+    await seedChain();
+    const first = await runningTask("claude-a");
+    // Other claims hold both of the agent's slots (maxTasks 2) by the time
+    // the resume is routed, so the parent's freed slot is gone.
+    for (const n of [1, 2]) {
+      const other = await createTaskExtended(`competing claim ${n}`, { agentId: CLAUDE_ID });
+      await startTask(other.id);
+    }
+    const res = await supersede(first.id, {
+      reason: "provider_fallback",
+      errorClass: "rate_limit",
+    });
+    expect(((await res.json()) as { kind: string }).kind).toBe("resumed");
+    const resume = await resumeOf(first.id);
+    expect(resume?.profile).toBe("claude-b");
+    expect(resume?.agentId).toBe(CLAUDE_ID);
+    expect(resume?.status).toBe("pending");
+  });
+
+  test("the resume stays on the agent even when the agent reads offline", async () => {
+    await seedChain();
+    const first = await runningTask("claude-a");
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [CLAUDE_ID]);
+    const res = await supersede(first.id, {
+      reason: "provider_fallback",
+      errorClass: "overloaded",
+    });
+    expect(((await res.json()) as { kind: string }).kind).toBe("resumed");
+    const resume = await resumeOf(first.id);
+    expect(resume?.profile).toBe("claude-b");
+    expect(resume?.agentId).toBe(CLAUDE_ID);
   });
 
   test("a task with no fallbacks and a workflow step are left for the worker to fail", async () => {

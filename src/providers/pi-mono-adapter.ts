@@ -1488,6 +1488,8 @@ export class PiMonoSession implements ProviderSession {
         cost,
         isError: true,
         errorCategory: classifiedError?.category,
+        // Unclassified throws are MCP / transport failures, not provider responses.
+        ...(classifiedError ? {} : { errorOrigin: "harness" as const }),
         failureReason: scrubSecrets(classifiedError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };
