@@ -402,6 +402,25 @@ describe("submitFeedback", () => {
     expect(calls).toBe(0);
   });
 
+  test("rejects feedback endpoints that include credentials before fetching", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response(null, { status: 202 });
+    };
+
+    for (const endpoint of [
+      "https://user:password@proxy.example.test/v1/feedback",
+      "https://user@proxy.example.test/v1/feedback",
+      "https://:password@proxy.example.test/v1/feedback",
+    ]) {
+      await expect(api.submitFeedback(endpoint, input)).rejects.toThrow(
+        "Invalid feedback endpoint",
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
   test("surfaces a readable non-2xx response without falling back", async () => {
     let call = 0;
     globalThis.fetch = async () => {
