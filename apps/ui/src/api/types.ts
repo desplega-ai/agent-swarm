@@ -4014,6 +4014,14 @@ export interface AppPageDef {
   /** Display title (breadcrumb / header); defaults to the page name. */
   title?: string;
   params?: Record<string, AppPageParamDef>;
+  /** Sidebar layout: a catalog icon name shown next to the page in the sidebar. */
+  icon?: string;
+  /** Sidebar layout: one line under the title in the sticky page header. */
+  description?: string;
+  /** Sidebar layout: element key rendered in the sticky header's actions slot. */
+  headerActions?: string;
+  /** Sidebar layout: `false` leaves the page out of the sidebar. */
+  nav?: boolean;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -4090,6 +4098,8 @@ export interface AppDefinition {
   theme?: string;
   /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
   icon?: AppIcon;
+  /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
+  layout?: "sidebar";
 }
 
 /**
