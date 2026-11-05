@@ -524,6 +524,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
+| `SessionThread` | `id` | `rootTaskId`, `placeholder`, `onDispatch`, `onRootCreated`, `onReset`, `fill`; chat-style history of a task chain with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
@@ -579,6 +580,29 @@ SchemaForm details:
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
 - Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
+
+SessionThread details — a chat bound to a task chain (every task under `rootTaskId`, linked by `parentTaskId`):
+
+- `rootTaskId` is the chain root, usually `{ "$state": "/queries/<name>/data/0/rootTaskId" }` from a row the app owns, or stable context such as a route param. Empty or unbound means no chain yet.
+- Each turn shows the request (the `message` of an app-action input, else the task text) and its outcome, or "Working…" with the latest activity step while the task runs. The newest 100 turns render; request text is cut at 4,000 characters and output at 20,000. The task detail sheet has the full text.
+- Sending a message takes one of three routes:
+  1. No `rootTaskId` → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates a root task. `onRootCreated` then runs with `$chain.newTaskId` set to the new task id.
+  2. Leaf task (newest in the chain) is running, paused, or reviewing → steer it: `POST /api/tasks/<leaf>/steer` with `mode: "queue"` and `source: "app-page"`. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Leaf task is completed, failed, cancelled, superseded, or draft → run `onDispatch` again with `$chain.leafTaskId` set to the leaf id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
+- Why `onRootCreated` is separate: a static chain cannot skip a step, so an `app.mutate` that adopts the new task as the root inside `onDispatch` would overwrite `rootTaskId` on every follow-up. Put that `app.mutate` (`values: { rootTaskId: { "$chain": "newTaskId" } }`) in `onRootCreated`. Omit it when `rootTaskId` does not come from a row the app writes.
+- `onReset` renders a Reset control once a root exists; it should clear `rootTaskId` so the next message starts a new chain.
+
+```json
+{ "type": "SessionThread", "props": {
+  "id": "chat",
+  "rootTaskId": { "$state": "/queries/screen/data/0/rootTaskId" },
+  "onDispatch": [{ "action": "app.action", "params": {
+    "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }],
+  "onRootCreated": [{ "action": "app.mutate", "params": {
+    "model": "screen", "op": "update", "rowId": { "$state": "/route/params/screenId" },
+    "values": { "rootTaskId": { "$chain": "newTaskId" } } } }]
+} }
+```
 
 Form details:
 
@@ -677,7 +701,7 @@ Valid `$state` roots are:
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
-Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, or `Form.onSubmit`) these scoped sentinels are valid, recursively inside objects and arrays:
+Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or a component chain prop such as `SessionThread.onDispatch`) these scoped sentinels are valid, recursively inside objects and arrays:
 
 | Sentinel | Resolves to |
 |---|---|
@@ -687,7 +711,7 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
-| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain; it carries `leafTaskId` and `newTaskId`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain (`SessionThread`); it carries `leafTaskId` and `newTaskId`. The component publishes every key, `null` when it has no value yet; a `null` key resolves to nothing and its param is dropped (a `parentTaskId` bound to a `null` `leafTaskId` creates a root task). Where no chain scope is published (Table, Form), or the key is not one the scope carries (a typo), the sentinel is left in place and the action fails instead of silently dropping the parent. An empty string is not "no parent": a `$state` slot meaning "no parent yet" must hold `null`. |
 | `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
