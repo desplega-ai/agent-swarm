@@ -235,3 +235,31 @@ test("a paused leaf reads Paused, not Working…", async () => {
   expect(host.textContent).not.toContain("Working…");
   await unmount();
 });
+
+test("the turn list opens scrolled to the newest turn and keeps its rows from shrinking", async () => {
+  sessionChain = [
+    task({ id: "a", createdAt: "2026-11-05T00:00:00.000Z" }),
+    task({ id: "b", createdAt: "2026-11-05T01:00:00.000Z" }),
+  ];
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => 900,
+  });
+  const { host, unmount } = await mount({ rootTaskId: "a" }, () => ({}));
+  const list = host.querySelector<HTMLElement>('[data-slot="session-thread-turns"]');
+  expect(list?.scrollTop).toBe(900);
+  for (const row of host.querySelectorAll('[data-slot="session-thread-turn"]')) {
+    expect(row.className).toContain("shrink-0");
+  }
+  if (original) Object.defineProperty(HTMLElement.prototype, "scrollHeight", original);
+  await unmount();
+});
+
+test("the composer sits under the same turn list box when there are no turns", async () => {
+  const { host, unmount } = await mount({}, () => ({}));
+  const list = host.querySelector('[data-slot="session-thread-turns"]');
+  expect(list?.className).toContain("h-[420px]");
+  expect(list?.textContent).toContain("No session yet");
+  await unmount();
+});

@@ -66,7 +66,7 @@ import { getByPath, type InferComponentProps } from "@json-render/core";
 import { useActions, useStateStore } from "@json-render/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Maximize2, RotateCcw, Send } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession } from "@/api/hooks/use-sessions";
@@ -156,7 +156,12 @@ function SessionThreadTurn({ task, live }: { task: AgentTask; live: boolean }) {
   const boundedTask = useMemo(() => boundTurnTask(task), [task]);
 
   return (
-    <div className="flex flex-col gap-1.5 border-b border-border-subtle pb-3 last:border-b-0 last:pb-0">
+    // `shrink-0`: in the fixed-height turn list a shrinking row squeezes its
+    // clamped outcome, so `ShowMore` would measure an overflow that isn't there.
+    <div
+      data-slot="session-thread-turn"
+      className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pb-3 last:border-b-0 last:pb-0"
+    >
       <p className="text-sm text-foreground whitespace-pre-wrap break-words min-w-0">
         {turnRequestText(task)}
       </p>
@@ -229,6 +234,17 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const chainLoaded = rootTaskId === "" || detail !== undefined;
   const { dispatchRoute, steerRoute, chainedDispatchRoute, chainMissing } =
     resolveSessionThreadRoute({ rootTaskId, chainLoaded, leafTask });
+
+  // Like a chat: open at the newest turn, and follow it when a turn is added
+  // or the newest one changes status (its outcome lands).
+  const turnListRef = useRef<HTMLDivElement>(null);
+  const newestTurn = turns.at(-1);
+  const newestTurnKey = newestTurn ? `${newestTurn.id}:${newestTurn.status}` : "";
+  useLayoutEffect(() => {
+    if (!newestTurnKey) return;
+    const list = turnListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [newestTurnKey]);
 
   const settled = isDispatchSettled({ pendingTaskId, rootTaskId, chain });
   useEffect(() => {
@@ -407,31 +423,29 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
             ) : null}
           </div>
         ) : null}
-        {turns.length > 0 ? (
-          <div
-            className={cn(
-              "flex min-h-0 flex-col gap-3 overflow-y-auto px-1 py-1",
-              fill ? "flex-1" : "h-[420px]",
-            )}
-          >
-            {hiddenTurns > 0 ? (
-              <p
-                className="px-1 text-xs text-muted-foreground"
-                data-slot="session-thread-truncated"
-              >
-                Showing the latest {SESSION_THREAD_MAX_TURNS.toLocaleString()} turns (
-                {hiddenTurns.toLocaleString()} older hidden)
-              </p>
-            ) : null}
-            {turns.map((task) => (
-              <SessionThreadTurn key={task.id} task={task} live={task.id === leafTask?.id} />
-            ))}
-          </div>
-        ) : (
-          <p className="px-1 py-2 text-sm text-muted-foreground">
-            No session yet — send a message to get started.
-          </p>
-        )}
+        <div
+          ref={turnListRef}
+          data-slot="session-thread-turns"
+          className={cn(
+            "flex min-h-0 flex-col gap-3 overflow-y-auto px-1 py-1",
+            fill ? "flex-1" : "h-[420px]",
+          )}
+        >
+          {turns.length > 0 ? null : (
+            <p className="py-1 text-sm text-muted-foreground">
+              No session yet — send a message to get started.
+            </p>
+          )}
+          {hiddenTurns > 0 ? (
+            <p className="px-1 text-xs text-muted-foreground" data-slot="session-thread-truncated">
+              Showing the latest {SESSION_THREAD_MAX_TURNS.toLocaleString()} turns (
+              {hiddenTurns.toLocaleString()} older hidden)
+            </p>
+          ) : null}
+          {turns.map((task) => (
+            <SessionThreadTurn key={task.id} task={task} live={task.id === leafTask?.id} />
+          ))}
+        </div>
         <div className={cn("flex flex-col gap-1.5", fill && "shrink-0")}>
           <div className="flex items-end gap-2">
             <Textarea
