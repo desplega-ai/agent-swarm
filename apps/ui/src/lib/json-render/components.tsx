@@ -200,6 +200,7 @@ import type {
   TableRowActionConfirm,
   TabsTab,
 } from "./catalog";
+import { ChartComponent, Sparkline } from "./chart";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import {
@@ -2735,6 +2736,11 @@ function MetricComponent({ props }: { props: MetricComponentProps }) {
       detail={detail}
       info={props.info}
       tone={props.tone ?? "neutral"}
+      footer={
+        props.sparkline ? (
+          <Sparkline data={props.sparkline} dataKey={props.sparklineKey} tone={props.tone} />
+        ) : undefined
+      }
     />
   );
 }
@@ -4072,6 +4078,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   ),
   Button: ({ props, emit }) => <ActionButtonComponent props={props} emit={emit} />,
   Metric: ({ props }) => <MetricComponent props={props} />,
+  Chart: ({ props }) => <ChartComponent props={props} />,
   Alert: ({ props, emit }) => {
     const tone = alertTone[props.tone ?? "info"];
     return (

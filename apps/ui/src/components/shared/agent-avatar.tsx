@@ -5,9 +5,12 @@
  * hash-derived icon/color (lead = crown, workers = one of 30 icons seeded
  * by agent id) when unset. Color is seeded by agent id so the same agent
  * appears with the same accent across the app — name changes don't shift it.
+ * A link or agent-fs avatar fills the disc as an image, with the deterministic
+ * glyph underneath while it loads or when it cannot show.
  */
 
 import { useAgent } from "@/api/hooks/use-agents";
+import { MediaIconGlyph } from "@/components/shared/media-icon-glyph";
 import { resolveAgentColor, solidBg } from "@/lib/agent-color";
 import { resolveAgentIcon } from "@/lib/agent-icon";
 import { cn } from "@/lib/utils";
@@ -46,14 +49,26 @@ export function AgentAvatar({ agentId, agentName, size = "md", className }: Agen
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex items-center justify-center rounded-full text-white shadow-sm",
+        "inline-flex items-center justify-center overflow-hidden rounded-full text-white shadow-sm",
         dims.box,
         color.kind === "token" && solidBg(color.token),
         className,
       )}
       style={color.kind === "custom" ? { backgroundColor: color.hex } : undefined}
     >
-      <Icon className={dims.icon} strokeWidth={2.25} />
+      {agent?.avatar?.type === "url" || agent?.avatar?.type === "agent-fs" ? (
+        // The image covers the disc; while it loads or if it cannot show, the
+        // deterministic glyph on the colored disc holds the slot. The image gets
+        // an opaque backdrop so a transparent one does not show the disc color.
+        <MediaIconGlyph
+          icon={agent.avatar}
+          fallback={Icon}
+          className={dims.icon}
+          imageClassName="size-full rounded-full bg-background"
+        />
+      ) : (
+        <Icon className={dims.icon} strokeWidth={2.25} />
+      )}
     </span>
   );
 }

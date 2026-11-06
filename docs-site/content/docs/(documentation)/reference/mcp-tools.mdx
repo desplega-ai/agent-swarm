@@ -148,7 +148,7 @@ Slack metadata and `requestedByUserId` are auto-inherited from the creator's cur
 
 ### list-model-profiles
 
-List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on `send-task` (or `task-action` `create`) to run that task on it, or set it as an agent's default through `PATCH /api/agents/{id}/runtime`. A profile runs only on its own harness. Profile writes are operator-only.
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on `send-task` (or `task-action` `create`) to run that task on it, or set it as an agent's default through `PATCH /api/agents/{id}/runtime`. A profile runs only on its own harness. `fallbacks` are the same-harness profiles a task hops to, in order, when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; with no fallback left the task fails as before. Profile writes are operator-only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -597,7 +597,7 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `toolsMd` | string | No | TOOLS.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
 | `claudeMd` | string | No | CLAUDE.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
 | `setupScript` | string | No | Startup script content |
-| `avatar` | object or null | No | Custom Lucide avatar: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`. Pass `null` to restore the deterministic default icon and color. |
+| `avatar` | object or null | No | Custom avatar, one of: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`; `{ type: "url", url: "https://…" }` (https only, no credentials); `{ type: "agent-fs", path: "/agents/<id>/avatar.png", orgId?, driveId? }` (both IDs or neither for the swarm drive). An image that cannot load shows the default icon. Pass `null` to restore the deterministic default icon and color. |
 | `slackIcon` | object or null | No | Icon for the agent's Slack messages: `{ type: "emoji", emoji: ":owl:" }` or `{ type: "url", url: "https://..." }`, or `{ type: "app" }` for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass `null` to restore the default (`:crown:` for the lead). |
 
 ### context-history
@@ -877,7 +877,7 @@ Get an app by ID, including its models, queries, actions, reusable elements, pag
 
 ### app-upsert
 
-Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. An optional top-level `icon` (`{ type: "lucide", icon: "<kebab-case lucide name>", color?: "#RRGGBB" }`) sets the app's icon on the dashboard Apps page; omit it, or use an unrecognized name, for a generic default.
+Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. The optional top-level `icon` is `{ type: "lucide", icon, color? }`, `{ type: "url", url }` (https), or `{ type: "agent-fs", path }` (swarm drive; add `orgId` and `driveId` for another drive). The dashboard shows a glyph when an image cannot load.
 
 ### app-patch
 

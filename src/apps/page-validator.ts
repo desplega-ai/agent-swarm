@@ -146,6 +146,7 @@ const DATA_FIELD_PROPS: Record<string, readonly string[]> = {
   Kanban: ["columnField", "titleField", "idField"],
   Calendar: ["startField", "endField", "titleField", "idField"],
   ContributionGraph: ["dateField", "countField"],
+  Chart: ["x"],
 };
 const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
@@ -1357,6 +1358,72 @@ interface ElementTreeValidationTarget {
   elementProps?: Record<string, unknown>;
 }
 
+const CHART_MAX_SERIES = 8;
+
+/** Chart bounds the generic JSON-schema walker does not evaluate (minItems, pattern, minimum). */
+function chartPropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (Array.isArray(props.series)) {
+    if (props.series.length === 0 || props.series.length > CHART_MAX_SERIES) {
+      issues.push(issue(`${propsPath}.series`, `must list 1-${CHART_MAX_SERIES} series`));
+    }
+    const seen = new Set<string>();
+    for (const [index, entry] of props.series.entries()) {
+      if (!isPlainObject(entry) || typeof entry.key !== "string") continue;
+      if (seen.has(entry.key)) {
+        issues.push(issue(`${propsPath}.series.${index}.key`, `duplicate series "${entry.key}"`));
+      }
+      seen.add(entry.key);
+    }
+  }
+  if (typeof props.currency === "string" && !/^[A-Z]{3}$/.test(props.currency)) {
+    issues.push(issue(`${propsPath}.currency`, "must be an ISO 4217 code like USD"));
+  }
+  if (
+    typeof props.height === "number" &&
+    (!Number.isInteger(props.height) || props.height < 120 || props.height > 640)
+  ) {
+    issues.push(issue(`${propsPath}.height`, "must be an integer from 120 to 640"));
+  }
+  return issues;
+}
+
+/**
+ * Sidebar-layout page metadata: `icon` from the catalog icon set, and
+ * `headerActions` / `nav` only where the sidebar layout renders them.
+ */
+export function shellDefinitionIssues(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const iconNames = catalog.components.Icon?.props.properties?.name?.enum ?? [];
+  const sidebar = definition.layout === "sidebar";
+  for (const [pageName, page] of Object.entries(definition.pages)) {
+    const pagePath = appendPath("pages", pageName);
+    if (page.icon !== undefined && !iconNames.includes(page.icon)) {
+      issues.push(issue(appendPath(pagePath, "icon"), `unknown icon "${page.icon}"`));
+    }
+    if (!sidebar) {
+      for (const key of ["headerActions", "nav"] as const) {
+        if (page[key] !== undefined) {
+          issues.push(
+            issue(
+              appendPath(pagePath, key),
+              'only rendered with layout: "sidebar"; set it or drop this',
+            ),
+          );
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 export function validatePage(
   definition: AppDefinition,
   catalog: AppCatalog,
@@ -1498,6 +1565,7 @@ export function validatePage(
         );
       }
       collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
+      if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;
@@ -1623,6 +1691,13 @@ export function validatePage(
             for (const [index, field] of props.cardFields.entries()) {
               if (isPlainObject(field)) {
                 fieldNames.push([`${elementPath}.props.cardFields.${index}.key`, field.key]);
+              }
+            }
+          }
+          if (type === "Chart" && Array.isArray(props.series)) {
+            for (const [index, entry] of props.series.entries()) {
+              if (isPlainObject(entry)) {
+                fieldNames.push([`${elementPath}.props.series.${index}.key`, entry.key]);
               }
             }
           }
@@ -1849,6 +1924,19 @@ export function validatePage(
     }
   };
   if (typeof root === "string") markReachable(root);
+  // The sidebar layout renders `headerActions` as a second root in the sticky
+  // page header, so its subtree is reachable too, but never also from `root`.
+  const headerActions = pageName ? definition.pages[pageName]?.headerActions : undefined;
+  if (headerActions !== undefined) {
+    const headerPath = appendPath(pagePath, "headerActions");
+    if (!Object.hasOwn(elements, headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" not found`));
+    } else if (reachable.has(headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" is already rendered from root`));
+    } else {
+      markReachable(headerActions);
+    }
+  }
   for (const elementId of Object.keys(elements)) {
     if (!reachable.has(elementId)) {
       issues.push(issue(`${elementsPath}.${elementId}`, "element is not reachable from root"));

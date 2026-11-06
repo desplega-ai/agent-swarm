@@ -1,9 +1,18 @@
 import Editor from "@monaco-editor/react";
-import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
+import {
+  Children,
+  createContext,
+  isValidElement,
+  type ReactNode,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "../../lib/monaco-themes";
 import { CopyButton } from "./copy-button";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 import { SwarmLinkChip, useSwarmLinkPlugins } from "./markdown-link-chip";
@@ -84,16 +93,21 @@ export function MonacoCodeBlock({
   return (
     <div
       className={cn(
-        "relative w-full border-y border-border overflow-hidden",
-        fill ? "h-full" : "my-2",
+        "relative w-full overflow-hidden",
+        // A snippet sits on a muted card, as fenced code does in agent-fs;
+        // `[data-monaco-snippet]` in markdown.css clears the editor background
+        // so the card shows through.
+        fill ? "h-full border-y border-border" : "my-3 rounded-md border border-border bg-muted/60",
       )}
       data-monaco-block="markdown-view"
+      data-monaco-snippet={fill ? undefined : ""}
       style={fill ? undefined : { height }}
     >
       <CopyButton value={value} />
       <Editor
         language={resolvedLanguage}
-        theme={theme === "dark" ? "vs-dark" : "vs"}
+        theme={fill ? (theme === "dark" ? "vs-dark" : "vs") : MONACO_GITHUB_THEME[theme]}
+        beforeMount={defineGithubThemes}
         value={value}
         options={{
           readOnly: true,
@@ -111,6 +125,8 @@ export function MonacoCodeBlock({
           fontSize: 12,
           lineHeight: MONACO_LINE_HEIGHT,
           lineNumbers: "off",
+          renderLineHighlight: "none",
+          guides: { indentation: false },
           wordWrap: "on",
           folding: false,
           automaticLayout: true,
@@ -128,26 +144,43 @@ export function MonacoCodeBlock({
   );
 }
 
+function codeText(children: ReactNode): string {
+  return (Array.isArray(children) ? children.join("") : String(children ?? "")).replace(/\n$/, "");
+}
+
 // Streamdown component overrides: route fenced code blocks (anything with a
 // `language-*` className) through Monaco; unwrap the outer <pre> since Monaco
-// brings its own container; keep inline code as a small styled chip.
+// brings its own container; keep inline code as a small styled chip (the
+// shared `inline-code` look in `markdown.css`).
 const STREAMDOWN_COMPONENTS = {
-  code({ className, children, ...rest }: { className?: string; children?: ReactNode }) {
+  code({
+    className,
+    children,
+    node: _node,
+    ...rest
+  }: {
+    className?: string;
+    children?: ReactNode;
+    node?: unknown;
+  }) {
     const m = /language-([\w-]+)/.exec(className ?? "");
-    if (m) {
-      const value = (Array.isArray(children) ? children.join("") : String(children ?? "")).replace(
-        /\n$/,
-        "",
-      );
-      return <MonacoCodeBlock language={m[1]} value={value} />;
-    }
+    if (m) return <MonacoCodeBlock language={m[1]} value={codeText(children)} />;
     return (
-      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...rest}>
+      <code data-streamdown="inline-code" {...rest}>
         {children}
       </code>
     );
   },
   pre({ children }: { children?: ReactNode }) {
+    // A fence with no language reaches `code` with no `language-*` class,
+    // like inline code, so catch it here: it is still a block.
+    const only = Children.count(children) === 1 ? Children.toArray(children)[0] : null;
+    if (
+      isValidElement<{ className?: string; children?: ReactNode }>(only) &&
+      !/language-/.test(only.props.className ?? "")
+    ) {
+      return <MonacoCodeBlock language="plaintext" value={codeText(only.props.children)} />;
+    }
     return <>{children}</>;
   },
   a: MarkdownLink,
@@ -169,7 +202,7 @@ function MarkdownLink({ children, href }: { children?: ReactNode; href?: string 
     <InAppOrExternalLink
       to={combTo ?? (href && sameTab?.has(href) ? href : null)}
       href={href}
-      className="text-primary underline underline-offset-2 hover:opacity-80"
+      className="md-link"
     >
       {children}
     </InAppOrExternalLink>

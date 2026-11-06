@@ -544,2301 +544,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/used-by": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grant or revoke the 'used by' logo consent
-         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        granted: boolean;
-                        /** Format: email */
-                        contactEmail?: string;
-                        /** @enum {string} */
-                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "marketing" | "sales" | "research" | "ops" | "other";
-                        quote?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Consent recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            granted: boolean;
-                            changedAt: string;
-                        };
-                    };
-                };
-                /** @description Invalid contact details, or missing organization name or website */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can change the consent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The telemetry proxy did not accept the consent */
-                502: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Ranking state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            eligible: boolean;
-                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
-                            telemetryOn: boolean;
-                            enabled: boolean;
-                            name: string | null;
-                            domain: string | null;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            } | null;
-                            listingMatchesDomain: boolean;
-                            verifyUrl: string | null;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can read the ranking state */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Opt this install into the public ranking
-         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                        subcategory?: string | null;
-                        description?: string | null;
-                        sourceCodeUrl?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Opted in */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            domain: string;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            };
-                            verifyUrl: string;
-                        };
-                    };
-                };
-                /** @description A listing field is invalid */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt in */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Leave the public ranking
-         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Opted out */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            enabled: false;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt out */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/resolved": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get resolved config (merged global + agent + repo scopes) */
-        get: {
-            parameters: {
-                query?: {
-                    agentId?: string;
-                    repoId?: string;
-                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Resolved config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/env-presence": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
-        get: {
-            parameters: {
-                query: {
-                    keys: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Map of key -> boolean (true iff set in process.env) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            presence: {
-                                [key: string]: boolean;
-                            };
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Reload result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            configsLoaded: number;
-                            keysUpdated: string[];
-                            integrationsReinitialized: string[];
-                        };
-                    };
-                };
-                /** @description Reload failed */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a single config entry by ID */
-        get: {
-            parameters: {
-                query?: {
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config entry */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"] & {
-                            message?: string;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List config entries with optional filters */
-        get: {
-            parameters: {
-                query?: {
-                    scope?: string;
-                    scopeId?: string;
-                    /** @description Return only entries with this exact key. Omit to return every entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description List of config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        scope: "global" | "agent" | "repo";
-                        scopeId?: string | null;
-                        key: string;
-                        value?: unknown;
-                        isSecret?: boolean;
-                        envPath?: string | null;
-                        description?: string | null;
-                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
-                        exportToEnv?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Config entry upserted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"];
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    status?: string;
-                    agentId?: string;
-                    scheduleId?: string;
-                    workflowRunId?: string;
-                    /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
-                    key?: string;
-                    /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
-                    keyPrefix?: string;
-                    /** @description Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. */
-                    search?: string;
-                    includeHeartbeat?: "true" | "false";
-                    createdAfter?: string;
-                    createdBefore?: string;
-                    source?: string;
-                    requestedByUserId?: string;
-                    orderBy?: "lastUpdatedAt" | "createdAt";
-                    limit?: number | null;
-                    offset?: number | null;
-                    fields?: "full" | "slim" | "timeline";
-                    includeTotal?: "true" | "false";
-                    /** @description all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
-                    scope?: "all";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Paginated task list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            tasks: components["schemas"]["AgentTask"][] | {
-                                /** Format: uuid */
-                                id: string;
-                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
-                                key: string;
-                                agentId: string | null;
-                                creatorAgentId?: string;
-                                task: string;
-                                title?: string;
-                                /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
-                                /**
-                                 * @default mcp
-                                 * @enum {string}
-                                 */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
-                                taskType?: string;
-                                /** @default [] */
-                                tags: string[];
-                                /** @default 50 */
-                                priority: number;
-                                /** @default [] */
-                                dependsOn: string[];
-                                offeredTo?: string;
-                                /** Format: date-time */
-                                acceptedAt?: string;
-                                parentTaskId?: string;
-                                scheduleId?: string;
-                                model?: string;
-                                /** @enum {string} */
-                                modelTier?: "smol" | "regular" | "smart" | "ultra";
-                                resolvedModel?: string;
-                                modelSource?: string;
-                                modelAlias?: string;
-                                /** @enum {string} */
-                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-                                /** @enum {string} */
-                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-                                profile?: string;
-                                resolvedProfile?: string;
-                                /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
-                                requestedByUserId?: string;
-                                progress?: string;
-                                /** Format: date-time */
-                                createdAt: string;
-                                /** Format: date-time */
-                                lastUpdatedAt: string;
-                                /** Format: date-time */
-                                finishedAt?: string;
-                                peakContextPercent?: number;
-                                totalCostUsd?: number;
-                            }[] | {
-                                /** Format: uuid */
-                                id: string;
-                                agentId: string | null;
-                                parentTaskId?: string;
-                                task: string;
-                                title?: string;
-                                /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
-                                /** Format: date-time */
-                                createdAt: string;
-                                /** Format: date-time */
-                                lastUpdatedAt: string;
-                                /** Format: date-time */
-                                finishedAt?: string;
-                                peakContextTokens?: number;
-                                totalCostUsd?: number;
-                            }[];
-                            total?: number;
-                        };
-                    };
-                };
-                /** @description Validation error (e.g. unknown status token) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Create a new task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        task: string;
-                        agentId?: string;
-                        /** @enum {string} */
-                        routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
-                        routingNote?: string;
-                        taskType?: string;
-                        tags?: string[];
-                        priority?: number;
-                        dependsOn?: string[];
-                        offeredTo?: string;
-                        dir?: string;
-                        parentTaskId?: string;
-                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
-                        key?: string;
-                        /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
-                        outputSchema?: {
-                            [key: string]: unknown;
-                        };
-                        contextKey?: string;
-                        requestedByUserId?: string;
-                        /** @description Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. */
-                        model?: string;
-                        /** @enum {string} */
-                        modelTier?: "smol" | "regular" | "smart" | "ultra";
-                        allowCustomModel?: boolean;
-                        /** @enum {string} */
-                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-                        profile?: string;
-                        draft?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Task created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentTask"];
-                    };
-                };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task creation blocked by an extension */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            error: string;
-                            extension: {
-                                id: string;
-                                name: string;
-                            };
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/promote-draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Promote a draft task out of the pre-dispatch draft state
-         * @description Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task promoted (or already out of draft) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentTask"];
-                    };
-                };
-                /** @description Caller does not own this task */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/session": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Update provider session ID and harness metadata for a task */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        claudeSessionId: string;
-                        /** @enum {string} */
-                        provider: "devin";
-                        model?: string;
-                        providerMeta: {
-                            sessionUrl: string;
-                            maxAcuLimit?: number;
-                            acuCostUsd?: number;
-                        };
-                    } | {
-                        claudeSessionId: string;
-                        /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
-                        model?: string;
-                        /** @enum {string|null} */
-                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
-                        providerMeta?: {
-                            /** @enum {string} */
-                            transport?: "cli" | "sdk";
-                        };
-                        harnessVariant?: string;
-                        harnessVariantMeta?: {
-                            [key: string]: unknown;
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Session ID updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentTask"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel a pending or in-progress task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task cancelled */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            task: components["schemas"]["AgentTask"];
-                        };
-                    };
-                };
-                /** @description Cannot cancel terminal task */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent caller is neither a lead nor the task creator */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/steer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deliver a steering message to a running task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        message: string;
-                        /**
-                         * @default queue
-                         * @enum {string}
-                         */
-                        mode?: "steer" | "queue";
-                        /**
-                         * @default degrade
-                         * @enum {string}
-                         */
-                        onUnsupported?: "degrade" | "fail";
-                        /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
-                        requestedByUserId?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Steering accepted (see `outcome` for what actually happened) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SteerResult"];
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Caller cannot steer this task */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Requested mode unsupported by the target harness and onUnsupported=fail */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/steering-messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List steering messages for a task */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Steering messages */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            messages: components["schemas"]["SteeringMessage"][];
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/steering-messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List pending steering messages for the current worker */
-        get: {
-            parameters: {
-                query?: {
-                    taskId?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Pending steering messages */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            messages: components["schemas"]["SteeringMessage"][];
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID header */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/steering-messages/{id}/delivered": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Mark a steering message delivered */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        mode: "steer" | "queue";
-                        taskId?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Steering message delivery recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            message: components["schemas"]["SteeringMessage"];
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID header or validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Steering message task is assigned to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent or steering message not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Steering message moved to another task */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/steering-messages/{id}/handled": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mark a steering message handled
-         * @description Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Steering message acknowledgement recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            message: components["schemas"]["SteeringMessage"];
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID header or validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Steering message task is assigned to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent or steering message not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/steering-messages/{id}/undeliverable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Promote an undeliverable steering message */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        reason: string;
-                        taskId?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Steering message promoted to a follow-up task */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            message: components["schemas"]["SteeringMessage"];
-                            promotedTaskId?: string;
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID header or validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Steering message task is assigned to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent or steering message not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Steering message moved to another task */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task details with logs and attachments
-         * @description Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).
-         */
-        get: {
-            parameters: {
-                query?: {
-                    logsLimit?: number;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task with logs and attachments */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentTask"] & {
-                            isLeadTask: boolean;
-                            supportedSteerModes: ("steer" | "queue")[];
-                            logs: components["schemas"]["AgentLog"][];
-                            attachments: components["schemas"]["TaskAttachment"][];
-                            citations: {
-                                index: number;
-                                /** @enum {string} */
-                                kind: "task" | "memory" | "github" | "slack" | "agent-fs" | "page" | "script-run" | "url";
-                                ref: string;
-                                label?: string | null;
-                                quote?: string | null;
-                                general?: boolean;
-                                resolvedUrl: string | null;
-                                /** @enum {string} */
-                                verified: "true" | "false" | "unchecked";
-                            }[];
-                        };
-                    };
-                };
-                /** @description A user caller cannot read the task's session */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/lineage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get the tree a task belongs to (ancestors and descendants)
-         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when any task in the tree is missing from the response.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    maxNodes?: number;
-                    maxDepth?: number;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description The lineage tree as a flat list linked by `parentTaskId` */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            rootTaskId: string;
-                            tasks: {
-                                /** Format: uuid */
-                                id: string;
-                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
-                                key: string;
-                                agentId: string | null;
-                                creatorAgentId?: string;
-                                task: string;
-                                title?: string;
-                                /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
-                                /**
-                                 * @default mcp
-                                 * @enum {string}
-                                 */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
-                                taskType?: string;
-                                /** @default [] */
-                                tags: string[];
-                                /** @default 50 */
-                                priority: number;
-                                /** @default [] */
-                                dependsOn: string[];
-                                offeredTo?: string;
-                                /** Format: date-time */
-                                acceptedAt?: string;
-                                parentTaskId?: string;
-                                scheduleId?: string;
-                                model?: string;
-                                /** @enum {string} */
-                                modelTier?: "smol" | "regular" | "smart" | "ultra";
-                                resolvedModel?: string;
-                                modelSource?: string;
-                                modelAlias?: string;
-                                /** @enum {string} */
-                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-                                /** @enum {string} */
-                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-                                profile?: string;
-                                resolvedProfile?: string;
-                                /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
-                                requestedByUserId?: string;
-                                progress?: string;
-                                /** Format: date-time */
-                                createdAt: string;
-                                /** Format: date-time */
-                                lastUpdatedAt: string;
-                                /** Format: date-time */
-                                finishedAt?: string;
-                                peakContextPercent?: number;
-                                totalCostUsd?: number;
-                                workflowRunId?: string;
-                            }[];
-                            truncated: boolean;
-                        };
-                    };
-                };
-                /** @description A user caller cannot read the task's session */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Update task progress text */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        progress: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Progress updated; a no-op once the task is terminal */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                        };
-                    };
-                };
-                /** @description Task is assigned to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/finish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mark task as completed, failed, or skipped (runner endpoint)
-         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        status: "completed" | "failed" | "skipped";
-                        output?: string;
-                        failureReason?: string;
-                        force?: boolean;
-                        /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
-                    };
-                };
-            };
-            responses: {
-                /** @description Task finished */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            alreadyFinished: boolean;
-                            task: components["schemas"]["AgentTask"];
-                            message?: string;
-                            /** @enum {boolean} */
-                            wasNoOp?: true;
-                            /** @enum {boolean} */
-                            wasForcedOverwrite?: true;
-                        };
-                    };
-                };
-                /** @description Invalid status, or a skip without a reason */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Not assigned to this agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Differing terminal result text was discarded */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: false;
-                            message: string;
-                            task: components["schemas"]["AgentTask"];
-                            /** @enum {boolean} */
-                            alreadyFinished: true;
-                            error: string;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/paused-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get paused tasks for this agent */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Paused task list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            tasks: (components["schemas"]["AgentTask"] & {
-                                attachments: components["schemas"]["TaskAttachment"][];
-                                requestedBy?: {
-                                    id?: string;
-                                    name: string;
-                                    email?: string;
-                                    role?: string;
-                                    notes?: string;
-                                    comms?: components["schemas"]["UserCommsPrefs"];
-                                };
-                                credentialAllowlist?: {
-                                    [key: string]: string[];
-                                };
-                            })[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pause an in-progress task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task paused */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            task: components["schemas"]["AgentTask"];
-                        };
-                    };
-                };
-                /** @description Task not in_progress */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task belongs to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resume a paused task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task resumed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            task: components["schemas"]["AgentTask"];
-                        };
-                    };
-                };
-                /** @description Task not paused */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task belongs to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/supersede": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback";
-                        /** @enum {string} */
-                        errorClass?: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
-                    };
-                };
-            };
-            responses: {
-                /** @description Task superseded (or workflow-failed) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            /** @enum {string} */
-                            kind: "alreadyFinished" | "workflow-failed" | "resumed" | "noFallback";
-                            task: components["schemas"]["AgentTask"] | null;
-                            resumeTaskId: string | null;
-                            /** @enum {string} */
-                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
-                            failureReason?: string | null;
-                        };
-                    };
-                };
-                /** @description Task not in_progress */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task belongs to another agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/vcs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update VCS (PR/MR) info for a task */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
-                        vcsRepo: string;
-                        vcsNumber: number;
-                        /** Format: uri */
-                        vcsUrl: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description VCS info updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentTask"];
-                    };
-                };
-                /** @description Task belongs to another token agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/api/tasks/{id}/title": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Set or clear a task's display title (session rename)
-         * @description Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        title: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Title updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            task: components["schemas"]["AgentTask"];
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
     "/api/apps/{id}/user-config": {
         parameters: {
             query?: never;
@@ -3047,6 +752,17 @@ export interface paths {
                                     type: "lucide";
                                     icon: string;
                                     color?: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "url";
+                                    /** Format: uri */
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "agent-fs";
+                                    path: string;
+                                    orgId?: string;
+                                    driveId?: string;
                                 };
                                 createdAt: string;
                                 updatedAt: string;
@@ -5178,6 +2894,17 @@ export interface paths {
                             type: "lucide";
                             icon: string;
                             color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
                         } | null;
                         slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
@@ -5558,6 +3285,658 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/used-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant or revoke the 'used by' logo consent
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "marketing" | "sales" | "research" | "ops" | "other";
+                        quote?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Consent recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                            changedAt: string;
+                        };
+                    };
+                };
+                /** @description Invalid contact details, or missing organization name or website */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can change the consent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The telemetry proxy did not accept the consent */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public ranking state
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranking state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            eligible: boolean;
+                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
+                            telemetryOn: boolean;
+                            enabled: boolean;
+                            name: string | null;
+                            domain: string | null;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            } | null;
+                            listingMatchesDomain: boolean;
+                            verifyUrl: string | null;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can read the ranking state */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Opt this install into the public ranking
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                        subcategory?: string | null;
+                        description?: string | null;
+                        sourceCodeUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Opted in */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            domain: string;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            };
+                            verifyUrl: string;
+                        };
+                    };
+                };
+                /** @description A listing field is invalid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt in */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave the public ranking
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Opted out */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            enabled: false;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt out */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get resolved config (merged global + agent + repo scopes) */
+        get: {
+            parameters: {
+                query?: {
+                    agentId?: string;
+                    repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Resolved config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/env-presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
+        get: {
+            parameters: {
+                query: {
+                    keys: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Map of key -> boolean (true iff set in process.env) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            presence: {
+                                [key: string]: boolean;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Reload result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            configsLoaded: number;
+                            keysUpdated: string[];
+                            integrationsReinitialized: string[];
+                        };
+                    };
+                };
+                /** @description Reload failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a single config entry by ID */
+        get: {
+            parameters: {
+                query?: {
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config entry */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"] & {
+                            message?: string;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List config entries with optional filters */
+        get: {
+            parameters: {
+                query?: {
+                    scope?: string;
+                    scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List of config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        scope: "global" | "agent" | "repo";
+                        scopeId?: string | null;
+                        key: string;
+                        value?: unknown;
+                        isSecret?: boolean;
+                        envPath?: string | null;
+                        description?: string | null;
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        exportToEnv?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Config entry upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -9584,7 +7963,7 @@ export interface paths {
         put?: never;
         /**
          * Invite an external member into the agent-fs shared org
-         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.
+         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.
          */
         post: {
             parameters: {
@@ -9618,7 +7997,7 @@ export interface paths {
                             /** @description False only when the email already holds the requested role. */
                             invited: boolean;
                             /**
-                             * @description already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.
+                             * @description already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account).
                              * @enum {string}
                              */
                             status: "already_member" | "added" | "pending";
@@ -9628,6 +8007,8 @@ export interface paths {
                             expiresAt?: string;
                             /** @description Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured. */
                             acceptUrl?: string;
+                            /** @description Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept. */
+                            token?: string;
                         };
                     };
                 };
@@ -15516,6 +13897,1671 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tasks with filters
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: string;
+                    agentId?: string;
+                    scheduleId?: string;
+                    workflowRunId?: string;
+                    /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                    key?: string;
+                    /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                    keyPrefix?: string;
+                    /** @description Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. */
+                    search?: string;
+                    includeHeartbeat?: "true" | "false";
+                    createdAfter?: string;
+                    createdBefore?: string;
+                    source?: string;
+                    requestedByUserId?: string;
+                    orderBy?: "lastUpdatedAt" | "createdAt";
+                    limit?: number | null;
+                    offset?: number | null;
+                    fields?: "full" | "slim" | "timeline";
+                    includeTotal?: "true" | "false";
+                    /** @description all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
+                    scope?: "all";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated task list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            tasks: components["schemas"]["AgentTask"][] | {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                agentId: string | null;
+                                creatorAgentId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                                /**
+                                 * @default mcp
+                                 * @enum {string}
+                                 */
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                /** @default [] */
+                                dependsOn: string[];
+                                offeredTo?: string;
+                                /** Format: date-time */
+                                acceptedAt?: string;
+                                parentTaskId?: string;
+                                scheduleId?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
+                                /** @enum {string} */
+                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
+                                /** @enum {string} */
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                                requestedByUserId?: string;
+                                progress?: string;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextPercent?: number;
+                                totalCostUsd?: number;
+                            }[] | {
+                                /** Format: uuid */
+                                id: string;
+                                agentId: string | null;
+                                parentTaskId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextTokens?: number;
+                                totalCostUsd?: number;
+                            }[];
+                            total?: number;
+                        };
+                    };
+                };
+                /** @description Validation error (e.g. unknown status token) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create a new task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        task: string;
+                        agentId?: string;
+                        /** @enum {string} */
+                        routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
+                        routingNote?: string;
+                        taskType?: string;
+                        tags?: string[];
+                        priority?: number;
+                        dependsOn?: string[];
+                        offeredTo?: string;
+                        dir?: string;
+                        parentTaskId?: string;
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        key?: string;
+                        /** @enum {string} */
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        outputSchema?: {
+                            [key: string]: unknown;
+                        };
+                        contextKey?: string;
+                        requestedByUserId?: string;
+                        /** @description Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. */
+                        model?: string;
+                        /** @enum {string} */
+                        modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        allowCustomModel?: boolean;
+                        /** @enum {string} */
+                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                        profile?: string;
+                        draft?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Task created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task creation blocked by an extension */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            extension: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/promote-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a draft task out of the pre-dispatch draft state
+         * @description Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task promoted (or already out of draft) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Caller does not own this task */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update provider session ID and harness metadata for a task */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        claudeSessionId: string;
+                        /** @enum {string} */
+                        provider: "devin";
+                        model?: string;
+                        providerMeta: {
+                            sessionUrl: string;
+                            maxAcuLimit?: number;
+                            acuCostUsd?: number;
+                        };
+                    } | {
+                        claudeSessionId: string;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                        model?: string;
+                        /** @enum {string|null} */
+                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+                        providerMeta?: {
+                            /** @enum {string} */
+                            transport?: "cli" | "sdk";
+                        };
+                        harnessVariant?: string;
+                        harnessVariantMeta?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Session ID updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a pending or in-progress task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task cancelled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Cannot cancel terminal task */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent caller is neither a lead nor the task creator */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deliver a steering message to a running task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        message: string;
+                        /**
+                         * @default queue
+                         * @enum {string}
+                         */
+                        mode?: "steer" | "queue";
+                        /**
+                         * @default degrade
+                         * @enum {string}
+                         */
+                        onUnsupported?: "degrade" | "fail";
+                        /** @enum {string} */
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
+                        requestedByUserId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Steering accepted (see `outcome` for what actually happened) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SteerResult"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot steer this task */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Requested mode unsupported by the target harness and onUnsupported=fail */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/steering-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List steering messages for a task */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Steering messages */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            messages: components["schemas"]["SteeringMessage"][];
+                        };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/steering-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List pending steering messages for the current worker */
+        get: {
+            parameters: {
+                query?: {
+                    taskId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Pending steering messages */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            messages: components["schemas"]["SteeringMessage"][];
+                        };
+                    };
+                };
+                /** @description Missing X-Agent-ID header */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/steering-messages/{id}/delivered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a steering message delivered */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        mode: "steer" | "queue";
+                        taskId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Steering message delivery recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message: components["schemas"]["SteeringMessage"];
+                        };
+                    };
+                };
+                /** @description Missing X-Agent-ID header or validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent or steering message not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/steering-messages/{id}/handled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a steering message handled
+         * @description Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Steering message acknowledgement recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message: components["schemas"]["SteeringMessage"];
+                        };
+                    };
+                };
+                /** @description Missing X-Agent-ID header or validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent or steering message not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/steering-messages/{id}/undeliverable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote an undeliverable steering message */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                        taskId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Steering message promoted to a follow-up task */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message: components["schemas"]["SteeringMessage"];
+                            promotedTaskId?: string;
+                        };
+                    };
+                };
+                /** @description Missing X-Agent-ID header or validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent or steering message not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get task details with logs and attachments
+         * @description Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    logsLimit?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task with logs and attachments */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"] & {
+                            isLeadTask: boolean;
+                            supportedSteerModes: ("steer" | "queue")[];
+                            logs: components["schemas"]["AgentLog"][];
+                            attachments: components["schemas"]["TaskAttachment"][];
+                            citations: {
+                                index: number;
+                                /** @enum {string} */
+                                kind: "task" | "memory" | "github" | "slack" | "agent-fs" | "page" | "script-run" | "url";
+                                ref: string;
+                                label?: string | null;
+                                quote?: string | null;
+                                general?: boolean;
+                                resolvedUrl: string | null;
+                                /** @enum {string} */
+                                verified: "true" | "false" | "unchecked";
+                            }[];
+                        };
+                    };
+                };
+                /** @description A user caller cannot read the task's session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the tree a task belongs to (ancestors and descendants)
+         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when any task in the tree is missing from the response.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    maxNodes?: number;
+                    maxDepth?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The lineage tree as a flat list linked by `parentTaskId` */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rootTaskId: string;
+                            tasks: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                agentId: string | null;
+                                creatorAgentId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                                /**
+                                 * @default mcp
+                                 * @enum {string}
+                                 */
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                /** @default [] */
+                                dependsOn: string[];
+                                offeredTo?: string;
+                                /** Format: date-time */
+                                acceptedAt?: string;
+                                parentTaskId?: string;
+                                scheduleId?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
+                                /** @enum {string} */
+                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
+                                /** @enum {string} */
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                                requestedByUserId?: string;
+                                progress?: string;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextPercent?: number;
+                                totalCostUsd?: number;
+                                workflowRunId?: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+                /** @description A user caller cannot read the task's session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update task progress text */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        progress: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Progress updated; a no-op once the task is terminal */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                        };
+                    };
+                };
+                /** @description Task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark task as completed, failed, or skipped (runner endpoint)
+         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "completed" | "failed" | "skipped";
+                        output?: string;
+                        failureReason?: string;
+                        force?: boolean;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    };
+                };
+            };
+            responses: {
+                /** @description Task finished */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            alreadyFinished: boolean;
+                            task: components["schemas"]["AgentTask"];
+                            message?: string;
+                            /** @enum {boolean} */
+                            wasNoOp?: true;
+                            /** @enum {boolean} */
+                            wasForcedOverwrite?: true;
+                        };
+                    };
+                };
+                /** @description Invalid status, or a skip without a reason */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not assigned to this agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Differing terminal result text was discarded */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: false;
+                            message: string;
+                            task: components["schemas"]["AgentTask"];
+                            /** @enum {boolean} */
+                            alreadyFinished: true;
+                            error: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/paused-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get paused tasks for this agent */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paused task list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            tasks: (components["schemas"]["AgentTask"] & {
+                                attachments: components["schemas"]["TaskAttachment"][];
+                                requestedBy?: {
+                                    id?: string;
+                                    name: string;
+                                    email?: string;
+                                    role?: string;
+                                    notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
+                                credentialAllowlist?: {
+                                    [key: string]: string[];
+                                };
+                            })[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause an in-progress task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task paused */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task not in_progress */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task belongs to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task resumed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task not paused */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task belongs to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/supersede": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Supersede an in-progress task (terminate + spawn resume follow-up)
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback";
+                        /** @enum {string} */
+                        errorClass?: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
+                    };
+                };
+            };
+            responses: {
+                /** @description Task superseded (or workflow-failed) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            /** @enum {string} */
+                            kind: "alreadyFinished" | "workflow-failed" | "resumed" | "noFallback";
+                            task: components["schemas"]["AgentTask"] | null;
+                            resumeTaskId: string | null;
+                            /** @enum {string} */
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            failureReason?: string | null;
+                        };
+                    };
+                };
+                /** @description Task not in_progress */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task belongs to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/vcs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update VCS (PR/MR) info for a task */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
+                        vcsRepo: string;
+                        vcsNumber: number;
+                        /** Format: uri */
+                        vcsUrl: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description VCS info updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Task belongs to another token agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/tasks/{id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear a task's display title (session rename)
+         * @description Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        title: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Title updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/pages": {
         parameters: {
             query?: never;
@@ -16921,6 +16967,28 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
                             } | {
                                 /** @enum {string} */
                                 type: "task_assigned";
@@ -16945,6 +17013,28 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
@@ -20016,6 +20106,669 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings per workflow or script
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    scheduleId?: string;
+                    kind?: "workflow" | "script" | "schedule";
+                    components?: "true" | "false";
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            rows: ({
+                                /** @enum {string} */
+                                kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                scheduleId?: string;
+                                scheduleName?: string;
+                                scheduleEnabled?: boolean;
+                                /** @enum {string} */
+                                scope?: "target-job";
+                                enabledOnlyRule: boolean;
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
+                                measuredUsd: number;
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active. */
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            } | {
+                                /** @enum {string} */
+                                kind: "agent-task-schedule";
+                                scheduleId: string;
+                                scheduleName: string;
+                                scheduleEnabled: boolean;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "measured";
+                                /** @description Agent tasks the schedule created in the window. */
+                                runs: number;
+                                /** @description Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule. */
+                                actualUsd: number;
+                                actualHours: number;
+                                savingUsd: null;
+                            })[];
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            components?: {
+                                /** @enum {string} */
+                                kind: "workflow" | "script" | "task";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+                                depth: number;
+                                /** @description Runs (tasks for a task component) in this tree. Fractional below the first level. */
+                                runs: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`. */
+                                inOwnRow: boolean;
+                            }[];
+                            withComponents?: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow, script or schedule not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings of a workflow, a script or the fleet
+         * @description The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
+                                actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Both workflowId and scriptName, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow or script not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet automation savings
+         * @description What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Fleet savings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            byKind: {
+                                workflows: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                scheduledScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                agentInvokedScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                            } | null;
+                            /** @description Measured session spend of the whole swarm in the window, as on the usage page. */
+                            fleetLlmUsd: number;
+                            /** @description `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total. */
+                            selfOptimizationRatio: number | null;
+                            excluded: {
+                                /** @description Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs. */
+                                enabledOnlyRuns: number;
+                            } | null;
+                            assumptions: string[];
+                        };
+                    };
+                };
+                /** @description An unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The savings curve in use
+         * @description Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The active calibration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            source: "shipped" | "deployment";
+                            active: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                            };
+                            stored: {
+                                valid: boolean;
+                                updatedAt: string;
+                                calibratedAt?: string;
+                                model?: string;
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Derive the savings curve from this deployment's sessions
+         * @description Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default 30 */
+                        days?: number;
+                        /**
+                         * Format: date-time
+                         * @description End of the window (ISO 8601); default now.
+                         */
+                        end?: string;
+                        /** @default false */
+                        apply?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The derived curve, or why there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @description Opus sessions of 1 to 61 turns used. */
+                            sessions: number;
+                            /** @description Why no curve was derived, or why a derived one was not applied. */
+                            refusals: string[];
+                            /** @description The derived curve; null when refused. */
+                            calibration: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                            speed: {
+                                [key: string]: number;
+                            } | null;
+                            repriceMatch: number | null;
+                            /** @description Derived smart-tier mean cost over the shipped one. */
+                            meanRatio: number | null;
+                            gaps: {
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                /** @enum {string} */
+                                key: "usd" | "hrs";
+                                /** @description Median absolute deviation from the shipped curve, as a fraction. */
+                                median: number;
+                                max: number;
+                                /** @description Turn counts more than 5% from the shipped curve. */
+                                over5pct: number;
+                                points: number;
+                                /** @description Session-weighted mean of derived over shipped; 1 means the same price. */
+                                weighted: number;
+                            }[];
+                            applied: boolean;
+                        };
+                    };
+                };
+                /** @description Invalid days, end or apply */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description `apply` without permission to write config */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A session query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Another calibration run is in progress */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The run passed its 120 s deadline */
+                504: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -28540,6 +29293,18 @@ export interface components {
             slackThreadTs?: string;
             slackTriggerMessageTs?: string;
             slackUserId?: string;
+            slackParticipants?: {
+                people: {
+                    slackUserId: string;
+                    userId?: string;
+                    /** @enum {string} */
+                    trust: "internal" | "external" | "unknown";
+                    starter?: boolean;
+                    newest?: boolean;
+                    asked?: boolean;
+                }[];
+                more: number;
+            };
             /** @default false */
             slackReplySent: boolean;
             slackProgressMessageTs?: string;
@@ -28634,112 +29399,6 @@ export interface components {
             /** @default [] */
             capabilities: string[];
             leadOnly?: boolean;
-        };
-        SwarmConfig: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            scope: "global" | "agent" | "repo";
-            scopeId: string | null;
-            key: string;
-            value: string;
-            isSecret: boolean;
-            envPath: string | null;
-            description: string | null;
-            createdAt: string;
-            lastUpdatedAt: string;
-            encrypted: boolean;
-            exportToEnv: boolean;
-        };
-        SteerResult: {
-            /** @enum {string} */
-            outcome: "steered" | "queued" | "promoted";
-            /** Format: uuid */
-            steeringMessageId?: string;
-            /** Format: uuid */
-            promotedTaskId?: string;
-            /** @enum {string} */
-            effectiveMode: "steer" | "queue";
-            /** @enum {string} */
-            degradedFrom?: "steer" | "queue";
-        };
-        SteeringMessage: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            taskId: string;
-            body: string;
-            /** @enum {string} */
-            mode: "steer" | "queue";
-            /** @enum {string} */
-            status: "pending" | "delivered" | "handled" | "promoted" | "cancelled";
-            /** @enum {string} */
-            deliveredMode?: "steer" | "queue";
-            /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
-            senderLabel?: string;
-            /** @enum {string} */
-            createdByKind: "user" | "agent" | "system";
-            createdByUserId?: string;
-            createdByAgentId?: string;
-            /** Format: uuid */
-            promotedTaskId?: string;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            deliveredAt?: string;
-            /** Format: date-time */
-            handledAt?: string;
-            handledNote?: string;
-        };
-        AgentLog: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
-            agentId?: string;
-            taskId?: string;
-            oldValue?: string;
-            newValue?: string;
-            metadata?: string;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        TaskAttachment: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            taskId: string;
-            agentId: string | null;
-            name: string;
-            /** @enum {string} */
-            kind: "agent-fs" | "url" | "shared-fs" | "page";
-            url?: string;
-            path?: string;
-            pageId?: string;
-            providerId?: string;
-            providerKey?: string;
-            capabilities?: {
-                [key: string]: unknown;
-            };
-            orgId?: string;
-            driveId?: string;
-            mimeType?: string;
-            sizeBytes?: number;
-            sha256?: string;
-            intent?: string;
-            description?: string;
-            /** @default false */
-            isPrimary: boolean;
-            /** Format: date-time */
-            createdAt: string;
-            createdBy?: string;
-            updatedBy?: string;
-        };
-        UserCommsPrefs: {
-            tone?: string;
-            language?: string;
-            verbosity?: string;
         };
         AgentCredStatus: {
             ready: boolean;
@@ -28901,6 +29560,17 @@ export interface components {
                 type: "lucide";
                 icon: string;
                 color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
             };
             slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */
@@ -28922,6 +29592,22 @@ export interface components {
                     detail?: string;
                 }[];
             }[];
+        };
+        SwarmConfig: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            scope: "global" | "agent" | "repo";
+            scopeId: string | null;
+            key: string;
+            value: string;
+            isSecret: boolean;
+            envPath: string | null;
+            description: string | null;
+            createdAt: string;
+            lastUpdatedAt: string;
+            encrypted: boolean;
+            exportToEnv: boolean;
         };
         AssetSummary: {
             /** @enum {string} */
@@ -29158,6 +29844,37 @@ export interface components {
             createdBy?: string;
             updatedBy?: string;
         };
+        TaskAttachment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            taskId: string;
+            agentId: string | null;
+            name: string;
+            /** @enum {string} */
+            kind: "agent-fs" | "url" | "shared-fs" | "page";
+            url?: string;
+            path?: string;
+            pageId?: string;
+            providerId?: string;
+            providerKey?: string;
+            capabilities?: {
+                [key: string]: unknown;
+            };
+            orgId?: string;
+            driveId?: string;
+            mimeType?: string;
+            sizeBytes?: number;
+            sha256?: string;
+            intent?: string;
+            description?: string;
+            /** @default false */
+            isPrimary: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            createdBy?: string;
+            updatedBy?: string;
+        };
         InboxItemState: {
             id: string;
             userId: string;
@@ -29296,6 +30013,65 @@ export interface components {
             title: string;
             description?: string;
             definition: components["schemas"]["MetricDefinition"];
+        };
+        SteerResult: {
+            /** @enum {string} */
+            outcome: "steered" | "queued" | "promoted";
+            /** Format: uuid */
+            steeringMessageId?: string;
+            /** Format: uuid */
+            promotedTaskId?: string;
+            /** @enum {string} */
+            effectiveMode: "steer" | "queue";
+            /** @enum {string} */
+            degradedFrom?: "steer" | "queue";
+        };
+        SteeringMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            taskId: string;
+            body: string;
+            /** @enum {string} */
+            mode: "steer" | "queue";
+            /** @enum {string} */
+            status: "pending" | "delivered" | "handled" | "promoted" | "cancelled";
+            /** @enum {string} */
+            deliveredMode?: "steer" | "queue";
+            /** @enum {string} */
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
+            senderLabel?: string;
+            /** @enum {string} */
+            createdByKind: "user" | "agent" | "system";
+            createdByUserId?: string;
+            createdByAgentId?: string;
+            /** Format: uuid */
+            promotedTaskId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deliveredAt?: string;
+            /** Format: date-time */
+            handledAt?: string;
+            handledNote?: string;
+        };
+        AgentLog: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            agentId?: string;
+            taskId?: string;
+            oldValue?: string;
+            newValue?: string;
+            metadata?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        UserCommsPrefs: {
+            tone?: string;
+            language?: string;
+            verbosity?: string;
         };
         PageThemeTokens: {
             light: {

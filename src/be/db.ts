@@ -158,7 +158,7 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
-import { getCurrentRequestUserId } from "../utils/request-auth-context";
+import { getCurrentRequestUserId, getCurrentRunProvenance } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
   registerSensitiveKeyName,
@@ -368,6 +368,7 @@ export {
   getAllTasks,
   getChildTasks,
   getCompletedSlackTasks,
+  getFirstTaskInThread,
   getInProgressSlackTasks,
   getInProgressTasksByContextKey,
   getLatestActiveTaskByContextKey,
@@ -2585,6 +2586,9 @@ export async function createTaskExtended(
       if (parent.slackUserId && !options.slackUserId && !explicitForeignChannel) {
         options.slackUserId = parent.slackUserId;
       }
+      if (parent.slackParticipants && !options.slackParticipants && !explicitForeignChannel) {
+        options.slackParticipants = parent.slackParticipants;
+      }
 
       // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
@@ -2955,17 +2959,19 @@ export async function createTaskExtended(
       workflowRunId: options?.workflowRunId,
     });
 
+    const provenance = getCurrentRunProvenance();
     const inserted = await getDbClient().get<AgentTaskRow>(
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
+        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId, slackParticipants,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
+        sourceStepId, sourceScriptRunId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -2988,6 +2994,7 @@ export async function createTaskExtended(
         options?.slackThreadTs ?? null,
         options?.slackTriggerMessageTs ?? null,
         options?.slackUserId ?? null,
+        options?.slackParticipants ? JSON.stringify(options.slackParticipants) : null,
         options?.vcsProvider ?? null,
         options?.vcsRepo ?? null,
         options?.vcsEventType ?? null,
@@ -3025,6 +3032,10 @@ export async function createTaskExtended(
         auditUserId,
         auditUserId,
         isHumanFree ? 1 : 0,
+        // A task a workflow node owns keeps only its workflowRunId: the engine
+        // can run that node inside the request of the script that triggered it.
+        options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
+        options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
       ],
     );
     if (!inserted) throw new Error("Failed to create task");
@@ -8028,7 +8039,7 @@ export async function createWorkflowRun(data: {
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -8040,6 +8051,14 @@ export async function createWorkflowRun(data: {
       data.parentStepAttempt ?? 0,
       data.triggeredByAgentId ?? null,
       data.definitionHash ?? null,
+      // The script step whose run token started this run (trigger-workflow is
+      // a manual or api trigger). A sub-workflow child is linked by
+      // parentStepId instead, and an event or schedule run is never the
+      // script's, even when it starts inside that script's request.
+      data.parentStepId ||
+      (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
+        ? null
+        : (getCurrentRunProvenance()?.sourceStepId ?? null),
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -14362,11 +14381,13 @@ export async function recordInlineScriptRun(data: {
   // redact them here so every caller is covered.
   const args = scrubJsonValue(data.args ?? null);
   const output = data.output === undefined ? null : scrubJsonValue(data.output);
+  const provenance = getCurrentRunProvenance();
   const row = await getDbClient().get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
-         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId)
-       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
+         sourceStepId, parentScriptRunId)
+       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14383,6 +14404,10 @@ export async function recordInlineScriptRun(data: {
       data.createdBy ?? null,
       data.createdBy ?? null,
       data.apiEndpointId ?? null,
+      // A run called through another script run's token (a nested
+      // ctx.swarm.script_run) records that run and its workflow step.
+      provenance?.sourceStepId ?? null,
+      provenance?.sourceScriptRunId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to record inline script run");

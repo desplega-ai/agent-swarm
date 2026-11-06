@@ -61,6 +61,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 ## Guides
 
 - [Choosing an AI operating model](https://docs.agent-swarm.dev/docs/guides/choosing-an-ai-operating-model). Reference.
+- [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
@@ -70,6 +71,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.
 - [agent-fs Co-deployment](https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment). When: Someone wants shared persistent files for agents on a self-hosted swarm.
 - [Self-Hosted SSO](https://docs.agent-swarm.dev/docs/guides/self-hosted-sso). When: Someone wants their self-hosted swarm dashboard behind single sign-on.
+- [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/guides/ai-operations-governance). Reference.
 - [E2B Provider Smoke Tests](https://docs.agent-swarm.dev/docs/guides/e2b-provider-smoke-tests). Reference.
 - [Evals Harness](https://docs.agent-swarm.dev/docs/guides/evals-harness). Reference.
 - [Personalization & Status](https://docs.agent-swarm.dev/docs/guides/personalization). Reference.

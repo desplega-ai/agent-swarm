@@ -1511,6 +1511,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "COMPANY_EMAIL_DOMAINS",
+        label: "Company email domains",
+        description:
+          "Comma-separated email domains of your company. Slack thread participants with one of these emails count as internal and get a member user row; other people are external and untrusted. Unset falls back to SLACK_ALLOWED_EMAIL_DOMAINS; with both unset no users are auto-created.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#company-email-domains`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:

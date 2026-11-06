@@ -1,8 +1,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { parseAppDefinition } from "../apps/definition";
+import {
+  type AppDefinition,
+  applyAppDefinitionPatch,
+  parseAppDefinition,
+} from "../apps/definition";
 import { createApp, getApp, listApps, updateApp } from "../apps/store";
-import { closeDb, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getAgentById,
+  getDbClient,
+  initDb,
+  updateAgentProfile,
+} from "../be/db";
+import { AgentAvatarSchema, AgentSlackIconSchema, AppIconSchema } from "../types";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-icon-${process.pid}.sqlite`;
 
@@ -116,5 +128,147 @@ describe("app icon", () => {
     const id = await createWithIcon("Unknown icon", icon);
     const summary = (await listApps()).find((app) => app.id === id);
     expect(summary?.icon).toEqual(icon);
+  });
+});
+
+const URL_ICON = { type: "url", url: "https://example.com/icon.png" };
+const AGENT_FS_ICON = { type: "agent-fs", path: "/apps/abc/icon-1.png" };
+const AGENT_FS_ICON_WITH_DRIVE = {
+  type: "agent-fs",
+  path: "/apps/abc/icon-1.png",
+  orgId: "org-1",
+  driveId: "drive-1",
+};
+
+async function parseWithIcon(icon: unknown) {
+  return parseAppDefinition({ ...baseDefinition, icon }, { writerIsUser: true });
+}
+
+async function storedDefinition(icon: unknown): Promise<AppDefinition> {
+  const parsed = await parseWithIcon(icon);
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
+  return parsed.definition;
+}
+
+describe("app icon url variant", () => {
+  test("accepts an https link", async () => {
+    expect(AppIconSchema.safeParse(URL_ICON).success).toBe(true);
+    expect((await parseWithIcon(URL_ICON)).success).toBe(true);
+  });
+
+  test("rejects http, javascript:, credentials, and links over 2048 characters", async () => {
+    const bad = [
+      "http://example.com/icon.png",
+      "javascript:alert(1)",
+      "https://user:pass@example.com/icon.png",
+      `https://example.com/${"a".repeat(2048)}`,
+    ];
+    for (const url of bad) {
+      expect(AppIconSchema.safeParse({ type: "url", url }).success).toBe(false);
+      expect((await parseWithIcon({ type: "url", url })).success).toBe(false);
+    }
+  });
+
+  test("Slack icons share the same https link rules", () => {
+    expect(AgentSlackIconSchema.safeParse(URL_ICON).success).toBe(true);
+    expect(
+      AgentSlackIconSchema.safeParse({ type: "url", url: "http://example.com/i.png" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("app icon agent-fs variant", () => {
+  test("accepts a path alone or with both drive IDs", async () => {
+    for (const icon of [AGENT_FS_ICON, AGENT_FS_ICON_WITH_DRIVE]) {
+      expect(AppIconSchema.safeParse(icon).success).toBe(true);
+      expect((await parseWithIcon(icon)).success).toBe(true);
+    }
+  });
+
+  test("rejects a relative path, a .. segment, and a single drive ID", async () => {
+    const bad = [
+      { type: "agent-fs", path: "apps/abc/icon.png" },
+      { type: "agent-fs", path: "/apps/../secrets/icon.png" },
+      { type: "agent-fs", path: "/apps/abc/icon.png", orgId: "org-1" },
+      { type: "agent-fs", path: "/apps/abc/icon.png", driveId: "drive-1" },
+    ];
+    for (const icon of bad) {
+      expect(AppIconSchema.safeParse(icon).success).toBe(false);
+      expect((await parseWithIcon(icon)).success).toBe(false);
+    }
+  });
+});
+
+describe("app icon variants round trip", () => {
+  test("parseAppDefinition -> createApp -> listApps keeps each variant", async () => {
+    for (const icon of [URL_ICON, AGENT_FS_ICON, AGENT_FS_ICON_WITH_DRIVE]) {
+      const app = await createApp({
+        name: `Round trip ${icon.type}`,
+        definition: await storedDefinition(icon),
+      });
+      expect((await listApps()).find((summary) => summary.id === app.id)?.icon).toEqual(icon);
+      expect((await getApp(app.id))?.definition.icon).toEqual(icon);
+    }
+  });
+});
+
+describe("app icon merge patch", () => {
+  test("switching from lucide with color to url leaves no lucide keys", async () => {
+    const stored = await storedDefinition({ type: "lucide", icon: "star", color: "#f59e0b" });
+    const patched = applyAppDefinitionPatch(stored, { icon: URL_ICON });
+    expect(patched.success).toBe(true);
+    if (patched.success) {
+      expect((patched.definition as { icon: unknown }).icon).toEqual(URL_ICON);
+      const reparsed = await parseAppDefinition(patched.definition, { writerIsUser: true });
+      expect(reparsed.success).toBe(true);
+    }
+  });
+
+  test("switching from agent-fs to lucide leaves no agent-fs keys", async () => {
+    const stored = await storedDefinition(AGENT_FS_ICON_WITH_DRIVE);
+    const lucide = { type: "lucide", icon: "star" };
+    const patched = applyAppDefinitionPatch(stored, { icon: lucide });
+    expect(patched.success).toBe(true);
+    if (patched.success) {
+      expect((patched.definition as { icon: unknown }).icon).toEqual(lucide);
+    }
+  });
+
+  test("a null icon removes it", async () => {
+    const stored = await storedDefinition(URL_ICON);
+    const patched = applyAppDefinitionPatch(stored, { icon: null });
+    expect(patched.success).toBe(true);
+    if (patched.success) expect("icon" in (patched.definition as object)).toBe(false);
+  });
+});
+
+describe("agent avatars take the same icons", () => {
+  test("AgentAvatarSchema accepts lucide, url and agent-fs icons", () => {
+    expect(AgentAvatarSchema.safeParse({ type: "lucide", icon: "bot" }).success).toBe(true);
+    expect(AgentAvatarSchema.safeParse(URL_ICON).success).toBe(true);
+    expect(AgentAvatarSchema.safeParse(AGENT_FS_ICON).success).toBe(true);
+  });
+
+  test("AgentAvatarSchema rejects http links and a single drive ID", () => {
+    expect(
+      AgentAvatarSchema.safeParse({ type: "url", url: "http://example.com/x.png" }).success,
+    ).toBe(false);
+    expect(
+      AgentAvatarSchema.safeParse({ type: "agent-fs", path: "/agents/a/avatar.png", orgId: "o" })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a url avatar round trips through the profile update, then an agent-fs one replaces it", async () => {
+    const agent = await createAgent({ name: "Avatar Agent", isLead: false, status: "idle" });
+    await updateAgentProfile(agent.id, { avatar: URL_ICON });
+    expect((await getAgentById(agent.id))?.avatar).toEqual(URL_ICON);
+
+    const fsAvatar = { type: "agent-fs" as const, path: `/agents/${agent.id}/avatar-1.png` };
+    await updateAgentProfile(agent.id, { avatar: fsAvatar });
+    expect((await getAgentById(agent.id))?.avatar).toEqual(fsAvatar);
+
+    await updateAgentProfile(agent.id, { avatar: null });
+    expect((await getAgentById(agent.id))?.avatar).toBeNull();
   });
 });

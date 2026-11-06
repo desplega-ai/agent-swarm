@@ -186,6 +186,11 @@ export interface AssemblyIssue {
 export interface AssembledPage {
   /** `null` when the page does not exist in the definition. */
   spec: AssembledSpec | null;
+  /**
+   * The page's `headerActions` element, emitted into `spec.elements` as a
+   * second root for the sidebar layout's sticky header. `null` when unset.
+   */
+  headerRoot: string | null;
   instances: AssembledInstance[];
   /**
    * Foreign query slots actually referenced by the expanded page:
@@ -870,8 +875,9 @@ export function assemblePageSpec(
     issues: [],
   };
 
-  const result = (spec: AssembledSpec | null): AssembledPage => ({
+  const result = (spec: AssembledSpec | null, headerRoot: string | null = null): AssembledPage => ({
     spec,
+    headerRoot,
     instances: state.instances,
     boundQueries: Object.fromEntries(
       [...state.boundQueries].map(([appId, names]) => [appId, [...names]]),
@@ -898,7 +904,12 @@ export function assemblePageSpec(
   };
   const root = emitNode(page.root, { elements: page.elements, scope, visiting: new Set() }, state);
   if (!root) return result(null);
-  return result({ root, elements: state.out });
+  const headerActions = (page as { headerActions?: unknown }).headerActions;
+  const headerRoot =
+    typeof headerActions === "string" && Object.hasOwn(page.elements, headerActions)
+      ? emitNode(headerActions, { elements: page.elements, scope, visiting: new Set() }, state)
+      : null;
+  return result({ root, elements: state.out }, headerRoot);
 }
 
 /**

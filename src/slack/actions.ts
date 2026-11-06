@@ -112,6 +112,7 @@ export function registerActionHandlers(app: App): void {
     const requestedByUserId = await resolveSlackUserId(client, body.user.id, {
       sampleEventType: "view_submission",
       sampleContext: view.callback_id || "follow_up_submit",
+      userTeam: body.user.team_id,
     });
     noteSlackInboundSideEffect("task_created");
     const followUpTask = await createTaskWithSiblingAwareness(

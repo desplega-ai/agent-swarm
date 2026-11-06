@@ -21,6 +21,7 @@ import type {
   ApiKeyStatusResponse,
   AppActionResponse,
   AppDetail,
+  AppIcon,
   AppListItem,
   AppRow,
   ApprovalRequest,
@@ -120,6 +121,12 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
+  SavingsJobsResponse,
+  SavingsScheduleResponse,
+  SavingsSummaryResponse,
+  SavingsTarget,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -1219,7 +1226,7 @@ class ApiClient {
   async inviteAgentFsMember(data: {
     email: string;
     role: "viewer" | "editor" | "admin";
-  }): Promise<{ orgId: string; invited: boolean }> {
+  }): Promise<{ orgId: string; invited: boolean; status?: string; token?: string }> {
     const url = `${this.getBaseUrl()}/api/fs/members/invite`;
     const res = await fetch(url, {
       method: "POST",
@@ -4012,6 +4019,66 @@ class ApiClient {
     return (await res.json()) as { enabled: false };
   }
 
+  /**
+   * Modelled saving of one workflow or script (`target`), or of every workflow
+   * or script with runs in the window (`{ kind }`), from the hourly rollup.
+   */
+  async getSavingsJobs(
+    target: SavingsTarget | { kind: "workflow" | "script" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
+  ): Promise<SavingsJobsResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
+  }
+
+  /**
+   * The modelled saving of one workflow or script per UTC day, from the same
+   * rollup as `getSavingsJobs`; with no target, of the whole fleet.
+   */
+  async getSavingsDaily(
+    target: SavingsTarget | undefined,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target ?? {}, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load daily savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
+  }
+
+  /** The fleet's modelled saving, spend and assumptions, from the savings rollup. */
+  async getSavingsSummary(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsSummaryResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/summary?${savingsParams({}, opts)}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load the savings summary: ${res.status}`);
+    return (await res.json()) as SavingsSummaryResponse;
+  }
+
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
   async getFleetBenchmark(): Promise<FleetBenchmarkResponse> {
     const url = `${this.getBaseUrl()}/api/fleet-benchmark`;
@@ -4392,6 +4459,26 @@ class ApiClient {
   }
 
   /**
+   * RFC 7396 merge patch of an app (`app.manage`). `definition` merges into the
+   * stored definition; a `null` value removes that key. `definition.icon` is
+   * replaced whole, so switching icon types leaves no stale keys.
+   */
+  async patchApp(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      definition?: Record<string, unknown> & { icon?: AppIcon | null };
+    },
+  ): Promise<{ app: AppDetail }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+      "Failed to update app",
+    );
+  }
+
+  /**
    * Resolve a named query from the app definition. `params` feed the query's
    * `{ "$param": "<name>" }` filters and ride as repeatable `param.<name>=`
    * keys (same idiom as the row-list `filter.<col>=`).
@@ -4530,3 +4617,14 @@ export interface ExecutorTypeInfo {
 }
 
 export const api = new ApiClient();
+
+function savingsParams(
+  target: Record<string, string>,
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
+): URLSearchParams {
+  const params = new URLSearchParams(target);
+  if (opts.days) params.set("days", String(opts.days));
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
+  return params;
+}

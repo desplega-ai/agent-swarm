@@ -22,6 +22,13 @@ export type HttpRequestAuth = (
       runtimeId: string | null;
       tokenId: string;
       expiresAt: string;
+      /**
+       * Set on a script run's per-run token (`mintScriptRunToken`): the
+       * swarm-script workflow step that started the run, and the run's own
+       * `script_runs` row. Rows the request creates are stamped with them.
+       */
+      sourceStepId?: string | null;
+      sourceScriptRunId?: string | null;
     }
 ) & {
   /** Verified page context for agent-scoped operations. This does not identify the viewer. */
@@ -95,4 +102,21 @@ export function isOperatorAuth(
 
 export function getCurrentRequestUserId(): string | undefined {
   return authUserId(getCurrentRequestAuth());
+}
+
+/** Where the current request's script run came from, when it presents a script-run token. */
+export type RunProvenance = { sourceStepId: string | null; sourceScriptRunId: string | null };
+
+/**
+ * Provenance of the current request: set only when it authenticated with a
+ * script run's per-run token that recorded a step or a script run. Async work
+ * started inside the request inherits it (the workflow engine continuing a run
+ * it triggered), so callers stamp only rows a script can create directly.
+ */
+export function getCurrentRunProvenance(): RunProvenance | null {
+  const auth = getCurrentRequestAuth();
+  if (auth?.kind !== "agent") return null;
+  const sourceStepId = auth.sourceStepId ?? null;
+  const sourceScriptRunId = auth.sourceScriptRunId ?? null;
+  return sourceStepId || sourceScriptRunId ? { sourceStepId, sourceScriptRunId } : null;
 }

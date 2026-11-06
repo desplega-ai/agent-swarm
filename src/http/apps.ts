@@ -73,7 +73,7 @@ import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { agentFirstPrincipal, authUser, authUserId, requestPrincipal } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { denyParentAttach } from "./session-access";
-import { resolveTaskRequester } from "./tasks";
+import { resolveTaskRequester } from "./task-requester";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;

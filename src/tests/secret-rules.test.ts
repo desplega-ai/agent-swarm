@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { convertGoRegex, stripKeyPrefix } from "../../scripts/gen-secret-rules";
+import { anchorAlternation, convertGoRegex, stripKeyPrefix } from "../../scripts/gen-secret-rules";
 import { GITLEAKS_RULES } from "../utils/secret-rules.generated";
 import {
   clearVolatileSecretsForTesting,
   scrubSecrets,
   setGitleaksPassEnabledForTesting,
+  takePass2SweepCountForTesting,
 } from "../utils/secret-scrubber";
 import { buildNegatives, buildPositives } from "./fixtures/secret-corpus";
 import { randomToken } from "./synthetic-secret-helpers";
@@ -51,6 +52,54 @@ describe("convertGoRegex", () => {
     expect(stripKeyPrefix(`${prefix}(?:okta)`)).toBe("(?:okta)");
     expect(stripKeyPrefix(`${prefix}(?i:${prefix}(?:okta))`)).toBe("(?i:(?:okta))");
     expect(stripKeyPrefix("(?:okta)")).toBe("(?:okta)");
+  });
+});
+
+describe("anchorAlternation", () => {
+  test("anchors a ^a|b$ alternation as a whole", () => {
+    expect(anchorAlternation({ source: "^true|false|null$", flags: "i" })).toEqual({
+      source: "^(?:true|false|null)$",
+      flags: "i",
+    });
+  });
+
+  test("splits only on top-level pipes, not escaped, grouped or in a class", () => {
+    expect(anchorAlternation({ source: String.raw`^a|[|](b|c)|d\|e$`, flags: "" }).source).toBe(
+      String.raw`^(?:a|[|](b|c)|d\|e)$`,
+    );
+  });
+
+  test("leaves single, grouped and uniformly anchored alternations alone", () => {
+    for (const source of ["^abc$", "^(?:a|b)$", "^a$|^b$", "a|b"]) {
+      expect(anchorAlternation({ source, flags: "" }).source).toBe(source);
+    }
+  });
+
+  test("rejects any other mix of anchored and unanchored branches", () => {
+    expect(() => anchorAlternation({ source: "^a|b", flags: "" })).toThrow(/mixes anchored/);
+    expect(() => anchorAlternation({ source: "a|^b$", flags: "" })).toThrow(/mixes anchored/);
+    expect(() => anchorAlternation({ source: String.raw`^a|b\$`, flags: "" })).toThrow(
+      /mixes anchored/,
+    );
+  });
+
+  test("every generated allowlist regex is already anchored as a whole", () => {
+    const sources = [
+      ...GITLEAKS_RULES.globalAllowlist.regexes,
+      ...GITLEAKS_RULES.rules.flatMap((r) => (r.allowlists ?? []).flatMap((l) => l.regexes)),
+    ];
+    expect(sources.length).toBeGreaterThan(10);
+    for (const re of sources) expect(anchorAlternation(re)).toEqual(re);
+  });
+
+  test("the global allowlist still allows the bare values true, false and null", () => {
+    const res = GITLEAKS_RULES.globalAllowlist.regexes.map((r) => new RegExp(r.source, r.flags));
+    for (const value of ["true", "FALSE", "Null"]) {
+      expect(res.some((re) => re.test(value))).toBe(true);
+    }
+    for (const value of ["truex", "xfalse", "nullx", "afalseb"]) {
+      expect(res.some((re) => re.test(value))).toBe(false);
+    }
   });
 });
 
@@ -147,6 +196,80 @@ describe("secret corpus", () => {
         expect(out).toMatch(new RegExp(`^\\[REDACTED:[^\\]]+\\]${sep}\\[REDACTED:[^\\]]+\\]$`));
       }
     }
+  });
+
+  test("redacts a secret that contains true, false or null", () => {
+    // The global allowlist was `^true|false|null$`: it allowed any secret
+    // containing "false", starting with "true" or ending with "null".
+    const lowerAlnum = (len: number) =>
+      randomToken(len * 2)
+        .toLowerCase()
+        .slice(0, len);
+    const words = ["true", "FALsE", "nULL", "True", "false", "Null"];
+    const cases: { text: string; secret: string; rule: string }[] = [];
+    for (const word of words) {
+      // The vault secret starts with `hvs.`, so the word goes mid and end.
+      for (const at of [31, 96 - word.length]) {
+        const tail = randomToken(96);
+        const secret = ["hvs", ".", tail.slice(0, at), word, tail.slice(at + word.length)].join("");
+        cases.push({ text: `token ${secret} end`, secret, rule: "vault-service-token" });
+      }
+      for (const at of [0, 14, 32 - word.length]) {
+        const body = lowerAlnum(32);
+        const secret = [body.slice(0, at), word, body.slice(at + word.length)].join("");
+        cases.push({ text: `droneci: ${secret}`, secret, rule: "droneci-access-token" });
+      }
+    }
+    for (const { text, secret, rule } of cases) {
+      const out = scrubSecrets(text);
+      expect(out, `${rule} ${secret.slice(0, 8)}…`).not.toContain(secret);
+      expect(out).toContain(`[REDACTED:gitleaks:${rule}]`);
+    }
+  });
+
+  test("a vendor secret wins over a structural rule matching inside it", () => {
+    // A Heroku v2 key (`HRKU-AA` + 58 URL-safe chars) whose tail embeds
+    // `-sk-` + 20 alnum: pass 2's sk_key matched the tail first, and pass 5
+    // then missed the key, leaving its prefix in the output.
+    const heroku = () => ["HRKU", "-AA", randomToken(14), "-sk-", randomToken(40)].join("");
+    const bareSk = ["sk", randomToken(32)].join("-");
+    const a = heroku();
+    const b = heroku();
+    expect(a.length).toBe(65);
+    expect(scrubSecrets(`the response included ${a} in its body`)).toBe(
+      "the response included [REDACTED:gitleaks:heroku-api-key-v2] in its body",
+    );
+    // Two covered keys and an uncovered sk- key in one text keep their own labels.
+    expect(scrubSecrets(`${a} ${bareSk}\n${b}`)).toBe(
+      "[REDACTED:gitleaks:heroku-api-key-v2] [REDACTED:sk_key]\n[REDACTED:gitleaks:heroku-api-key-v2]",
+    );
+  });
+
+  test("pass 2 sweeps gitleaks once per call, however many rules hit", () => {
+    const heroku = () => ["HRKU", "-AA", randomToken(14), "-sk-", randomToken(40)].join("");
+    const a = heroku();
+    const b = heroku();
+    // Hits of several structural rules ahead of each key shift its offsets.
+    const text = [
+      ["lin", "api", randomToken(24)].join("_"),
+      a,
+      ["AKIA", "Q7RW3MZPXK5TB2NH"].join(""),
+      ["sk", randomToken(32)].join("-"),
+      b,
+      ["xai", randomToken(48)].join("-"),
+    ].join(" ");
+    takePass2SweepCountForTesting();
+    expect(scrubSecrets(text)).toBe(
+      [
+        "[REDACTED:linear_api]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:aws_access_key]",
+        "[REDACTED:sk_key]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:xai_key]",
+      ].join(" "),
+    );
+    expect(takePass2SweepCountForTesting()).toBe(1);
   });
 
   test("redacts a token whose last character is a dash or equals sign", () => {

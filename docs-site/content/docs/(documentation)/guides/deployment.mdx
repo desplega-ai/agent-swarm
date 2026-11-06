@@ -8,6 +8,8 @@ agent:
 
 For Kubernetes, see [Kubernetes and Helm](/docs/guides/kubernetes) for installation, API ingress, dashboard access, and CORS diagnostics.
 
+For the sizing, ownership and rollout decisions around a single production deployment, see [Small tech team operating model](/docs/guides/small-tech-team-operating-model).
+
 ## Docker Compose (Recommended)
 
 The easiest way to deploy a full swarm with API, workers, and lead agent. You can go from zero to a running swarm in under 5 minutes.
@@ -570,7 +572,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.318`
 - `PI_CODING_AGENT_VERSION=1.5.0`
-- `CODEX_VERSION=0.166.0`
+- `CODEX_VERSION=0.167.0`
 - `OPENCODE_VERSION=2.2.5` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.

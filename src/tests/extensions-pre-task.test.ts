@@ -585,7 +585,8 @@ export default extension;
     expect(event.origin).toBe("slack");
     expect(event.options).toMatchObject({
       slackTriggerMessageTs: "3000.0003",
-      slackUserId: "U_FIRST",
+      // The newest sender owns the batch task.
+      slackUserId: "U_SECOND",
       priority: 7,
     });
     expect(event.options).not.toHaveProperty("slack");
@@ -593,7 +594,8 @@ export default extension;
     expect(task).toMatchObject({
       priority: 7,
       slackTriggerMessageTs: "3000.0003",
-      slackUserId: "U_FIRST",
+      // The newest sender owns the batch task.
+      slackUserId: "U_SECOND",
     });
     expect(task).not.toHaveProperty("slack");
 

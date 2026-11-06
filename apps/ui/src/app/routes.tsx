@@ -25,6 +25,7 @@ import {
   MessagesSquare,
   Network,
   Palette,
+  PiggyBank,
   Plug,
   Plus,
   SlidersHorizontal,
@@ -60,6 +61,9 @@ const UsageContent = lazyRoute(() =>
   import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
 );
 const BudgetsPage = lazyRoute(() => import("@/pages/budgets/page"));
+const SavingsPage = lazyRoute(() =>
+  import("@/pages/usage/savings-page").then((m) => ({ default: m.SavingsPage })),
+);
 const ConnectionsPage = lazyRoute(() => import("@/pages/settings/connections-page"));
 const AppearancePage = lazyRoute(() => import("@/pages/settings/appearance-page"));
 const SecretsPage = lazyRoute(() => import("@/pages/settings/secrets-page"));
@@ -347,6 +351,17 @@ export const appRoutes: RouteObject[] = [
             ),
           },
           { path: "metrics/:id", element: <MetricsPage /> },
+          {
+            path: "savings",
+            element: <SavingsPage />,
+            handle: nav({
+              title: "Savings",
+              icon: PiggyBank,
+              parent: "Usage",
+              keywords: ["automation", "saved"],
+              adminOnly: true,
+            }),
+          },
         ],
       },
       {
