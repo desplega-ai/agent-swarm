@@ -1339,7 +1339,7 @@ export const swarmCatalogSpec = {
     File: {
       props: fileProps,
       description:
-        "One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm's default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser's viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and \"Open in agent-fs\". An empty `path` shows a \"No file selected\" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a \"Connect agent-fs\" card.",
+        'One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm\'s default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser\'s viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and "Open in agent-fs". An empty `path` shows a "No file selected" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a "Connect agent-fs" card.',
     },
     SchemaForm: {
       props: schemaFormProps,

@@ -258,7 +258,9 @@ function FilesList({
         <nav aria-label="Folder" className="flex flex-wrap items-center gap-1 border-b px-3 py-2">
           {folderCrumbs(root, folder).map((crumb, index, all) => (
             <span key={crumb.path} className="flex items-center gap-1 text-sm">
-              {index > 0 ? <ChevronRight aria-hidden className="size-3 text-muted-foreground" /> : null}
+              {index > 0 ? (
+                <ChevronRight aria-hidden className="size-3 text-muted-foreground" />
+              ) : null}
               {index === all.length - 1 ? (
                 <span aria-current="location" className="font-medium">
                   {crumb.label}
@@ -327,7 +329,9 @@ function FileBody({ file }: { file: DrivePath }) {
     );
   }
   if (isNotFound(stat.error)) {
-    return <EmptyState compact icon={FileQuestion} title="File not found" description={file.path} />;
+    return (
+      <EmptyState compact icon={FileQuestion} title="File not found" description={file.path} />
+    );
   }
   if (isAccessDenied(stat.error)) {
     return (
@@ -356,7 +360,10 @@ function FileContent({ file, stat }: { file: DrivePath; stat: StatResult }) {
     return (
       <TextGate file={file} stat={stat}>
         {(text) => (
-          <div className="prose-doc min-w-0 px-4 py-3 text-foreground" data-testid="app-file-markdown">
+          <div
+            className="prose-doc min-w-0 px-4 py-3 text-foreground"
+            data-testid="app-file-markdown"
+          >
             <MarkdownView text={text} normalizeSoftBreaks={false} html={false} />
           </div>
         )}

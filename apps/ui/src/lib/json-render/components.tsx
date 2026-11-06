@@ -201,6 +201,7 @@ import type {
   TabsTab,
 } from "./catalog";
 import { ChartComponent, Sparkline } from "./chart";
+import { type FilesProps, FilesView, FileView } from "./files";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import {
@@ -254,7 +255,6 @@ import {
 } from "./table-selection-ui";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { OverflowTip, Tip } from "./tip";
-import { FilesView, FileView, type FilesProps } from "./files";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
 
