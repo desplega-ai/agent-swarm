@@ -65,6 +65,46 @@ describe("script SDK allowlist", () => {
     );
   });
 
+  test("savings calibration is REST-only: reachable from scripts, not an MCP tool or bridge entry", async () => {
+    const requests: { method: string; path: string; body: unknown }[] = [];
+    const httpServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        requests.push({
+          method: req.method,
+          path: new URL(req.url).pathname,
+          body: req.method === "POST" ? await req.json() : undefined,
+        });
+        return Response.json({ ok: true });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+    const sdk = createSwarmSdk(config);
+    try {
+      await sdk.savings_calibrationGet();
+      await sdk.savings_calibrationRun({ days: 7, apply: true });
+      expect(requests).toEqual([
+        { method: "GET", path: "/api/savings/calibration", body: undefined },
+        { method: "POST", path: "/api/savings/calibration", body: { days: 7, apply: true } },
+      ]);
+    } finally {
+      httpServer.stop(true);
+    }
+    // Neither an MCP tool nor an allowlist entry, so the workflow capability list and the bridge skip them.
+    for (const name of ["savings_calibrationGet", "savings_calibrationRun"]) {
+      expect((SDK_ALLOWLIST as readonly string[]).includes(name)).toBe(false);
+      expect(isMcpToolAllowedForScripts(name)).toBe(false);
+      expect(name in registeredTools).toBe(false);
+    }
+  });
+
   test("workflow_listRuns sends bounded pagination defaults and rejects an excessive limit", async () => {
     let requestUrl: URL | undefined;
     const httpServer = Bun.serve({

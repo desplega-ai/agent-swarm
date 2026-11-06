@@ -11,9 +11,16 @@ import {
   getDbClient,
   getWorkflow,
   initDb,
+  upsertSwarmConfig,
 } from "../be/db";
 import { computeWorkflowWindow, type SavingsSql } from "../be/savings/compute";
-import { MODEL_VERSION, priceWorkflow } from "../be/savings/model";
+import {
+  CURVE,
+  MODEL_VERSION,
+  priceWorkflow,
+  SAVINGS_CALIBRATION_KEY,
+  SAVINGS_TIERS,
+} from "../be/savings/model";
 import { readWorkflowSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   getSavingsRollupStats,
@@ -26,7 +33,12 @@ import {
   workflowDaysToCompute,
 } from "../be/savings/rollup";
 import { getDbQueryConcurrencyCap } from "../http/db-query-shared";
-import { handleSavings, resetSavingsRefreshCache, savingsRequestSql } from "../http/savings";
+import {
+  clearCalibrationCache,
+  handleSavings,
+  resetSavingsRefreshCache,
+  savingsRequestSql,
+} from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -559,6 +571,65 @@ describe("savings rollup", () => {
       expect(await runs()).toBe(1);
       resetSavingsRefreshCache();
       expect(await runs()).toBe(2);
+    });
+
+    test("a stored deployment curve prices the rollup routes and is named as the source", async () => {
+      await runSavingsRollupTick(inProcessSql);
+      const wf = (await createWorkflow({ name: "rollup-calibrated", definition: DEFINITION })).id;
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+      type Read = {
+        calibrationSource: string;
+        calibratedAt: string;
+        rows: { agentOnlyUsd: { p50: number }; savingUsd: { p50: number } }[];
+      };
+      const detail = async () =>
+        (await get(`/api/savings/jobs?workflowId=${wf}&days=7&tier=smart`)).body as Read;
+      const store = async (value: string) => {
+        await upsertSwarmConfig({ scope: "global", key: SAVINGS_CALIBRATION_KEY, value });
+        clearCalibrationCache();
+      };
+      const doubled = JSON.stringify({
+        calibratedAt: "2026-12-01",
+        model: "claude-opus-5-5",
+        curve: Object.fromEntries(
+          SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+        ),
+      });
+      try {
+        clearCalibrationCache();
+        const shipped = await detail();
+        expect(shipped.calibrationSource).toBe("shipped");
+        await store(doubled);
+        const deployed = await detail();
+        expect(deployed).toMatchObject({
+          calibrationSource: "deployment",
+          calibratedAt: "2026-12-01",
+        });
+        expect(deployed.rows[0]?.agentOnlyUsd.p50).toBeGreaterThan(
+          (shipped.rows[0]?.agentOnlyUsd.p50 as number) * 1.2,
+        );
+        // The daily points use the same curve, so they still add up to the row.
+        const daily = (await get(`/api/savings/daily?workflowId=${wf}&days=7&tier=smart`)).body as {
+          calibrationSource: string;
+          points: { savingUsd: number }[];
+        };
+        expect(daily.calibrationSource).toBe("deployment");
+        const cents = daily.points.reduce((sum, p) => sum + Math.round(p.savingUsd * 100), 0);
+        expect(cents).toBe(Math.round((deployed.rows[0]?.savingUsd.p50 ?? Number.NaN) * 100));
+        const list = (await get("/api/savings/jobs?kind=workflow&days=7")).body as Read;
+        expect(list.calibrationSource).toBe("deployment");
+        // A malformed row falls back to the shipped curve.
+        await store("{not json");
+        expect(await detail()).toMatchObject({
+          calibrationSource: "shipped",
+          calibratedAt: "2026-11-05",
+        });
+      } finally {
+        await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [
+          SAVINGS_CALIBRATION_KEY,
+        ]);
+        clearCalibrationCache();
+      }
     });
 
     test("bad input is rejected", async () => {

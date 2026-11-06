@@ -4492,6 +4492,7 @@ export interface SavingsJobsResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   /** Newest rollup time of the window; null before the first rollup. */
   computedAt: string | null;
   valid: boolean;

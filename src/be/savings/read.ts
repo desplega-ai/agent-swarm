@@ -9,6 +9,7 @@ import type { DbParam } from "../db-client";
 import { computeWorkflowWindow, type SavingsSql } from "./compute";
 import {
   allocateSchedule,
+  type CurveSet,
   isEnabledOnlyRouter,
   MODEL_VERSION,
   type PricedWorkflow,
@@ -220,6 +221,8 @@ export async function readWorkflowSavings(opts: {
   workflowId?: string;
   /** Runs the live scan of the window's partial first day. */
   sql?: SavingsSql;
+  /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
+  curve?: CurveSet;
 }): Promise<WorkflowSavingsRead> {
   const client = getDbClient();
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
@@ -317,7 +320,7 @@ export async function readWorkflowSavings(opts: {
   const rows: WorkflowSavingsRow[] = [];
   const totalParts: PricedWorkflow[] = [];
   for (const job of selected) {
-    const pricing = { tier: opts.tier, days: opts.days };
+    const pricing = { tier: opts.tier, days: opts.days, curve: opts.curve };
     const allocation = allocations.get(job.workflowId);
     const priced = priceWorkflow(job.facts, { ...pricing, band: "job" }, allocation);
     rows.push({ ...priced, workflowId: job.workflowId, name: job.name });
@@ -329,7 +332,9 @@ export async function readWorkflowSavings(opts: {
 
   const only = selected.length === 1 ? selected[0] : undefined;
   const points =
-    only && rows[0] ? dailyPoints(only, rows[0], calendarDays, opts.days, opts.tier) : [];
+    only && rows[0]
+      ? dailyPoints(only, rows[0], calendarDays, opts.days, opts.tier, opts.curve)
+      : [];
   return {
     window,
     computedAt,
@@ -433,9 +438,13 @@ function dailyPoints(
   calendarDays: string[],
   windowDays: number,
   tier: SavingsTier,
+  curve?: CurveSet,
 ): SavingsDailyPoint[] {
   const split = new Map(
-    splitByDay(job.facts, job.days, { tier, days: windowDays }, priced).map((p) => [p.day, p]),
+    splitByDay(job.facts, job.days, { tier, days: windowDays, curve }, priced).map((p) => [
+      p.day,
+      p,
+    ]),
   );
   return calendarDays.map(
     (day) =>

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { createBunSqliteClient, type DbClient } from "../be/db-client";
+import { createBunSqliteClient, type DbClient, DbTransactionDeadlineError } from "../be/db-client";
 
 // Cross-process SQLITE_BUSY retry: a second connection on the same file plays
 // the external lock holder (litestream checkpoint, CLI access). The client's
@@ -441,5 +441,53 @@ describe("db-client SQLITE_BUSY retry", () => {
       "SELECT name FROM items WHERE name LIKE 'after-%' ORDER BY name",
     );
     expect(rows.map((r) => r.name)).toEqual(["after-hold", "after-second-hold"]);
+  });
+  describe("transaction deadlineAt", () => {
+    const names = async () =>
+      (await client.query<{ name: string }>("SELECT name FROM items ORDER BY id")).map(
+        (r) => r.name,
+      );
+
+    test("BEGIN stops retrying at the deadline instead of outwaiting the holder", async () => {
+      const released = holdWriteLock(600);
+      const startedAt = performance.now();
+      await expect(
+        client.transaction(
+          async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES ('late')");
+          },
+          { deadlineAt: Date.now() + 150 },
+        ),
+      ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
+      expect(performance.now() - startedAt).toBeLessThan(500);
+      await released;
+      expect(await names()).toEqual(["locker"]);
+    });
+
+    test("a callback that outlives the deadline is rolled back, not committed", async () => {
+      await expect(
+        client.transaction(
+          async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES ('slow')");
+            await new Promise((r) => setTimeout(r, 120));
+          },
+          { deadlineAt: Date.now() + 60 },
+        ),
+      ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
+      expect(await names()).toEqual([]);
+      // The connection is not left inside the transaction.
+      await client.run("INSERT INTO items (name) VALUES ('after')");
+      expect(await names()).toEqual(["after"]);
+    });
+
+    test("a transaction inside its deadline commits as before", async () => {
+      await client.transaction(
+        async (tx) => {
+          await tx.run("INSERT INTO items (name) VALUES ('ok')");
+        },
+        { deadlineAt: Date.now() + 5_000 },
+      );
+      expect(await names()).toEqual(["ok"]);
+    });
   });
 });
