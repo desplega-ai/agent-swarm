@@ -19,13 +19,14 @@ export default function AppearancePage() {
   const [autoReload, setAutoReload] = useLocalToggle("entity-auto-reload", false);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
+    <div className="flex flex-col flex-1 min-h-0 gap-4 sm:gap-6">
       <PageHeader
         title="Appearance"
         description="Stored in this browser only. Every operator picks their own."
       />
 
-      <Card>
+      {/* mockup(ui-audit): Card py-6 gap-6 cost ~30% of the first phone screen, tighter below sm */}
+      <Card className="max-sm:gap-3 max-sm:py-4">
         <CardHeader>
           <CardTitle>Mode</CardTitle>
         </CardHeader>
@@ -54,7 +55,7 @@ export default function AppearancePage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="max-sm:gap-3 max-sm:py-4">
         <CardHeader>
           <CardTitle>Entity updates</CardTitle>
         </CardHeader>
@@ -71,11 +72,13 @@ export default function AppearancePage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="max-sm:gap-3 max-sm:py-4">
         <CardHeader>
           <CardTitle>Theme</CardTitle>
         </CardHeader>
-        <CardContent>
+        {/* mockup(ui-audit): 17 presets one per row on a phone (~1,700px); 2 columns, description hidden below sm.
+            Page-local override of the shared picker's grid; the real fix is a `cols` prop on ThemePresetPicker. */}
+        <CardContent className="max-sm:[&>div]:grid-cols-2 max-sm:[&>div]:gap-2 max-sm:[&>div>button]:p-2 max-sm:[&>div>button>span:last-child]:hidden">
           <ThemePresetPicker />
         </CardContent>
       </Card>

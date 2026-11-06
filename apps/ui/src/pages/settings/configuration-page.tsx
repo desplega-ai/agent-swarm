@@ -1,5 +1,5 @@
-import { RefreshCw, Search, SlidersHorizontal } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronDown, ChevronUp, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence, useReloadConfig } from "@/api/hooks/use-integrations-meta";
@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
@@ -52,6 +53,9 @@ export default function ConfigurationPage() {
   const reloadConfig = useReloadConfig();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
+  // mockup(ui-audit): configuration is 70 phone screens, groups collapse (first open by default)
+  const [openIds, setOpenIds] = useState<Set<string> | null>(null);
+  const searching = search.trim().length > 0;
 
   const visibleGroups = useMemo<VisibleGroup[]>(() => {
     const q = search.trim().toLowerCase();
@@ -69,6 +73,18 @@ export default function ConfigurationPage() {
     }
     return result;
   }, [search, groups]);
+
+  // mockup(ui-audit): null = untouched, so only the first group starts open
+  const firstId = visibleGroups[0]?.group.id;
+  const isOpen = (id: string) => (openIds ? openIds.has(id) : id === firstId);
+  const allOpen = visibleGroups.every(({ group }) => isOpen(group.id));
+  const toggle = (id: string) =>
+    setOpenIds((prev) => {
+      const next = new Set(prev ?? (firstId ? [firstId] : []));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   if (isLoading) {
     return <PageSkeleton />;
@@ -105,7 +121,9 @@ export default function ConfigurationPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
+      {/* mockup(ui-audit): description wrapped to 5 lines beside Reload on mobile, header is desktop-only */}
       <PageHeader
+        className="hidden sm:flex"
         title="Configuration"
         description="Tune swarm-wide behaviour — steering, memory, heartbeat, harness, integrations, and branding — without hand-editing .env."
         action={
@@ -130,19 +148,46 @@ export default function ConfigurationPage() {
         </Alert>
       )}
 
-      <div className="relative max-w-sm w-full">
-        <Search
-          className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <Input
-          type="search"
-          placeholder="Search settings..."
-          value={search}
-          onChange={(e) => setParam("search", e.target.value)}
-          className="pl-8"
-          aria-label="Search configuration settings"
-        />
+      {/* mockup(ui-audit): on mobile, Reload sits beside the search as an icon button */}
+      <div className="flex items-center gap-2">
+        <div className="relative max-w-sm w-full">
+          <Search
+            className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            type="search"
+            placeholder="Search settings..."
+            value={search}
+            onChange={(e) => setParam("search", e.target.value)}
+            className="pl-8"
+            aria-label="Search configuration settings"
+          />
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className="sm:hidden shrink-0"
+          onClick={handleReload}
+          disabled={reloadConfig.isPending}
+          aria-label="Reload config"
+        >
+          <RefreshCw className={cn("h-4 w-4", reloadConfig.isPending && "animate-spin")} />
+        </Button>
+        {!searching && visibleGroups.length > 1 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto shrink-0 text-muted-foreground"
+            onClick={() =>
+              setOpenIds(allOpen ? new Set() : new Set(visibleGroups.map((g) => g.group.id)))
+            }
+          >
+            {allOpen ? "Collapse all" : "Expand all"}
+          </Button>
+        ) : null}
       </div>
 
       {visibleGroups.length === 0 ? (
@@ -152,15 +197,42 @@ export default function ConfigurationPage() {
           description="Try a different term, or clear the search to see every setting."
         />
       ) : (
-        <div className="flex flex-col gap-6">
-          {visibleGroups.map(({ group, entries }) => (
-            <ConfigurationGroupCard
-              key={group.id}
-              group={group}
-              entries={entries}
-              envPresence={envPresence ?? {}}
-            />
-          ))}
+        <div className="flex flex-col gap-3 sm:gap-4">
+          {visibleGroups.map(({ group, entries }) =>
+            searching || isOpen(group.id) ? (
+              // mockup(ui-audit): expanded group keeps the shared card, with a collapse button over its header
+              <div
+                key={group.id}
+                className="relative max-sm:[&_[data-slot=card-description]]:line-clamp-2"
+              >
+                <ConfigurationGroupCard
+                  group={group}
+                  entries={entries}
+                  envPresence={envPresence ?? {}}
+                />
+                {searching ? null : (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-3 right-2 sm:right-4 h-8 w-8 text-muted-foreground"
+                    onClick={() => toggle(group.id)}
+                    aria-expanded
+                    aria-label={`Collapse ${group.title}`}
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <CollapsedGroup
+                key={group.id}
+                group={group}
+                count={entries.length}
+                onOpen={() => toggle(group.id)}
+              />
+            ),
+          )}
         </div>
       )}
 
@@ -169,5 +241,40 @@ export default function ConfigurationPage() {
         variables, at boot and on reload. Settings marked Restart required need a server restart.
       </p>
     </div>
+  );
+}
+
+// mockup(ui-audit): configuration is 70 phone screens, a collapsed group is one compact row
+function CollapsedGroup({
+  group,
+  count,
+  onOpen,
+}: {
+  group: ConfigCatalogGroup;
+  count: number;
+  onOpen: () => void;
+}) {
+  const Icon = group.icon;
+  return (
+    <Card className="py-0 gap-0 transition-colors hover:border-primary/40">
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={false}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left sm:px-6 sm:py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-xl"
+      >
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="min-w-0 truncate font-semibold leading-tight">{group.title}</span>
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+              {count} setting{count === 1 ? "" : "s"}
+            </span>
+          </span>
+          <span className="truncate text-sm text-muted-foreground">{group.description}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+    </Card>
   );
 }

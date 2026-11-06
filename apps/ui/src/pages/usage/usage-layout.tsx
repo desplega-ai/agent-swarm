@@ -71,7 +71,8 @@ export function UsageLayout() {
     ) ?? USAGE_NAV[0];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
+    // mockup(ui-audit): usage double scroller - the shell fills the height only at lg+; below lg it flows inside `main`.
+    <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
       <SectionTabs
         label="Usage"
@@ -124,7 +125,7 @@ export function UsageLayout() {
       ) : null}
 
       {/* Content area — embedded pages own their own scroll container. */}
-      <div className={cn("flex flex-col flex-1 min-h-0 relative", collapsed && "lg:pl-10")}>
+      <div className={cn("relative flex flex-col lg:flex-1 lg:min-h-0", collapsed && "lg:pl-10")}>
         {collapsed ? (
           <div className="hidden lg:flex absolute top-0 left-0 z-10">
             <Tooltip>

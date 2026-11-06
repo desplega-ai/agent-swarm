@@ -5,11 +5,13 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { IntegrationCard } from "@/components/integrations/integration-card";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MobileList } from "@/components/shared/mobile-list";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import {
   getIntegrationFields,
@@ -19,6 +21,7 @@ import {
 } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
+import { IntegrationMobileRow } from "./integration-mobile-row";
 
 const QUICK_PICK_IDS = ["slack", "github", "anthropic"] as const;
 
@@ -44,6 +47,7 @@ export default function IntegrationsPage() {
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
   const category = coerceCategory(readStringParam(searchParams, "category", "all"));
+  const isMobile = useIsMobile();
 
   // Gather every catalog key (+ disableKey) so a single env-presence request
   // covers status derivation for the whole grid.
@@ -103,9 +107,11 @@ export default function IntegrationsPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
+    <div className="flex flex-col flex-1 min-h-0 gap-4 sm:gap-6">
+      {/* mockup(ui-audit): 42% chrome before the first integration on mobile, description folds into the legend */}
       <div className="space-y-2">
         <PageHeader
+          className="hidden sm:block"
           title="Integrations"
           description={
             <>
@@ -116,8 +122,13 @@ export default function IntegrationsPage() {
         />
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none hover:text-foreground">
-            Legend — what do the chips mean?
+            <span className="sm:hidden">About integrations and the status chips</span>
+            <span className="hidden sm:inline">Legend — what do the chips mean?</span>
           </summary>
+          <p className="mt-2 sm:hidden">
+            Configure third-party integrations without hand-editing{" "}
+            <code className="font-mono text-[11px]">.env</code>.
+          </p>
           <ul className="mt-2 space-y-1 pl-1">
             <li>
               <span className="inline-flex items-center gap-1">
@@ -232,7 +243,8 @@ export default function IntegrationsPage() {
           />
         </div>
 
-        <fieldset className="flex flex-wrap items-center gap-1.5 border-0 p-0 m-0">
+        {/* mockup(ui-audit): category chips wrap to 2 rows on mobile, one sideways-scrolling row instead */}
+        <fieldset className="flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0 m-0 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden max-sm:[&>button]:shrink-0">
           <legend className="sr-only">Category filters</legend>
           <CategoryChip
             label="All"
@@ -257,6 +269,21 @@ export default function IntegrationsPage() {
           title="No integrations match your filters"
           description="Try clearing the search or selecting a different category."
         />
+      ) : isMobile ? (
+        // mockup(ui-audit): compact rows on a phone; the page scrolls, not the list
+        <MobileList
+          label="Integrations"
+          emptyMessage="No integrations match your filters"
+          className="flex-none overflow-visible"
+        >
+          {visible.map((def) => (
+            <IntegrationMobileRow
+              key={def.id}
+              def={def}
+              status={deriveIntegrationStatus(def, configs ?? [], presence, live)}
+            />
+          ))}
+        </MobileList>
       ) : (
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {visible.map((def) => {

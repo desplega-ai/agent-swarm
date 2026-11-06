@@ -278,46 +278,64 @@ export default function RepoDetailPage() {
       <PageHeader
         className="shrink-0"
         title={
-          /* Repo name lives in the breadcrumb — badges only here. */
-          <div className="flex items-center gap-3 min-w-0">
-            {provider && (
-              <Badge variant="outline" size="tag">
-                {provider}
+          // mockup(ui-audit): repo-detail P1 — name as a wrapping h1, badges on their own wrapping row
+          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+            <h1 className="break-all text-base font-semibold leading-snug max-sm:line-clamp-2">
+              {repo.name}
+            </h1>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {provider && (
+                <Badge variant="outline" size="tag">
+                  {provider}
+                </Badge>
+              )}
+              <Badge
+                variant="outline"
+                size="tag"
+                className={
+                  repo.autoClone
+                    ? "bg-status-success/15 text-status-success-strong border-status-success/30"
+                    : ""
+                }
+              >
+                {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
               </Badge>
-            )}
-            <Badge
-              variant="outline"
-              size="tag"
-              className={
-                repo.autoClone
-                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
-                  : ""
-              }
-            >
-              {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
-            </Badge>
-            <Badge
-              variant="outline"
-              size="tag"
-              className={
-                repo.hooks.enabled
-                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
-                  : ""
-              }
-            >
-              {repo.hooks.enabled ? "Hooks ON" : "Hooks OFF"}
-            </Badge>
+              <Badge
+                variant="outline"
+                size="tag"
+                className={
+                  repo.hooks.enabled
+                    ? "bg-status-success/15 text-status-success-strong border-status-success/30"
+                    : ""
+                }
+              >
+                {repo.hooks.enabled ? "Hooks ON" : "Hooks OFF"}
+              </Badge>
+            </div>
           </div>
         }
         action={
           <>
-            <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
+            {/* mockup(ui-audit): repo-detail P1 — icon-only actions below sm so they never cover the badges */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              aria-label="Edit repository"
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Edit</span>
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button size="sm" variant="destructive-outline" className="gap-1">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                <Button
+                  size="sm"
+                  variant="destructive-outline"
+                  className="gap-1"
+                  aria-label="Delete repository"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />{" "}
+                  <span className="hidden sm:inline">Delete</span>
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -356,26 +374,39 @@ export default function RepoDetailPage() {
         rail={
           <DetailPageRail>
             <QuickStats>
+              {/* mockup(ui-audit): repo-detail-long P1 — label column hugs, the long value takes the rest and ellipsizes */}
               <QuickStat
                 label="URL"
+                className="grid-cols-[auto_minmax(0,1fr)]"
                 value={
                   <a
                     href={repo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                    title={repo.url}
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 align-bottom text-primary hover:underline"
                   >
                     <span className="truncate">{repo.url}</span>
                     <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
                   </a>
                 }
               />
-              <QuickStat label="Clone Path" value={repo.clonePath} mono />
+              <QuickStat
+                label="Clone Path"
+                className="grid-cols-[auto_minmax(0,1fr)]"
+                value={<span title={repo.clonePath}>{repo.clonePath}</span>}
+                mono
+              />
               <QuickStat
                 label="Default Branch"
+                className="grid-cols-[auto_minmax(0,1fr)]"
                 value={
-                  <span className="inline-flex items-center gap-1">
-                    <GitBranch className="h-3 w-3" /> {repo.defaultBranch}
+                  <span
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 align-bottom"
+                    title={repo.defaultBranch}
+                  >
+                    <GitBranch className="h-3 w-3 shrink-0" />{" "}
+                    <span className="truncate">{repo.defaultBranch}</span>
                   </span>
                 }
               />

@@ -17,6 +17,7 @@ import {
   MessageCircle,
   MessageSquare,
   Mic,
+  MoreHorizontal,
   Plug,
   Route,
   Sparkles,
@@ -47,7 +48,6 @@ import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { ProviderIcon } from "@/components/shared/provider-icon";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +67,12 @@ import {
   Relationship,
   Relationships,
 } from "@/components/ui/detail-page-layout";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   buildInitialState,
@@ -360,8 +366,14 @@ function IntegrationDetailInner({
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       {/* Header */}
+      {/* mockup(ui-audit): header stack pushed the first field to 47-69% on mobile; back link is desktop-only (the tab strip links to Integrations) */}
       <div className="flex flex-col gap-2">
-        <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
+        <Button
+          asChild
+          size="sm"
+          variant="ghost"
+          className="self-start text-muted-foreground max-lg:hidden"
+        >
           <Link to="/settings/integrations">← All integrations</Link>
         </Button>
         <PageHeader
@@ -371,7 +383,10 @@ function IntegrationDetailInner({
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
                 {logo}
               </div>
-              <p className="min-w-0 text-sm text-muted-foreground">{def.description}</p>
+              {/* mockup(ui-audit): description clamped to 2 lines below lg */}
+              <p className="min-w-0 text-sm text-muted-foreground max-lg:line-clamp-2">
+                {def.description}
+              </p>
             </div>
           }
           action={<IntegrationStatusBadge status={status} />}
@@ -380,14 +395,15 @@ function IntegrationDetailInner({
 
       <DetailPageBody
         main={
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             {/* Action bar, hidden when a special flow replaces the generic form. */}
+            {/* mockup(ui-audit): below lg the bar moves under the form and sticks to the bottom; Disable/Reset go into a … menu */}
             {!isReplaced && (
-              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20 max-lg:order-last max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:flex-nowrap max-lg:bg-background/95 max-lg:backdrop-blur max-lg:shadow-sm max-lg:p-2">
                 <Button
                   onClick={handleSave}
                   disabled={!hasDirty || upsertBatch.isPending}
-                  className="bg-primary hover:bg-primary/90"
+                  className="bg-primary hover:bg-primary/90 max-lg:flex-1"
                   size="sm"
                 >
                   {upsertBatch.isPending
@@ -404,12 +420,13 @@ function IntegrationDetailInner({
                     size="sm"
                     onClick={handleToggleDisable}
                     disabled={upsertBatch.isPending}
+                    className="max-lg:hidden"
                   >
                     {isDisabled ? "Enable" : "Disable"} {def.name}
                   </Button>
                 )}
 
-                <div className="flex-1" />
+                <div className="flex-1 max-lg:hidden" />
 
                 <Button
                   type="button"
@@ -417,9 +434,41 @@ function IntegrationDetailInner({
                   size="sm"
                   onClick={() => setConfirmResetOpen(true)}
                   disabled={deleteBatch.isPending}
+                  className="max-lg:hidden"
                 >
                   Reset integration
                 </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 lg:hidden"
+                      aria-label={`More ${def.name} actions`}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="top">
+                    {def.disableKey && (
+                      <DropdownMenuItem
+                        onSelect={handleToggleDisable}
+                        disabled={upsertBatch.isPending}
+                      >
+                        {isDisabled ? "Enable" : "Disable"} {def.name}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => setConfirmResetOpen(true)}
+                      disabled={deleteBatch.isPending}
+                    >
+                      Reset integration
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
 
@@ -451,25 +500,15 @@ function IntegrationDetailInner({
               />
             ) : (
               <div className="space-y-6">
+                {/* mockup(ui-audit): 140px PAT callout shrunk to one line */}
                 {isGithub && (
-                  <Alert>
-                    <Info className="h-4 w-4" />
-                    <AlertDescription>
-                      <p className="leading-relaxed">
-                        <strong>PAT mode is the default and simpler path.</strong> For GitHub App
-                        integration (recommended for production), expand <em>Advanced</em> below and
-                        fill{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_ID
-                        </code>{" "}
-                        +{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_PRIVATE_KEY
-                        </code>
-                        .
-                      </p>
-                    </AlertDescription>
-                  </Alert>
+                  <p className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      PAT mode is the default. For GitHub App mode (recommended in production), open{" "}
+                      <em>Advanced</em>.
+                    </span>
+                  </p>
                 )}
 
                 {requiredFields.length > 0 && (
@@ -513,13 +552,16 @@ function IntegrationDetailInner({
         }
         rail={
           <DetailPageRail>
-            <QuickStats>
-              <QuickStat label="Status" value={status} />
-              <QuickStat label="Total fields" value={allFields.length} />
-              <QuickStat label="Required" value={strictRequiredFields.length} />
-              <QuickStat label="Advanced" value={advancedFields.length} />
-              {def.disableKey && <QuickStat label="Disabled" value={isDisabled ? "Yes" : "No"} />}
-            </QuickStats>
+            {/* mockup(ui-audit): Quick stats repeat the header badge, hidden below lg */}
+            <div className="max-lg:hidden">
+              <QuickStats>
+                <QuickStat label="Status" value={status} />
+                <QuickStat label="Total fields" value={allFields.length} />
+                <QuickStat label="Required" value={strictRequiredFields.length} />
+                <QuickStat label="Advanced" value={advancedFields.length} />
+                {def.disableKey && <QuickStat label="Disabled" value={isDisabled ? "Yes" : "No"} />}
+              </QuickStats>
+            </div>
 
             <Relationships>
               <Relationship label="Docs" href={def.docsUrl}>

@@ -6,6 +6,7 @@ import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hoo
 import type { SwarmRepo } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Switch } from "@/components/ui/switch";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 
 interface RepoFormData {
@@ -42,6 +44,22 @@ interface RepoFormData {
 }
 
 const clonePathForName = (name: string) => (name ? `/workspace/personal/repos/${name}` : "");
+
+// mockup(ui-audit): settings-repos P1 — "owner/repo" for the phone row's meta line
+function repoSlug(url: string): string {
+  const match = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/);
+  return match?.[1] ?? url;
+}
+
+// mockup(ui-audit): settings-repos P1 — the phone list filters the same fields the grid's quick filter sees
+function matchesRepoSearch(repo: SwarmRepo, search: string): boolean {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = [repo.name, repo.url, repo.clonePath, repo.defaultBranch]
+    .join(" ")
+    .toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
 
 const emptyForm: RepoFormData = {
   url: "",
@@ -185,6 +203,7 @@ export default function ReposPage() {
   const [editingRepo, setEditingRepo] = useState<SwarmRepo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmRepo | null>(null);
   const search = readStringParam(searchParams, "search");
+  const isMobile = useIsMobile();
 
   function handleAdd() {
     setEditingRepo(null);
@@ -382,14 +401,17 @@ export default function ReposPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Repos"
-        action={
-          <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
-            <Plus className="h-3.5 w-3.5" /> Add Repo
-          </Button>
-        }
-      />
+      {/* mockup(ui-audit): settings-repos P2 — on a phone "Add Repo" moves into the search row as an icon */}
+      {isMobile ? null : (
+        <PageHeader
+          title="Repos"
+          action={
+            <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
+              <Plus className="h-3.5 w-3.5" /> Add Repo
+            </Button>
+          }
+        />
+      )}
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -401,17 +423,55 @@ export default function ReposPage() {
             className="pl-9"
           />
         </div>
+        {isMobile ? (
+          <Button onClick={handleAdd} size="icon" className="shrink-0" aria-label="Add repo">
+            <Plus className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
 
-      <DataGrid
-        rowData={repos ?? []}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No repositories registered"
-        paginationQueryKey="repos"
-      />
+      {/* mockup(ui-audit): settings-repos P1 — phone list instead of the 7-column grid; Edit/Delete live on the detail page */}
+      {isMobile ? (
+        <MobileList
+          label="Repos"
+          loading={isLoading}
+          emptyMessage="No repos match your search"
+          className="flex-none"
+        >
+          {(repos ?? [])
+            .filter((repo) => matchesRepoSearch(repo, search))
+            .map((repo) => (
+              <MobileListRow
+                key={repo.id}
+                to={`/repos/${repo.id}`}
+                title={repo.name}
+                meta={[
+                  // The title already names the repo, so show just the owner when they match.
+                  repoSlug(repo.url).endsWith(`/${repo.name}`)
+                    ? repoSlug(repo.url).split("/")[0]
+                    : repoSlug(repo.url),
+                  <span key="branch" className="inline-flex min-w-0 items-center gap-1">
+                    <GitBranch className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{repo.defaultBranch}</span>
+                  </span>,
+                  [repo.autoClone && "auto-clone", repo.hooks.enabled && "hooks"]
+                    .filter(Boolean)
+                    .join(" + "),
+                ]}
+              />
+            ))}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={repos ?? []}
+          columnDefs={columnDefs}
+          quickFilterText={search}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage="No repositories registered"
+          paginationQueryKey="repos"
+        />
+      )}
 
       <RepoDialog
         key={editingRepo?.id ?? "new"}

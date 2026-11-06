@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -23,7 +23,8 @@ import type {
   PricingRow,
   PricingTokenClass,
 } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
@@ -56,6 +58,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { pricingModelOptions } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime, formatUTCTime } from "@/lib/utils";
@@ -408,6 +411,11 @@ export default function BudgetsPage() {
     label: string;
   } | null>(null);
   const [pricingDeleteTarget, setPricingDeleteTarget] = useState<PricingRow | null>(null);
+  // mockup(ui-audit): usage-budgets P1 - pricing is reference data; collapsed by default on phones.
+  const isMobile = useIsMobile();
+  const [pricingOpenChoice, setPricingOpenChoice] = useState<boolean | null>(null);
+  const pricingOpen = pricingOpenChoice ?? !isMobile;
+  const [pricingMobileLimit, setPricingMobileLimit] = useState(20);
 
   // Index helpers ------------------------------------------------------------
 
@@ -476,10 +484,12 @@ export default function BudgetsPage() {
 
   const agentColumnDefs = useMemo<ColDef<(typeof agentRows)[number]>[]>(
     () => [
+      // mockup(ui-audit): usage-budgets P1 - smaller min widths + Updated hides when compact + Actions
+      // pinned right, so the edit pencil stays on a phone screen.
       {
         headerName: "Agent",
         flex: 1,
-        minWidth: 200,
+        minWidth: 110,
         cellRenderer: (params: ICellRendererParams<(typeof agentRows)[number]>) => {
           const row = params.data;
           if (!row) return null;
@@ -498,7 +508,7 @@ export default function BudgetsPage() {
       {
         headerName: "Daily spend / budget",
         flex: 2,
-        minWidth: 280,
+        minWidth: 130,
         cellRenderer: (params: ICellRendererParams<(typeof agentRows)[number]>) => {
           const row = params.data;
           if (!row) return null;
@@ -511,6 +521,7 @@ export default function BudgetsPage() {
       },
       {
         headerName: "Updated",
+        context: HIDE_WHEN_COMPACT,
         width: 160,
         cellRenderer: (params: ICellRendererParams<(typeof agentRows)[number]>) => {
           const row = params.data;
@@ -524,7 +535,8 @@ export default function BudgetsPage() {
       },
       {
         headerName: "Actions",
-        width: 110,
+        width: 80,
+        pinned: "right",
         cellRenderer: (params: ICellRendererParams<(typeof agentRows)[number]>) => {
           const row = params.data;
           if (!row) return null;
@@ -697,6 +709,9 @@ export default function BudgetsPage() {
       {
         field: "provider",
         headerName: "Provider",
+        // mockup(ui-audit): usage-budgets P1 - Provider / Effective from hide when compact; Model
+        // middle-truncates so the unique suffix shows; delete pinned right.
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         cellRenderer: (params: ICellRendererParams<PricingRow>) => (
           <Badge variant="outline" size="tag">
@@ -704,7 +719,19 @@ export default function BudgetsPage() {
           </Badge>
         ),
       },
-      { field: "model", headerName: "Model", flex: 1, minWidth: 200 },
+      {
+        field: "model",
+        headerName: "Model",
+        flex: 1,
+        minWidth: 140,
+        cellRenderer: (params: ICellRendererParams<PricingRow>) => (
+          <div className="flex h-full min-w-0 items-center" title={params.value}>
+            <MiddleTruncation className="min-w-0 flex-1" minEnd={14}>
+              {params.value ?? ""}
+            </MiddleTruncation>
+          </div>
+        ),
+      },
       {
         field: "tokenClass",
         headerName: "Token class",
@@ -732,6 +759,7 @@ export default function BudgetsPage() {
       {
         field: "effectiveFrom",
         headerName: "Effective from",
+        context: HIDE_WHEN_COMPACT,
         width: 180,
         cellRenderer: (params: ICellRendererParams<PricingRow>) => {
           if (!params.value) return null;
@@ -745,7 +773,8 @@ export default function BudgetsPage() {
       },
       {
         headerName: "",
-        width: 60,
+        width: 56,
+        pinned: "right",
         cellRenderer: (params: ICellRendererParams<PricingRow>) => {
           const row = params.data;
           if (!row) return null;
@@ -776,7 +805,8 @@ export default function BudgetsPage() {
   // ─── render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
+    // mockup(ui-audit): usage-budgets P1 double scroller - inner scroller only at lg+.
+    <div className="space-y-6 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
       <PageHeader title="Budgets & spend" />
 
       {/* Global budget */}
@@ -827,7 +857,7 @@ export default function BudgetsPage() {
         <CardHeader>
           <CardTitle className="text-sm font-semibold">Per-agent daily budgets</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-4 sm:px-6">
           <DataGrid
             rowData={agentRows}
             columnDefs={agentColumnDefs}
@@ -845,21 +875,45 @@ export default function BudgetsPage() {
           <CardTitle className="text-sm font-semibold">Recent budget refusals</CardTitle>
         </CardHeader>
         <CardContent>
-          <DataGrid
-            rowData={refusals ?? []}
-            columnDefs={refusalColumnDefs}
-            loading={loadingRefusals}
-            emptyMessage="No budget refusals recorded"
-            domLayout="autoHeight"
-            paginationQueryKey="budgetRefusals"
-          />
+          {/* mockup(ui-audit): usage-budgets P2 - zero refusals is one muted line, not an empty grid + pager. */}
+          {!loadingRefusals && (refusals?.length ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground">No budget refusals recorded.</p>
+          ) : (
+            <DataGrid
+              rowData={refusals ?? []}
+              columnDefs={refusalColumnDefs}
+              loading={loadingRefusals}
+              emptyMessage="No budget refusals recorded"
+              domLayout="autoHeight"
+              paginationQueryKey="budgetRefusals"
+            />
+          )}
         </CardContent>
       </Card>
 
       {/* Pricing */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-semibold">Pricing rows (append-only)</CardTitle>
+          <CardTitle className="text-sm font-semibold">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 text-left"
+              aria-expanded={pricingOpen}
+              onClick={() => setPricingOpenChoice(!pricingOpen)}
+            >
+              {pricingOpen ? (
+                <ChevronDown className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 text-muted-foreground" />
+              )}
+              Pricing rows <span className="max-sm:hidden">(append-only)</span>
+              {!pricingOpen && pricing ? (
+                <span className="font-mono text-xs font-normal text-muted-foreground">
+                  {pricing.length.toLocaleString()}
+                </span>
+              ) : null}
+            </button>
+          </CardTitle>
           <CardAction>
             <Button size="sm" onClick={() => setPricingDialogOpen(true)}>
               <Plus className="h-3.5 w-3.5" />
@@ -867,16 +921,75 @@ export default function BudgetsPage() {
             </Button>
           </CardAction>
         </CardHeader>
-        <CardContent>
-          <DataGrid
-            rowData={pricing ?? []}
-            columnDefs={pricingColumnDefs}
-            loading={loadingPricing}
-            emptyMessage="No pricing rows configured (provider falls back to harness-reported cost)"
-            domLayout="autoHeight"
-            paginationQueryKey="budgetPricing"
-          />
-        </CardContent>
+        {pricingOpen ? (
+          <CardContent className="px-4 sm:px-6">
+            {isMobile ? (
+              // mockup(ui-audit): usage-budgets P1 - phones list pricing rows: full model id (wraps),
+              // token class + price on the meta line, delete in its own tap target. 20 at a time.
+              <MobileList
+                label="Pricing rows"
+                loading={loadingPricing}
+                emptyMessage="No pricing rows configured"
+                className="flex-none overflow-hidden"
+                footer={
+                  (pricing?.length ?? 0) > pricingMobileLimit ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setPricingMobileLimit((n) => n + 20)}
+                    >
+                      Show 20 more of {(pricing?.length ?? 0).toLocaleString()}
+                    </Button>
+                  ) : null
+                }
+              >
+                {(pricing ?? []).slice(0, pricingMobileLimit).map((row) => (
+                  <MobileListRow
+                    key={`${row.provider}:${row.model}:${row.tokenClass}:${row.effectiveFrom}`}
+                    title={<span className="font-mono text-xs">{row.model}</span>}
+                    titleLines="full"
+                    meta={[
+                      <Badge
+                        key="class"
+                        variant="outline"
+                        size="tag"
+                        className="border-status-info/30 text-status-info-strong"
+                      >
+                        {row.tokenClass}
+                      </Badge>,
+                      <span key="price" className="font-mono text-foreground">
+                        {formatCost(row.pricePerMillionUsd, { precision: "precise" })} / 1M
+                      </span>,
+                      row.provider,
+                    ]}
+                    controls={[
+                      <Button
+                        key="delete"
+                        variant="destructive-outline"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setPricingDeleteTarget(row)}
+                        aria-label={`Delete ${row.tokenClass} price for ${row.model}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>,
+                    ]}
+                  />
+                ))}
+              </MobileList>
+            ) : (
+              <DataGrid
+                rowData={pricing ?? []}
+                columnDefs={pricingColumnDefs}
+                loading={loadingPricing}
+                emptyMessage="No pricing rows configured (provider falls back to harness-reported cost)"
+                domLayout="autoHeight"
+                paginationQueryKey="budgetPricing"
+              />
+            )}
+          </CardContent>
+        ) : null}
       </Card>
 
       {/* Audit feed */}
