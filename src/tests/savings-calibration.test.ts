@@ -7,7 +7,7 @@ import {
   type OpusSession,
   type TierPrices,
   trimmedMean,
-} from "../../scripts/calibrate-savings-curve";
+} from "../be/savings/calibrate";
 import {
   CURVE,
   parseCalibration,
@@ -60,7 +60,7 @@ const input = (opus: OpusSession[], tierTurns: DeriveInput["tierTurns"] = {}): D
   end: new Date("2026-12-01T10:00:00Z"),
 });
 
-describe("calibrate-savings-curve", () => {
+describe("savings calibration", () => {
   test("recovers a known linear cost curve per tier, ignoring outlier sessions", () => {
     const out = deriveCurves(input(sessions(20)));
     for (const tier of SAVINGS_TIERS) {

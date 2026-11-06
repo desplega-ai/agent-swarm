@@ -1,16 +1,11 @@
-#!/usr/bin/env bun
 /**
  * Re-derive the automation-savings session curve from this deployment's own
  * `session_costs`, and optionally store it so the savings endpoints use it
  * instead of the constants shipped in `src/be/savings/model.ts`.
  *
- *   bun scripts/calibrate-savings-curve.ts [--days 30] [--end <ISO>] [--apply]
- *
- * Needs a running swarm API (`MCP_BASE_URL`, the key via getApiKey()). Without
- * `--apply` it is read-only: it prints the derived calibration as JSON on
- * stdout and a comparison against the shipped curve on stderr. With `--apply`
- * it writes the JSON to the global `SAVINGS_CURVE_CALIBRATION` config row.
- * Delete that row to go back to the shipped curve.
+ * Served by `POST /api/savings/calibration` (`src/http/savings-calibration.ts`), which
+ * also owns the deadline, the one-run-at-a-time lock and the config write. Delete the
+ * global `SAVINGS_CURVE_CALIBRATION` row to go back to the shipped curve.
  *
  * Method, rebuilt from the v7 calibration notes (research/cost/2026-11-05); it reproduces
  * the shipped curve to about 1% on session-weighted average, not point for point:
@@ -26,18 +21,15 @@
  *   supported counts reach MIN_LOW_TURN at the bottom and MIN_HIGH_TURN at the top. Past the
  *   outermost supported count the shipped curve's shape is used, scaled to meet that count.
  */
-import { parseArgs } from "node:util";
+import type { SavingsSql } from "./compute";
 import {
   CALIBRATION_MODEL,
   CURVE,
   type CurveSet,
-  SAVINGS_CALIBRATION_KEY,
   SAVINGS_TIERS,
   type SavingsTier,
-  StoredCalibrationSchema,
   TAU_MAX,
-} from "../src/be/savings/model";
-import { getApiKey } from "../src/utils/api-key";
+} from "./model";
 
 /** The model each tier bills at. */
 export const TIER_MODEL: Record<SavingsTier, string> = {
@@ -69,8 +61,18 @@ export const MIN_SUPPORTED_TURNS = 15;
 export const MIN_SESSIONS = 300;
 /** Fewer sessions than this for a tier model: use SPEED_FALLBACK. */
 const MIN_SPEED_SESSIONS = 30;
-/** `--apply` refuses a curve whose mean cost is further than this factor from the shipped one. */
-const SANITY_FACTOR = 3;
+/** A curve whose mean cost is further than this factor from the shipped one is never applied. */
+export const SANITY_FACTOR = 3;
+/** Rows read per query; the read pages by keyset so no query is unbounded. */
+const PAGE = 1000;
+/** Refuse a window with more sessions than this: one run must stay inside the API's memory. */
+export const MAX_SESSIONS_READ = 200_000;
+
+/** The data cannot support a curve; the message is the reason shown to the caller. */
+export class CalibrationRefusal extends Error {}
+
+/** `CurveSet` with plain arrays: what a derivation produces and the API serializes. */
+export type DerivedCurveSet = Record<SavingsTier, { usd: number[]; hrs: number[] }>;
 
 export type OpusSession = {
   turns: number;
@@ -98,7 +100,7 @@ export type DeriveInput = {
 export type DerivedCalibration = {
   calibratedAt: string;
   model: string;
-  curve: CurveSet;
+  curve: DerivedCurveSet;
   sessions: number;
   usable: OpusSession[];
   speed: Record<SavingsTier, number>;
@@ -182,7 +184,9 @@ function curveOf(
   const byTurns = new Map<number, number[]>();
   for (const s of sessions) {
     if (s.turns < 1 || s.turns > TAU_MAX) continue;
-    byTurns.set(s.turns, [...(byTurns.get(s.turns) ?? []), value(s)]);
+    const at = byTurns.get(s.turns);
+    if (at) at.push(value(s));
+    else byTurns.set(s.turns, [value(s)]);
   }
   const raw = Array.from({ length: TAU_MAX }, (_, i) => {
     const at = byTurns.get(i + 1);
@@ -200,7 +204,7 @@ function curveOf(
     hi < MIN_HIGH_TURN ||
     supported.length < MIN_SUPPORTED_TURNS
   ) {
-    throw new Error(
+    throw new CalibrationRefusal(
       `turn coverage too thin: ${supported.length} of ${TAU_MAX - 1} turn counts have ${MIN_SESSIONS_PER_TURN}+ sessions` +
         `${lo === undefined ? "" : ` (turns ${lo}..${hi})`}; need at least ${MIN_SUPPORTED_TURNS}, reaching turn ${MIN_LOW_TURN} or lower and turn ${MIN_HIGH_TURN} or higher`,
     );
@@ -216,7 +220,7 @@ export function deriveCurves(input: DeriveInput): DerivedCalibration {
   const { opus, prices, tierTurns, end } = input;
   const usable = opus.filter((s) => s.turns >= 1 && s.turns <= TAU_MAX);
   if (usable.length < MIN_SESSIONS) {
-    throw new Error(
+    throw new CalibrationRefusal(
       `only ${usable.length} opus sessions of 1..${TAU_MAX} turns in the window; need ${MIN_SESSIONS}`,
     );
   }
@@ -260,7 +264,7 @@ export function deriveCurves(input: DeriveInput): DerivedCalibration {
         hrs: opusHrs.map((v) => round(v * speed[tier], 5)),
       },
     ]),
-  ) as CurveSet;
+  ) as DerivedCurveSet;
   return {
     calibratedAt: end.toISOString().slice(0, 10),
     model: CALIBRATION_MODEL,
@@ -298,86 +302,72 @@ export function compareToShipped(curve: CurveSet, sessionsPerTurn: number[]) {
   );
 }
 
-// ---- API access --------------------------------------------------------------------------
-
-const PAGE = 1000;
-
-async function sleep(ms: number) {
-  await new Promise((r) => setTimeout(r, ms));
-}
-
-/** Read-only query through the API's bounded executor; a concurrency rejection is retried, never read as empty. */
-async function query(base: string, sql: string, params: unknown[]): Promise<unknown[][]> {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const res = await fetch(`${base}/api/db-query`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ sql, params }),
-    });
-    if (res.status === 429) {
-      await sleep(1000 * 2 ** attempt);
-      continue;
-    }
-    if (!res.ok) throw new Error(`db-query ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const body = (await res.json()) as { rows: unknown[][]; truncated: boolean };
-    if (body.truncated) throw new Error("db-query result was truncated; lower the page size");
-    return body.rows;
-  }
-  throw new Error("db-query stayed at its concurrency cap after 6 attempts");
-}
-
-/** Keyset-paged read of `sql`, which selects the session id first and takes `id > ?` as its last parameter. */
-async function pages(base: string, sql: string, params: unknown[]): Promise<unknown[][]> {
-  const out: unknown[][] = [];
-  let after = "";
-  for (;;) {
-    const rows = await query(base, sql, [...params, after]);
-    out.push(...rows);
-    if (rows.length < PAGE) return out;
-    after = String((rows[rows.length - 1] as unknown[])[0]);
-  }
-}
+// ---- Reading the sessions ----------------------------------------------------------------
 
 const num = (v: unknown) => Number(v) || 0;
 
-export async function fetchInput(base: string, start: Date, end: Date): Promise<DeriveInput> {
+/** Keyset-paged read of `sql`, which selects `id` and takes `id > ?` as its last parameter. */
+async function pages<T extends { id: string }>(
+  sql: SavingsSql,
+  query: string,
+  params: (string | number)[],
+): Promise<T[]> {
+  const out: T[] = [];
+  let after = "";
+  for (;;) {
+    const rows = await sql<T>(query, [...params, after]);
+    out.push(...rows);
+    if (out.length > MAX_SESSIONS_READ) {
+      throw new CalibrationRefusal(
+        `more than ${MAX_SESSIONS_READ} sessions in the window; use a shorter window (days)`,
+      );
+    }
+    if (rows.length < PAGE) return out;
+    after = (rows[rows.length - 1] as T).id;
+  }
+}
+
+export async function fetchInput(sql: SavingsSql, start: Date, end: Date): Promise<DeriveInput> {
   const window = [start.toISOString(), end.toISOString()];
-  const opusRows = await pages(
-    base,
-    `SELECT s.id, s.numTurns, s.durationMs, json_extract(j.value,'$.inputTokens'), json_extract(j.value,'$.outputTokens'),
-       json_extract(j.value,'$.cacheReadTokens'), json_extract(j.value,'$.cacheWriteTokens'), json_extract(j.value,'$.costUsd'), s.totalCostUsd
+  const opusRows = await pages<Record<string, unknown> & { id: string }>(
+    sql,
+    `SELECT s.id AS id, s.numTurns AS turns, s.durationMs AS durationMs,
+       json_extract(j.value,'$.inputTokens') AS inputTokens, json_extract(j.value,'$.outputTokens') AS outputTokens,
+       json_extract(j.value,'$.cacheReadTokens') AS cacheReadTokens, json_extract(j.value,'$.cacheWriteTokens') AS cacheWriteTokens,
+       json_extract(j.value,'$.costUsd') AS costUsd, s.totalCostUsd AS totalCostUsd
      FROM session_costs s, json_each(CASE WHEN json_valid(s.modelBreakdown) THEN s.modelBreakdown ELSE '[]' END) j
      WHERE s.model = ? AND json_extract(j.value,'$.model') = ? AND s.createdAt >= ? AND s.createdAt < ?
        AND s.numTurns BETWEEN 1 AND ${TAU_MAX} AND s.id > ? ORDER BY s.id LIMIT ${PAGE}`,
     [CALIBRATION_MODEL, CALIBRATION_MODEL, ...window],
   );
   const opus = opusRows.map((r) => ({
-    turns: num(r[1]),
-    durationMs: num(r[2]),
-    inputTokens: num(r[3]),
-    outputTokens: num(r[4]),
-    cacheReadTokens: num(r[5]),
-    cacheWriteTokens: num(r[6]),
-    costUsd: num(r[7]),
-    otherUsd: Math.max(0, num(r[8]) - num(r[7])),
+    turns: num(r.turns),
+    durationMs: num(r.durationMs),
+    inputTokens: num(r.inputTokens),
+    outputTokens: num(r.outputTokens),
+    cacheReadTokens: num(r.cacheReadTokens),
+    cacheWriteTokens: num(r.cacheWriteTokens),
+    costUsd: num(r.costUsd),
+    otherUsd: Math.max(0, num(r.totalCostUsd) - num(r.costUsd)),
   }));
 
-  const priceRows = await query(
-    base,
-    `SELECT model, token_class, price_per_million_usd FROM pricing
+  const priceRows = await sql<{ model: string; token_class: string; price: number }>(
+    `SELECT model, token_class, price_per_million_usd AS price FROM pricing
      WHERE provider = 'claude' AND model IN (${SAVINGS_TIERS.map(() => "?").join(",")}) AND effective_from <= ?
      ORDER BY effective_from`,
     [...SAVINGS_TIERS.map((t) => TIER_MODEL[t]), end.getTime()],
   );
   const latest = new Map<string, number>(); // later effective_from overwrites earlier
-  for (const r of priceRows) latest.set(`${r[0]}|${r[1]}`, num(r[2]));
+  for (const r of priceRows) latest.set(`${r.model}|${r.token_class}`, num(r.price));
   const prices = Object.fromEntries(
     SAVINGS_TIERS.map((tier) => [
       tier,
       Object.fromEntries(
         (["input", "output", "cached_input", "cache_write_1h"] as const).map((cls) => {
           const p = latest.get(`${TIER_MODEL[tier]}|${cls}`);
-          if (p === undefined) throw new Error(`no ${cls} price for ${TIER_MODEL[tier]}`);
+          if (p === undefined) {
+            throw new CalibrationRefusal(`no ${cls} price for ${TIER_MODEL[tier]}`);
+          }
           return [cls, p];
         }),
       ),
@@ -387,79 +377,92 @@ export async function fetchInput(base: string, start: Date, end: Date): Promise<
   const tierTurns: DeriveInput["tierTurns"] = {};
   for (const tier of SAVINGS_TIERS) {
     if (tier === "smart") continue;
-    const rows = await pages(
-      base,
-      `SELECT id, numTurns, durationMs FROM session_costs
+    const rows = await pages<{ id: string; turns: number; durationMs: number }>(
+      sql,
+      `SELECT id, numTurns AS turns, durationMs FROM session_costs
        WHERE model = ? AND createdAt >= ? AND createdAt < ? AND numTurns BETWEEN 3 AND ${TAU_MAX} AND id > ? ORDER BY id LIMIT ${PAGE}`,
       [TIER_MODEL[tier], ...window],
     );
-    tierTurns[tier] = rows.map((r) => ({ turns: num(r[1]), durationMs: num(r[2]) }));
+    tierTurns[tier] = rows.map((r) => ({ turns: num(r.turns), durationMs: num(r.durationMs) }));
   }
   return { opus, prices, tierTurns, end };
 }
 
-async function main() {
-  const { values } = parseArgs({
-    options: {
-      days: { type: "string", default: "30" },
-      end: { type: "string" },
-      apply: { type: "boolean", default: false },
-    },
-  });
-  const base = (process.env.MCP_BASE_URL ?? "http://localhost:3013").replace(/\/$/, "");
-  const end = values.end ? new Date(values.end) : new Date();
-  const days = Number(values.days);
-  if (Number.isNaN(end.getTime()) || !(days >= 1 && days <= 90)) {
-    throw new Error("--end must be an ISO date and --days 1..90");
-  }
-  const start = new Date(end.getTime() - days * 86_400_000);
-  const derived = deriveCurves(await fetchInput(base, start, end));
-  const stored = {
-    calibratedAt: derived.calibratedAt,
-    model: derived.model,
-    curve: derived.curve,
-  };
-  StoredCalibrationSchema.parse(stored);
+// ---- The run -----------------------------------------------------------------------------
 
+export type CalibrationGap = ReturnType<typeof compareToShipped>[number];
+
+export type CalibrationRun = {
+  window: { start: string; end: string; days: number };
+  /** Opus sessions of 1..TAU_MAX turns used; 0 when the run was refused before counting. */
+  sessions: number;
+  /** Why the data cannot support a curve. When set, `calibration` is null. */
+  refusal: string | null;
+  /** The derived curve in the form the config row stores. */
+  calibration: StoredCalibration | null;
+  speed: Record<SavingsTier, number> | null;
+  repriceMatch: number | null;
+  /** Per tier and quantity, the derived curve against the shipped one. */
+  gaps: CalibrationGap[];
+  /** Derived smart-tier mean cost over the shipped one. */
+  meanRatio: number | null;
+  /** Why a derived curve must not be applied (mean cost beyond SANITY_FACTOR); null when it may be. */
+  applyBlocked: string | null;
+};
+
+export type StoredCalibration = {
+  calibratedAt: string;
+  model: string;
+  curve: DerivedCurveSet;
+  window: { start: string; end: string; sessions: number };
+};
+
+/** Read the window's sessions through `sql` and derive the curve. Never writes. */
+export async function calibrate(
+  sql: SavingsSql,
+  opts: { days: number; end: Date },
+): Promise<CalibrationRun> {
+  const start = new Date(opts.end.getTime() - opts.days * 86_400_000);
+  const window = { start: start.toISOString(), end: opts.end.toISOString(), days: opts.days };
+  const refused = (refusal: string): CalibrationRun => ({
+    window,
+    sessions: 0,
+    refusal,
+    calibration: null,
+    speed: null,
+    repriceMatch: null,
+    gaps: [],
+    meanRatio: null,
+    applyBlocked: null,
+  });
+  let derived: DerivedCalibration;
+  try {
+    derived = deriveCurves(await fetchInput(sql, start, opts.end));
+  } catch (err) {
+    if (err instanceof CalibrationRefusal) return refused(err.message);
+    throw err;
+  }
   const perTurn = Array.from({ length: TAU_MAX }, () => 0);
   for (const s of derived.usable) perTurn[s.turns - 1] = (perTurn[s.turns - 1] as number) + 1;
-  const cmp = compareToShipped(derived.curve, perTurn);
-  console.error(
-    `window ${start.toISOString()} .. ${end.toISOString()}  sessions ${derived.sessions}  repricing within 1%: ${(derived.repriceMatch * 100).toFixed(1)}%  speed ${JSON.stringify(derived.speed)}`,
-  );
-  console.error("tier     key  median   max     >5%     weighted  (turns 2..61 vs shipped)");
-  for (const c of cmp) {
-    console.error(
-      `${c.tier.padEnd(8)} ${c.key.padEnd(4)} ${(c.median * 100).toFixed(1).padStart(5)}%  ${(c.max * 100).toFixed(1).padStart(5)}%  ${`${c.over5pct}/${c.points}`.padEnd(7)}  ${c.weighted.toFixed(3)}`,
-    );
-  }
-  console.log(JSON.stringify(stored));
-
-  if (!values.apply) return;
   const mean = (a: readonly number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-  const ratio = mean(derived.curve.smart.usd) / mean(CURVE.smart.usd);
-  if (ratio > SANITY_FACTOR || ratio < 1 / SANITY_FACTOR) {
-    throw new Error(`derived smart curve is ${ratio.toFixed(2)}x the shipped one; not applying`);
-  }
-  const res = await fetch(`${base}/api/config`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      scope: "global",
-      key: SAVINGS_CALIBRATION_KEY,
-      value: JSON.stringify(stored),
-      // The row is read by the API only; keep a 9 KB blob out of every agent's environment.
-      exportToEnv: false,
-      description: "Savings session curve derived from this deployment's sessions",
-    }),
-  });
-  if (!res.ok) throw new Error(`config write ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  console.error(`stored ${SAVINGS_CALIBRATION_KEY}`);
-}
-
-if (import.meta.main) {
-  main().catch((err) => {
-    console.error(err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
+  const meanRatio = mean(derived.curve.smart.usd) / mean(CURVE.smart.usd);
+  return {
+    window,
+    sessions: derived.sessions,
+    refusal: null,
+    calibration: {
+      calibratedAt: derived.calibratedAt,
+      model: derived.model,
+      curve: derived.curve,
+      window: { start: window.start, end: window.end, sessions: derived.sessions },
+    },
+    speed: derived.speed,
+    repriceMatch: derived.repriceMatch,
+    gaps: compareToShipped(derived.curve, perTurn),
+    meanRatio,
+    applyBlocked:
+      meanRatio > SANITY_FACTOR || meanRatio < 1 / SANITY_FACTOR
+        ? `derived smart curve is ${meanRatio.toFixed(2)}x the shipped one (limit ${SANITY_FACTOR}x)`
+        : null,
+  };
 }

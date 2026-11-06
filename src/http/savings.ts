@@ -29,7 +29,7 @@ const FACTS_TTL_MS = 10 * 60 * 1000;
  * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so a
  * burst of requests can neither block the API's event loop nor pile up.
  */
-const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
+export const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
   const result = await executeReadOnlyQueryGated(sql, params, getDbQueryHttpBudgetMs(), 10_000);
   return result.rows.map((row) =>
     Object.fromEntries(result.columns.map((column, i) => [column, row[i]])),
@@ -184,10 +184,15 @@ async function activeCalibration(now: number): Promise<Calibration> {
   return value;
 }
 
+/** Forget the cached curve, so the next savings request reads the stored row. */
+export function clearCalibrationCache(): void {
+  calibrationCache = null;
+}
+
 /** Test hook. */
 export function resetSavingsCache(): void {
   factsCache.clear();
-  calibrationCache = null;
+  clearCalibrationCache();
 }
 
 function cachedWindow(

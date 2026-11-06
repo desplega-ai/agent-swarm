@@ -137,6 +137,8 @@ export type Calibration = {
   calibratedAt: string;
   model: string;
   curve: CurveSet;
+  /** The sessions the curve was derived from; absent on a row stored before this was recorded. */
+  window?: { start: string; end: string; sessions: number };
 };
 
 export const SHIPPED_CALIBRATION: Calibration = {
@@ -146,7 +148,7 @@ export const SHIPPED_CALIBRATION: Calibration = {
   curve: CURVE,
 };
 
-/** Global `swarm_config` key holding the JSON written by `scripts/calibrate-savings-curve.ts`. */
+/** Global `swarm_config` key holding the JSON written by `POST /api/savings/calibration`. */
 export const SAVINGS_CALIBRATION_KEY = "SAVINGS_CURVE_CALIBRATION";
 
 const CurveArraySchema = z.array(z.number().positive()).length(TAU_MAX);
@@ -154,6 +156,9 @@ const TierCurveSchema = z.object({ usd: CurveArraySchema, hrs: CurveArraySchema 
 export const StoredCalibrationSchema = z.object({
   calibratedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   model: z.string().min(1),
+  window: z
+    .object({ start: z.string(), end: z.string(), sessions: z.number().int().nonnegative() })
+    .optional(),
   curve: z.object({
     smol: TierCurveSchema,
     regular: TierCurveSchema,
@@ -168,8 +173,8 @@ export function parseCalibration(raw: string | null | undefined): Calibration | 
   try {
     const parsed = StoredCalibrationSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) return null;
-    const { calibratedAt, model, curve } = parsed.data;
-    return { source: "deployment", calibratedAt, model, curve };
+    const { calibratedAt, model, curve, window } = parsed.data;
+    return { source: "deployment", calibratedAt, model, curve, ...(window ? { window } : {}) };
   } catch {
     return null;
   }
