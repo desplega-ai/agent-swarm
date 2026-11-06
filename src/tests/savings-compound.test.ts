@@ -13,6 +13,7 @@ import {
   recordInlineScriptRun,
 } from "../be/db";
 import type { SavingsSql } from "../be/savings/compute";
+import { MODEL_VERSION } from "../be/savings/model";
 import { readScriptSavings, readWorkflowSavings } from "../be/savings/read";
 import { resetSavingsRollupForTests, runSavingsRollupTick } from "../be/savings/rollup";
 import { mintScriptRunToken, resolveSessionToken } from "../be/users";
@@ -405,6 +406,34 @@ describe("savings with components", () => {
     expect(before.body.components).toBeUndefined();
     expect((await get("kind=workflow&components=true")).status).toBe(400);
     expect((await get("scriptName=compound-helper&components=true")).status).toBe(400);
+  });
+
+  test("a burst of component reads shares one tree for a minute", async () => {
+    const read = async () => {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/api/savings/jobs?workflowId=${leaf}&components=true&days=7`,
+      );
+      return ((await res.json()) as Record<string, any>).components as unknown[];
+    };
+    resetSavingsRefreshCache();
+    expect(await read()).toEqual([]);
+    // A link the held tree has not seen: reads inside the minute keep the held tree.
+    await getDbClient().run(
+      `INSERT INTO automation_savings_links (day, parentJobId, childKind, childJobId, linkKind, n, actualUsd, keptUsd, modelVersion, computedAt)
+       VALUES (?, ?, 'workflow', ?, 'step-workflow', 1, 0, 0, ?, ?)`,
+      [DAY, leaf, child, MODEL_VERSION, new Date().toISOString()],
+    );
+    try {
+      expect(await Promise.all([read(), read()])).toEqual([[], []]);
+      resetSavingsRefreshCache();
+      expect(await read()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "workflow", workflowId: child, depth: 1 }),
+        ]),
+      );
+    } finally {
+      await getDbClient().run("DELETE FROM automation_savings_links WHERE parentJobId=?", [leaf]);
+    }
   });
 });
 

@@ -17,7 +17,9 @@ import {
   readWorkflowSavings,
   type SavingsComponent,
   type SavingsTotals,
+  type WorkflowComponentsRead,
   type WorkflowSavingsRead,
+  type WorkflowSavingsRow,
 } from "../be/savings/read";
 import { refreshWorkflowToday, utcDay } from "../be/savings/rollup";
 import { executeReadOnlyQueryGated } from "./db-query";
@@ -384,10 +386,42 @@ const inFlight = new Map<string, Promise<void>>();
 /** When a refresh last scanned the day, per workflow and UTC day. */
 const scannedAt = new Map<string, number>();
 
-/** Test hook: forget the refresh state. */
+/** Test hook: forget the refresh state and the held component trees. */
 export function resetSavingsRefreshCache(): void {
   inFlight.clear();
   scannedAt.clear();
+  heldTrees.clear();
+}
+
+/**
+ * Component trees per workflow, window and tier, keyed also by the own row's
+ * rollup time, so a refreshed own row gets a fresh tree. Concurrent reads share
+ * the read in flight, and a tree is reused for REFRESH_TTL_MS: the tree reads
+ * the fleet's rollup rows, so a burst reads them once a minute at most.
+ */
+const heldTrees = new Map<string, { at: number; tree: Promise<WorkflowComponentsRead> }>();
+const MAX_HELD_TREES = 200;
+
+function componentsOf(
+  own: WorkflowSavingsRow,
+  days: number,
+  tier: (typeof SAVINGS_TIERS)[number],
+  computedAt: string | null,
+): Promise<WorkflowComponentsRead> {
+  const now = Date.now();
+  for (const [k, h] of heldTrees) if (now - h.at >= REFRESH_TTL_MS) heldTrees.delete(k);
+  const key = [own.workflowId, days, tier, computedAt ?? ""].join("\u0000");
+  const held = heldTrees.get(key);
+  if (held) return held.tree;
+  const tree = readWorkflowComponents({ days, tier, now, workflowId: own.workflowId, own });
+  // A failed read is not held: the next request reads again.
+  tree.catch(() => heldTrees.delete(key));
+  if (heldTrees.size >= MAX_HELD_TREES) {
+    const oldest = heldTrees.keys().next().value;
+    if (oldest !== undefined) heldTrees.delete(oldest);
+  }
+  heldTrees.set(key, { at: now, tree });
+  return tree;
 }
 
 function refreshToday(
@@ -504,13 +538,7 @@ export async function handleSavings(
   const own = show && workflowId ? read.rows[0] : undefined;
   const tree =
     components && own && "workflowId" in own
-      ? await readWorkflowComponents({
-          days,
-          tier,
-          now: Date.now(),
-          workflowId: own.workflowId,
-          own,
-        })
+      ? await componentsOf(own, days, tier, read.computedAt)
       : null;
   savingsJobsRoute.respond(res, 200, {
     ...meta(read, tier, { complete: read.complete, hasRows: read.rows.length > 0 }),
