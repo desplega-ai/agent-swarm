@@ -571,6 +571,204 @@ describe("quickjs structuredClone boundaries", () => {
   });
 });
 
+// Retries: `retry()` in the stdlib, method-aware `ctx.stdlib.fetch` retries,
+// and the bridge's own retries under `ctx.swarm`. The fixture fails the first
+// N hits of a path whose segment reads `<status>-<N>-<tag>`, then answers 200.
+type RetryHit = { at: number; key: string | null };
+const retryHits = new Map<string, RetryHit[]>();
+const retryServer = Bun.serve({
+  port: 0,
+  hostname: "127.0.0.1",
+  fetch(req) {
+    const path = new URL(req.url).pathname;
+    const hits = retryHits.get(path) ?? [];
+    hits.push({ at: Date.now(), key: req.headers.get("idempotency-key") });
+    retryHits.set(path, hits);
+    const spec = /(\d{3})-(\d+)-([^/]+)/.exec(path);
+    if (spec && hits.length <= Number(spec[2])) {
+      const status = Number(spec[1]);
+      const headers: Record<string, string> =
+        status === 429 && spec[3].includes("ra") ? { "retry-after": "1" } : {};
+      return Response.json({ error: "transient" }, { status, headers });
+    }
+    return Response.json({ ok: true, key: "k", value: 1 });
+  },
+});
+afterAll(() => retryServer.stop(true));
+const retryBase = `http://127.0.0.1:${retryServer.port}`;
+const hitsOf = (path: string) => retryHits.get(path) ?? [];
+
+describe("retries match across executors", () => {
+  const executors: Array<[string, () => ScriptExecutor, boolean]> = [
+    ["native", () => new NativeScriptExecutor(), true],
+    ["quickjs", () => new QuickJSScriptExecutor(), false],
+  ];
+  const run = (makeExecutor: () => ScriptExecutor, source: string, args: unknown = {}) =>
+    makeExecutor().run(
+      input({
+        source,
+        args,
+        configPayload: {
+          ...payload,
+          system: { ...payload.system, mcpBaseUrl: { value: retryBase, isSecret: false } },
+        },
+        resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 15_000 },
+      }),
+    );
+
+  for (const [name, makeExecutor, spawns] of executors) {
+    const retryTest = (title: string, fn: () => Promise<void>) =>
+      test.skipIf(spawns && SKIP_SANDBOX_SPAWN_TESTS)(
+        `${title} (${name})`,
+        fn,
+        CHILD_PROCESS_TEST_BUDGET_MS,
+      );
+
+    retryTest("retry() handles sync and async functions", async () => {
+      const output = await run(
+        makeExecutor,
+        `import { retry } from "stdlib";
+export default async (_args, ctx) => {
+  const fast = { minDelayMs: 1 };
+  const out = {};
+  let calls = 0;
+  out.syncReturn = [await retry(() => { calls++; return 5; }), calls];
+  calls = 0;
+  out.syncThrowThenOk = [await retry((a) => { calls++; if (a < 2) throw new Error("x"); return a; }, fast), calls];
+  calls = 0;
+  out.asyncRejectThenOk = [await retry(async (a) => { calls++; if (a < 3) throw new Error("x"); return "ok"; }, fast), calls];
+  calls = 0;
+  try {
+    await retry((a) => { calls++; throw new Error("fail " + a); }, { ...fast, retries: 2 });
+    out.exhausted = "resolved";
+  } catch (error) {
+    out.exhausted = [error.message, calls];
+  }
+  calls = 0;
+  try {
+    await ctx.stdlib.retry(() => { calls++; throw new Error("stop"); }, { ...fast, retryOn: () => false });
+  } catch (error) {
+    out.retryOnFalse = [error.message, calls];
+  }
+  calls = 0;
+  out.lastResult = [await retry(() => { calls++; return { success: false, status: 502 }; }, { ...fast, retries: 1 }), calls];
+  calls = 0;
+  const add = retry.wrap((a, b) => { calls++; if (calls < 2) throw new Error("x"); return a + b; }, fast);
+  out.wrap = [await add(2, 3), calls];
+  return out;
+};`,
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({
+        syncReturn: [5, 1],
+        syncThrowThenOk: [2, 2],
+        asyncRejectThenOk: ["ok", 3],
+        exhausted: ["fail 3", 3],
+        retryOnFalse: ["stop", 1],
+        lastResult: [{ success: false, status: 502 }, 2],
+        wrap: [5, 2],
+      });
+    });
+
+    retryTest("retry() honours Retry-After on a 429", async () => {
+      const path = `/f/429-1-ra-${name}`;
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const res = await ctx.stdlib.retry(() => fetch(args.url), { minDelayMs: 1 });
+  return res.status;
+};`,
+        { url: `${retryBase}${path}` },
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toBe(200);
+      const hits = hitsOf(path);
+      expect(hits.length).toBe(2);
+      expect(hits[1].at - hits[0].at).toBeGreaterThanOrEqual(900);
+    });
+
+    retryTest("stdlib.fetch retries by method and idempotency key", async () => {
+      const paths = {
+        postNoKey: `/f/502-5-postnokey-${name}`,
+        postKey: `/f/502-2-postkey-${name}`,
+        get: `/f/502-1-get-${name}`,
+        off: `/f/502-5-off-${name}`,
+        legacy: `/f/502-5-legacy-${name}`,
+      };
+      const urls = Object.fromEntries(
+        Object.entries(paths).map(([key, path]) => [key, `${retryBase}${path}`]),
+      );
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const f = ctx.stdlib.fetch;
+  return {
+    postNoKey: (await f(args.postNoKey, { method: "POST", body: "x", retry: { minDelayMs: 1 } })).status,
+    postKey: (await f(args.postKey, { method: "POST", body: "x", retry: { minDelayMs: 1, idempotencyKey: true } })).status,
+    get: (await f(args.get, { retry: { minDelayMs: 100 } })).status,
+    off: (await f(args.off, { retry: false })).status,
+    legacy: (await f(args.legacy, { retries: 2 })).status,
+  };
+};`,
+        urls,
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({
+        postNoKey: 502,
+        postKey: 200,
+        get: 200,
+        off: 502,
+        legacy: 502,
+      });
+      expect(hitsOf(paths.postNoKey).length).toBe(1);
+      const keyed = hitsOf(paths.postKey);
+      expect(keyed.length).toBe(3);
+      expect(keyed[0].key).toMatch(/^[0-9a-f-]{36}$/);
+      expect(new Set(keyed.map((hit) => hit.key)).size).toBe(1);
+      const get = hitsOf(paths.get);
+      expect(get.length).toBe(2);
+      // Equal jitter: the first wait is at least half of minDelayMs.
+      expect(get[1].at - get[0].at).toBeGreaterThanOrEqual(45);
+      expect(hitsOf(paths.off).length).toBe(1);
+      expect(hitsOf(paths.legacy).length).toBe(2);
+    });
+
+    retryTest("ctx.swarm retries 429 always and 5xx only when a repeat is safe", async () => {
+      const keys = {
+        write429: `429-1-w429-${name}`,
+        read502: `502-1-r502-${name}`,
+        write502: `502-1-w502-${name}`,
+        trigger502: `502-1-trig-${name}`,
+      };
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const pick = (r) => [r.success, r.status];
+  return {
+    write429: pick(await ctx.swarm.kv_set({ key: args.write429, value: 1 })),
+    read502: pick(await ctx.swarm.kv_get({ key: args.read502 })),
+    write502: pick(await ctx.swarm.kv_set({ key: args.write502, value: 1 })),
+    trigger502: pick(await ctx.swarm.workflow_trigger({ id: args.trigger502, idempotencyKey: "same-key" })),
+  };
+};`,
+        keys,
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({
+        write429: [true, 200],
+        read502: [true, 200],
+        write502: [false, 502],
+        trigger502: [true, 200],
+      });
+      expect(hitsOf(`/api/kv/${keys.write429}`).length).toBe(2);
+      expect(hitsOf(`/api/kv/${keys.read502}`).length).toBe(2);
+      expect(hitsOf(`/api/kv/${keys.write502}`).length).toBe(1);
+      const trigger = hitsOf(`/api/workflows/${keys.trigger502}/trigger`);
+      expect(trigger.map((hit) => hit.key)).toEqual(["same-key", "same-key"]);
+    });
+  }
+});
+
 describe("native-only executor behavior", () => {
   test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)("timeout maps to timeout", async () => {
     const output = await new NativeScriptExecutor().run(

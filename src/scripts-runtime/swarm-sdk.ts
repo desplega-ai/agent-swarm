@@ -2,6 +2,7 @@ import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
+import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
 
 type BridgeRequest = {
@@ -474,11 +475,112 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
   }
 }
 
+// ── transient-failure retries ──
+// Every ctx.swarm call retries a 429 (the rate limiter refused it before any
+// work ran). A 502/503/504 or a network error retries only when a repeat is
+// safe: a read, or a write whose route dedupes by its `Idempotency-Key`
+// header (workflow_trigger with `idempotencyKey`). Any other write may have
+// landed, and a second call would repeat it. script_run's `idempotencyKey`
+// does not count: it overwrites a KV entry and does not dedupe the run.
+const BRIDGE_MAX_RETRIES = 3;
+const BRIDGE_MIN_DELAY_MS = 250;
+const BRIDGE_MAX_DELAY_MS = 2_000;
+/** Total retry time per call, so retries cannot eat the script's wall clock. */
+const BRIDGE_RETRY_BUDGET_MS = 5_000;
+const READ_RETRY_STATUSES = new Set([502, 503, 504]);
+
+// MCP tool names that only read. Prefix/suffix rules cover get-* / list-* /
+// *-get / *-list / *-search; the set lists the rest. A tool missing here is
+// treated as a write, which is the safe default.
+const READ_TOOL_PATTERN = /^(get|list)-|-(get|list|search)$/;
+const READ_TOOLS = new Set([
+  "db-query",
+  "kv-get",
+  "kv-list",
+  "my-agent-info",
+  "script-query-types",
+  "skill-get-file",
+  "slack-read",
+  "slack-list-channels",
+  "chat-read-thread",
+  "app-rows-list",
+  "app-row-get",
+  "app-history",
+  "app-diff",
+  "context-history",
+  "context-diff",
+  "extension-catalog",
+  "tracker-status",
+]);
+// GET routes that change state: polling claims work.
+const NON_READ_GET_METHODS = new Set(["task_poll"]);
+
+export function isReadOnlyBridgeCall(name: string, method: string): boolean {
+  if (method === "GET") return !NON_READ_GET_METHODS.has(name);
+  const tool = mcpToolNameForSdkMethod(name);
+  return READ_TOOL_PATTERN.test(tool) || READ_TOOLS.has(tool);
+}
+
+function hasIdempotencyKey(headers: Record<string, string> | undefined): boolean {
+  return Object.keys(headers ?? {}).some((key) => key.toLowerCase() === "idempotency-key");
+}
+
+/** Waits `ms`, or less when `signal` aborts first. */
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * `signal` is the run's own signal (quickjs aborts it when the run ends): an
+ * aborted run gets the current outcome at once, never another wait or attempt.
+ */
+async function bridgeFetch(
+  url: string,
+  init: RequestInit,
+  readOnly: boolean,
+  signal: AbortSignal | undefined,
+): Promise<Response> {
+  const started = Date.now();
+  const fits = (delay: number) => Date.now() - started + delay <= BRIDGE_RETRY_BUDGET_MS;
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (error) {
+      const delay = backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
+      // An abort means the run is ending: settle now, never wait and retry.
+      const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
+      if (aborted || !readOnly || attempt > BRIDGE_MAX_RETRIES || !fits(delay)) throw error;
+      await sleep(delay, signal);
+      if (signal?.aborted) throw error;
+      continue;
+    }
+    const retryable = res.status === 429 || (readOnly && READ_RETRY_STATUSES.has(res.status));
+    if (!retryable || attempt > BRIDGE_MAX_RETRIES || signal?.aborted) return res;
+    const delay =
+      (res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined) ??
+      backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
+    // A Retry-After past the budget: hand the 429 back rather than wait.
+    if (!fits(delay)) return res;
+    await res.body?.cancel().catch(() => {});
+    await sleep(delay, signal);
+    if (signal?.aborted) return res;
+  }
+}
+
 async function callBridgeApi(
   name: string,
   args: unknown,
   config: SwarmConfig,
-  options: { throwOnError?: boolean; preserveData?: boolean } = {},
+  options: { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal } = {},
 ): Promise<unknown> {
   const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
   const request = bridgeRequestFor(name, args);
@@ -486,11 +588,16 @@ async function callBridgeApi(
   // Tools without a specific REST route go through the generic MCP bridge
   if (!request) {
     const mcpToolName = mcpToolNameForSdkMethod(name);
-    const res = await fetch(`${baseUrl}/api/mcp-bridge`, {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
-    });
+    const res = await bridgeFetch(
+      `${baseUrl}/api/mcp-bridge`,
+      {
+        method: "POST",
+        headers: headers(config),
+        body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
+      },
+      isReadOnlyBridgeCall(name, "POST"),
+      options.signal,
+    );
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
     if (!res.ok && options.throwOnError) {
       const message =
@@ -519,11 +626,16 @@ async function callBridgeApi(
     });
   }
 
-  const res = await fetch(`${baseUrl}${request.path}`, {
-    method: request.method,
-    headers: { ...headers(config), ...request.headers },
-    body: request.body === undefined ? undefined : JSON.stringify(request.body),
-  });
+  const res = await bridgeFetch(
+    `${baseUrl}${request.path}`,
+    {
+      method: request.method,
+      headers: { ...headers(config), ...request.headers },
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+    },
+    isReadOnlyBridgeCall(name, request.method) || hasIdempotencyKey(request.headers),
+    options.signal,
+  );
   const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
   if (!res.ok && options.throwOnError) {
     const message =
@@ -536,7 +648,12 @@ async function callBridgeApi(
   return options.preserveData ? result : scrubObject(result);
 }
 
-async function callTool(name: string, args: unknown, config: SwarmConfig): Promise<unknown> {
+async function callTool(
+  name: string,
+  args: unknown,
+  config: SwarmConfig,
+  signal: AbortSignal | undefined,
+): Promise<unknown> {
   if (!isSdkToolAllowed(name)) {
     throw new Error(
       `Tool '${name}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
@@ -544,11 +661,11 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
   }
 
   if (name === "script_search" || name === "script_run") {
-    return callBridgeApi(name, args, config, { throwOnError: true });
+    return callBridgeApi(name, args, config, { throwOnError: true, signal });
   }
 
   if (name === "kv_getOrNull") {
-    const result = (await callBridgeApi(name, args, config)) as {
+    const result = (await callBridgeApi(name, args, config, { signal })) as {
       success: boolean;
       status: number;
       data: unknown;
@@ -564,7 +681,7 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
     return result.data;
   }
 
-  return callBridgeApi(name, args, config);
+  return callBridgeApi(name, args, config, { signal });
 }
 
 type RoomMethods = Record<
@@ -573,11 +690,17 @@ type RoomMethods = Record<
 >;
 type RuntimeSwarmSdk = Record<string, (args?: unknown) => Promise<unknown>> & { room: RoomMethods };
 
-export function createSwarmSdk(config: SwarmConfig): RuntimeSwarmSdk {
+/** `signal`: the run's abort signal; it stops bridge retries when the run ends. */
+export function createSwarmSdk(
+  config: SwarmConfig,
+  options: { signal?: AbortSignal } = {},
+): RuntimeSwarmSdk {
+  const { signal } = options;
   const roomCall = (method: keyof RoomMethods) => async (args?: unknown) => {
     const result = (await callBridgeApi(`room_${method}`, args, config, {
       throwOnError: true,
       preserveData: true,
+      signal,
     })) as { data: { room?: unknown } };
     return method === "decode" ? result.data : result.data.room;
   };
@@ -592,7 +715,7 @@ export function createSwarmSdk(config: SwarmConfig): RuntimeSwarmSdk {
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) return target[prop];
-      return (args?: unknown) => callTool(prop, args, config);
+      return (args?: unknown) => callTool(prop, args, config, signal);
     },
   }) as RuntimeSwarmSdk;
 }

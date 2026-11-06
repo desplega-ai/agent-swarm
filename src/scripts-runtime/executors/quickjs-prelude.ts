@@ -245,15 +245,130 @@ const toRequest = (input, init) => {
 };
 const fetch = async (input, init) => new Response(await hostCall("fetch", [toRequest(input, init)]));
 
+// ── retry (mirrors stdlib/retry.ts; sleeps on the host clock) ──
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const retryAfterMs = (value) => {
+  if (value === null || value === undefined) return undefined;
+  const trimmed = String(value).trim();
+  if (trimmed === "") return undefined;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000);
+  const date = Date.parse(trimmed);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+};
+const failedStatus = (value) => {
+  if (!value || typeof value !== "object") return undefined;
+  if (typeof value.status !== "number") return undefined;
+  if (value.ok !== false && value.success !== false) return undefined;
+  const headers = value.headers;
+  let retryAfter;
+  if (headers && typeof headers.get === "function") retryAfter = headers.get("retry-after");
+  else if (headers && typeof headers === "object" && typeof headers["retry-after"] === "string") retryAfter = headers["retry-after"];
+  return { status: value.status, retryAfter };
+};
+const checkNumber = (name, value, fallback, integer) => {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError("retry: \x60" + name + "\x60 must be a non-negative number");
+  }
+  if (integer && !Number.isInteger(value)) {
+    throw new TypeError("retry: \x60" + name + "\x60 must be a non-negative integer");
+  }
+  return value;
+};
+const retryCall = async (fn, options) => {
+  if (typeof fn !== "function") throw new TypeError("retry: first argument must be a function");
+  const opts = options || {};
+  const retries = checkNumber("retries", opts.retries, 3, true);
+  const minDelayMs = checkNumber("minDelayMs", opts.minDelayMs, 200, false);
+  const maxDelayMs = checkNumber("maxDelayMs", opts.maxDelayMs, 5000, false);
+  const budgetMs = checkNumber("budgetMs", opts.budgetMs, 30000, false);
+  const retryOn = opts.retryOn;
+  if (retryOn !== undefined && typeof retryOn !== "function") {
+    throw new TypeError("retry: \x60retryOn\x60 must be a function");
+  }
+  const started = Date.now();
+  for (let attempt = 1; ; attempt++) {
+    let threw = false;
+    let value;
+    try {
+      value = await fn(attempt);
+    } catch (error) {
+      threw = true;
+      value = error;
+    }
+    const settle = () => {
+      if (threw) throw value;
+      return value;
+    };
+    if (attempt > retries) return settle();
+    const info = threw ? undefined : failedStatus(value);
+    const again = retryOn ? await retryOn(value, attempt) : threw || (info !== undefined && RETRYABLE_STATUSES.has(info.status));
+    if (!again) return settle();
+    const waitFor = info && info.status === 429 ? retryAfterMs(info.retryAfter) : undefined;
+    const ceiling = Math.min(maxDelayMs, minDelayMs * 2 ** (attempt - 1));
+    const delay = waitFor !== undefined ? Math.min(maxDelayMs, waitFor) : Math.round(ceiling / 2 + (Math.random() * ceiling) / 2);
+    if (Date.now() - started + delay > budgetMs) return settle();
+    await __host_sleep(delay);
+  }
+};
+const retry = Object.assign(retryCall, {
+  wrap(fn, options) {
+    if (typeof fn !== "function") throw new TypeError("retry.wrap: first argument must be a function");
+    return (...args) => retryCall(() => fn(...args), options);
+  },
+});
+
 const unavailable = (name) => () => {
   throw new Error(name + " is not available in the quickjs executor (no filesystem access)");
 };
+// stdlib.fetch retries in the sandbox, so a retryOn function runs here and the
+// waits use the host clock. Mirrors runtimeFetch in stdlib/fetch.ts. Bodies are
+// serialized once, so every sandbox body can be replayed.
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
+const TRANSIENT_5XX = new Set([502, 503, 504]);
+const stdlibFetch = async (input, options) => {
+  const opts = options || {};
+  const retryOption = opts.retry;
+  let config = {};
+  if (retryOption === false) config = { retries: 0 };
+  else if (retryOption && typeof retryOption === "object") config = retryOption;
+  else if (retryOption === undefined && opts.retries !== undefined) config = { retries: Math.max(0, opts.retries - 1) };
+  const { idempotencyKey, retryOn: userRetryOn, ...retryOptions } = config;
+  const init = { ...opts };
+  delete init.retry;
+  delete init.retries;
+  const headerMap = new Headers(opts.headers);
+  if (idempotencyKey && !headerMap.has("idempotency-key")) {
+    headerMap.set("idempotency-key", idempotencyKey === true ? randomUUID() : String(idempotencyKey));
+    init.headers = headerMap;
+  }
+  const method = String(opts.method || "GET").toUpperCase();
+  const repeatSafe = IDEMPOTENT_METHODS.has(method) || headerMap.has("idempotency-key");
+  const request = toRequest(input, init);
+  request.retry = false;
+  return retryCall(async () => new Response(await hostCall("stdlib.fetch", [request])), {
+    ...retryOptions,
+    retryOn: async (value, attempt) => {
+      if (userRetryOn) return userRetryOn(value, attempt);
+      if (value instanceof Response) return value.status === 429 || (repeatSafe && TRANSIENT_5XX.has(value.status));
+      return repeatSafe;
+    },
+  });
+};
+const stdlibFetchJson = async (input, options) => {
+  const response = await stdlibFetch(input, options);
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  return contentType.includes("application/json") ? JSON.parse(text) : text;
+};
+
 const stdlib = Object.freeze({
-  fetch: async (input, options) => new Response(await hostCall("stdlib.fetch", [toRequest(input, options)])),
-  fetchJson: async (input, options) => hostCall("stdlib.fetchJson", [toRequest(input, options)]),
+  fetch: stdlibFetch,
+  fetchJson: stdlibFetchJson,
   glob: unavailable("ctx.stdlib.glob"),
   grep: unavailable("ctx.stdlib.grep"),
   table: (rows) => hostSync("table", rows),
+  retry,
   Redacted,
 });
 

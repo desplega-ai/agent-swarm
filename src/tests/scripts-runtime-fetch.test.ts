@@ -26,7 +26,7 @@ describe("runtimeFetch abort handling", () => {
           await new Promise<void>((resolve) => stallReleases.push(resolve));
         }
         if (path === "/flaky" && hits[path] === 1) {
-          return new Response("boom", { status: 500 });
+          return new Response("boom", { status: 502 });
         }
         return new Response("ok");
       },
@@ -108,7 +108,7 @@ describe("runtimeFetch abort handling", () => {
     expect(hits["/stall-timeout"]).toBe(2);
   });
 
-  test("5xx responses still retry and succeed on a later attempt", async () => {
+  test("a 502 on a GET still retries and succeeds on a later attempt", async () => {
     const controller = new AbortController();
     const res = await runtimeFetch(`${origin}/flaky`, {
       signal: controller.signal,
