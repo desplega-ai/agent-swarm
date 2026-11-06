@@ -415,7 +415,10 @@ function componentsOf(
   if (held) return held.tree;
   const tree = readWorkflowComponents({ days, tier, now, workflowId: own.workflowId, own });
   // A failed read is not held: the next request reads again.
-  tree.catch(() => heldTrees.delete(key));
+  tree.catch(() => {
+    // Only this read's own entry: an expired one may already be replaced.
+    if (heldTrees.get(key)?.tree === tree) heldTrees.delete(key);
+  });
   if (heldTrees.size >= MAX_HELD_TREES) {
     const oldest = heldTrees.keys().next().value;
     if (oldest !== undefined) heldTrees.delete(oldest);
