@@ -73,6 +73,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
+  Approval: ["onResolved"],
 };
 
 /**
@@ -88,6 +89,61 @@ const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]>
   ],
   Drawer: [["actions", "actions"]],
 };
+
+/** The `$chain` keys an `Approval.onResolved` chain may read (first path segment). */
+const APPROVAL_CHAIN_KEYS = new Set(["status", "responses", "resolvedBy"]);
+
+/** Every `{ $chain: key }` sentinel nested in `value`, with its path. */
+function collectChainSentinels(
+  value: unknown,
+  path: string,
+  found: { path: string; key: string }[],
+): void {
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      collectChainSentinels(child, appendPath(path, index), found);
+    }
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  if (Object.keys(value).length === 1 && typeof value.$chain === "string") {
+    found.push({ path, key: value.$chain });
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectChainSentinels(child, appendPath(path, key), found);
+  }
+}
+
+/**
+ * Approval publishes `{ status, responses, resolvedBy }` to its own
+ * `props.onResolved` chain. An element-level `on.resolved` is never emitted
+ * (json-render resolves `on` params itself and cannot see `$chain`), and an
+ * unknown `$chain` key stays an unresolved sentinel that fails the step.
+ */
+function approvalIssues(element: Record<string, unknown>, elementPath: string) {
+  const issues: AppValidationIssue[] = [];
+  if (isPlainObject(element.on) && Object.hasOwn(element.on, "resolved")) {
+    issues.push(
+      issue(
+        `${elementPath}.on.resolved`,
+        "Approval runs its resolved chain from props.onResolved, not on.resolved",
+      ),
+    );
+  }
+  const props = isPlainObject(element.props) ? element.props : {};
+  const found: { path: string; key: string }[] = [];
+  collectChainSentinels(props.onResolved, `${elementPath}.props.onResolved`, found);
+  for (const { path, key } of found) {
+    // `$chain` reads a JSON-pointer path: `responses/<questionId>` reaches one answer.
+    const head = key.replace(/^\//, "").split("/")[0]!;
+    if (key === "" || APPROVAL_CHAIN_KEYS.has(head)) continue;
+    issues.push(
+      issue(path, `unknown $chain key "${key}"; Approval publishes status, responses, resolvedBy`),
+    );
+  }
+  return issues;
+}
 
 /** Every `[path, chain]` nested in an element's item-chain props. */
 function itemActionChains(type: unknown, props: Record<string, unknown>, propsPath: string) {
@@ -1751,6 +1807,7 @@ export function validatePage(
       issues.push(...onResult.issues);
       stateRefs.push(...onResult.stateRefs);
     }
+    if (type === "Approval") issues.push(...approvalIssues(rawElement, elementPath));
     if (Object.hasOwn(rawElement, "watch")) {
       const watchResult = validateActionMap(
         rawElement.watch,

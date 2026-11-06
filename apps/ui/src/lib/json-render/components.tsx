@@ -170,6 +170,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
+import { ApprovalComponent } from "./approval";
 import {
   CARD_GRID_PAGE_SIZE,
   cardGridCapText,
@@ -4157,6 +4158,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
   Kanban: ({ props }) => <KanbanComponent props={props} />,
+  Approval: ({ props }) => <ApprovalComponent props={props} />,
   Calendar: ({ props }) => <CalendarComponent props={props} />,
   ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
   Tree: ({ props }) => <TreeComponent props={props} />,

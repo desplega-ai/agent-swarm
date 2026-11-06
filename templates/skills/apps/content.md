@@ -576,6 +576,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
+| `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 
 Table details:
 
@@ -631,6 +632,47 @@ SchemaForm details:
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
 - Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
+
+Approval details (human-in-the-loop):
+
+- `requestId` names one approval request, usually the id an `app.action` script returned: `{ "$state": "/actions/<name>/result/requestId" }`. An empty value renders nothing, so the element can sit on the page before the request exists.
+- While the request is pending, the card shows its questions with the dashboard's answer flow and polls every 5s; polling stops once it resolves. The viewer answers with their own credential, so the server records them and enforces the approvers list and RBAC.
+- A viewer whose role cannot answer, or whose answer the server refuses (not an approver), sees a read-only card with an "Open in dashboard" link. If the request was answered or expired meanwhile, the card refetches and shows that state instead of an error. With an `all` or `{ min: N }` policy, an answer that does not resolve it shows "Your answer is recorded".
+- `showResolved: false` shows only the outcome line after resolution, not the answers. `compact: true` drops the card chrome.
+- `onResolved` is an action chain run once, when the page sees the request leave `pending`. Its params may read `{ "$chain": "status" }` (`approved`, `rejected`, `timeout`, `cancelled`), `{ "$chain": "responses" }` (answers keyed by question id; `{ "$chain": "responses/<questionId>" }` reads one), and `{ "$chain": "resolvedBy" }`. A request that was already resolved when the page loaded does not run it, so a reload never repeats the follow-up. Use `onResolved`, not `on.resolved`: the validator rejects the latter.
+
+In-session wait: the follow-up runs in the viewer's browser, so if they close the tab before the answer, nothing continues. The script behind the action creates the request detached and returns its id:
+
+```ts
+export default async function run(args, ctx) {
+  const res: any = await ctx.swarm.request_humanInput({
+    title: `Deploy ${args.service}?`,
+    questions: [{ id: "go", type: "approval", label: "Ship it to production?" }],
+    detached: true,
+  });
+  return { requestId: res?.data?.requestId ?? res?.requestId };
+}
+```
+
+```json
+{
+  "askBtn": { "type": "Button", "props": { "label": "Request deploy", "busyWith": "requestDeploy" },
+    "on": { "press": { "action": "app.action", "params": { "name": "requestDeploy", "input": { "service": "api" } } } } },
+  "approve": {
+    "type": "Approval",
+    "props": {
+      "requestId": { "$state": "/actions/requestDeploy/result/requestId" },
+      "onResolved": [
+        { "action": "app.action", "params": { "name": "applyDecision",
+          "input": { "status": { "$chain": "status" }, "responses": { "$chain": "responses" } } } },
+        { "action": "ui.toast", "params": { "message": "Decision applied", "tone": "success" } }
+      ]
+    }
+  }
+}
+```
+
+Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE workflowRunId = ? AND status = 'pending' ORDER BY createdAt DESC LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
 
 Form details:
 
@@ -731,7 +773,7 @@ Valid `$state` roots are:
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
-Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, or `Form.onSubmit`) these scoped sentinels are valid, recursively inside objects and arrays:
+Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or `Approval.onResolved`) these scoped sentinels are valid, recursively inside objects and arrays:
 
 | Sentinel | Resolves to |
 |---|---|
@@ -741,7 +783,7 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
-| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain; it carries `leafTaskId` and `newTaskId`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by the component that runs the chain: a task chain carries `leafTaskId` and `newTaskId`; `Approval.onResolved` carries `status`, `responses` and `resolvedBy`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
 | `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.

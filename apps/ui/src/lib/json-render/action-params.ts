@@ -30,7 +30,8 @@
  *     previous value.
  *   - `{ $state: "/path" }`                 — json-render state read
  *   - `{ $chain: "key" }` / `{ $chain: "" }`— chain-derived value (e.g. `leafTaskId` /
- *     `newTaskId` set by a component that runs a task chain) / whole chain object.
+ *     `newTaskId` set by a component that runs a task chain, or Approval's `status` /
+ *     `responses` / `resolvedBy`) / whole chain object.
  *     Unlike the others, an unresolvable `$chain` is returned as-is (see below).
  * Anything else is a literal.
  */
@@ -49,11 +50,13 @@ export interface ParamScope {
   /** Live json-render state snapshot, for `$state` reads. */
   state?: Record<string, unknown>;
   /**
-   * Chain-derived values (current leaf / newly created task id) published by a
-   * component that runs a task chain — target of `$chain`. Table/Form dispatch
-   * scopes leave it unset, and a `$chain` they cannot resolve stays a sentinel.
+   * Chain-derived values published by the component that runs the chain:
+   * a task chain's current leaf / newly created task id, or Approval's
+   * `{ status, responses, resolvedBy }` — target of `$chain`. Table/Form
+   * dispatch scopes leave it unset, and a `$chain` they cannot resolve stays a
+   * sentinel.
    */
-  chain?: { leafTaskId?: string; newTaskId?: string };
+  chain?: Record<string, unknown>;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

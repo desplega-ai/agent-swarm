@@ -1074,6 +1074,17 @@ const cardGridProps = z.object({
   emptyMessage: z.string().optional(),
 });
 
+const approvalProps = z.object({
+  /** The approval request id, usually `{ "$state": "/actions/<name>/result/requestId" }`. Empty renders nothing. */
+  requestId: z.string(),
+  /** After resolution, show the answers (default true). False shows only the outcome line. */
+  showResolved: z.boolean().optional(),
+  /** Questions only, without the card chrome. */
+  compact: z.boolean().optional(),
+  /** Chain run once when this page sees the request leave `pending`. Params may use `$chain`: `status`, `responses`, `resolvedBy`. */
+  onResolved: actionChainSchema.optional(),
+});
+
 const elementRefProps = z.object({
   app: z.string().optional(),
   element: z.string(),
@@ -1290,6 +1301,11 @@ export const swarmCatalogSpec = {
       props: kanbanProps,
       description:
         'Kanban board: one card per row, grouped into `columns` by the row\'s `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with the DetailList field kinds (badge tones, status, user, relative, copy, ...). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ "action": "app.mutate", "params": { "model": "<m>", "op": "update", "rowId": { "$row": "id" }, "values": { "<columnField>": { "$row": "<columnField>" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).',
+    },
+    Approval: {
+      props: approvalProps,
+      description:
+        'One approval request (human-in-the-loop), answered in place as the viewer. Bind `requestId` to the id an `app.action` script returned (`{ "$state": "/actions/<name>/result/requestId" }`); an empty id renders nothing. It polls every 5s while the request is pending and stops once it resolves. A viewer whose role cannot answer, or whose answer the server refuses, gets a read-only card with an "Open in dashboard" link. `showResolved` (default true) shows the answers after resolution; `compact` drops the card chrome. `onResolved` runs once when the page sees the request leave `pending`, with `$chain` = `{ status, responses, resolvedBy }`; a request that was already resolved when the page loaded does not run it.',
     },
     Calendar: {
       props: calendarProps,
