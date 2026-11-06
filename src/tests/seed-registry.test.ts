@@ -1,17 +1,23 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   closeDb,
+  createWorkflow,
+  getDb,
   getScheduledTaskByName,
   getScheduledTasks,
   initDb,
   listWorkflows,
+  upsertSwarmConfig,
 } from "../be/db";
-import { getScript } from "../be/scripts/db";
+import { getScript, upsertScriptByName } from "../be/scripts/db";
 import { buildSeeders, runSeeder, SEEDERS } from "../be/seed";
 import { schedulesSeeder } from "../be/seed/schedules-seeder";
 import { workflowsSeeder } from "../be/seed/workflows-seeder";
 import { scriptsSeeder } from "../be/seed-scripts";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const TEST_DB_PATH = "./test-seed-registry.sqlite";
 
@@ -21,6 +27,22 @@ const SEED_TOGGLE_KEYS = [
   "SEED_WORKFLOWS_ENABLED",
   "SEED_SCHEDULES_ENABLED",
 ] as const;
+
+async function seedUpdateCheckTarget(): Promise<void> {
+  await upsertScriptByName({
+    name: "swarm-update-check",
+    scope: "global",
+    scopeId: null,
+    source: "export default async function main() { return {}; }",
+    description: "external stand-in",
+    intent: "seed registry target fixture",
+    signatureJson: "{}",
+    fsMode: "none",
+    agentId: null,
+    isScratch: false,
+    typeChecked: true,
+  });
+}
 
 async function removeDbFiles(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -74,12 +96,7 @@ describe("seeder registry", () => {
         const config = await Bun.file(`${catalogDir}/${path}`).json();
         catalogNames.push(config.name);
       }
-      expect(
-        seeder
-          .items()
-          .map((item) => item.key)
-          .sort(),
-      ).toEqual(catalogNames.sort());
+      expect((await seeder.items()).map((item) => item.key).sort()).toEqual(catalogNames.sort());
     }
   });
 
@@ -110,7 +127,7 @@ describe("seeder registry", () => {
       workflowsSeeder.items().map((item) => item.key),
     );
     expect((await getScheduledTasks()).map((schedule) => schedule.name).sort()).toEqual(
-      schedulesSeeder.items().map((item) => item.key),
+      (await schedulesSeeder.items()).map((item) => item.key),
     );
 
     expect(await runSeeder(workflowsSeeder, { quiet: true })).toMatchObject({
@@ -155,5 +172,76 @@ describe("seeder registry", () => {
   test("all four flags off leaves only agent-fs-provision", () => {
     for (const key of SEED_TOGGLE_KEYS) process.env[key] = "false";
     expect(buildSeeders().map((seeder) => seeder.kind)).toEqual(["agent-fs-provision"]);
+  });
+
+  test.each([undefined, "true"])(
+    "the seed CLI honors dashboard opt-outs over deployment flags (%s)",
+    async (deploymentValue) => {
+      for (const key of SEED_TOGGLE_KEYS) {
+        await upsertSwarmConfig({ scope: "global", key, value: "false" });
+      }
+      // The preload serves test DBs from an in-memory template; the real CLI
+      // needs the same saved configuration in a file-backed database.
+      await Bun.write(TEST_DB_PATH, getDb().serialize());
+      closeDb();
+      const result = await runChild(
+        [process.execPath, "--no-env-file", "scripts/seed-scripts.ts"],
+        {
+          env: {
+            PATH: process.env.PATH,
+            NODE_ENV: "test",
+            DESPLEGA_TELEMETRY_ENV: "test",
+            SECRETS_ENCRYPTION_KEY: process.env.SECRETS_ENCRYPTION_KEY,
+            DATABASE_PATH: resolve(TEST_DB_PATH),
+            ...Object.fromEntries(SEED_TOGGLE_KEYS.map((key) => [key, deploymentValue])),
+          },
+        },
+      );
+      const seededKinds = result.stdout.match(/^\[seed:[^\]]+\]/gm) ?? [];
+      expect(seededKinds).toEqual(["[seed:agent-fs-provision]"]);
+      expectChildOk(result, "seed CLI with dashboard opt-outs");
+      const persisted = new Database(TEST_DB_PATH, { readonly: true });
+      try {
+        for (const table of ["scripts", "skills", "workflows", "scheduled_tasks"]) {
+          expect(persisted.query(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({
+            count: 0,
+          });
+        }
+      } finally {
+        persisted.close();
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test.each([
+    { disabledKeys: ["SEED_SCRIPTS_ENABLED"] },
+    { disabledKeys: ["SEED_WORKFLOWS_ENABLED"] },
+    { disabledKeys: ["SEED_SCRIPTS_ENABLED", "SEED_WORKFLOWS_ENABLED"] },
+  ])("defers only missing opted-out schedule targets: %j", async ({ disabledKeys }) => {
+    const scriptsOff = disabledKeys.includes("SEED_SCRIPTS_ENABLED");
+    const workflowsOff = disabledKeys.includes("SEED_WORKFLOWS_ENABLED");
+    for (const key of disabledKeys) process.env[key] = "false";
+    if (!scriptsOff) await seedUpdateCheckTarget();
+    if (!workflowsOff) await createWorkflow({ name: "dreaming", definition: { nodes: [] } });
+
+    const seeder = buildSeeders().find((candidate) => candidate.kind === "schedule")!;
+    expect(await runSeeder(seeder, { quiet: true })).toMatchObject({
+      created: 11 - disabledKeys.length,
+      failed: [],
+    });
+    expect(await getScheduledTaskByName("daily-status-report")).not.toBeNull();
+    if (scriptsOff) expect(await getScheduledTaskByName("daily-swarm-update-check")).toBeNull();
+    if (workflowsOff) expect(await getScheduledTaskByName("dreaming-daily")).toBeNull();
+
+    // Targets may be supplied externally later. Reuse the same seeder to prove
+    // availability is checked at execution, not when the registry is built.
+    if (scriptsOff) await seedUpdateCheckTarget();
+    if (workflowsOff) await createWorkflow({ name: "dreaming", definition: { nodes: [] } });
+    expect(await runSeeder(seeder, { quiet: true })).toMatchObject({
+      created: disabledKeys.length,
+      failed: [],
+    });
+    expect(await getScheduledTasks()).toHaveLength(11);
   });
 });

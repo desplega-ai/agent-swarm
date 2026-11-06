@@ -443,6 +443,11 @@ retires, disables, or otherwise touches rows a previous seed pass already create
 hand if you no longer want them. The API server reads these values at boot (`restartRequired`): flip
 one, then restart to change what the next seed pass includes.
 
+The `seed:scripts` CLI loads saved global configuration before seeding; dashboard values take
+precedence over deployment env values, as at API boot. If scripts or workflows are opted out,
+schedules targeting missing entities of that kind are deferred without errors. Other schedules
+still seed normally. Once an external target exists, its schedule can seed on the next pass.
+
 ## Chat SDK
 
 `CHAT_SDK_ENABLED` (boolean, default `false`, applies on save) starts the [Chat SDK channel](/docs/integrations/chat-sdk) for the adapters defined in `CHAT_SDK_ADAPTERS`. Edit `CHAT_SDK_ADAPTERS` (JSON, applies on save) on the Chat SDK card under **Settings → Integrations**, not on this page.

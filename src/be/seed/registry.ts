@@ -10,7 +10,7 @@ import { scriptsSeeder } from "../seed-scripts";
 import { skillsSeeder } from "../seed-skills";
 import { agentFsProvisionSeeder } from "./agent-fs-provision";
 import { runSeeders } from "./runner";
-import { schedulesSeeder } from "./schedules-seeder";
+import { createSchedulesSeeder } from "./schedules-seeder";
 import {
   isSeedSchedulesEnabled,
   isSeedScriptsEnabled,
@@ -30,7 +30,7 @@ export function buildSeeders(env: NodeJS.ProcessEnv = process.env): Seeder[] {
   if (isSeedScriptsEnabled(env)) seeders.push(scriptsSeeder);
   if (isSeedSkillsEnabled(env)) seeders.push(skillsSeeder);
   if (isSeedWorkflowsEnabled(env)) seeders.push(workflowsSeeder);
-  if (isSeedSchedulesEnabled(env)) seeders.push(schedulesSeeder);
+  if (isSeedSchedulesEnabled(env)) seeders.push(createSchedulesSeeder(undefined, env));
   return seeders;
 }
 
