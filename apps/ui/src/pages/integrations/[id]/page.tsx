@@ -60,14 +60,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  DetailPageBody,
-  DetailPageRail,
-  QuickStat,
-  QuickStats,
-  Relationship,
-  Relationships,
-} from "@/components/ui/detail-page-layout";
+import { DetailPageBody } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { adapterChannelState, CHANNEL_DEFS } from "@/lib/channel-cards";
 import { CHAT_SDK_ADAPTER_DEFS } from "@/lib/chat-sdk-fields";
@@ -90,6 +83,7 @@ import {
   type IntegrationField,
 } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
+import { cn } from "@/lib/utils";
 
 // Mirror of the ICON_MAP in integration-card. Keeps the detail page rendering
 // the same icon as the card without a round-trip import.
@@ -365,7 +359,6 @@ function IntegrationDetailInner({
     ? []
     : allFields.filter((f) => f.required === true || (f.advanced !== true && !f.required));
   const advancedFields = allAdvanced ? allFields : allFields.filter((f) => f.advanced === true);
-  const strictRequiredFields = allFields.filter((f) => f.required === true);
   const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
   const isGithub = def.id === "github";
@@ -395,11 +388,21 @@ function IntegrationDetailInner({
             </div>
           }
           action={
-            adapter ? (
-              <ChannelStatusChip chip={adapterChannelState(chatSdkStatus.data, adapter).chip} />
-            ) : (
-              <IntegrationStatusBadge status={status} />
-            )
+            <div className="flex items-center gap-2">
+              {adapter ? (
+                <ChannelStatusChip chip={adapterChannelState(chatSdkStatus.data, adapter).chip} />
+              ) : (
+                <IntegrationStatusBadge status={status} />
+              )}
+              {def.docsUrl ? (
+                <Button asChild size="sm" variant="outline">
+                  <a href={def.docsUrl} target="_blank" rel="noopener noreferrer">
+                    Docs
+                    <ExternalLink aria-hidden />
+                  </a>
+                </Button>
+              ) : null}
+            </div>
           }
         />
       </div>
@@ -537,23 +540,6 @@ function IntegrationDetailInner({
               </div>
             )}
           </div>
-        }
-        rail={
-          <DetailPageRail>
-            <QuickStats>
-              <QuickStat label="Status" value={status} />
-              <QuickStat label="Total fields" value={allFields.length} />
-              <QuickStat label="Required" value={strictRequiredFields.length} />
-              <QuickStat label="Advanced" value={advancedFields.length} />
-              {def.disableKey && <QuickStat label="Disabled" value={isDisabled ? "Yes" : "No"} />}
-            </QuickStats>
-
-            <Relationships>
-              <Relationship label="Docs" href={def.docsUrl}>
-                <ExternalLink className="h-3 w-3" />
-              </Relationship>
-            </Relationships>
-          </DetailPageRail>
         }
       />
 
@@ -702,28 +688,31 @@ function FieldGroup({
 }: FieldGroupProps) {
   const poolLists = usePoolKeysSupport() !== "legacy";
   const content = (
-    <div className="space-y-5">
+    <div className="grid gap-x-6 gap-y-5 lg:grid-cols-2">
       {fields.map((f) => {
         const existing = findConfigForKey(configs, f.key);
         const current = state[f.key] ?? { value: "" };
+        // Multi-line values and key pools need the full width.
+        const wide = f.type === "textarea" || f.credentialPool === true;
         return (
-          <FieldRenderer
-            key={f.key}
-            field={f}
-            existingConfig={existing}
-            inEnv={!!envPresence[f.key]}
-            value={current.value}
-            markedForReplace={!!current.markedForReplace}
-            onChange={(v) => onUpdate(f.key, { value: v })}
-            onMarkForReplace={() => onUpdate(f.key, { value: "", markedForReplace: true })}
-            onUnmarkForReplace={() =>
-              onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
-            }
-            // A pool field removes its keys one at a time in its own list.
-            onClearExisting={
-              existing && !(f.credentialPool && poolLists) ? () => onClearField(f.key) : undefined
-            }
-          />
+          <div key={f.key} className={cn("min-w-0", wide && "lg:col-span-2")}>
+            <FieldRenderer
+              field={f}
+              existingConfig={existing}
+              inEnv={!!envPresence[f.key]}
+              value={current.value}
+              markedForReplace={!!current.markedForReplace}
+              onChange={(v) => onUpdate(f.key, { value: v })}
+              onMarkForReplace={() => onUpdate(f.key, { value: "", markedForReplace: true })}
+              onUnmarkForReplace={() =>
+                onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
+              }
+              // A pool field removes its keys one at a time in its own list.
+              onClearExisting={
+                existing && !(f.credentialPool && poolLists) ? () => onClearField(f.key) : undefined
+              }
+            />
+          </div>
         );
       })}
     </div>

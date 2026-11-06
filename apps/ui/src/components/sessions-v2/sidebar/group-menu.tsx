@@ -1,12 +1,13 @@
 /**
- * The group menu (plan Phase 5): New session here, New subgroup, Rename
+ * The group menu (plan Phase 5): Open group (desktop: its tab, with the
+ * Overview when it qualifies), New session here, New subgroup, Rename
  * group, Delete group. The "⋯" on a group row, a right-click, and the menu
  * key open it at the row. Groups under Shared with me have none. A group
  * this connection cannot write into (a personal group on the operator key)
  * keeps only Delete, which works there. Delete asks first.
  */
 
-import { FolderPlus, type LucideIcon, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderOpen, FolderPlus, type LucideIcon, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +37,8 @@ export interface GroupMenuState {
 }
 
 export interface GroupMenuActions {
+  /** Open the group in its tab. The phone opens a group on tap, so it has none. */
+  open?: (groupKey: string) => void;
   newSession: (groupKey: string) => void;
   newSubgroup: (groupKey: string) => void;
   rename: (groupKey: string) => void;
@@ -61,8 +64,12 @@ export function groupMenuItems(
   actions: GroupMenuActions,
 ): { edits: GroupMenuItem[]; remove: GroupMenuItem } {
   const blocked = writeBlock !== null;
+  const { open } = actions;
   return {
     edits: [
+      ...(open
+        ? [{ label: "Open group", icon: FolderOpen, disabled: false, run: () => open(groupKey) }]
+        : []),
       {
         label: "New session here",
         icon: Plus,

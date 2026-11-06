@@ -9,7 +9,7 @@ import { useMetricDefinition } from "@/api/hooks/use-metric-definitions";
 import { usePage } from "@/api/hooks/use-pages";
 import { useRepo } from "@/api/hooks/use-repos";
 import { useScheduledTask } from "@/api/hooks/use-schedules";
-import { useScriptConnection } from "@/api/hooks/use-script-connections";
+import { useOAuthApps, useScriptConnection } from "@/api/hooks/use-script-connections";
 import { useScriptRun } from "@/api/hooks/use-script-runs";
 import { useScript } from "@/api/hooks/use-scripts";
 import { useSession } from "@/api/hooks/use-sessions";
@@ -219,6 +219,9 @@ export function Breadcrumbs() {
   const { data: repoMeta } = useRepo(idFor("repos"));
   const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
   const { data: connectionMeta } = useScriptConnection(idFor("connections") || undefined);
+  // No single-app read: the list is small and the page shares the query.
+  const { data: oauthApps } = useOAuthApps({ enabled: !!idFor("oauth-apps") });
+  const oauthAppName = oauthApps?.find((app) => app.id === idFor("oauth-apps"))?.provider;
 
   // `/usage/metrics/:id` — the one detail id at segment index 2. Resolved
   // here (like the index-1 entities above) because `PageHeader` drops string
@@ -279,7 +282,9 @@ export function Breadcrumbs() {
                                 ? approvalMeta?.title
                                 : parent === "connections"
                                   ? connectionMeta?.slug
-                                  : undefined
+                                  : parent === "oauth-apps"
+                                    ? oauthAppName
+                                    : undefined
     : undefined;
 
   // `/apps/:id/p/<page>` — one app page. The literal `p` segment is not a

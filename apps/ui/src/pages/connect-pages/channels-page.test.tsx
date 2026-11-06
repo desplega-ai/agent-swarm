@@ -179,7 +179,7 @@ function cards(html: string): Array<[string, string]> {
 }
 
 describe("ChannelsPage", () => {
-  test("three cards, then More channels, all Not connected on a fresh swarm", () => {
+  test("one grid of channel cards, all Not connected on a fresh swarm", () => {
     configs = [];
     chatStatus = status([]);
     const html = render();
@@ -190,9 +190,7 @@ describe("ChannelsPage", () => {
       ["teams", "none"],
       ["kapso", "none"],
     ]);
-    expect(html).toContain("More channels");
-    expect(html).toContain("Socket mode");
-    expect(html).toContain("Chat SDK adapter");
+    expect(html).not.toContain("More channels");
     expect(html).toContain('href="/integrations/chat-sdk?adapter=telegram"');
   });
 

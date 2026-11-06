@@ -53,22 +53,22 @@ export function matchMcpServer(server: McpServer, search: string): boolean {
   );
 }
 
+/** One titled group of tool cards on the Tools tab. */
+export interface ToolGroup {
+  title: string;
+  tools: IntegrationDef[];
+}
+
 /**
- * Split the Tools tab cards into the grid and the "Show N more" row. The grid
- * holds `primary` (in order) and every `more` card that is in use. The rest
- * waits behind "Show N more". A search shows every match in the grid.
+ * The Tools tab groups with the cards that match `search` (every card when it
+ * is empty). A group with no match is dropped.
  */
-export function layoutToolCards(
-  primary: IntegrationDef[],
-  more: IntegrationDef[],
-  inUse: (def: IntegrationDef) => boolean,
-  search: string,
-): { shown: IntegrationDef[]; hidden: IntegrationDef[] } {
-  if (search.trim()) {
-    return { shown: [...primary, ...more].filter((def) => matchTool(def, search)), hidden: [] };
-  }
-  return {
-    shown: [...primary, ...more.filter(inUse)],
-    hidden: more.filter((def) => !inUse(def)),
-  };
+export function filterToolGroups(groups: ToolGroup[], search: string): ToolGroup[] {
+  const q = search.trim();
+  return groups
+    .map((group) => ({
+      title: group.title,
+      tools: q ? group.tools.filter((def) => matchTool(def, q)) : group.tools,
+    }))
+    .filter((group) => group.tools.length > 0);
 }

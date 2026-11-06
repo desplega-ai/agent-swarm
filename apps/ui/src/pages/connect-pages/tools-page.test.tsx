@@ -3,7 +3,7 @@ import type { McpServer, OAuthAppSummary, ScriptConnection } from "../../api/typ
 import { INTEGRATIONS } from "../../lib/integrations-catalog";
 import { OAUTH_ONLY_TOOLS } from "../../lib/provider-status";
 import {
-  layoutToolCards,
+  filterToolGroups,
   matchMcpServer,
   matchOAuthApp,
   matchScriptConnection,
@@ -19,23 +19,22 @@ const defs = (ids: string[]) =>
     return def;
   });
 
-const PRIMARY = defs(["github", "linear", "gmail"]);
-const MORE = defs(["sentry", "agentfs", "serply"]);
+const GROUPS = [
+  { title: "Code and issues", tools: defs(["github", "linear"]) },
+  { title: "Email", tools: defs(["gmail"]) },
+  { title: "Monitoring", tools: defs(["sentry"]) },
+];
 
-describe("Tools tab cards", () => {
-  test("in-use 'more' tools join the grid; the rest wait behind Show more", () => {
-    const { shown, hidden } = layoutToolCards(PRIMARY, MORE, (def) => def.id === "agentfs", "");
-    expect(shown.map((def) => def.id)).toEqual(["github", "linear", "gmail", "agentfs"]);
-    expect(hidden.map((def) => def.id)).toEqual(["sentry", "serply"]);
+describe("Tools tab groups", () => {
+  test("no search shows every group and every tool", () => {
+    expect(filterToolGroups(GROUPS, "")).toEqual(GROUPS);
   });
 
-  test("a search shows every match, hidden or not", () => {
-    const { shown, hidden } = layoutToolCards(PRIMARY, MORE, () => false, "sentry");
-    expect(shown.map((def) => def.id)).toEqual(["sentry"]);
-    expect(hidden).toEqual([]);
-    expect(layoutToolCards(PRIMARY, MORE, () => false, "mail").shown.map((d) => d.id)).toEqual([
-      "gmail",
-    ]);
+  test("a search keeps the matches and drops empty groups", () => {
+    const shown = filterToolGroups(GROUPS, "mail");
+    expect(shown.map((group) => group.title)).toEqual(["Email"]);
+    expect(shown[0]?.tools.map((def) => def.id)).toEqual(["gmail"]);
+    expect(filterToolGroups(GROUPS, "nothing-matches")).toEqual([]);
   });
 });
 

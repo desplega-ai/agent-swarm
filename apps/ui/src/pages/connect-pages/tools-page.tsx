@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, Plug, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronDown, Plug, Plus } from "lucide-react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
@@ -28,7 +28,7 @@ import {
   type ProviderStatus,
   scriptConnectionTerm,
 } from "@/lib/provider-status";
-import { layoutToolCards } from "@/lib/tools-search";
+import { filterToolGroups, type ToolGroup } from "@/lib/tools-search";
 import { ScriptConnectionsPanel } from "@/pages/connections/page";
 import { McpServersPanel } from "@/pages/mcp-servers/page";
 import { ConnectPhoneTitle, ConnectSearch } from "./connect-shell";
@@ -37,23 +37,18 @@ function catalogDefs(ids: readonly string[]): IntegrationDef[] {
   return ids.flatMap((id) => INTEGRATIONS.filter((def) => def.id === id));
 }
 
-/** Code hosts and trackers first, then the OAuth-only mail tools. */
-const PRIMARY_TOOLS = [
-  ...catalogDefs(["github", "gitlab", "bitbucket", "linear", "jira"]),
-  ...OAUTH_ONLY_TOOLS,
+/** Every tool, always shown, by what it connects. */
+const TOOL_GROUPS: ToolGroup[] = [
+  {
+    title: "Code and issues",
+    tools: catalogDefs(["github", "gitlab", "bitbucket", "linear", "jira"]),
+  },
+  { title: "Email", tools: [...OAUTH_ONLY_TOOLS, ...catalogDefs(["agentmail"])] },
+  { title: "CRM", tools: catalogDefs(["attio"]) },
+  { title: "Monitoring", tools: catalogDefs(["sentry", "gsc", "business-use"]) },
+  { title: "Other", tools: catalogDefs(["agentfs", "composio", "serply"]) },
 ];
-/** Shown in the grid when in use; the rest waits behind "Show N more". */
-const MORE_TOOLS = catalogDefs([
-  "attio",
-  "sentry",
-  "agentmail",
-  "composio",
-  "serply",
-  "gsc",
-  "agentfs",
-  "business-use",
-]);
-const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
+const ALL_TOOLS = TOOL_GROUPS.flatMap((group) => group.tools);
 const PRESENCE_KEYS = Array.from(new Set(ALL_TOOLS.flatMap((def) => getPresenceKeys(def))));
 
 const TABS = [
@@ -203,7 +198,6 @@ function ToolCardGrid({
 }) {
   const { data: configs, isLoading, error } = useConfigs({ scope: "global" });
   const { data: presence } = useEnvPresence(PRESENCE_KEYS);
-  const [showMore, setShowMore] = useState(false);
 
   const statuses = useMemo(() => {
     const inputs = {
@@ -218,7 +212,7 @@ function ToolCardGrid({
   if (isLoading || connectionsLoading) {
     return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {PRIMARY_TOOLS.slice(0, 3).map((def) => (
+        {ALL_TOOLS.slice(0, 3).map((def) => (
           <Skeleton key={def.id} className="h-36" />
         ))}
       </div>
@@ -226,16 +220,10 @@ function ToolCardGrid({
   }
 
   const statusOf = (def: IntegrationDef) => statuses.get(def.id) as ProviderStatus;
-  const { shown, hidden } = layoutToolCards(
-    PRIMARY_TOOLS,
-    MORE_TOOLS,
-    (def) => isProviderInUse(statusOf(def)),
-    search,
-  );
-  const cards = showMore ? [...shown, ...hidden] : shown;
+  const groups = filterToolGroups(TOOL_GROUPS, search);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6">
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>
@@ -243,32 +231,22 @@ function ToolCardGrid({
           </AlertDescription>
         </Alert>
       ) : null}
-      {cards.length === 0 ? (
+      {groups.length === 0 ? (
         <EmptyState icon={Plug} title="No tools match your search" compact />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {cards.map((def) => (
-            <ToolCard key={def.id} def={def} status={statusOf(def)} oauthApps={oauthApps} />
-          ))}
-        </div>
+        groups.map((group) => (
+          <section key={group.title} aria-label={group.title} className="flex flex-col gap-3">
+            <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+              {group.title}
+            </h2>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {group.tools.map((def) => (
+                <ToolCard key={def.id} def={def} status={statusOf(def)} oauthApps={oauthApps} />
+              ))}
+            </div>
+          </section>
+        ))
       )}
-      {hidden.length > 0 ? (
-        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="shrink-0"
-            aria-expanded={showMore}
-            onClick={() => setShowMore((open) => !open)}
-          >
-            {showMore ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-            {showMore ? "Show fewer" : `Show ${hidden.length} more`}
-          </Button>
-          {showMore ? null : (
-            <span className="min-w-0 truncate">{hidden.map((def) => def.name).join(", ")}</span>
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }

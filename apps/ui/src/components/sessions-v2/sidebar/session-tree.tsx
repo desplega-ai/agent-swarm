@@ -874,7 +874,7 @@ export function SessionTree({
         focused={focused}
         canTriage={canTriage}
         triage={actions}
-        groupActions={edits.groupActions}
+        groupActions={{ ...edits.groupActions, open: setView }}
         targets={targets}
         writeBlock={writeBlock}
         moves={moves}
