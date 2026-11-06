@@ -27,8 +27,10 @@ import {
 } from "@/components/schedules/schedule-target-fields";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { ModelCombobox } from "@/components/shared/model-combobox";
 import { ModelLabel } from "@/components/shared/model-logo";
+import { StatusBadge } from "@/components/shared/status-badge";
 import {
   ignoreRowClickFromInteractives,
   TasksColumnsMenu,
@@ -77,13 +79,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval } from "@/lib/schedule-format";
-import { formatSmartTime, formatUTCTime } from "@/lib/utils";
+import { taskListTitle } from "@/lib/task-title";
+import { formatRelativeTime, formatSmartTime, formatUTCTime } from "@/lib/utils";
+import { ClampedDescription } from "../../skills/components/phone-detail";
+import { PhoneDetailHeader } from "../../templates/components/phone-detail-header";
 
 function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { data: agents } = useAgents();
   const { data: tasksData, isLoading } = useTasks({ scheduleId, limit: 100 });
 
@@ -109,6 +116,31 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
     [navigate],
   );
 
+  if (isMobile) {
+    // Rows instead of a grid: the grid showed only the description column on a phone.
+    return (
+      <MobileList
+        label="Tasks created by this schedule"
+        loading={isLoading}
+        emptyMessage="No tasks created by this schedule"
+      >
+        {(tasksData?.tasks ?? []).map((task) => (
+          <MobileListRow
+            key={task.id}
+            to={`/tasks/${task.id}`}
+            live={task.status === "in_progress"}
+            title={taskListTitle(task)}
+            status={<StatusBadge status={task.status} />}
+            meta={[
+              task.agentId ? (agentMap.get(task.agentId) ?? "Unknown agent") : "Pool",
+              formatRelativeTime(task.createdAt),
+            ]}
+          />
+        ))}
+      </MobileList>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-end">
@@ -131,6 +163,7 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
 export default function ScheduleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { data: schedule, isLoading } = useScheduledTask(id!);
   const { data: agents } = useAgents();
   const { data: workflows } = useWorkflows();
@@ -185,92 +218,165 @@ export default function ScheduleDetailPage() {
     return <p className="text-muted-foreground">Schedule not found.</p>;
   }
 
+  const headerBadges = (
+    <>
+      <Badge
+        variant="outline"
+        size="tag"
+        className={`${
+          schedule.scheduleType === "one_time"
+            ? "border-status-active/30 text-status-active-strong"
+            : "border-status-success/30 text-status-success-strong"
+        }`}
+      >
+        {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
+      </Badge>
+      <Badge variant="outline" size="tag">
+        {schedule.targetType === "workflow"
+          ? "Workflow"
+          : schedule.targetType === "script"
+            ? "Script"
+            : "Agent Task"}
+      </Badge>
+      {schedule.taskType && (
+        <Badge variant="outline" size="tag">
+          {schedule.taskType}
+        </Badge>
+      )}
+    </>
+  );
+  const savingsChip = (
+    <ScheduleSavingsHeaderAmount
+      scheduleId={schedule.id}
+      targetHref={
+        schedule.targetType === "workflow"
+          ? `/workflows/${schedule.workflowId}?tab=savings`
+          : linkedScript
+            ? `/scripts/${linkedScript.id}?tab=savings`
+            : undefined
+      }
+    />
+  );
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-      <button
-        type="button"
-        onClick={() => navigate("/schedules")}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Schedules
-      </button>
-
-      <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="min-w-0 text-xl font-semibold break-words">{schedule.name}</h1>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={schedule.enabled}
-            onCheckedChange={(checked) =>
-              updateSchedule.mutate({ id: schedule.id, data: { enabled: checked } })
-            }
-          />
-          <span className="text-xs text-muted-foreground">
-            {schedule.enabled ? "Enabled" : "Disabled"}
-          </span>
-        </div>
-        <Badge
-          variant="outline"
-          size="tag"
-          className={`${
-            schedule.scheduleType === "one_time"
-              ? "border-status-active/30 text-status-active-strong"
-              : "border-status-success/30 text-status-success-strong"
-          }`}
-        >
-          {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
-        </Badge>
-        <Badge variant="outline" size="tag">
-          {schedule.targetType === "workflow"
-            ? "Workflow"
-            : schedule.targetType === "script"
-              ? "Script"
-              : "Agent Task"}
-        </Badge>
-        {schedule.taskType && (
-          <Badge variant="outline" size="tag">
-            {schedule.taskType}
-          </Badge>
-        )}
-        <ScheduleSavingsHeaderAmount
-          scheduleId={schedule.id}
-          targetHref={
-            schedule.targetType === "workflow"
-              ? `/workflows/${schedule.workflowId}?tab=savings`
-              : linkedScript
-                ? `/scripts/${linkedScript.id}?tab=savings`
-                : undefined
+      {isMobile ? (
+        <PhoneDetailHeader
+          backTo="/schedules"
+          backLabel="Back to Schedules"
+          title={schedule.name}
+          menuTitle={schedule.name}
+          actions={
+            <>
+              <FavoriteButton
+                className="size-9"
+                favorite={schedule.favorite}
+                disabled={favoriteToggle.isPending}
+                onToggle={() =>
+                  favoriteToggle.mutate({ itemId: schedule.id, favorite: !schedule.favorite })
+                }
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                aria-label="Run now"
+                onClick={() => runNow.mutate(schedule.id)}
+                disabled={!schedule.enabled || runNow.isPending}
+              >
+                <Play />
+              </Button>
+            </>
+          }
+          menu={[
+            {
+              key: "edit",
+              label: "Edit schedule",
+              icon: Pencil,
+              onSelect: () => setEditOpen(true),
+            },
+            {
+              key: "delete",
+              label: "Delete schedule",
+              icon: Trash2,
+              destructive: true,
+              onSelect: () => setDeleteOpen(true),
+            },
+          ]}
+          badges={
+            <>
+              <label className="flex min-h-7 items-center gap-1.5 text-xs text-muted-foreground">
+                <Switch
+                  checked={schedule.enabled}
+                  onCheckedChange={(checked) =>
+                    updateSchedule.mutate({ id: schedule.id, data: { enabled: checked } })
+                  }
+                />
+                {schedule.enabled ? "Enabled" : "Disabled"}
+              </label>
+              {headerBadges}
+              {savingsChip}
+            </>
           }
         />
-        {/* On a phone the actions take their own row, left-aligned under the
-            badges, instead of hanging off the right edge. */}
-        <div className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto sm:shrink-0">
-          <FavoriteButton
-            favorite={schedule.favorite}
-            disabled={favoriteToggle.isPending}
-            onToggle={() =>
-              favoriteToggle.mutate({ itemId: schedule.id, favorite: !schedule.favorite })
-            }
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => runNow.mutate(schedule.id)}
-            disabled={!schedule.enabled || runNow.isPending}
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => navigate("/schedules")}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            <Play className="h-3 w-3 mr-1" /> Run Now
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <Pencil className="h-3 w-3 mr-1" /> Edit
-          </Button>
-          <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
-            <Trash2 className="h-3 w-3 mr-1" /> Delete
-          </Button>
-        </div>
-      </div>
+            <ArrowLeft className="h-4 w-4" /> Back to Schedules
+          </button>
 
-      {schedule.description && (
-        <p className="text-sm text-muted-foreground">{schedule.description}</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="min-w-0 text-xl font-semibold break-words">{schedule.name}</h1>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={schedule.enabled}
+                onCheckedChange={(checked) =>
+                  updateSchedule.mutate({ id: schedule.id, data: { enabled: checked } })
+                }
+              />
+              <span className="text-xs text-muted-foreground">
+                {schedule.enabled ? "Enabled" : "Disabled"}
+              </span>
+            </div>
+            {headerBadges}
+            {savingsChip}
+            <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto sm:shrink-0">
+              <FavoriteButton
+                favorite={schedule.favorite}
+                disabled={favoriteToggle.isPending}
+                onToggle={() =>
+                  favoriteToggle.mutate({ itemId: schedule.id, favorite: !schedule.favorite })
+                }
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runNow.mutate(schedule.id)}
+                disabled={!schedule.enabled || runNow.isPending}
+              >
+                <Play className="h-3 w-3 mr-1" /> Run Now
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <Pencil className="h-3 w-3 mr-1" /> Edit
+              </Button>
+              <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="h-3 w-3 mr-1" /> Delete
+              </Button>
+            </div>
+          </div>
+        </>
       )}
+
+      {schedule.description &&
+        (isMobile ? (
+          <ClampedDescription text={schedule.description} lines={2} />
+        ) : (
+          <p className="text-sm text-muted-foreground">{schedule.description}</p>
+        ))}
 
       <DetailPageBody
         main={
@@ -304,8 +410,9 @@ export default function ScheduleDetailPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Schedule Info</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 md:flex md:flex-col">
                     <InfoRow
+                      className="col-span-2 md:col-span-1"
                       label={
                         schedule.scheduleType === "one_time"
                           ? schedule.lastRunAt
@@ -377,7 +484,7 @@ export default function ScheduleDetailPage() {
                     </InfoRow>
 
                     {schedule.tags.length > 0 && (
-                      <InfoRow label="Tags">
+                      <InfoRow label="Tags" className="col-span-2 md:col-span-1">
                         <div className="flex flex-wrap gap-1 mt-1">
                           {schedule.tags.map((tag) => (
                             <Badge key={tag} variant="outline" size="tag">
@@ -394,7 +501,7 @@ export default function ScheduleDetailPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Timing</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 md:flex md:flex-col">
                     <InfoRow label="Next Run">
                       {schedule.nextRunAt ? (
                         <div>
