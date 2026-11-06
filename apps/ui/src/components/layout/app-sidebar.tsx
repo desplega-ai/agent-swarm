@@ -216,6 +216,7 @@ const footerNav: FooterItem[] = [
       { title: "Usage", path: "/usage", end: true },
       { title: "Budgets", path: "/usage/budgets" },
       { title: "Metrics", path: "/usage/metrics" },
+      { title: "Savings", path: "/usage/savings" },
     ],
   },
 ];

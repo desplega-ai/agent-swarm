@@ -12,9 +12,13 @@ import {
   SAVINGS_TIERS,
   type SavingsBand,
   SHIPPED_CALIBRATION,
+  savingsAssumptions,
 } from "../be/savings/model";
 import {
+  type FleetKindTotals,
   isKnownScriptName,
+  readFleetLlmUsd,
+  readFleetSavings,
   readScheduleSavings,
   readScriptSavings,
   readWorkflowSavings,
@@ -218,6 +222,47 @@ const SavingsDailyResponseSchema = z.object({
   ),
 });
 
+const FleetKindTotalsSchema = z.object({
+  jobs: z.number().int(),
+  runs: z.number().int(),
+  substitutedRuns: z.number().int(),
+  savingUsd: z.number().describe("p50"),
+  hoursSaved: z.number().describe("p50"),
+});
+
+const SavingsSummaryResponseSchema = z.object({
+  ...savingsMeta,
+  /** Every workflow and script; the fleet band unless the fleet is one job. */
+  total: SavingsTotalsSchema.nullable(),
+  byKind: z
+    .object({
+      workflows: FleetKindTotalsSchema,
+      scheduledScripts: FleetKindTotalsSchema,
+      agentInvokedScripts: FleetKindTotalsSchema,
+    })
+    .nullable(),
+  fleetLlmUsd: z
+    .number()
+    .describe("Measured session spend of the whole swarm in the window, as on the usage page."),
+  selfOptimizationRatio: z
+    .number()
+    .nullable()
+    .describe(
+      "`(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total.",
+    ),
+  excluded: z
+    .object({
+      enabledOnlyRuns: z
+        .number()
+        .int()
+        .describe(
+          "Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs.",
+        ),
+    })
+    .nullable(),
+  assumptions: z.array(z.string()),
+});
+
 const windowQuery = {
   days: z.enum(["7", "30", "90"]).default("30").transform(Number),
   tier: z.enum(SAVINGS_TIERS).default("smart"),
@@ -252,9 +297,9 @@ const savingsDailyRoute = route({
   method: "get",
   path: "/api/savings/daily",
   pattern: ["api", "savings", "daily"],
-  summary: "Daily automation savings of a workflow or script",
+  summary: "Daily automation savings of a workflow, a script or the fleet",
   description:
-    "The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.",
+    "The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1).optional(),
@@ -264,9 +309,24 @@ const savingsDailyRoute = route({
   responses: {
     200: { description: "Daily savings points", schema: SavingsDailyResponseSchema },
     400: {
-      description: "Not exactly one of workflowId and scriptName, or an unknown days or tier value",
+      description: "Both workflowId and scriptName, or an unknown days or tier value",
     },
     404: { description: "Workflow or script not found" },
+  },
+});
+
+const savingsSummaryRoute = route({
+  method: "get",
+  path: "/api/savings/summary",
+  pattern: ["api", "savings", "summary"],
+  summary: "Fleet automation savings",
+  description:
+    "What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+  tags: ["Savings"],
+  query: z.object(windowQuery),
+  responses: {
+    200: { description: "Fleet savings", schema: SavingsSummaryResponseSchema },
+    400: { description: "An unknown days or tier value" },
   },
 });
 
@@ -379,6 +439,10 @@ function toTotals(t: SavingsTotals) {
     actualHours: round2(t.actualHours),
     hoursSaved: roundBand(t.hoursSaved),
   };
+}
+
+function roundKind(k: FleetKindTotals): FleetKindTotals {
+  return { ...k, savingUsd: round2(k.savingUsd), hoursSaved: round2(k.hoursSaved) };
 }
 
 function notFound(
@@ -520,13 +584,21 @@ export async function handleSavings(
     const parsed = await savingsDailyRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { workflowId, scriptName, days, tier } = parsed.query;
-    if (!workflowId === !scriptName) return badTarget(res, "Pass workflowId or scriptName");
+    if (workflowId && scriptName) return badTarget(res, "Pass workflowId or scriptName, not both");
     const calibration = await activeCalibration(Date.now());
     const read = workflowId
       ? await readOne(workflowId, days, tier, calibration.curve)
-      : await readScript(scriptName as string, days, tier, calibration.curve);
+      : scriptName
+        ? await readScript(scriptName, days, tier, calibration.curve)
+        : await readFleetSavings({
+            days,
+            tier,
+            now: Date.now(),
+            sql: savingsRequestSql,
+            curve: calibration.curve,
+          });
     if (!read) return notFound(res, workflowId ? "Workflow" : "Script");
-    const hasRows = read.rows.length > 0;
+    const hasRows = read.total !== null;
     const points = read.complete && hasRows ? read.points : [];
     const saving = roundToTotal(points.map((p) => p.savingUsd));
     const actual = roundToTotal(points.map((p) => p.actualUsd));
@@ -541,6 +613,39 @@ export async function handleSavings(
         measuredUsd: measured[i] as number,
         estimatedLlmUsd: estimated[i] as number,
       })),
+    });
+    return true;
+  }
+
+  if (savingsSummaryRoute.match(req.method, pathSegments)) {
+    const parsed = await savingsSummaryRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { days, tier } = parsed.query;
+    const calibration = await activeCalibration(Date.now());
+    const read = await readFleetSavings({
+      days,
+      tier,
+      now: Date.now(),
+      sql: savingsRequestSql,
+      curve: calibration.curve,
+    });
+    const fleetLlmUsd = await readFleetLlmUsd(read.window);
+    const total = read.complete ? read.total : null;
+    savingsSummaryRoute.respond(res, 200, {
+      ...meta(read, tier, calibration, { complete: read.complete, hasRows: read.total !== null }),
+      total: total ? toTotals(total) : null,
+      byKind: total
+        ? {
+            workflows: roundKind(read.byKind.workflows),
+            scheduledScripts: roundKind(read.byKind.scheduledScripts),
+            agentInvokedScripts: roundKind(read.byKind.agentInvokedScripts),
+          }
+        : null,
+      fleetLlmUsd: round2(fleetLlmUsd),
+      selfOptimizationRatio:
+        total && fleetLlmUsd > 0 ? (fleetLlmUsd + total.savingUsd.p50) / fleetLlmUsd : null,
+      excluded: total ? { enabledOnlyRuns: total.enabledOnlyRuns } : null,
+      assumptions: savingsAssumptions(tier),
     });
     return true;
   }

@@ -4560,8 +4560,42 @@ export interface SavingsDailyResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   computedAt: string | null;
   valid: boolean;
   reason: "not-computed" | "no-runs" | null;
   points: SavingsDailyPoint[];
+}
+
+/** One kind of job in the fleet savings summary; p50 values. */
+export interface SavingsKindTotals {
+  jobs: number;
+  runs: number;
+  substitutedRuns: number;
+  savingUsd: number;
+  hoursSaved: number;
+}
+
+/** GET /api/savings/summary: every workflow and script, with the fleet band. */
+export interface SavingsSummaryResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  total: SavingsTotals | null;
+  byKind: {
+    workflows: SavingsKindTotals;
+    scheduledScripts: SavingsKindTotals;
+    agentInvokedScripts: SavingsKindTotals;
+  } | null;
+  /** Measured session spend of the whole swarm in the window. */
+  fleetLlmUsd: number;
+  /** `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`; null without spend or a valid total. */
+  selfOptimizationRatio: number | null;
+  excluded: { enabledOnlyRuns: number } | null;
+  assumptions: string[];
 }

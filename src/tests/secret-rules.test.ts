@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { convertGoRegex, stripKeyPrefix } from "../../scripts/gen-secret-rules";
+import { anchorAlternation, convertGoRegex, stripKeyPrefix } from "../../scripts/gen-secret-rules";
 import { GITLEAKS_RULES } from "../utils/secret-rules.generated";
 import {
   clearVolatileSecretsForTesting,
@@ -52,6 +52,54 @@ describe("convertGoRegex", () => {
     expect(stripKeyPrefix(`${prefix}(?:okta)`)).toBe("(?:okta)");
     expect(stripKeyPrefix(`${prefix}(?i:${prefix}(?:okta))`)).toBe("(?i:(?:okta))");
     expect(stripKeyPrefix("(?:okta)")).toBe("(?:okta)");
+  });
+});
+
+describe("anchorAlternation", () => {
+  test("anchors a ^a|b$ alternation as a whole", () => {
+    expect(anchorAlternation({ source: "^true|false|null$", flags: "i" })).toEqual({
+      source: "^(?:true|false|null)$",
+      flags: "i",
+    });
+  });
+
+  test("splits only on top-level pipes, not escaped, grouped or in a class", () => {
+    expect(anchorAlternation({ source: String.raw`^a|[|](b|c)|d\|e$`, flags: "" }).source).toBe(
+      String.raw`^(?:a|[|](b|c)|d\|e)$`,
+    );
+  });
+
+  test("leaves single, grouped and uniformly anchored alternations alone", () => {
+    for (const source of ["^abc$", "^(?:a|b)$", "^a$|^b$", "a|b"]) {
+      expect(anchorAlternation({ source, flags: "" }).source).toBe(source);
+    }
+  });
+
+  test("rejects any other mix of anchored and unanchored branches", () => {
+    expect(() => anchorAlternation({ source: "^a|b", flags: "" })).toThrow(/mixes anchored/);
+    expect(() => anchorAlternation({ source: "a|^b$", flags: "" })).toThrow(/mixes anchored/);
+    expect(() => anchorAlternation({ source: String.raw`^a|b\$`, flags: "" })).toThrow(
+      /mixes anchored/,
+    );
+  });
+
+  test("every generated allowlist regex is already anchored as a whole", () => {
+    const sources = [
+      ...GITLEAKS_RULES.globalAllowlist.regexes,
+      ...GITLEAKS_RULES.rules.flatMap((r) => (r.allowlists ?? []).flatMap((l) => l.regexes)),
+    ];
+    expect(sources.length).toBeGreaterThan(10);
+    for (const re of sources) expect(anchorAlternation(re)).toEqual(re);
+  });
+
+  test("the global allowlist still allows the bare values true, false and null", () => {
+    const res = GITLEAKS_RULES.globalAllowlist.regexes.map((r) => new RegExp(r.source, r.flags));
+    for (const value of ["true", "FALSE", "Null"]) {
+      expect(res.some((re) => re.test(value))).toBe(true);
+    }
+    for (const value of ["truex", "xfalse", "nullx", "afalseb"]) {
+      expect(res.some((re) => re.test(value))).toBe(false);
+    }
   });
 });
 
@@ -147,6 +195,35 @@ describe("secret corpus", () => {
         expect(out, `${b.slice(0, 6)}… ${JSON.stringify(sep)}`).not.toContain(b);
         expect(out).toMatch(new RegExp(`^\\[REDACTED:[^\\]]+\\]${sep}\\[REDACTED:[^\\]]+\\]$`));
       }
+    }
+  });
+
+  test("redacts a secret that contains true, false or null", () => {
+    // The global allowlist was `^true|false|null$`: it allowed any secret
+    // containing "false", starting with "true" or ending with "null".
+    const lowerAlnum = (len: number) =>
+      randomToken(len * 2)
+        .toLowerCase()
+        .slice(0, len);
+    const words = ["true", "FALsE", "nULL", "True", "false", "Null"];
+    const cases: { text: string; secret: string; rule: string }[] = [];
+    for (const word of words) {
+      // The vault secret starts with `hvs.`, so the word goes mid and end.
+      for (const at of [31, 96 - word.length]) {
+        const tail = randomToken(96);
+        const secret = ["hvs", ".", tail.slice(0, at), word, tail.slice(at + word.length)].join("");
+        cases.push({ text: `token ${secret} end`, secret, rule: "vault-service-token" });
+      }
+      for (const at of [0, 14, 32 - word.length]) {
+        const body = lowerAlnum(32);
+        const secret = [body.slice(0, at), word, body.slice(at + word.length)].join("");
+        cases.push({ text: `droneci: ${secret}`, secret, rule: "droneci-access-token" });
+      }
+    }
+    for (const { text, secret, rule } of cases) {
+      const out = scrubSecrets(text);
+      expect(out, `${rule} ${secret.slice(0, 8)}…`).not.toContain(secret);
+      expect(out).toContain(`[REDACTED:gitleaks:${rule}]`);
     }
   });
 

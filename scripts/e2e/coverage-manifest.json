@@ -507,7 +507,7 @@
       ]
     },
     "workflow-savings": {
-      "description": "A workflow run is priced from the savings rollup with an ordered 80% band, its daily series sums to the same p50, the list route answers; an idle workflow is not valid, never $0; unknown workflow and bad input are rejected",
+      "description": "A workflow run is priced from the savings rollup with an ordered 80% band, its daily series sums to the same p50, the list route answers, the fleet summary and fleet daily series agree; an idle workflow is not valid, never $0; unknown workflow and bad input are rejected",
       "scenarios": ["workflow-savings"]
     },
     "workflow-schedules": {
