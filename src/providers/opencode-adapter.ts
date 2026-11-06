@@ -40,6 +40,7 @@ import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
 } from "../utils/openrouter-base-url";
+import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -412,12 +413,20 @@ export function applyProviderKeySplice(
   }
   // OpenCode's built-in openrouter catalog only lists models.dev's OpenRouter
   // section. A model id reached through a gateway override (OPENROUTER_BASE_URL,
-  // e.g. a LiteLLM route) is absent from it, so OpenCode fails the session
+  // e.g. a LiteLLM route) can be absent from it, so OpenCode fails the session
   // instead of running the requested model (the same gap buildOpenAICompatibleProviderBlock
-  // already closes for custom-block providers, line ~301).
+  // already closes for custom-block providers, line ~301). Only synthesize a
+  // bare entry for ids truly missing from the catalog snapshot; an id the
+  // catalog already lists (even one it marks non-tool-calling) keeps its real
+  // capability flags instead of a blanket `tool_call: true`.
   let models = existing?.models;
   const modelId = model.slice(slash + 1);
-  if (providerId === "openrouter" && modelId && !models?.[modelId]) {
+  if (
+    providerId === "openrouter" &&
+    modelId &&
+    !models?.[modelId] &&
+    !snapshotCatalogRows("openrouter")[modelId]
+  ) {
     models = { ...models, [modelId]: { name: modelId, tool_call: true } };
   }
   opencodeConfig.provider = {

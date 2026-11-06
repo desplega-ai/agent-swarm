@@ -1108,12 +1108,10 @@ describe("provider key splice (one picked key per task)", () => {
         env: { OPENROUTER_API_KEY: PICKED, OPENROUTER_BASE_URL: "http://127.0.0.1:1234/v1" },
       }),
     );
+    // deepseek/deepseek-v4-flash is a real catalog row, so no bare entry is synthesized.
     expect(configOf(host).provider.openrouter).toEqual({
       env: [],
       options: { apiKey: PICKED, baseURL: "http://127.0.0.1:1234/v1" },
-      models: {
-        "deepseek/deepseek-v4-flash": { name: "deepseek/deepseek-v4-flash", tool_call: true },
-      },
     });
   });
 
@@ -1153,6 +1151,16 @@ describe("provider key splice (one picked key per task)", () => {
     expect(config.provider.openrouter.models).toEqual({
       "acme/uncatalogued": { name: "Custom Name", tool_call: true, reasoning: true },
     });
+  });
+
+  test("openrouter: a model id already in the catalog snapshot gets no bare entry, even non-tool-calling", () => {
+    // thedrummer/cydonia-24b-v4.1 is a real snapshot row with tool_call: false;
+    // a bare `{ tool_call: true }` entry would make OpenCode send it tools it rejects.
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "openrouter/thedrummer/cydonia-24b-v4.1", {
+      OPENROUTER_API_KEY: PICKED,
+    });
+    expect(config.provider.openrouter.models).toBeUndefined();
   });
 
   test("no splice without a key, or for providers outside the splice", () => {
