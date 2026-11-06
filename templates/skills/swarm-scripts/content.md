@@ -8,8 +8,8 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 |---|---|
 | 1 to 9 SDK calls, result fits in context | Direct tool calls. |
 | 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
-| Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
-| One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| Fetch, parse, and transform heavy data | Script. |
+| One large web fetch | Script with `ctx.stdlib.fetch`. Return only the part you need. |
 | A schedule, workflow, or API script that reads or writes drive files | Script with `ctx.fs` and `ctx.sh`. |
 | Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
 | Work that repeats on a clock | Schedule. See `scheduling`. |

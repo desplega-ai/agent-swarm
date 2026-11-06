@@ -32,7 +32,7 @@ import {
   splitCredentialPool,
   validateOpencodeCredentials,
 } from "../utils/credentials";
-import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
+import { isSessionSummarySkipped } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
@@ -43,7 +43,6 @@ import {
 import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
-import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { OpenRouterBilling } from "./opencode-billing";
 import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
 import {
@@ -963,16 +962,6 @@ export class OpencodeAdapter implements ProviderAdapter {
       },
       ...installedMcp,
     };
-    // context-mode ships only a V1 opencode plugin, which OpenCode 2 cannot
-    // load, so wire its stdio MCP server instead (same as codex).
-    if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
-      mcp["context-mode"] = {
-        type: "local",
-        command: ["context-mode"],
-        environment: { CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY },
-      };
-    }
-
     const opencodeConfig: OpencodeConfig = {
       $schema: "https://opencode.ai/config.json",
       model: config.model,
