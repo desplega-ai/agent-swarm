@@ -98,7 +98,10 @@ export default function ToolsPage() {
   };
 
   const tabList = (
-    <TabsList variant="line" className="w-full justify-start overflow-x-auto sm:w-fit">
+    <TabsList
+      variant="line"
+      className="w-full justify-start overflow-x-auto sm:w-fit sm:overflow-visible"
+    >
       {TABS.map((entry) => (
         <TabsTrigger key={entry.value} value={entry.value} className="flex-none">
           {entry.label}

@@ -206,7 +206,10 @@ export default function AiProvidersPage() {
     >
       <ConnectPhoneTitle title="AI providers" />
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
-        <TabsList variant="line" className="w-full justify-start overflow-x-auto sm:w-fit">
+        <TabsList
+          variant="line"
+          className="w-full justify-start overflow-x-auto sm:w-fit sm:overflow-visible"
+        >
           {TABS.map((entry) => (
             <TabsTrigger key={entry.value} value={entry.value} className="flex-none">
               {entry.label}

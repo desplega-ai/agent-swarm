@@ -92,8 +92,8 @@ describe("Cmd+K route metadata", () => {
       ["OAuth apps", "/integrations/tools/oauth-apps", "Connect"],
       ["Templates", "/templates", undefined],
       ["Servers", "/settings/connections", "Settings"],
-      ["Connection playground", "/settings/connection-playground", "Settings"],
-      ["Raw fetch credentials", "/settings/fetch-credentials", "Settings"],
+      ["Playground", "/settings/connection-playground", "Settings"],
+      ["Fetch credentials", "/settings/fetch-credentials", "Settings"],
     ];
     for (const [title, path, parent] of expected) {
       const entry = byTitle.get(title);

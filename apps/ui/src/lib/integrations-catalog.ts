@@ -92,6 +92,17 @@ export function connectPageTitle(category: IntegrationCategory): string {
   return "Tools";
 }
 
+/** Integrations whose overview is a tab of Connect › AI providers. */
+const AI_TAB_OF: Record<string, string> = {
+  memory: "?tab=embeddings",
+  transcription: "?tab=transcription",
+};
+
+/** The Connect page (and tab) that lists one integration. */
+export function connectPageHref(def: { id: string; category: IntegrationCategory }): string {
+  return `${connectPagePath(def.category)}${AI_TAB_OF[def.id] ?? ""}`;
+}
+
 export type IntegrationSpecialFlow =
   | "linear-oauth"
   | "jira-oauth"

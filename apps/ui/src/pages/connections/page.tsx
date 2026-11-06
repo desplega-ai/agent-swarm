@@ -1044,7 +1044,7 @@ export function AddConnectionDialog({
   const [openapiSpecJson, setOpenapiSpecJson] = useState("");
   // Embedded connection auth (step-7). One inline auth intent submitted with the
   // connection; the server derives + auto-manages the credential binding. The
-  // separate binding-creation path lives only under "Raw fetch credentials".
+  // separate binding-creation path lives only under "Fetch credentials".
   const [authType, setAuthType] = useState<ConnectionAuthType>("none");
   const [authSecret, setAuthSecret] = useState("");
   const [useExistingConfigKey, setUseExistingConfigKey] = useState(false);

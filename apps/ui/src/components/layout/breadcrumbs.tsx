@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { chatSdkPageChannel } from "@/lib/channel-cards";
-import { INTEGRATIONS } from "@/lib/integrations-catalog";
+import { connectPageHref, connectPageTitle, INTEGRATIONS } from "@/lib/integrations-catalog";
 import { shortId } from "@/lib/short-id";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import {
@@ -90,16 +90,20 @@ const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
 
 /** Routes that don't have their own list page — redirect breadcrumb to a parent. */
 const routeRedirects: Record<string, string> = {
+  repos: "/settings/repos",
   "workflow-runs": "/workflows",
   "script-runs": "/scripts?tab=runs",
 };
+
+/** First segments of the pages the Settings shell renders outside `/settings`. */
+const SETTINGS_SHELL_ROOTS = new Set(["people", "templates", "repos"]);
 
 /** Labels and links for whole paths, where a segment name alone is ambiguous. */
 const pathLabels: Record<string, string> = {
   "/settings/connections": "Servers",
   "/integrations/tools/connections": "Script connections",
-  "/settings/connection-playground": "Connection playground",
-  "/settings/fetch-credentials": "Raw fetch credentials",
+  "/settings/connection-playground": "Playground",
+  "/settings/fetch-credentials": "Fetch credentials",
   // `/fs/continue` (the agent-fs sign-in handoff) has no `/fs` page of its own.
   "/fs": "Files",
 };
@@ -320,6 +324,32 @@ export function Breadcrumbs() {
       return { path, label, isLast, mono, task };
     })
     .filter((_, index) => !(appPageName && index === 2));
+
+  // `/integrations/<id>` sits under the Connect page that lists it:
+  // Connect › Tools › GitHub, Connect › Channels › Slack.
+  const integration =
+    segments.length === 2 && segments[0] === "integrations"
+      ? INTEGRATIONS.find((def) => def.id === segments[1])
+      : undefined;
+  // Pages the Settings shell renders under their own URLs get a Settings crumb.
+  if (segments[0] && SETTINGS_SHELL_ROOTS.has(segments[0])) {
+    crumbs.unshift({
+      path: "/settings",
+      label: "Settings",
+      isLast: false,
+      mono: false,
+      task: undefined,
+    });
+  }
+  if (integration) {
+    crumbs.splice(1, 0, {
+      path: connectPageHref(integration),
+      label: connectPageTitle(integration.category),
+      isLast: false,
+      mono: false,
+      task: undefined,
+    });
+  }
 
   const leaf = crumbs[crumbs.length - 1];
 

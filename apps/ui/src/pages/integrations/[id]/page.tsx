@@ -80,7 +80,7 @@ import {
   SECRET_MASK_SENTINEL,
 } from "@/lib/integration-form-state";
 import {
-  connectPagePath,
+  connectPageHref,
   connectPageTitle,
   getIntegrationFields,
   getPresenceKeys,
@@ -117,12 +117,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
 function resolveIcon(iconKey: string): LucideIcon {
   return ICON_MAP[iconKey] ?? Plug;
 }
-
-/** Integrations whose overview is a tab of Connect › AI providers. */
-const AI_TAB_OF: Record<string, string> = {
-  memory: "?tab=embeddings",
-  transcription: "?tab=transcription",
-};
 
 export default function IntegrationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -377,13 +371,12 @@ function IntegrationDetailInner({
   const isGithub = def.id === "github";
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
+    // The page owns its scroll: on lg the main column does not scroll.
+    <div className="flex flex-col flex-1 min-h-0 gap-6 overflow-y-auto">
       {/* Header */}
       <div className="flex flex-col gap-2">
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
-          <Link to={`${connectPagePath(def.category)}${AI_TAB_OF[def.id] ?? ""}`}>
-            ← All {connectPageTitle(def.category)}
-          </Link>
+          <Link to={connectPageHref(def)}>← All {connectPageTitle(def.category)}</Link>
         </Button>
         <PageHeader
           title={

@@ -498,10 +498,10 @@ export const appRoutes: RouteObject[] = [
             path: "connection-playground",
             element: admin(<ConnectionPlaygroundPage />),
             handle: nav({
-              title: "Connection playground",
+              title: "Playground",
               icon: FlaskConical,
               parent: "Settings",
-              keywords: ["script connections", "try"],
+              keywords: ["connection playground", "script connections", "try"],
               adminOnly: true,
             }),
           },
@@ -509,10 +509,10 @@ export const appRoutes: RouteObject[] = [
             path: "fetch-credentials",
             element: admin(<FetchCredentialsPage />),
             handle: nav({
-              title: "Raw fetch credentials",
+              title: "Fetch credentials",
               icon: Key,
               parent: "Settings",
-              keywords: ["credential bindings", "fetch"],
+              keywords: ["raw fetch credentials", "credential bindings", "fetch"],
               adminOnly: true,
             }),
           },
@@ -611,48 +611,59 @@ export const appRoutes: RouteObject[] = [
         ],
       },
       {
-        path: "templates",
-        element: <TemplatesPage />,
-        handle: nav(
-          { title: "Templates", icon: FileText, keywords: ["prompt templates"], adminOnly: true },
-          { searchOptOut: "the prompt-templates API has no search yet" },
-        ),
-      },
-      { path: "templates/:id", element: <TemplateDetailPage /> },
-      { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
-      {
         path: "skills",
         element: <SkillsPage />,
         handle: nav({ title: "Skills", icon: BookOpen, adminOnly: true }, { search: ["skills"] }),
       },
       { path: "skills/:id", element: <SkillDetailPage /> },
-      { path: "repos/:id", element: <RepoDetailPage /> },
+      // Settings-rail pages that keep their own URLs: the rail stays beside them.
       {
-        path: "people",
-        element: <PeoplePage />,
-        handle: nav(
+        element: <SettingsLayout />,
+        children: [
           {
-            title: "People",
-            icon: Contact,
-            keywords: ["users"],
-            minVersion: "1.80.0",
-            adminOnly: true,
+            path: "templates",
+            element: <TemplatesPage />,
+            handle: nav(
+              {
+                title: "Templates",
+                icon: FileText,
+                keywords: ["prompt templates"],
+                adminOnly: true,
+              },
+              { searchOptOut: "the prompt-templates API has no search yet" },
+            ),
           },
-          { searchOptOut: "the users API has no search yet" },
-        ),
+          { path: "templates/:id", element: <TemplateDetailPage /> },
+          { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
+          { path: "repos/:id", element: <RepoDetailPage /> },
+          {
+            path: "people",
+            element: <PeoplePage />,
+            handle: nav(
+              {
+                title: "People",
+                icon: Contact,
+                keywords: ["users"],
+                minVersion: "1.80.0",
+                adminOnly: true,
+              },
+              { searchOptOut: "the users API has no search yet" },
+            ),
+          },
+          {
+            path: "people/unmapped",
+            element: <PeoplePage />,
+            handle: nav({
+              title: "Unmapped identities",
+              icon: UserSearch,
+              parent: "People",
+              minVersion: "1.80.0",
+              adminOnly: true,
+            }),
+          },
+          { path: "people/:id", element: <PersonDetailPage /> },
+        ],
       },
-      {
-        path: "people/unmapped",
-        element: <PeoplePage />,
-        handle: nav({
-          title: "Unmapped identities",
-          icon: UserSearch,
-          parent: "People",
-          minVersion: "1.80.0",
-          adminOnly: true,
-        }),
-      },
-      { path: "people/:id", element: <PersonDetailPage /> },
       {
         path: "memory",
         element: <MemoryPage />,

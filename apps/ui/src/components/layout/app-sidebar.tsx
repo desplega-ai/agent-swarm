@@ -232,13 +232,13 @@ const footerNav: FooterItem[] = [
       { title: "Secrets", path: "/settings/secrets", adminOnly: true, advanced: true },
       { title: "Templates", path: "/templates", adminOnly: true, advanced: true },
       {
-        title: "Connection playground",
+        title: "Playground",
         path: "/settings/connection-playground",
         adminOnly: true,
         advanced: true,
       },
       {
-        title: "Raw fetch credentials",
+        title: "Fetch credentials",
         path: "/settings/fetch-credentials",
         adminOnly: true,
         advanced: true,

@@ -3,7 +3,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { PageHeader } from "@/components/ui/page-header";
 import { PlaygroundPanel } from "@/pages/connections/playground-panel";
 
-/** Settings › Advanced › Connection playground: try script connections as an agent. */
+/** Settings › Advanced › Playground: try script connections as an agent. */
 export default function ConnectionPlaygroundPage() {
   const { data: agents } = useAgents(false);
   const defaultAgentId = useMemo(
@@ -12,7 +12,7 @@ export default function ConnectionPlaygroundPage() {
   );
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Connection playground" />
+      <PageHeader title="Playground" />
       <PlaygroundPanel defaultAgentId={defaultAgentId} />
     </div>
   );

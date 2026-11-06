@@ -1,4 +1,4 @@
-import { Workflow } from "lucide-react";
+import { Check, Workflow } from "lucide-react";
 import { useId } from "react";
 import { useConfigs, useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type AiProvider, findAiProvider } from "@/lib/ai-providers";
 import {
   SYSTEM_ONE_DECIDE_DEFAULT_KEY,
@@ -165,29 +166,45 @@ function DefaultSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {hosts.map((host) => (
-            <SelectItem key={host.id} value={host.id}>
-              {systemOneHostLabel(host, capability)}
-            </SelectItem>
-          ))}
+          {hosts.map((host) => {
+            const panel = panelOf(host);
+            return (
+              <SelectItem key={host.id} value={host.id}>
+                <span className="flex min-w-0 items-center gap-2">
+                  {panel ? <ProviderLogo provider={panel} size="sm" className="size-5" /> : null}
+                  <span className="truncate">{systemOneHostLabel(host, capability)}</span>
+                </span>
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>
   );
 }
 
-function ServesTag({ active, children }: { active: boolean; children: string }) {
-  return (
-    <Badge variant="outline" size="tag" className="gap-1.5">
-      {active ? (
-        <span
-          role="img"
-          aria-label="default"
-          className="size-1.5 shrink-0 rounded-full bg-primary"
-        />
-      ) : null}
-      {children}
+/** What a host serves. A check marks the host the defaults above pick. */
+function ServesTag({ active, capability }: { active: boolean; capability: SystemOneCapability }) {
+  const label = capability === "decide" ? "Decide" : "Extract";
+  const tag = (
+    <Badge
+      variant="outline"
+      size="tag"
+      className={cn("gap-1", active && "border-primary/50 text-foreground")}
+    >
+      {active ? <Check aria-hidden className="size-3 shrink-0 text-primary" /> : null}
+      {label}
+      {active ? <span className="sr-only">, default</span> : null}
     </Badge>
+  );
+  if (!active) return tag;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{tag}</TooltipTrigger>
+      <TooltipContent>
+        Default for {capability === "decide" ? "decisions" : "extraction"}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -220,8 +237,12 @@ function HostRow({
         </div>
       </div>
       <div className="col-span-2 flex flex-wrap gap-1.5 md:col-span-1">
-        {host.decide ? <ServesTag active={defaults.decide === host.id}>Decide</ServesTag> : null}
-        {host.extract ? <ServesTag active={defaults.extract === host.id}>Extract</ServesTag> : null}
+        {host.decide ? (
+          <ServesTag active={defaults.decide === host.id} capability="decide" />
+        ) : null}
+        {host.extract ? (
+          <ServesTag active={defaults.extract === host.id} capability="extract" />
+        ) : null}
       </div>
       <span className="col-span-2 min-w-0 font-mono text-xs text-muted-foreground md:col-span-1">
         {models.length > 0
@@ -345,11 +366,7 @@ export function SystemOneTab({
             )}
           >
             <span>Host</span>
-            <span className="flex items-center gap-1.5">
-              Serves
-              <span className="size-1.5 rounded-full bg-primary" />
-              <span className="font-normal">default</span>
-            </span>
+            <span>Serves</span>
             <span>Models</span>
             <span>Credential</span>
             <span>Status</span>

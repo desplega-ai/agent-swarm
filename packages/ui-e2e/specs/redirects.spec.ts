@@ -71,7 +71,7 @@ test("Settings flyout lists People, Templates and Secrets", { tag: ["@smoke"] },
   await expect(flyout.getByText("Advanced", { exact: true })).toBeVisible();
   // People carries the users count, so its name starts with "People".
   await expect(flyout.getByRole("link", { name: /^People/ })).toBeVisible();
-  for (const name of ["Servers", "Secrets", "Templates", "Raw fetch credentials"]) {
+  for (const name of ["Servers", "Secrets", "Templates", "Fetch credentials"]) {
     await expect(flyout.getByRole("link", { name, exact: true })).toBeVisible();
   }
   await expect(flyout.getByRole("link", { name: "Provider keys" })).toHaveCount(0);

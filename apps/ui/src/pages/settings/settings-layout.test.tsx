@@ -45,9 +45,11 @@ function render() {
   );
 }
 
-/** The bare `<span>` labels of the rail links, in order. */
+/** The label `<span>`s of the rail links, in order. */
 function railLabels(html: string): string[] {
-  return [...html.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1] ?? "");
+  return [...html.matchAll(/<span class="min-w-0 truncate">([^<]+)<\/span>/g)].map(
+    (match) => match[1] ?? "",
+  );
 }
 
 describe("SettingsLayout", () => {
@@ -88,8 +90,8 @@ describe("SettingsLayout", () => {
       "Debug",
       "Secrets",
       "Templates",
-      "Connection playground",
-      "Raw fetch credentials",
+      "Playground",
+      "Fetch credentials",
     ]);
     expect(rail.indexOf(">Advanced<")).toBeLessThan(rail.indexOf("Secrets"));
     expect(rail.indexOf(">Advanced<")).toBeGreaterThan(rail.indexOf("Debug"));
