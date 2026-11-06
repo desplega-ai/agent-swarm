@@ -76,34 +76,99 @@ function isOnError(value: unknown): value is OnError {
   );
 }
 
-function rewrite(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const out = rewrite(item);
-      if (out !== item) changed = true;
-      return out;
-    });
-    return changed ? next : value;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Maps `fn` over a list, returning the input when nothing changed. */
+function mapStable<T>(items: T[], fn: (item: T) => T): T[] {
+  let changed = false;
+  const next = items.map((item) => {
+    const out = fn(item);
+    if (out !== item) changed = true;
+    return out;
+  });
+  return changed ? next : items;
+}
+
+/**
+ * One action binding. Its `params` are payload data (a `swarm.call` body may
+ * itself hold `action` / `onError` keys), so they are never walked; the one
+ * chain that nests inside params, `ui.toast`'s `undo.actions`, is rewritten
+ * by position.
+ */
+function rewriteBinding(value: unknown): unknown {
+  if (!isRecord(value) || typeof value.action !== "string") return value;
+  let binding = value;
+  const params = isRecord(value.params) ? value.params : undefined;
+  const undo = params && isRecord(params.undo) ? params.undo : undefined;
+  if (value.action === "ui.toast" && params && undo && Array.isArray(undo.actions)) {
+    const actions = mapStable(undo.actions, rewriteBinding);
+    if (actions !== undo.actions) {
+      binding = { ...value, params: { ...params, undo: { ...undo, actions } } };
+    }
   }
-  if (!value || typeof value !== "object") return value;
-  const obj = value as Record<string, unknown>;
+  if (!isOnError(binding.onError)) return binding;
+  const { onError, ...rest } = binding;
+  const restParams = isRecord(rest.params) ? rest.params : {};
+  return { ...rest, params: { ...restParams, [CHAIN_ON_ERROR_PARAM]: onError } };
+}
+
+/** A chain: an array of bindings, or the single binding `on.<event>` also accepts. */
+function rewriteChain(value: unknown): unknown {
+  return Array.isArray(value) ? mapStable(value, rewriteBinding) : rewriteBinding(value);
+}
+
+/** Prop keys that hold a chain: `actions` (rowActions, bulkActions) and `on<Event>` (onSubmit, onSelect, ...). */
+function isChainKey(key: string): boolean {
+  return key === "actions" || /^on[A-Z]/.test(key);
+}
+
+/** Walks element props to the chain-valued keys, leaving everything else as is. */
+function rewriteProps(value: unknown): unknown {
+  if (Array.isArray(value)) return mapStable(value, rewriteProps);
+  if (!isRecord(value)) return value;
   let changed = false;
   const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(obj)) {
-    const out = rewrite(child);
+  for (const [key, child] of Object.entries(value)) {
+    const out = isChainKey(key) && Array.isArray(child) ? rewriteChain(child) : rewriteProps(child);
     if (out !== child) changed = true;
     next[key] = out;
   }
-  if (typeof next.action === "string" && isOnError(next.onError)) {
-    const { onError, ...binding } = next;
-    const params =
-      binding.params && typeof binding.params === "object" && !Array.isArray(binding.params)
-        ? (binding.params as Record<string, unknown>)
-        : {};
-    return { ...binding, params: { ...params, [CHAIN_ON_ERROR_PARAM]: onError } };
-  }
   return changed ? next : value;
+}
+
+function rewriteElement(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const props = rewriteProps(value.props);
+  let on = value.on;
+  if (isRecord(on)) {
+    let changed = false;
+    const nextOn: Record<string, unknown> = {};
+    for (const [event, chain] of Object.entries(on)) {
+      const out = rewriteChain(chain);
+      if (out !== chain) changed = true;
+      nextOn[event] = out;
+    }
+    if (changed) on = nextOn;
+  }
+  if (props === value.props && on === value.on) return value;
+  const next = { ...value };
+  if (props !== value.props) next.props = props;
+  if (on !== value.on) next.on = on;
+  return next;
+}
+
+function rewrite(elements: unknown): unknown {
+  if (!isRecord(elements)) return elements;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [id, element] of Object.entries(elements)) {
+    const out = rewriteElement(element);
+    if (out !== element) changed = true;
+    next[id] = out;
+  }
+  return changed ? next : elements;
 }
 
 const rewritten = new WeakMap<object, unknown>();

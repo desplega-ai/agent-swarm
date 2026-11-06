@@ -47,6 +47,7 @@ let root: ReturnType<typeof createRoot>;
 let calls: string[];
 let pressError: unknown;
 let marks: string[];
+let bodies: unknown[];
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -56,6 +57,7 @@ beforeEach(() => {
   calls = [];
   pressError = undefined;
   marks = [];
+  bodies = [];
 });
 
 afterEach(async () => {
@@ -66,8 +68,9 @@ afterEach(async () => {
 });
 
 function fetchReturning(status: number): typeof fetch {
-  return (async (input: RequestInfo | URL) => {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push(String(input));
+    if (typeof init?.body === "string") bodies.push(JSON.parse(init.body));
     return new Response(JSON.stringify({ ok: status < 400 }), { status });
   }) as never;
 }
@@ -162,6 +165,16 @@ describe("onError does not suppress the chain halt (real Renderer)", () => {
     expect(isChainHalt(pressError)).toBe(true);
   });
 
+  test("a swarm.call body with its own action/onError is POSTed unchanged", async () => {
+    const body = { action: "deploy", onError: { action: "rollback" } };
+    await renderAndPress(
+      [{ ...failingCall, params: { ...failingCall.params, body } }, savedToast],
+      fetchReturning(200),
+    );
+    expect(bodies).toEqual([{ action: "deploy", onError: { action: "rollback" } }]);
+    expect(shown).toContain("success: Saved");
+  });
+
   test("control: a successful step with onError lets the toast run", async () => {
     await renderAndPress(
       [{ ...failingCall, onError: { set: { "/err": "$error.message" } } }, savedToast],
@@ -223,6 +236,52 @@ describe("withChainOnError", () => {
     // Input untouched, output identity-stable.
     expect("onError" in spec.elements.t.on.press[0]).toBe(true);
     expect(withChainOnError(spec)).toBe(out);
+  });
+
+  test("payload data that looks like a binding passes through untouched", () => {
+    const body = { action: "deploy", onError: { action: "rollback" } };
+    const rows = [{ action: "deploy", onError: { set: { "/x": 1 } } }];
+    const spec = {
+      root: "t",
+      elements: {
+        t: {
+          type: "Table",
+          props: { data: rows, rowActions: [{ label: "Go", actions: [{ action: "app.action" }] }] },
+          on: {
+            press: [
+              { action: "swarm.call", params: { method: "POST", endpoint: "/a", body } },
+              { action: "ui.toast", params: { message: "Saved", meta: body } },
+            ],
+          },
+        },
+      },
+    };
+    const out = withChainOnError(spec);
+    expect(out).toBe(spec);
+    const press = out.elements.t.on.press;
+    expect(press[0]?.params.body).toEqual({ action: "deploy", onError: { action: "rollback" } });
+    expect(CHAIN_ON_ERROR_PARAM in (press[0]?.params ?? {})).toBe(false);
+    expect(out.elements.t.props.data).toEqual(rows);
+  });
+
+  test("a binding's own onError moves while its body keeps its onError", () => {
+    const body = { action: "deploy", onError: { action: "rollback" } };
+    const onError = { set: { "/err": "$error.message" } };
+    const spec = {
+      root: "b",
+      elements: {
+        b: {
+          type: "Btn",
+          props: {},
+          on: { press: { action: "swarm.call", params: { endpoint: "/d", body }, onError } },
+        },
+      },
+    };
+    const out = withChainOnError(spec);
+    expect(out.elements.b.on.press).toEqual({
+      action: "swarm.call",
+      params: { endpoint: "/d", body, [CHAIN_ON_ERROR_PARAM]: onError },
+    });
   });
 
   test("a spec without onError comes back as the same object", () => {
