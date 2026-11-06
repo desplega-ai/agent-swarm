@@ -223,9 +223,14 @@ export async function resolveSlackParticipant(
 export async function resolveSlackUserId(
   client: WebClient,
   slackUserId: string,
-  eventContext: { sampleEventType: string; sampleContext: string },
+  // `userTeam` is required (pass `undefined` when the event has none) so no
+  // call site can silently drop it: a Slack Connect sender with a company
+  // email must not get a member row.
+  eventContext: { sampleEventType: string; sampleContext: string; userTeam: string | undefined },
 ): Promise<string | undefined> {
-  return (await resolveSlackParticipant(client, slackUserId, eventContext)).userId;
+  const ourTeamId = eventContext.userTeam ? await getOurSlackTeamId(client) : undefined;
+  return (await resolveSlackParticipant(client, slackUserId, { ...eventContext, ourTeamId }))
+    .userId;
 }
 
 /** Our own Slack team id (`auth.test`), cached per process. */

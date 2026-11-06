@@ -48,6 +48,15 @@ export interface SlackThreadSnapshot {
   newest: SlackParticipantResolution;
 }
 
+/**
+ * `label: text` with every continuation line indented. Author labels start at
+ * column 0 and message lines never do, so a multi-line message cannot forge
+ * another person's `<@U…>: …` line.
+ */
+export function formatAuthoredMessage(label: string, text: string): string {
+  return `${label}: ${text.split(/\r\n|[\n\r\u2028\u2029]/).join("\n  ")}`;
+}
+
 export function isUntrusted(trust: SlackParticipantTrust | undefined): boolean {
   return trust === "external" || trust === "unknown";
 }
@@ -163,8 +172,12 @@ async function renderThreadContext(
   // UNKNOWN sentinel), never a raw Slack display name.
   const lines = window.map((m) => {
     const text = extractSlackMessageText(m);
-    if (isBot(m)) return `[Agent]: ${text.length > 500 ? `${text.slice(0, 500)}...` : text}`;
-    return `${m.user ? `<@${m.user}>` : "Unknown"}: ${text}`;
+    if (isBot(m))
+      return formatAuthoredMessage(
+        "[Agent]",
+        text.length > 500 ? `${text.slice(0, 500)}...` : text,
+      );
+    return formatAuthoredMessage(m.user ? `<@${m.user}>` : "Unknown", text);
   });
   let body = await rewriteSlackMentions(lines.join("\n"), botUserId, trust);
   if ([...trust.values()].some(isUntrusted)) {
