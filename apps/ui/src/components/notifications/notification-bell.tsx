@@ -11,6 +11,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { SLACK_CONNECT_INVITE_KEY } from "@/hooks/use-slack-connect-invite";
 import { NOTIFICATION_DEFINITIONS } from "@/lib/notifications/definitions";
 import { unreadBadgeLabel } from "@/lib/notifications/unread";
+import { cn } from "@/lib/utils";
 import { NotificationPanel } from "./notification-panel";
 import { useSlackConnectMoment } from "./use-slack-connect-moment";
 
@@ -24,7 +25,8 @@ function isUnread(state: InboxItemState | undefined): boolean {
   return !state?.readAt;
 }
 
-export function NotificationBell() {
+/** `className` sizes the trigger (the phone header makes it a 44 px target). */
+export function NotificationBell({ className }: { className?: string } = {}) {
   const currentUser = useCurrentUser();
   const inboxState = useInboxState({ userId: currentUser.userId, itemType: "notification" });
   const { trackEvent } = useNotificationEvents();
@@ -104,7 +106,7 @@ export function NotificationBell() {
         <Button
           variant="ghost"
           size="icon"
-          className="relative size-8"
+          className={cn("relative size-8", className)}
           aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
         >
           <Bell className="size-4" />

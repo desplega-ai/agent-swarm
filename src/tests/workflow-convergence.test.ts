@@ -461,46 +461,52 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       expect(steps).toHaveLength(50);
     });
 
-    test("exceeding MAX_ITERATIONS fails with 'node executions' message", async () => {
-      // We set WORKFLOW_MAX_ITERATIONS env to a low number for this test
-      const originalMax = process.env.WORKFLOW_MAX_ITERATIONS;
-      process.env.WORKFLOW_MAX_ITERATIONS = "3";
+    for (const [value, limit] of [
+      [undefined, 100],
+      ["", 100],
+      [" ", 100],
+      ["Infinity", 100],
+      ["-Infinity", 100],
+      ["NaN", 100],
+      ["invalid", 100],
+      ["0", 100],
+      ["-1", 100],
+      ["1.5", 100],
+      ["1", 1],
+      ["3", 3],
+      ["101", 101],
+    ] as const) {
+      test(`WORKFLOW_MAX_ITERATIONS=${value} stops execution at ${limit} nodes`, async () => {
+        const originalMax = process.env.WORKFLOW_MAX_ITERATIONS;
+        if (value === undefined) delete process.env.WORKFLOW_MAX_ITERATIONS;
+        else process.env.WORKFLOW_MAX_ITERATIONS = value;
 
-      // Need to re-import to pick up env change — but since MAX_ITERATIONS is
-      // read at module load, we test the error message pattern instead.
-      // Build a chain of 5 nodes which will exceed limit of 3
-      const registry = createTestRegistry();
-      const def: WorkflowDefinition = {
-        nodes: [
-          { id: "a", type: "echo", config: { message: "1" }, next: "b" },
-          { id: "b", type: "echo", config: { message: "2" }, next: "c" },
-          { id: "c", type: "echo", config: { message: "3" }, next: "d" },
-          { id: "d", type: "echo", config: { message: "4" }, next: "e" },
-          { id: "e", type: "echo", config: { message: "5" } },
-        ],
-      };
+        try {
+          const registry = createTestRegistry();
+          // A finite chain exposes a disabled breaker without hanging the test.
+          const def: WorkflowDefinition = {
+            nodes: Array.from({ length: limit + 1 }, (_, i) => ({
+              id: `n${i}`,
+              type: "echo",
+              config: { message: `step ${i}` },
+              ...(i < limit ? { next: `n${i + 1}` } : {}),
+            })),
+          };
+          const workflow = await makeWorkflow(def);
+          const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const workflow = await makeWorkflow(def);
-      const runId = await startWorkflowExecution(workflow, {}, registry);
-
-      const run = await getWorkflowRun(runId);
-      // With MAX_ITERATIONS=100 (module-level constant), this should complete.
-      // The env var is read at module load time, so we can't dynamically change it.
-      // Instead, verify the workflow runs correctly at the default limit.
-      // The error message format is verified structurally in the code.
-      if (run!.status === "failed") {
-        expect(run!.error).toContain("node executions");
-      } else {
-        expect(run!.status).toBe("completed");
-      }
-
-      // Restore
-      if (originalMax !== undefined) {
-        process.env.WORKFLOW_MAX_ITERATIONS = originalMax;
-      } else {
-        delete process.env.WORKFLOW_MAX_ITERATIONS;
-      }
-    });
+          const run = await getWorkflowRun(runId);
+          expect(run?.status).toBe("failed");
+          expect(run?.error).toContain(`Max node executions (${limit}) exceeded`);
+          const steps = await getWorkflowRunStepsByRunId(runId);
+          expect(steps).toHaveLength(limit);
+          expect(steps.every((step) => step.status === "completed")).toBe(true);
+        } finally {
+          if (originalMax === undefined) delete process.env.WORKFLOW_MAX_ITERATIONS;
+          else process.env.WORKFLOW_MAX_ITERATIONS = originalMax;
+        }
+      });
+    }
   });
 
   // ─── nextPort persistence ──────────────────────────────────

@@ -19,6 +19,10 @@
 
 ARG PREK_VERSION=0.4.5
 ARG SKILLS_CLI_VERSION=1.5.20
+# context-mode pins BOTH the global CLI/MCP server (worker-base) and the
+# Claude/Codex plugin marketplaces (worker-full-base). Global so the two
+# stages cannot drift; each stage re-declares it.
+ARG CONTEXT_MODE_VERSION=1.0.169
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
@@ -221,9 +225,11 @@ USER worker
 # plugin). The Claude/Codex plugin installs (worker-full-base) provide the
 # hooks; this provides the CLI binary + package importability. Disable
 # per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-ARG CONTEXT_MODE_VERSION=1.0.169
+# Version: global ARG at the top of this file.
+ARG CONTEXT_MODE_VERSION
 USER root
-RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
@@ -244,7 +250,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.17
+ARG AGENT_FS_VERSION=0.18.22
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -558,8 +564,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-alpha.3
-ARG DSH_SHA512=7df574e9f3a088e78824e980dc480f8fe53a6b326bb0b0028ac70b8fdb7e01f33ba7da75e1b33312b591860782f278b3053c90d9c93190f42d8f83eaa27f261b
+ARG DSH_VERSION=0.2.2-rc.1
+ARG DSH_SHA512=8a347d504558906d7943f43bf49cefccb07340e41f73add52ebf67e9f969c073e1af920a9f6531b619d2a2da3f3fd97ba8677ba4fbc8d516ba4d6ecb1f7a0aa6
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +580,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793764839-g19a5bc
-ARG AMP_SHA512_AMD64=a8fae24f8f8ce379baaebc11c8889040fb83e69e7dfe807f1fc6e664c2f5f3e8c26a7def61c2cde339ebc0dd2f78a4f7c8c483e73e95d07a3f20cc317a26fa21
-ARG AMP_SHA512_ARM64=d8b81267827bc6e02438a75f40cb5b796af9daae1dd88b02008f9855b33b44e157aa2538c04f2b17cda638bdff2f1dbc2bcf2ab617219ebb6182b7c3b5a27f86
+ARG AMP_VERSION=0.0.1793887133-gbf8b08
+ARG AMP_SHA512_AMD64=7f98b1f456097745c0a2f59a5935f36cab7c86bbfdada3786d1dfc0904eb72d688a8629a8dbf9b0b988fb594198edf1f4cfc11071cfa90d226630b7f5ce57c8e
+ARG AMP_SHA512_ARM64=9d1946097611f86e695d760487561798a649ebb6ab43b33a13e79ac0a4730401a7585a621d82431dc7ce65bf56c105ca9c3d776e21d080ba3111c6de74d66a67
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -611,7 +617,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.66.0
+ARG GEMINI_CLI_VERSION=0.67.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -822,21 +828,28 @@ USER root
 
 # Install the context-mode plugins for Claude + Codex (build-time cache).
 # These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
-# skills-only installer cannot replace. NOTE: the Claude plugin tracks the
-# marketplace HEAD and is NOT version-pinned. A build-time `git checkout
-# v${CONTEXT_MODE_VERSION}` in the marketplace clone does not work (git
-# rejects it with "dubious ownership" and the clone is shallow without tags),
-# so we don't attempt it. The ctx_* TOOLS are served by the globally-installed
-# CLI (npm i -g context-mode in worker-base), which IS pinned; only the hook
-# bundle floats — acceptable since the hooks are backward-compatible.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build.
+# skills-only installer cannot replace. Both marketplaces are PINNED to the
+# v${CONTEXT_MODE_VERSION} tag, the same version as the global CLI/MCP server
+# (npm i -g context-mode in worker-base). Never leave them unpinned: upstream
+# v2.0.0 raised engines.node to >=24.15.0, and on this image's Node 22 the
+# newer hook denies EVERY Bash call with NODE_TOO_OLD. Bump the tag only
+# together with NODE_VERSION when the target release needs a newer Node.
+# The ref persists (Claude: known_marketplaces.json + settings.json
+# extraKnownMarketplaces; Codex: config.toml `ref`), so a runtime marketplace
+# refresh stays on the tag. Plugin auto-update is also off at runtime:
+# DISABLE_AUTOUPDATER=1 (worker-base ENV) disables it in Claude Code.
+# Guarded with || true so a marketplace/registry hiccup can't fail the build;
+# the leading `test -n` is NOT guarded, so an ARG that fails to reach this
+# stage fails the build instead of installing an unpinned or empty ref.
 # CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
 # `bun install` under the hood and previously left an 880 MB cache in a layer.
+ARG CONTEXT_MODE_VERSION
 USER worker
-RUN claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@context-mode --scope user || true \
-    && codex plugin marketplace add mksglu/context-mode || true \
-    && codex plugin add context-mode@context-mode || true \
+RUN test -n "${CONTEXT_MODE_VERSION}" \
+    && { claude plugin marketplace add "mksglu/claude-context-mode#v${CONTEXT_MODE_VERSION}" || true; } \
+    && { claude plugin install context-mode@context-mode --scope user || true; } \
+    && { codex plugin marketplace add mksglu/context-mode --ref "v${CONTEXT_MODE_VERSION}" || true; } \
+    && { codex plugin add context-mode@context-mode || true; } \
     && rm -rf /home/worker/.bun/install/cache
 
 USER root

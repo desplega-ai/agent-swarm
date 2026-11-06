@@ -1466,11 +1466,11 @@ export class PiMonoSession implements ProviderSession {
           appliedReasoningEffort: this.appliedReasoningEffort,
         };
       }
-      // Defense-in-depth: AWS SDK failures surface as structured events (handled
-      // above in runSession), not thrown exceptions, so this catch is for genuine
-      // unexpected throws (MCP / transport / etc). Still classify in case an AWS
-      // signature or a rejected subscription login ever reaches here, so the
-      // red box fires like sibling adapters.
+      // Provider failures (AWS SDK, a rejected subscription login) arrive as
+      // structured events (the terminalError path above), so a throw here is
+      // MCP, transport or the harness itself. Classify it only for the red
+      // box: an MCP "HTTP 401 Unauthorized" reads like a rejected login but
+      // says nothing about the provider, so the origin stays "harness".
       const classifiedError = this.classifyFailure(errorMessage);
       if (classifiedError) {
         this.emit({
@@ -1488,6 +1488,7 @@ export class PiMonoSession implements ProviderSession {
         cost,
         isError: true,
         errorCategory: classifiedError?.category,
+        errorOrigin: "harness",
         failureReason: scrubSecrets(classifiedError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };

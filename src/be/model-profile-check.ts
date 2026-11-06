@@ -49,6 +49,11 @@ export interface ProfileCheckOptions {
   vcsRepo?: string | null;
   /** Whether the worker's config read includes secret repo rows (`readsRepoSecrets`). */
   includeRepoSecrets?: boolean;
+  /**
+   * Judge the profile's fallbacks too (default). Gates that read only `ok`
+   * pass false and skip the extra reads.
+   */
+  fallbacks?: boolean;
 }
 
 /**
@@ -232,10 +237,37 @@ async function credentialAllowlistRow(
   };
 }
 
+/** Every check row for one profile on the agent. */
+async function profileRows(
+  agent: Agent,
+  profile: ModelProfile,
+  harness: string | null,
+  agentHarness: string | null,
+  pools: Map<string, string>,
+): Promise<ProfileCheckRow[]> {
+  const checks: ProfileCheckRow[] = [
+    harnessRow(profile, harness),
+    modelRow(profile, harness),
+    harnessCredentialsRow(agent, profile, harness, agentHarness, pools),
+  ];
+  if (hasUnreadableCredentialAllowlist(profile)) {
+    // Null credentials here would read as the whole pool; fail closed instead.
+    checks.push({
+      check: "credential-allowlist",
+      state: "fail",
+      detail: "the stored credential allowlist is unreadable; set the profile's credentials again",
+    });
+  } else if (profile.credentials) {
+    checks.push(await credentialAllowlistRow(agent.id, profile.credentials, pools));
+  }
+  return checks;
+}
+
 /**
  * Judge whether `agentId` can run `profileName`. Null when the agent or the
- * profile does not exist. PR 2 has no fallbacks, so `profiles` holds the
- * primary only.
+ * profile does not exist. `profiles` holds the primary, then each of its
+ * fallbacks with its own rows; `ok` judges the primary only. A fallback that
+ * no longer exists is left out.
  */
 export async function checkProfileForAgent(
   agentId: string,
@@ -251,23 +283,16 @@ export async function checkProfileForAgent(
   const harness = options.harness === undefined ? agentHarness : options.harness;
   const pools = await configPools(agentId, options);
 
-  const checks: ProfileCheckRow[] = [
-    harnessRow(profile, harness),
-    modelRow(profile, harness),
-    harnessCredentialsRow(agent, profile, harness, agentHarness, pools),
-  ];
-  if (hasUnreadableCredentialAllowlist(profile)) {
-    // Null credentials here would read as the whole pool; fail closed instead.
-    checks.push({
-      check: "credential-allowlist",
-      state: "fail",
-      detail: "the stored credential allowlist is unreadable; set the profile's credentials again",
-    });
-  } else if (profile.credentials) {
-    checks.push(await credentialAllowlistRow(agentId, profile.credentials, pools));
-  }
+  const checks = await profileRows(agent, profile, harness, agentHarness, pools);
   const ok = !checks.some((row) => row.state === "fail");
-  return { agentId, ok, profiles: [{ name: profile.name, ok, checks }] };
+  const profiles: ProfileCheckResult["profiles"] = [{ name: profile.name, ok, checks }];
+  for (const name of options.fallbacks === false ? [] : profile.fallbacks) {
+    const fallback = await getModelProfileByName(name);
+    if (!fallback) continue;
+    const rows = await profileRows(agent, fallback, harness, agentHarness, pools);
+    profiles.push({ name, ok: !rows.some((row) => row.state === "fail"), checks: rows });
+  }
+  return { agentId, ok, profiles };
 }
 
 /** One line per failing row of the primary profile, for a gate's error message. */

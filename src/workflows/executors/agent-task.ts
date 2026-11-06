@@ -94,7 +94,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     let effectiveVcsRepo = config.vcsRepo;
     let effectiveKey: string | undefined;
     if (meta.workflowId) {
-      const workflow = await db.getWorkflow(meta.workflowId);
+      const workflow = await db.getRunWorkflow({ id: meta.runId, workflowId: meta.workflowId });
       if (workflow) {
         if (!effectiveDir && workflow.dir) effectiveDir = workflow.dir;
         if (!effectiveVcsRepo && workflow.vcsRepo) effectiveVcsRepo = workflow.vcsRepo;

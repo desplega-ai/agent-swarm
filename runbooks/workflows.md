@@ -321,6 +321,34 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   (the child runs its live definition) and a per-node timeout. As a `foreach` body, a run retry gives the failed item a new child run (see
   [Retry with preserved siblings](#retry-with-preserved-siblings)).
 
+## Definition pinning
+
+A run executes the definition it started with (migration 283). `startWorkflowExecution`
+stores the raw workflow, before token rendering, in `workflow_run_definitions` (one immutable
+row per distinct content, keyed by sha256) and sets `workflow_runs.definitionHash`. Every
+read made on behalf of a run goes through `getRunWorkflow(run)` (`src/be/db.ts`), never
+`getWorkflow(run.workflowId)`: resume, retry, the retry poller, approvals, waits, child
+completion, foreach drives and restart recovery.
+
+| Pinned (from the snapshot) | Live (from the `workflows` row) |
+|---|---|
+| `definition`, `input`, `params`, `dir`, `vcsRepo`, `name`, `description`, `triggers`, `cooldown`, `triggerSchema`, `requiredParams`, `requires` | `enabled`, `key`, `createdByAgentId`, row metadata |
+
+- The snapshot keeps nested key order as written: script `args` and System One `questions`
+  and `criteria` are iterated in that order, so definitions that differ only in order get
+  distinct rows. Only the top-level field order is normalized.
+- A run with no hash (created before 283, or a recorded setup failure) reads the live row.
+- Retry re-runs on the pinned definition. To pick up an edit, trigger a new run.
+- Two reads stay live: a `swarm-script` node resolves its script when the step runs, and a
+  `sub-workflow` node reads the child's definition when the child starts (the child then pins it).
+- `deleteWorkflow` collects the distinct hashes of its runs before deleting them. In the
+  same transaction, it checks only those snapshots in batches of 100 and removes each one
+  only if no remaining run references it, regardless of status. Shared snapshots and
+  unrelated orphans stay untouched. This optimizes deletion, but adds no run retention or
+  periodic snapshot sweep. A live workflow still retains the snapshots its runs reference.
+- A new `WorkflowSnapshot` field must be classified in `PINNED_WORKFLOW_KEYS`
+  (`src/be/db/workflow-run-definitions.ts`).
+
 ## Cancelling a run
 
 `cancelWorkflowRun` (`src/workflows/resume.ts`) backs the HTTP route

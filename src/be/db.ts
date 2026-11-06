@@ -232,6 +232,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
+import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
   emitChildRunFinished,
   emitRunFinished,
@@ -327,6 +328,13 @@ export {
   assertAssetKeyMovesAllowed,
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
+export {
+  getRunWorkflow,
+  PINNED_WORKFLOW_KEYS,
+  type PinnedWorkflowDefinition,
+  pinWorkflowDefinition,
+  toPinnedDefinition,
+} from "./db/workflow-run-definitions";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -2955,9 +2963,9 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -3001,6 +3009,7 @@ export async function createTaskExtended(
         options?.modelTier ?? null,
         options?.effort ?? null,
         options?.profile?.trim() || null,
+        options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
         options?.scheduleId ?? null,
         options?.workflowRunId ?? null,
         options?.workflowRunStepId ?? null,
@@ -7955,7 +7964,13 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     [id],
   );
   // 3. Delete runs (they reference workflow)
+  const definitionHashes = await client.query<{ definitionHash: string }>(
+    `SELECT DISTINCT definitionHash FROM workflow_runs
+      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
+    [id],
+  );
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
@@ -8008,10 +8023,12 @@ export async function createWorkflowRun(data: {
   parentStepAttempt?: number;
   /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
   triggeredByAgentId?: string;
+  /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
+  definitionHash?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -8022,6 +8039,7 @@ export async function createWorkflowRun(data: {
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
       data.triggeredByAgentId ?? null,
+      data.definitionHash ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");

@@ -21,6 +21,7 @@ import type {
   ApiKeyStatusResponse,
   AppActionResponse,
   AppDetail,
+  AppIcon,
   AppListItem,
   AppRow,
   ApprovalRequest,
@@ -120,6 +121,9 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
+  SavingsJobsResponse,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -1147,6 +1151,10 @@ class ApiClient {
       throw new Error("Invalid feedback endpoint");
     }
 
+    if (parsedEndpoint.username || parsedEndpoint.password) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
     const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
     if (
       parsedEndpoint.protocol !== "https:" &&
@@ -1208,7 +1216,7 @@ class ApiClient {
   async inviteAgentFsMember(data: {
     email: string;
     role: "viewer" | "editor" | "admin";
-  }): Promise<{ orgId: string; invited: boolean }> {
+  }): Promise<{ orgId: string; invited: boolean; status?: string; token?: string }> {
     const url = `${this.getBaseUrl()}/api/fs/members/invite`;
     const res = await fetch(url, {
       method: "POST",
@@ -4001,6 +4009,36 @@ class ApiClient {
     return (await res.json()) as { enabled: false };
   }
 
+  /** Modelled saving of one workflow against doing its runs with agent tasks. */
+  async getWorkflowSavings(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsJobsResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /** The workflow's modelled saving per UTC day, from the same computation as `getWorkflowSavings`. */
+  async getWorkflowSavingsDaily(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/daily?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load daily workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
+  }
+
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
   async getFleetBenchmark(): Promise<FleetBenchmarkResponse> {
     const url = `${this.getBaseUrl()}/api/fleet-benchmark`;
@@ -4378,6 +4416,26 @@ class ApiClient {
 
   async getApp(id: string): Promise<{ app: AppDetail }> {
     return this.appRequest(`/api/apps/${encodeURIComponent(id)}`, undefined, "Failed to load app");
+  }
+
+  /**
+   * RFC 7396 merge patch of an app (`app.manage`). `definition` merges into the
+   * stored definition; a `null` value removes that key. `definition.icon` is
+   * replaced whole, so switching icon types leaves no stale keys.
+   */
+  async patchApp(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      definition?: Record<string, unknown> & { icon?: AppIcon | null };
+    },
+  ): Promise<{ app: AppDetail }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+      "Failed to update app",
+    );
   }
 
   /**

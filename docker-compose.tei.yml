@@ -1,0 +1,43 @@
+# Local embeddings for swarm memory, using the official TEI CPU image.
+# Usage (include both files for every Compose command):
+#   docker compose -f docker-compose.example.yml -f docker-compose.tei.yml --env-file .env up -d
+# On arm64 Docker hosts, set this in .env:
+#   TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4
+# Procedure: skills/agent-swarm/references/embeddings.md
+
+services:
+  api:
+    environment:
+      EMBEDDING_API_BASE_URL: http://tei:80/v1
+      EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
+      EMBEDDING_API_KEY: local-tei
+      # Keep the trailing spaces. Nomic requires these task prefixes.
+      EMBEDDING_QUERY_PREFIX: "search_query: "
+      EMBEDDING_DOCUMENT_PREFIX: "search_document: "
+    depends_on:
+      # First boot downloads model weights. The API can serve keyword search meanwhile.
+      tei:
+        condition: service_started
+
+  tei:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4}
+    command:
+      - --model-id
+      - nomic-ai/nomic-embed-text-v1.5
+      - --max-batch-tokens
+      - "2048"
+      - --max-client-batch-size
+      - "256"
+    mem_limit: 2g
+    volumes:
+      - tei_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+    restart: unless-stopped
+
+volumes:
+  tei_data:

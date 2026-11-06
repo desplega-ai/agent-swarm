@@ -1,9 +1,7 @@
 import { AlertCircle, Check, Copy, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
-import {
-  buildJiraAuthorizeUrl,
-  useDisconnectJira,
-  useJiraTrackerStatus,
-} from "@/api/hooks/use-jira-status";
+import { toast } from "sonner";
+import { useDisconnectJira, useJiraTrackerStatus } from "@/api/hooks/use-jira-status";
+import { openTrackerAuthorizeInNewTab } from "@/api/tracker-authorize";
 import { OAuthSection, OAuthSectionRow, OAuthStatusRow } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -33,13 +31,21 @@ function formatTokenExpiry(expiry: string | null): string | null {
   return d.toLocaleString();
 }
 
-type CopyKey = "webhook" | "redirect" | "site" | "authorize";
+type CopyKey = "webhook" | "redirect" | "site";
 
 export function JiraOAuthSection() {
   const { data, isLoading, isError, error, refetch, isFetching } = useJiraTrackerStatus();
   const disconnect = useDisconnectJira();
   const { copiedKey, copy } = useCopyToClipboard<CopyKey>();
   const handleCopy = (key: CopyKey, value: string) => copy(value, key);
+
+  function handleAuthorize() {
+    openTrackerAuthorizeInNewTab("jira").catch((err: unknown) => {
+      toast.error("Could not start Jira OAuth", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
   if (isLoading) {
     return (
@@ -140,48 +146,22 @@ export function JiraOAuthSection() {
               </div>
             </div>
           ) : (
-            "Copy the Authorization URL below and open it in a browser to authorize a Jira Cloud workspace via OAuth 3LO."
+            "Click Authorize to connect a Jira Cloud workspace via OAuth 3LO."
           )
         }
       />
 
-      {/* Authorization URL row — copy instead of auto-redirect. */}
+      {/* Authorization row. The consent URL is fetched with the bearer on click. */}
       <OAuthSectionRow>
-        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {data.connected ? "Re-authentication URL" : "Authorization URL"}
-        </div>
         <div className="flex items-center gap-2">
-          <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
-            {buildJiraAuthorizeUrl()}
-          </code>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => handleCopy("authorize", buildJiraAuthorizeUrl())}
-            className="shrink-0"
-          >
-            {copiedKey === "authorize" ? (
-              <Check className="h-3.5 w-3.5 text-status-success-strong" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            {copiedKey === "authorize" ? "Copied" : "Copy"}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => window.open(buildJiraAuthorizeUrl(), "_blank", "noopener,noreferrer")}
-            className="shrink-0"
-          >
+          <Button type="button" size="sm" variant="outline" onClick={handleAuthorize}>
             <ExternalLink className="h-3.5 w-3.5" />
-            Open
+            {data.connected ? "Re-authenticate" : "Authorize"}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Open this URL in a browser to {data.connected ? "re-authenticate" : "authorize"} the swarm
-          with Jira via OAuth 3LO.
+          Opens the Atlassian consent screen in a new tab to{" "}
+          {data.connected ? "re-authenticate" : "authorize"} the swarm with Jira via OAuth 3LO.
         </p>
       </OAuthSectionRow>
 

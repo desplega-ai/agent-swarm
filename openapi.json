@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.10",
+    "version": "2.8.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -398,6 +398,60 @@
           },
           "resolvedProfile": {
             "type": "string"
+          },
+          "fallbackHops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string"
+                },
+                "errorClass": {
+                  "type": "string",
+                  "enum": [
+                    "rate_limit",
+                    "model_window",
+                    "seat",
+                    "credits",
+                    "overloaded",
+                    "server_error",
+                    "auth",
+                    "pool_empty"
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                },
+                "skipped": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "profile": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "profile",
+                      "reason"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "profile",
+                "errorClass",
+                "at"
+              ]
+            }
           },
           "scheduleId": {
             "type": "string"
@@ -1252,6 +1306,54 @@
                 "required": [
                   "type",
                   "icon"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
                 ]
               }
             ]
@@ -7713,6 +7815,54 @@
                                   "type",
                                   "icon"
                                 ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "url"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "maxLength": 2048,
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "url"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent-fs"
+                                    ]
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 2,
+                                    "maxLength": 1024
+                                  },
+                                  "orgId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "driveId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "path"
+                                ]
                               }
                             ]
                           },
@@ -12188,6 +12338,54 @@
                         "required": [
                           "type",
                           "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
                         ]
                       },
                       {
@@ -22938,7 +23136,7 @@
     "/api/fs/members/invite": {
       "post": {
         "summary": "Invite an external member into the agent-fs shared org",
-        "description": "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+        "description": "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.",
         "tags": [
           "FS"
         ],
@@ -22996,7 +23194,7 @@
                         "added",
                         "pending"
                       ],
-                      "description": "already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept."
+                      "description": "already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account)."
                     },
                     "inviteId": {
                       "type": "string",
@@ -23009,6 +23207,10 @@
                     "acceptUrl": {
                       "type": "string",
                       "description": "Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured."
+                    },
+                    "token": {
+                      "type": "string",
+                      "description": "Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept."
                     }
                   },
                   "required": [
@@ -28500,6 +28702,12 @@
                               "minItems": 1
                             }
                           },
+                          "fallbacks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -28517,6 +28725,7 @@
                           "description",
                           "seededFrom",
                           "credentials",
+                          "fallbacks",
                           "createdAt",
                           "lastUpdatedAt"
                         ]
@@ -28534,7 +28743,7 @@
       },
       "post": {
         "summary": "Create a model profile",
-        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).",
+        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28614,6 +28823,14 @@
                       },
                       "minItems": 1
                     }
+                  },
+                  "fallbacks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "maxItems": 10
                   }
                 },
                 "required": [
@@ -28704,6 +28921,12 @@
                         "minItems": 1
                       }
                     },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -28721,6 +28944,7 @@
                     "description",
                     "seededFrom",
                     "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -28861,6 +29085,12 @@
                         "minItems": 1
                       }
                     },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -28878,6 +29108,7 @@
                     "description",
                     "seededFrom",
                     "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -28899,7 +29130,7 @@
       },
       "patch": {
         "summary": "Update a model profile",
-        "description": "Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).",
+        "description": "Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28967,6 +29198,14 @@
                       },
                       "minItems": 1
                     }
+                  },
+                  "fallbacks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "maxItems": 10
                   }
                 }
               }
@@ -29052,6 +29291,12 @@
                         "minItems": 1
                       }
                     },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -29069,6 +29314,7 @@
                     "description",
                     "seededFrom",
                     "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -29110,7 +29356,7 @@
       },
       "delete": {
         "summary": "Delete a model profile",
-        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -36937,7 +37183,7 @@
     "/api/tasks/{id}/supersede": {
       "post": {
         "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
-        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
         "tags": [
           "Tasks"
         ],
@@ -36968,7 +37214,21 @@
                       "graceful_shutdown",
                       "context_limits",
                       "manual_supersede",
-                      "crash_recovery"
+                      "crash_recovery",
+                      "provider_fallback"
+                    ]
+                  },
+                  "errorClass": {
+                    "type": "string",
+                    "enum": [
+                      "rate_limit",
+                      "model_window",
+                      "seat",
+                      "credits",
+                      "overloaded",
+                      "server_error",
+                      "auth",
+                      "pool_empty"
                     ]
                   }
                 },
@@ -36998,7 +37258,8 @@
                       "enum": [
                         "alreadyFinished",
                         "workflow-failed",
-                        "resumed"
+                        "resumed",
+                        "noFallback"
                       ]
                     },
                     "task": {
@@ -37033,6 +37294,12 @@
                         "cancelled",
                         "superseded",
                         "skipped"
+                      ]
+                    },
+                    "failureReason": {
+                      "type": [
+                        "string",
+                        "null"
                       ]
                     }
                   },
@@ -51566,6 +51833,537 @@
         }
       }
     },
+    "/api/savings/jobs": {
+      "get": {
+        "summary": "Estimated automation savings for a workflow",
+        "description": "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Savings rows for the workflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "computedAt": {
+                      "type": "string"
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "no-runs",
+                        "too-many-runs",
+                        null
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "workflow"
+                            ]
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "basis": {
+                            "type": "string",
+                            "enum": [
+                              "modelled"
+                            ]
+                          },
+                          "runs": {
+                            "type": "integer"
+                          },
+                          "substitutedRuns": {
+                            "type": "integer"
+                          },
+                          "effectRuns": {
+                            "type": "integer"
+                          },
+                          "enabledOnlyRuns": {
+                            "type": "integer"
+                          },
+                          "capApplied": {
+                            "type": "boolean"
+                          },
+                          "opsPerRun": {
+                            "type": "number"
+                          },
+                          "measuredUsd": {
+                            "type": "number",
+                            "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
+                          },
+                          "estimatedLlmUsd": {
+                            "type": "number",
+                            "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
+                          },
+                          "actualUsd": {
+                            "type": "number",
+                            "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
+                          },
+                          "agentOnlyUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "savingUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "actualHours": {
+                            "type": "number",
+                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`."
+                          },
+                          "agentOnlyHours": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "hoursSaved": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "agentOnlyUsdPerRun": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "workflowId",
+                          "name",
+                          "basis",
+                          "runs",
+                          "substitutedRuns",
+                          "effectRuns",
+                          "enabledOnlyRuns",
+                          "capApplied",
+                          "opsPerRun",
+                          "measuredUsd",
+                          "estimatedLlmUsd",
+                          "actualUsd",
+                          "agentOnlyUsd",
+                          "savingUsd",
+                          "actualHours",
+                          "agentOnlyHours",
+                          "hoursSaved",
+                          "agentOnlyUsdPerRun"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing workflowId, or an unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "A savings query ran past its time budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent database queries; retry shortly",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/daily": {
+      "get": {
+        "summary": "Daily automation savings for a workflow",
+        "description": "The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily savings points for the workflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "computedAt": {
+                      "type": "string"
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "no-runs",
+                        "too-many-runs",
+                        null
+                      ]
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "day": {
+                            "type": "string"
+                          },
+                          "savingUsd": {
+                            "type": "number"
+                          },
+                          "actualUsd": {
+                            "type": "number",
+                            "description": "Scaled estimate: the day's measured and estimated spend times the window's substituted share."
+                          },
+                          "measuredUsd": {
+                            "type": "number",
+                            "description": "The day's measured spend, not scaled."
+                          },
+                          "estimatedLlmUsd": {
+                            "type": "number",
+                            "description": "The day's LLM spend estimated from tokens and output size, not measured."
+                          }
+                        },
+                        "required": [
+                          "day",
+                          "savingUsd",
+                          "actualUsd",
+                          "measuredUsd",
+                          "estimatedLlmUsd"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "points"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing workflowId, or an unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "A savings query ran past its time budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent database queries; retry shortly",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions/tokens": {
       "post": {
         "summary": "Mint an ephemeral task or runtime token",
@@ -59667,9 +60465,14 @@
     },
     "/api/trackers/jira/authorize": {
       "get": {
-        "summary": "Redirect to Atlassian OAuth consent screen",
+        "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -59679,11 +60482,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Atlassian OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",
@@ -60350,9 +61193,14 @@
     },
     "/api/trackers/linear/authorize": {
       "get": {
-        "summary": "Redirect to Linear OAuth consent screen",
+        "summary": "Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -60362,11 +61210,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Linear OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",
@@ -67342,6 +68230,7 @@
     "/api/workflow-runs/{id}/retry": {
       "post": {
         "summary": "Retry a failed workflow run",
+        "description": "Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
         "tags": [
           "Workflows"
         ],

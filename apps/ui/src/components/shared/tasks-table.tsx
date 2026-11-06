@@ -33,17 +33,18 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentTask, User } from "@/api/types";
+import type { AgentTask, ModelProfile, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { ColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { ModelDetailsCard, type ModelDetailsTask } from "@/components/shared/model-details-card";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
-import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskHoverCard } from "@/components/shared/task-hover-card";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,6 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
 import {
-  describeModelResolution,
   taskDisplayEffort,
   taskDisplayModel,
   taskDisplayProfile,
@@ -204,71 +204,42 @@ function DescriptionCell({ task }: { task: AgentTask | undefined }) {
 function ModelCell({
   task,
   liveCatalog,
+  profilesByName,
 }: {
-  task: Pick<
-    AgentTask,
-    | "model"
-    | "modelTier"
-    | "resolvedModel"
-    | "modelSource"
-    | "modelAlias"
-    | "profile"
-    | "resolvedProfile"
-    | "effort"
-    | "resolvedEffort"
-  >;
+  task: Partial<ModelDetailsTask>;
   liveCatalog?: LiveModelsCatalog;
+  profilesByName: Map<string, ModelProfile>;
 }) {
   const shown = taskDisplayModel(task);
   const effort = taskDisplayEffort(task);
   const profile = taskDisplayProfile(task);
-  const profileChip = profile ? (
-    <Badge
-      variant="outline"
-      size="tag"
-      className="max-w-32 shrink-0 border-status-info/30 text-status-info-strong"
-      title={`Model profile: ${profile}`}
-    >
-      <span className="truncate">{profile}</span>
-    </Badge>
-  ) : null;
-  if (!shown && !task.modelTier && !profileChip) return DASH;
-  if (!shown) {
-    return (
-      <span className="flex min-w-0 items-center gap-1.5">
-        {task.modelTier ? (
-          <Badge variant="outline" size="tag" className="gap-1">
-            tier: {modelTierLabel(task.modelTier)}
-            <EffortMark effort={effort} />
-          </Badge>
-        ) : null}
-        {profileChip}
-      </span>
-    );
-  }
-  const label = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
-  const cell = profileChip ? (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {label}
-      {profileChip}
-    </span>
+  if (!shown && !task.modelTier && !profile) return DASH;
+  // The cell stays logo + name + effort; the profile, cost and credential live
+  // in the details card so the model name keeps the column's width.
+  const cell = shown ? (
+    <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} className="max-w-full" />
   ) : (
-    label
+    <span className="flex min-w-0 items-center gap-1.5">
+      {task.modelTier ? (
+        <Badge variant="outline" size="tag" className="shrink-0 gap-1">
+          tier: {modelTierLabel(task.modelTier)}
+          <EffortMark effort={effort} />
+        </Badge>
+      ) : null}
+      {profile ? <span className="truncate text-muted-foreground">{profile}</span> : null}
+    </span>
   );
-  const lines = [
-    ...describeModelResolution(task),
-    ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),
-  ];
-  if (lines.length === 0) return cell;
+  // Skeleton rows (no id yet) have nothing to look up.
+  if (!task.id) return cell;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{cell}</TooltipTrigger>
-      <TooltipContent side="right" align="start">
-        {lines.map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-      </TooltipContent>
-    </Tooltip>
+    <ModelDetailsCard
+      task={task as ModelDetailsTask}
+      profile={profile ? profilesByName.get(profile) : undefined}
+      catalog={liveCatalog}
+      label={shown ?? profile ?? `${task.modelTier} tier`}
+    >
+      {cell}
+    </ModelDetailsCard>
   );
 }
 
@@ -582,6 +553,11 @@ export function TasksTable({
   paginationQueryKey,
 }: TasksTableProps) {
   const { data: modelsCatalog } = useModelsCatalog();
+  const { data: modelProfiles } = useModelProfiles();
+  const profilesByName = useMemo(
+    () => new Map(modelProfiles?.map((profile) => [profile.name, profile])),
+    [modelProfiles],
+  );
   // Build a `userId → User` lookup for the "Requested by" column. We skip the
   // network call entirely on swarms that don't support the column — the
   // gate-hidden set already filters the column out of `columnDefs`, so the
@@ -652,7 +628,11 @@ export function TasksTable({
         width: 200,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
-          <ModelCell task={p.data ?? {}} liveCatalog={modelsCatalog?.providers} />
+          <ModelCell
+            task={p.data ?? {}}
+            liveCatalog={modelsCatalog?.providers}
+            profilesByName={profilesByName}
+          />
         ),
       },
       {
@@ -738,7 +718,7 @@ export function TasksTable({
     ];
 
     return all.filter((c) => !columns.isHidden(c._id)).map(({ _id, ...col }) => col);
-  }, [agentNameById, columns, userById, modelsCatalog?.providers]);
+  }, [agentNameById, columns, userById, modelsCatalog?.providers, profilesByName]);
 
   return (
     <DataGrid

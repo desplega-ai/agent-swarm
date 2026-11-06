@@ -752,6 +752,17 @@ export interface paths {
                                     type: "lucide";
                                     icon: string;
                                     color?: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "url";
+                                    /** Format: uri */
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "agent-fs";
+                                    path: string;
+                                    orgId?: string;
+                                    driveId?: string;
                                 };
                                 createdAt: string;
                                 updatedAt: string;
@@ -2876,6 +2887,17 @@ export interface paths {
                             type: "lucide";
                             icon: string;
                             color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
                         } | null;
                         slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
@@ -7934,7 +7956,7 @@ export interface paths {
         put?: never;
         /**
          * Invite an external member into the agent-fs shared org
-         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.
+         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.
          */
         post: {
             parameters: {
@@ -7968,7 +7990,7 @@ export interface paths {
                             /** @description False only when the email already holds the requested role. */
                             invited: boolean;
                             /**
-                             * @description already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.
+                             * @description already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account).
                              * @enum {string}
                              */
                             status: "already_member" | "added" | "pending";
@@ -7978,6 +8000,8 @@ export interface paths {
                             expiresAt?: string;
                             /** @description Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured. */
                             acceptUrl?: string;
+                            /** @description Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept. */
+                            token?: string;
                         };
                     };
                 };
@@ -11163,6 +11187,7 @@ export interface paths {
                                 credentials: {
                                     [key: string]: string[];
                                 } | null;
+                                fallbacks: string[];
                                 createdAt: string;
                                 lastUpdatedAt: string;
                             }[];
@@ -11174,7 +11199,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -11198,6 +11223,7 @@ export interface paths {
                         credentials?: {
                             [key: string]: string[];
                         } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11222,6 +11248,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11301,6 +11328,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11321,7 +11349,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -11379,7 +11407,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model profile
-         * @description Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).
+         * @description Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).
          */
         patch: {
             parameters: {
@@ -11401,6 +11429,7 @@ export interface paths {
                         credentials?: {
                             [key: string]: string[];
                         } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11425,6 +11454,7 @@ export interface paths {
                             credentials: {
                                 [key: string]: string[];
                             } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -15302,7 +15332,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -15317,7 +15347,9 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery";
+                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback";
+                        /** @enum {string} */
+                        errorClass?: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
                     };
                 };
             };
@@ -15332,11 +15364,12 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                             /** @enum {string} */
-                            kind: "alreadyFinished" | "workflow-failed" | "resumed";
+                            kind: "alreadyFinished" | "workflow-failed" | "resumed" | "noFallback";
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
                             resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            failureReason?: string | null;
                         };
                     };
                 };
@@ -20154,6 +20187,245 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings for a workflow
+         * @description What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows for the workflow */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            computedAt: string;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "no-runs" | "too-many-runs" | null;
+                            rows: {
+                                /** @enum {string} */
+                                kind: "workflow";
+                                workflowId: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
+                                measuredUsd: number;
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. */
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Missing workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A savings query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many concurrent database queries; retry shortly */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings for a workflow
+         * @description The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points for the workflow */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            computedAt: string;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "no-runs" | "too-many-runs" | null;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
+                                actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Missing workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A savings query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many concurrent database queries; retry shortly */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/tokens": {
         parameters: {
             query?: never;
@@ -23573,11 +23845,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Atlassian OAuth consent screen */
+        /** Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23585,12 +23858,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Atlassian OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -24072,11 +24365,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Linear OAuth consent screen */
+        /** Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -24084,12 +24378,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Linear OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -27962,7 +28276,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry a failed workflow run */
+        /**
+         * Retry a failed workflow run
+         * @description Retries on the definition the run started with; to use an edited workflow, trigger a new run.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -28662,6 +28979,17 @@ export interface components {
             resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             profile?: string;
             resolvedProfile?: string;
+            fallbackHops?: {
+                from: string;
+                profile: string;
+                /** @enum {string} */
+                errorClass: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
+                at: string;
+                skipped?: {
+                    profile: string;
+                    reason: string;
+                }[];
+            }[];
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
@@ -28871,6 +29199,17 @@ export interface components {
                 type: "lucide";
                 icon: string;
                 color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
             };
             slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */

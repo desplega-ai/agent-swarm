@@ -356,7 +356,6 @@ describe("db-client SQLITE_BUSY retry", () => {
     }) as unknown as typeof main.query);
     const released = holdWriteLock(1_500);
 
-    const startedAt = performance.now();
     let results: PromiseSettledResult<unknown>[];
     try {
       results = await Promise.allSettled(
@@ -369,7 +368,6 @@ describe("db-client SQLITE_BUSY retry", () => {
       execSpy.mockRestore();
       querySpy.mockRestore();
     }
-    const wallMs = performance.now() - startedAt;
     const messages = warn.mock.calls.map((c) => String(c[0]));
     warn.mockRestore();
 
@@ -393,13 +391,19 @@ describe("db-client SQLITE_BUSY retry", () => {
     // attempt that waits any time (even 10ms x hundreds of attempts) shows up
     // here as more spinning attempts than the gate reported probes.
     expect(spinning).toBe(probes);
-    // Ungated the crowd needed several seconds of spin rounds after release.
-    expect(wallMs).toBeLessThan(3_000);
+    // No wall-clock bound on purpose. Idle, the crowd finishes in ~1.85s
+    // (1.5s hold plus the post-release backoff); a loaded CI runner stretched
+    // that past 3s twice although the gate held, so a time limit measured the
+    // runner. "Ungated the crowd spins for seconds" is already asserted above
+    // by counting spinning attempts, and the per-test timeout still fails a
+    // crowd that never drains.
     const rows = await crowdClient.query<{ n: number }>(
       "SELECT COUNT(*) AS n FROM items WHERE name LIKE 'crowd-%'",
     );
     expect(rows[0]?.n).toBe(writers);
-  });
+    // The test spends 1.5s in the hold alone, so the 5s default leaves a
+    // loaded runner under 3s of slack; 15s keeps a hung crowd a failure.
+  }, 15_000);
 
   test("a held lock past the budget fails fast for the whole crowd", async () => {
     const crowdClient = createBunSqliteClient(() => main, {

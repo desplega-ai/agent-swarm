@@ -95,6 +95,8 @@ function createFetchStub(
     registerConflictEmail?: string;
     /** A body to send, or a function of the invited email (undefined: the default). */
     inviteResponse?: Record<string, unknown> | ((email: string) => Response | undefined);
+    /** Status for `POST /invites/:token/accept` (default 200). */
+    acceptStatus?: number;
   } = {},
 ): typeof fetch {
   return (async (input, init) => {
@@ -166,6 +168,12 @@ function createFetchStub(
       if (typeof invite !== "function") return Response.json(invite ?? { ok: true });
       const email = body && typeof body === "object" && "email" in body ? String(body.email) : "";
       return invite(email) ?? Response.json({ ok: true });
+    }
+    if (/^\/invites\/[^/]+\/accept$/.test(url.pathname) && method === "POST") {
+      const status = options.acceptStatus ?? 200;
+      return status === 200
+        ? Response.json({ ok: true, orgId: "shared-org" })
+        : Response.json({ error: "invite not found" }, { status });
     }
 
     return Response.json(
@@ -607,6 +615,77 @@ describe("agent-fs provisioning seeder", () => {
     ]);
   });
 
+  test("accepts a pending shared-org invite with the new agent's own key", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "example-afs-admin-key",
+      isSecret: true,
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
+
+    const token = "b".repeat(43);
+    const pendingInvite = { ok: true, status: "pending", inviteId: "invite-agent", token };
+    const provision = async (acceptStatus?: number) => {
+      const worker = await createAgent({
+        name: `Pending Worker ${acceptStatus ?? 200}`,
+        description: "Joins the shared org through an invite",
+        role: "worker",
+        isLead: false,
+        status: "idle",
+        maxTasks: 1,
+        capabilities: [],
+      });
+      await upsertSwarmConfig({
+        scope: "agent",
+        scopeId: worker.id,
+        key: "AGENT_EMAIL",
+        value: `pending-worker-${acceptStatus ?? 200}-${suffix}@example.test`,
+      });
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(
+        createFetchStub(records, { inviteResponse: pendingInvite, acceptStatus }),
+      );
+      const result = await ensureAgentFsCredentialsForAgent(worker.id);
+      return { result, records };
+    };
+
+    const accepted = await provision();
+    expect(accepted.result.created).toBe(true);
+    const accept = accepted.records.find((r) => r.path === `/invites/${token}/accept`);
+    expect(accept).toMatchObject({
+      method: "POST",
+      authorization: "Bearer example-afs-agent-key",
+      body: undefined,
+    });
+    const invitePos = accepted.records.findIndex((r) => r.path.endsWith("/members/invite"));
+    expect(accepted.records.indexOf(accept!)).toBeGreaterThan(invitePos);
+
+    // A failed accept keeps the stored key (as a failed invite does) and logs
+    // the status without the token.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const failed = await provision(404);
+      expect(failed.result.created).toBe(true);
+      const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("agent-fs invite accept failed: HTTP 404");
+      expect(logged).not.toContain(token);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("profile sync failures leave existing credentials usable and retry later", async () => {
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
     const worker = await createAgent({
@@ -805,6 +884,7 @@ describe("agent-fs provisioning seeder", () => {
       inviteId: "invite-1",
       expiresAt: "2026-11-03T00:00:00.000Z",
       acceptUrl: `https://live.agent-fs.example.test/invite/${token}`,
+      token,
     });
   });
 
@@ -835,6 +915,7 @@ describe("agent-fs provisioning seeder", () => {
       status: "pending",
       inviteId: "invite-2",
       expiresAt: "2026-11-03T00:00:00.000Z",
+      token: "b".repeat(43),
     });
   });
 });

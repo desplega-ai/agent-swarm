@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import type { Workflow } from "../types";
 import { invalidateStatusQuery } from "./status-query";
 
 export function useWorkflows() {
@@ -73,7 +74,10 @@ export function useUpdateWorkflow() {
         triggerSchema: Record<string, unknown> | null;
       }>;
     }) => api.updateWorkflow(id, data),
-    onSuccess: () => {
+    onSuccess: (workflow, variables) => {
+      queryClient.setQueryData<Workflow>(["workflow", variables.id], (current) =>
+        current ? { ...current, ...workflow, definition: current.definition } : current,
+      );
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
       queryClient.invalidateQueries({ queryKey: ["workflow"] });
       void invalidateStatusQuery(queryClient);

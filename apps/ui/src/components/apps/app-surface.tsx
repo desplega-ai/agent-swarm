@@ -51,6 +51,11 @@
  *   - default      → normal SPA chrome (PageHeader + action cluster).
  *   - ?mode=full   → full-viewport overlay with a slim header.
  *   - ?mode=chromeless → the rendered page only (embed surface, no header).
+ *
+ * `layout: "sidebar"` wraps the page in `<AppShell>` (page sidebar + sticky
+ * page header) in every mode: inside the bordered canvas (default), under the
+ * slim bar (full), and as the whole viewport (chromeless), where the sidebar
+ * also names the app. Below `md` the sidebar folds into a header menu.
  */
 
 import type { StateStore } from "@json-render/core";
@@ -69,6 +74,8 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
+  RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -78,6 +85,7 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AppQueryPlan } from "@/api/hooks/use-apps";
 import {
@@ -89,6 +97,7 @@ import {
 } from "@/api/hooks/use-apps";
 import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import { AppShell, shellNavItems } from "@/components/apps/app-shell";
 import {
   buildQuerySlot,
   errorMessage,
@@ -97,10 +106,19 @@ import {
 } from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
+import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
+import { PageActions } from "@/components/shared/page-actions";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useVersionedAppReferences } from "@/hooks/use-versioned-app-references";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import {
   type ActionHandlerMap,
   createSwarmActionHandlers,
@@ -486,11 +504,20 @@ export interface AppSurfaceProps {
  * in place, so in-flight task watchers are disposed with the old app.
  */
 export function AppSurface({
-  app,
+  app: latestApp,
   mode = "default",
   pageName,
   navigate: navigateProp,
 }: AppSurfaceProps) {
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const appRevision = useMemo(
+    () => JSON.stringify([latestApp.name, latestApp.description, latestApp.definition]),
+    [latestApp],
+  );
+  const appVersion = useVersionedValue(latestApp.id, latestApp, appRevision, autoReload, {
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
+  const app = appVersion.value ?? latestApp;
   const definition = app.definition;
   const routerNavigate = useNavigate();
   const navigate = navigateProp ?? routerNavigate;
@@ -548,7 +575,29 @@ export function AppSurface({
     }
     resolvedAppsRef.current = { signature: definitionSignature, map };
   }
-  const resolvedApps = resolvedAppsRef.current.map;
+  const referenceVersions = useVersionedAppReferences(
+    resolvedAppsRef.current.map,
+    targetAppIds,
+    autoReload && appVersion.canAutoReload,
+  );
+  const resolvedApps = referenceVersions.value;
+  const latestReferences = resolvedAppsRef.current.map;
+  const referencesRevision = useMemo(
+    () => JSON.stringify([...latestReferences].map(([id, ref]) => [id, ref.definition])),
+    [latestReferences],
+  );
+  useVersionUpdateToast({
+    entityKey: `app:${latestApp.id}`,
+    latestRevision: `${appRevision}|${referencesRevision}`,
+    pending: appVersion.pending || referenceVersions.pending,
+    editing: appVersion.editing,
+    autoReload,
+    canAutoReload: appVersion.canAutoReload,
+    onLoad: () => {
+      appVersion.apply();
+      referenceVersions.apply();
+    },
+  });
   // A target whose definition request is still in flight gets a neutral
   // "Loading…" card from the assembler instead of an "app unavailable" error.
   // `useQueries` keeps result order, so the index lines up with the id list.
@@ -577,6 +626,15 @@ export function AppSurface({
     [app, activePageName, resolvedApps, pendingAppIds],
   );
   const activeSpec = assembled.spec;
+  // `layout: "sidebar"`: the page's `headerActions` subtree, rendered as a
+  // second root (same elements, same state) in the shell's sticky header.
+  const headerSpec = useMemo(
+    () =>
+      assembled.spec && assembled.headerRoot
+        ? { root: assembled.headerRoot, elements: assembled.spec.elements }
+        : null,
+    [assembled],
+  );
 
   // Named queries, each with the route params its `$param` filters need. A
   // query missing one is parked (not executed) and gets an explicit error slot.
@@ -1107,8 +1165,19 @@ export function AppSurface({
   // navigating back. Owned by the runtime (not the definition) so every app
   // gets it for free — including `?mode=chromeless`, where the dashboard
   // breadcrumb bar doesn't exist and this is the only way back.
+  // The sidebar layout (`layout: "sidebar"`) lists the pages itself, so its
+  // header keeps crumbs only for pages the sidebar does not list.
+  const shellHref = (page: string) =>
+    page === defaultPage
+      ? `/apps/${encodeURIComponent(app.id)}${modeParam ? `?${new URLSearchParams({ mode: modeParam })}` : ""}`
+      : appPagePath(app.id, page, undefined, modeParam);
+  const shellItems =
+    definition.layout === "sidebar" && activePage ? shellNavItems(pages, shellHref) : null;
   const showPageCrumbs =
-    Boolean(activePage) && Object.keys(pages).length > 1 && activePageName !== defaultPage;
+    Boolean(activePage) &&
+    Object.keys(pages).length > 1 &&
+    activePageName !== defaultPage &&
+    !shellItems?.some((item) => item.name === activePageName);
   const pageCrumbs = showPageCrumbs ? (
     <nav
       aria-label="App pages"
@@ -1151,13 +1220,71 @@ export function AppSurface({
     </JsonRenderThemeProvider>
   );
 
+  // Sidebar layout: the same providers around the shell, so the header's
+  // actions slot reads and writes the page's state and runs its actions.
+  const shellSurface =
+    shellItems && activePage ? (
+      <JsonRenderThemeProvider value={appThemeAttr ?? null}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>
+              <AppShell
+                items={shellItems}
+                activePage={activePageName}
+                onNavigate={(href) => navigate(href)}
+                // The dashboard header names the app in the default view only.
+                appName={mode === "default" ? undefined : app.name}
+                title={activePage.title ?? activePageName}
+                description={activePage.description}
+                crumbs={pageCrumbs}
+                actions={
+                  headerSpec ? (
+                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                  ) : null
+                }
+                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                scrollRef={scrollRef}
+              >
+                {actionError && (
+                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                    {actionError}
+                  </AlertCallout>
+                )}
+                {renderedSpec}
+              </AppShell>
+            </ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </JsonRenderThemeProvider>
+    ) : null;
+
   // Embed surface: the rendered page and nothing else — no SPA chrome, no
   // header, no debug drawer. Covers the layout so an iframe gets the full
-  // viewport.
+  // viewport. A sidebar-layout app keeps its shell here: it is the app's own
+  // navigation, and the only way between pages inside an iframe.
+  if (mode === "chromeless" && shellSurface) {
+    return (
+      <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
+        className="fixed inset-0 z-50 flex flex-col bg-background"
+        data-testid="app-runtime"
+        data-theme={appThemeAttr}
+      >
+        {shellSurface}
+      </div>
+    );
+  }
   if (mode === "chromeless") {
     return (
       <div
-        ref={scrollRef}
+        ref={(node) => {
+          scrollRef.current = node;
+          appVersion.scopeRef.current = node;
+        }}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
@@ -1171,6 +1298,9 @@ export function AppSurface({
   if (mode === "full") {
     return (
       <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
@@ -1188,33 +1318,49 @@ export function AppSurface({
             </Link>
           </Button>
         </div>
-        <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
-          {surface}
-        </div>
+        {shellSurface ?? (
+          <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
+            {surface}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4" data-testid="app-runtime">
+    <div
+      ref={appVersion.scopeRef}
+      onInputCapture={appVersion.markInteraction}
+      onClickCapture={appVersion.markInteraction}
+      className="flex flex-col flex-1 min-h-0 gap-4"
+      data-testid="app-runtime"
+    >
       {/* The header (title, open-full/chromeless actions) stays fixed; ONLY
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
-        // Below sm the actions take their own row under a full-width
-        // description; side by side they squeezed it to one word per line.
-        className="max-sm:flex-col max-sm:items-stretch"
+        // A phone folds the actions into one "more" button beside the
+        // description (`PageActions`), so the row stays a single line.
         title={app.name}
         description={app.description ?? undefined}
-        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
+        action={
+          <AppHeaderActions
+            title={app.name}
+            appIds={[...definitionsByApp.keys()]}
+            settingsApp={app}
+          />
+        }
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}
       <div
-        ref={scrollRef}
+        // The shell owns the scroll column (and `scrollRef`) in the sidebar layout.
+        ref={shellSurface ? undefined : scrollRef}
         className={cn(
-          "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          shellSurface
+            ? "flex flex-1 min-h-0 overflow-hidden rounded-lg border border-border"
+            : "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
           // Below md the canvas bleeds through `<main>`'s gutter to the screen
           // edges, so a phone gives the app its full width.
           "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
@@ -1224,7 +1370,7 @@ export function AppSurface({
         )}
         data-theme={appThemeAttr}
       >
-        {surface}
+        {shellSurface ?? surface}
       </div>
       {lastResponse !== undefined && (
         <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
@@ -1249,14 +1395,18 @@ export function AppSurface({
  * override, plus the declared `userConfig` fields when the app has any.
  */
 function AppHeaderActions({
+  title,
   appIds,
   settingsApp,
 }: {
+  /** The app's name: names the phone action sheet. */
+  title: string;
   appIds: string[];
   settingsApp: AppDetail | null;
 }) {
   const refresh = useAppRefresh(appIds);
   const location = useLocation();
+  const navigate = useNavigate();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1276,60 +1426,106 @@ function AppHeaderActions({
   const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
-        All apps
-      </Link>
-      <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
-        <Link to={fullUrl}>
-          <Maximize2 className="size-3.5" />
-          Open full
-        </Link>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Copy a header-less URL for embedding this app"
-        onClick={() => copy(chromelessUrl)}
+    <>
+      <PageActions
+        title={title}
+        more={
+          <>
+            <ActionSheetItem
+              icon={Maximize2}
+              label="Open full"
+              onSelect={() => void navigate(fullUrl)}
+            />
+            <ActionSheetItem
+              icon={Copy}
+              label="Copy chromeless link"
+              // The sheet closes on tap, so the toast is the confirmation.
+              onSelect={() =>
+                void copy(chromelessUrl).then((ok) =>
+                  ok
+                    ? toast.success("Chromeless link copied")
+                    : toast.error("Could not copy the link"),
+                )
+              }
+            />
+            <ActionSheetItem
+              icon={RefreshCw}
+              label="Refresh"
+              disabled={refreshing}
+              onSelect={() => void handleRefresh()}
+            />
+            {settingsApp ? (
+              <ActionSheetItem
+                icon={Settings}
+                label="App settings"
+                onSelect={() => setSettingsOpen(true)}
+              />
+            ) : null}
+            <ActionSheetItem
+              icon={LayoutGrid}
+              label="All apps"
+              onSelect={() => void navigate("/apps")}
+            />
+          </>
+        }
       >
-        {copied ? (
-          <Check className="size-3.5 text-status-success-strong" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-        {copied ? "Copied" : "Copy chromeless link"}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Re-read the app definition and re-run every query"
-        disabled={refreshing}
-        onClick={handleRefresh}
-      >
-        <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
-        Refresh
-      </Button>
-      {settingsApp && (
-        <>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
+            All apps
+          </Link>
+          <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
+            <Link to={fullUrl}>
+              <Maximize2 className="size-3.5" />
+              Open full
+            </Link>
+          </Button>
           <Button
             variant="outline"
-            size="icon"
-            aria-label="App settings"
-            title="Your settings for this app"
-            data-testid="app-settings-open"
-            onClick={() => setSettingsOpen(true)}
+            size="sm"
+            title="Copy a header-less URL for embedding this app"
+            onClick={() => copy(chromelessUrl)}
           >
-            <SettingsIcon size={14} />
+            {copied ? (
+              <Check className="size-3.5 text-status-success-strong" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            {copied ? "Copied" : "Copy chromeless link"}
           </Button>
-          <AppSettingsDrawer
-            appId={settingsApp.id}
-            appName={settingsApp.name}
-            appDefaultTheme={settingsApp.definition.theme}
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-          />
-        </>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Re-read the app definition and re-run every query"
+            disabled={refreshing}
+            onClick={handleRefresh}
+          >
+            <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+          {settingsApp && (
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="App settings"
+              title="Your settings for this app"
+              data-testid="app-settings-open"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <SettingsIcon size={14} />
+            </Button>
+          )}
+        </div>
+      </PageActions>
+      {settingsApp && (
+        <AppSettingsDrawer
+          appId={settingsApp.id}
+          appName={settingsApp.name}
+          appDefaultTheme={settingsApp.definition.theme}
+          appIcon={settingsApp.definition.icon}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
       )}
-    </div>
+    </>
   );
 }

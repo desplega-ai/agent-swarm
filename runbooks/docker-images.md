@@ -59,6 +59,7 @@ for Claude + Codex (they ship the ctx_* hooks, which a skills-only installer
 can't provide).
 
 - Pin every source to a tag/SHA — unpinned `npx skills add` resolves the default branch at build time.
+- The context-mode marketplaces follow the same rule: `claude plugin marketplace add <owner/repo>#v${CONTEXT_MODE_VERSION}` and `codex plugin marketplace add <owner/repo> --ref v${CONTEXT_MODE_VERSION}`. An unpinned add once baked upstream v2.1.0, which requires Node >=24.15.0; on the image's Node 22 its hook denied every Bash call (NODE_TOO_OLD).
 - Don't `|| true`-guard the skills RUN; keep the `test -e .../SKILL.md` asserts (upstream bug: global installs occasionally skip the `~/.claude/skills` link — vercel-labs/skills#851).
 - Adding a plugin via `claude plugin install` again? It runs `bun install` under the hood — `rm -rf /home/worker/.bun/install/cache` in the SAME RUN (this was once an 880 MB layer), and expect the plugin cache to hold a full repo clone (the old agent-fs plugin was 778 MB for one skill — prefer `npx skills`).
 

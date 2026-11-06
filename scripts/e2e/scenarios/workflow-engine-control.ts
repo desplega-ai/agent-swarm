@@ -32,6 +32,13 @@ export const workflowEngineControl: Scenario = {
     const marker = `ctl-${ctx.nonce}`;
     const workerId = await registerWorker(ctx, "wf-ctl");
     const flakyFile = `/tmp/e2e-wf-flaky-${ctx.nonce}`;
+    // A run retries on the definition it started with, so a retry heals through
+    // outside state (these marker files), never through a workflow edit.
+    const healFiles = {
+      fail: `/tmp/e2e-wf-heal-fail-${ctx.nonce}`,
+      exhaust: `/tmp/e2e-wf-heal-exhaust-${ctx.nonce}`,
+      fan: `/tmp/e2e-wf-heal-fan-${ctx.nonce}`,
+    };
     const taskAttempts = new Map<string, number>();
     const sim = await ctx.startAgent({
       agentId: workerId,
@@ -57,7 +64,11 @@ export const workflowEngineControl: Scenario = {
       const failId = await make("ctl-fail", {
         nodes: [
           bash("a", "echo ok", "b"),
-          bash("b", "echo boom >&2; exit 3", "c"),
+          bash(
+            "b",
+            `if [ -f ${healFiles.fail} ]; then echo fixed; else echo boom >&2; exit 3; fi`,
+            "c",
+          ),
           bash("c", "echo after"),
         ],
       });
@@ -78,9 +89,14 @@ export const workflowEngineControl: Scenario = {
 
       const exhaustId = await make("ctl-exhaust", {
         nodes: [
-          bash("a", "echo nope >&2; exit 1", undefined, {
-            retry: { maxRetries: 1, strategy: "static", baseDelayMs: 1000 },
-          }),
+          bash(
+            "a",
+            `if [ -f ${healFiles.exhaust} ]; then echo healed; else echo nope >&2; exit 1; fi`,
+            undefined,
+            {
+              retry: { maxRetries: 1, strategy: "static", baseDelayMs: 1000 },
+            },
+          ),
         ],
       });
       const exhaustRun = await triggerWorkflow(ctx, exhaustId, {}, { agentId: workerId });
@@ -131,7 +147,7 @@ export const workflowEngineControl: Scenario = {
       });
       const taskFailRun = await triggerWorkflow(ctx, taskFailId, {}, { agentId: workerId });
 
-      const fanScript = 'if [ "$0" = bad ]; then echo bad-item >&2; exit 1; fi; echo ok-$0';
+      const fanScript = `if [ "$0" = bad ] && [ ! -f ${healFiles.fan} ]; then echo bad-item >&2; exit 1; fi; echo ok-$0`;
       const fanConfig = (policy: string, script: string) => ({
         over: "{{items}}",
         itemKey: "id",
@@ -775,10 +791,11 @@ export const workflowEngineControl: Scenario = {
       // Retry a failed fan-out: the finished item stays, the failed and cancelled ones rerun.
       const goodBefore = failFast.steps.find((step) => step.nodeId === "fan#good");
       expect(goodBefore?.status === "completed", "the first item finished before the failure");
-      const fixFan = await ctx.api("PATCH", `/api/workflows/${failFastId}/nodes/fan`, {
-        body: { config: fanConfig("fail-fast", "echo healed-$0") },
+      const editFan = await ctx.api("PATCH", `/api/workflows/${failFastId}/nodes/fan`, {
+        body: { config: fanConfig("fail-fast", "echo edited-$0") },
       });
-      expectStatus(fixFan, [200], "fix the fan-out body");
+      expectStatus(editFan, [200], "edit the fan-out body after the run started");
+      await Bun.write(healFiles.fan, "");
       expectStatus(
         await ctx.api("POST", `/api/workflow-runs/${failFastRun.runId}/retry`),
         [200],
@@ -807,8 +824,8 @@ export const workflowEngineControl: Scenario = {
       const healedAggregate = outputOf(fanHealed, "fan");
       expect(
         healedAggregate.okCount === 3 &&
-          asRecord(asRecords(healedAggregate, "results")[1]?.output).stdout === "healed-bad",
-        `the retried fan-out aggregates all three items: ${JSON.stringify(healedAggregate)}`,
+          asRecord(asRecords(healedAggregate, "results")[1]?.output).stdout === "ok-bad",
+        `the retried fan-out aggregates all three items on its own body: ${JSON.stringify(healedAggregate)}`,
       );
       expect(outputOf(fanHealed, "tail").stdout === "tail", "the retried fan-out routes on");
 
@@ -818,12 +835,14 @@ export const workflowEngineControl: Scenario = {
         `a failing child fails the parent: ${String(subFailed.run.error)}`,
       );
 
-      // ── run retry: fix the node, retry, only the failed step runs again ─────
+      // ── run retry: heal the cause, retry, only the failed step runs again ──
+      // The edit lands after the run started, so the retry must ignore it.
       const aStepId = stepOf(failed, "a").id;
-      const fix = await ctx.api("PATCH", `/api/workflows/${failId}/nodes/b`, {
-        body: { config: { runtime: "bash", script: "echo fixed" } },
+      const edit = await ctx.api("PATCH", `/api/workflows/${failId}/nodes/b`, {
+        body: { config: { runtime: "bash", script: "echo edited" } },
       });
-      expectStatus(fix, [200], "fix the failing node");
+      expectStatus(edit, [200], "edit the failing node after the run started");
+      await Bun.write(healFiles.fail, "");
       const retried = await ctx.api("POST", `/api/workflow-runs/${failRun.runId}/retry`);
       expectStatus(retried, [200], "retry the failed run");
       expect(asRecord(retried.json).success === true, "retry answers success");
@@ -836,7 +855,7 @@ export const workflowEngineControl: Scenario = {
             step.status === "completed" &&
             asRecord(step.output).stdout === "fixed",
         ) && outputOf(recovered, "c").stdout === "after",
-        "the failed step ran again with the fixed config and released its successor",
+        "the failed step ran again on the run's own definition and released its successor",
       );
       const refusal = await ctx.api("POST", `/api/workflow-runs/${failRun.runId}/retry`);
       expectStatus(refusal, [400], "retry a completed run");
@@ -869,7 +888,7 @@ export const workflowEngineControl: Scenario = {
         "cancel unknown run",
       );
 
-      // retry-workflow-run tool: fix and retry the exhausted run.
+      // retry-workflow-run tool: heal and retry the exhausted run.
       await callToolErr(
         connection,
         "retry-workflow-run",
@@ -882,10 +901,11 @@ export const workflowEngineControl: Scenario = {
         { runId: crypto.randomUUID() },
         "not found",
       );
-      const fixExhaust = await ctx.api("PATCH", `/api/workflows/${exhaustId}/nodes/a`, {
-        body: { config: { runtime: "bash", script: "echo healed" }, retry: { maxRetries: 0 } },
+      const editExhaust = await ctx.api("PATCH", `/api/workflows/${exhaustId}/nodes/a`, {
+        body: { config: { runtime: "bash", script: "echo edited" }, retry: { maxRetries: 0 } },
       });
-      expectStatus(fixExhaust, [200], "fix the exhausted node");
+      expectStatus(editExhaust, [200], "edit the exhausted node after the run started");
+      await Bun.write(healFiles.exhaust, "");
       const toolRetry = await callToolOk(connection, "retry-workflow-run", {
         runId: exhaustRun.runId,
       });
@@ -901,7 +921,7 @@ export const workflowEngineControl: Scenario = {
         healed.steps.some(
           (step) => step.nodeId === "a" && asRecord(step.output).stdout === "healed",
         ),
-        "the tool retry ran the fixed node",
+        "the tool retry ran the run's own node, not the edit",
       );
 
       // Workflow list filters that read run history.
@@ -933,7 +953,7 @@ export const workflowEngineControl: Scenario = {
     } finally {
       await sim.stop();
       await connection.close();
-      await rm(flakyFile, { force: true });
+      for (const file of [flakyFile, ...Object.values(healFiles)]) await rm(file, { force: true });
     }
   },
 };

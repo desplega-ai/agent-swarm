@@ -90,7 +90,7 @@ update-workflow(
 )
 ```
 
-An edited workflow or schedule counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed. A copy kept from before the cooldown existed has none: add `"cooldown": {"hours": 20, "from": "start"}` with `update-workflow`.
+Inputs, cooldown, description, event triggers and on/off are your settings: later boots still apply template updates to the nodes and keep those settings, adding only input keys a new template introduces. Editing the nodes or params, or editing the schedule, counts as user-modified, so later boots keep your copy instead of replacing it with a newer seed. A template update never sets the cooldown, so a copy seeded before the cooldown existed has none: add `"cooldown": {"hours": 20, "from": "start"}` with `update-workflow`.
 
 **Run it once by hand.** Start with a dry run. It does every read and every draft, and skips Slack. It changes no profile, memory, skill, or script, writes no ledger, and writes no report or changelog to agent-fs. It still creates the run and its agent tasks, and the lead steps store their results in `dreaming-v2` KV:
 

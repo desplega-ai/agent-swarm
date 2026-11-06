@@ -201,6 +201,7 @@ export async function routePoolTasks(
         const result = await checkProfileForAgent(agent.id, task.profile, {
           vcsRepo: task.vcsRepo,
           includeRepoSecrets,
+          fallbacks: false,
         });
         ok = result?.ok !== false;
         profileOk.set(memoKey, ok);

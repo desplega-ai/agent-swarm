@@ -62,6 +62,23 @@ declare module "swarm-extension" {
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
     effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
+    fallbackHops?:
+      | {
+          from: string;
+          profile: string;
+          errorClass:
+            | "rate_limit"
+            | "model_window"
+            | "seat"
+            | "credits"
+            | "overloaded"
+            | "server_error"
+            | "auth"
+            | "pool_empty";
+          at: string;
+          skipped?: { profile: string; reason: string }[] | undefined;
+        }[]
+      | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | undefined;
     workflowRunStepId?: string | undefined;
@@ -204,6 +221,23 @@ declare module "swarm-extension" {
     resolvedEffort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
     resolvedProfile?: string | undefined;
+    fallbackHops?:
+      | {
+          from: string;
+          profile: string;
+          errorClass:
+            | "rate_limit"
+            | "model_window"
+            | "seat"
+            | "credits"
+            | "overloaded"
+            | "server_error"
+            | "auth"
+            | "pool_empty";
+          at: string;
+          skipped?: { profile: string; reason: string }[] | undefined;
+        }[]
+      | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | null | undefined;
     workflowRunStepId?: string | null | undefined;

@@ -488,10 +488,47 @@ export const ModelProfileSchema = z.object({
   seededFrom: z.string().nullable(),
   /** Pooled-key allowlist (column `credentialAllowlist`); null uses the whole pool. */
   credentials: ModelProfileCredentialsSchema.nullable(),
+  /**
+   * Profiles on the same harness to hop to, in order, when a provider error
+   * (rate limit, seat, overload, auth, empty pool) ends a task running on
+   * this one. Empty: the task fails as before.
+   */
+  fallbacks: z.array(z.string()),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
 });
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
+
+/**
+ * Why a provider session ended in a way another profile may survive. Set by
+ * the worker's classifier (`src/commands/provider-error-class.ts`); never a
+ * task failure, tool error, context overflow, cancellation or budget refusal.
+ */
+export const ProviderErrorClassSchema = z.enum([
+  "rate_limit",
+  "model_window",
+  "seat",
+  "credits",
+  "overloaded",
+  "server_error",
+  "auth",
+  "pool_empty",
+]);
+export type ProviderErrorClass = z.infer<typeof ProviderErrorClassSchema>;
+
+/**
+ * One same-agent fallback hop: the task left `from` on `errorClass` and its
+ * resume runs `profile`. `skipped` lists the fallbacks passed over because
+ * they failed the profile check on the agent.
+ */
+export const FallbackHopSchema = z.object({
+  from: z.string(),
+  profile: z.string(),
+  errorClass: ProviderErrorClassSchema,
+  at: z.string(),
+  skipped: z.array(z.object({ profile: z.string(), reason: z.string() })).optional(),
+});
+export type FallbackHop = z.infer<typeof FallbackHopSchema>;
 
 /** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
 export const ProfileCheckStateSchema = z.enum(["pass", "warn", "fail", "unverified"]);
@@ -830,6 +867,9 @@ export const AgentTaskSchema = z
     // the agent's default). Unset when no profile applied.
     profile: z.string().optional(),
     resolvedProfile: z.string().optional(),
+    // Provider-error fallback hops so far, oldest first; carried by every
+    // resume of the same work. Unset when the work never hopped.
+    fallbackHops: z.array(FallbackHopSchema).optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -962,6 +1002,8 @@ export const CreateTaskOptionsSchema = z.object({
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
   profile: z.string().optional(),
+  /** Internal: the fallback hops a resume carries over (`createResumeFollowUp`). */
+  fallbackHops: z.array(FallbackHopSchema).optional(),
   scheduleId: z.string().optional(),
   workflowRunId: z.string().optional(),
   workflowRunStepId: z.string().optional(),
@@ -1309,32 +1351,80 @@ export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
-// Discriminated union so future avatar types (emoji, image, ...) can be added
-// with zero migrations — just a new zod branch + a UI renderer branch. Server
-// validates shape only; the UI owns the curated icon catalog and deterministic
-// fallback, so an unrecognized/hand-set icon name can never break rendering.
-export const AgentAvatarSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("lucide"),
-    icon: z
+// An https image link, shared by Slack icons and media icons so the rules
+// can't drift: https only, at most 2048 characters, no embedded credentials.
+export const HttpsImageUrlSchema = z
+  .url({ protocol: /^https$/, error: "Must be an https:// URL" })
+  .max(2048)
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return !parsed.username && !parsed.password;
+    } catch {
+      return false;
+    }
+  }, "URL must be valid and contain no credentials");
+
+// Server validates shape only; the UI owns the curated icon catalog and
+// deterministic fallback, so an unrecognized/hand-set icon name can never
+// break rendering.
+export const LucideIconSchema = z.object({
+  type: z.literal("lucide"),
+  icon: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .max(64),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+});
+
+export const UrlIconSchema = z.object({
+  type: z.literal("url"),
+  url: HttpsImageUrlSchema,
+});
+
+// Same addressing as the agent-fs task attachment ref: an absolute path, plus
+// both `orgId` and `driveId` for a specific drive, or neither for the swarm
+// drive. A single ID is never mixed with the swarm defaults.
+export const AgentFsIconSchema = z
+  .object({
+    type: z.literal("agent-fs"),
+    path: z
       .string()
-      .regex(/^[a-z0-9-]+$/)
-      .max(64),
-    color: z
-      .string()
-      .regex(/^#[0-9a-fA-F]{6}$/)
-      .optional(),
-  }),
+      .min(2)
+      .max(1024)
+      .refine((value) => value.startsWith("/"), "Path must be absolute (start with /)")
+      .refine((value) => !value.split("/").includes(".."), 'Path must not contain ".." segments'),
+    orgId: z.string().min(1).optional(),
+    driveId: z.string().min(1).optional(),
+  })
+  .refine(
+    (value) => (value.orgId === undefined) === (value.driveId === undefined),
+    "Pass both orgId and driveId, or neither for the swarm drive",
+  );
+
+// Discriminated union so future icon types can be added with zero migrations:
+// a new zod branch plus a UI renderer branch. Images that can't load fall back
+// to a lucide glyph in the dashboard.
+export const MediaIconSchema = z.discriminatedUnion("type", [
+  LucideIconSchema,
+  UrlIconSchema,
+  AgentFsIconSchema,
 ]);
-export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
+export type MediaIcon = z.infer<typeof MediaIconSchema>;
+
+// Agent avatars accept the same shapes as app icons.
+export const AgentAvatarSchema = MediaIconSchema;
+export type AgentAvatar = MediaIcon;
 
 /**
- * Apps reuse the same avatar shape as agents (lucide icon + optional hex
- * color) for their dashboard tile icon. A distinct export name keeps app call
- * sites self-documenting.
+ * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https
+ * image link, or an image in agent-fs.
  */
-export const AppIconSchema = AgentAvatarSchema;
-export type AppIcon = AgentAvatar;
+export const AppIconSchema = MediaIconSchema;
+export type AppIcon = MediaIcon;
 
 // Separate from `avatar` so an agent can keep its lucide disc and still post
 // to Slack with its own emoji or image.
@@ -1349,17 +1439,7 @@ export const AgentSlackIconSchema = z
     }),
     z.object({
       type: z.literal("url"),
-      url: z
-        .url({ protocol: /^https$/ })
-        .max(2048)
-        .refine((value) => {
-          try {
-            const parsed = new URL(value);
-            return !parsed.username && !parsed.password;
-          } catch {
-            return false;
-          }
-        }, "URL must be valid and contain no credentials"),
+      url: HttpsImageUrlSchema,
     }),
     // No icon override: Slack shows the app's own avatar.
     z.object({ type: z.literal("app") }),
@@ -1432,7 +1512,8 @@ export const AgentSchema = z
       .nullable()
       .optional(),
 
-    // Custom avatar (icon + color). Null/missing = fall back to the
+    // Custom avatar: a lucide glyph, an https image link, or an agent-fs image.
+    // Null/missing = fall back to the
     // deterministic hash-derived icon and color (see apps/ui/src/lib/agent-icon.ts
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z
@@ -1787,6 +1868,7 @@ export const ResumeReasonSchema = z.enum([
   "context_limits", // Provider session approaching context-window limits (Phase 6)
   "manual_supersede", // Operator-triggered (e.g. dashboard button)
   "crash_recovery", // Heartbeat sweep detected dead/stalled worker (DES-523)
+  "provider_fallback", // Provider error; the resume runs the next fallback profile
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 

@@ -116,6 +116,17 @@ const SKIP_AUTO_RESUME_TYPES = new Set([
 // ============================================================================
 
 /**
+ * Parse HEARTBEAT_INTERVAL_MS: a positive integer, or the 90-second default.
+ *
+ * `Number("Infinity")` is truthy, so `Number(value) || 90_000` let a non-finite
+ * interval through to `setInterval` (#2714).
+ */
+export function parseHeartbeatIntervalMs(raw: string | undefined): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : 90_000;
+}
+
+/**
  * Default heartbeat interval: 90 seconds.
  *
  * Every value in this block is read DYNAMICALLY (a getter, not a module-load
@@ -124,7 +135,7 @@ const SKIP_AUTO_RESUME_TYPES = new Set([
  * silently ignored — even across a restart. Keep these as functions.
  */
 function defaultIntervalMs(): number {
-  return Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
+  return parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS);
 }
 
 /** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */

@@ -393,7 +393,38 @@ async function supersede(ctx: ScenarioContext, agentId: string, otherId: string)
     [400],
     "supersede with an unknown reason",
   );
+  // provider_fallback needs its errorClass, and only it takes one.
+  expectStatus(
+    await ctx.api("POST", `/api/tasks/${taskId}/supersede`, {
+      agentId,
+      body: { reason: "provider_fallback" },
+    }),
+    [400],
+    "provider_fallback without errorClass",
+  );
+  expectStatus(
+    await ctx.api("POST", `/api/tasks/${taskId}/supersede`, {
+      agentId,
+      body: { reason: "manual_supersede", errorClass: "rate_limit" },
+    }),
+    [400],
+    "errorClass on another reason",
+  );
+  // No profile at claim, so no fallback: the task is left for the worker to fail.
   let response = await ctx.api("POST", `/api/tasks/${taskId}/supersede`, {
+    agentId,
+    body: { reason: "provider_fallback", errorClass: "rate_limit" },
+  });
+  expectStatus(response, [200], "provider_fallback with no profile");
+  expect(
+    asRecord(response.json).kind === "noFallback" && asRecord(response.json).resumeTaskId === null,
+    `provider_fallback with no profile answered ${String(asRecord(response.json).kind)}`,
+  );
+  expect(
+    (await readTask(ctx, taskId)).status === "in_progress",
+    "provider_fallback with no fallback changed the task",
+  );
+  response = await ctx.api("POST", `/api/tasks/${taskId}/supersede`, {
     agentId,
     body: { reason: "manual_supersede" },
   });

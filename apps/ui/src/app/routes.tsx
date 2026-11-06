@@ -37,6 +37,7 @@ import {
 import { type ReactNode, Suspense } from "react";
 import { Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
+import { LinkPreviewScope } from "@/components/link-preview/link-preview-state";
 import { lazyRoute } from "@/components/shared/app-update-prompt";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { AdminRoute, SettingsLayout } from "@/pages/settings/settings-layout";
@@ -225,19 +226,37 @@ export const appRoutes: RouteObject[] = [
         element: <TasksPage />,
         handle: nav({ title: "Tasks", icon: ListTodo }, { search: ["tasks"] }),
       },
-      { path: "tasks/:id", element: <TaskDetailPage /> },
+      {
+        path: "tasks/:id",
+        element: (
+          <LinkPreviewScope>
+            <TaskDetailPage />
+          </LinkPreviewScope>
+        ),
+      },
       { path: "tasks/:id/lineage", element: <TaskLineagePage /> },
       // One page for both paths (as chat does), so the sessions v2 shell stays
       // mounted when the focused session changes. It also picks the legacy pages.
       {
         path: "sessions",
-        element: <SessionsPage />,
+        element: (
+          <LinkPreviewScope>
+            <SessionsPage />
+          </LinkPreviewScope>
+        ),
         handle: nav(
           { title: "Sessions", icon: MessageSquare, minVersion: "1.76.0" },
           { searchOptOut: "the sessions page adds its own palette group" },
         ),
       },
-      { path: "sessions/:rootTaskId", element: <SessionsPage /> },
+      {
+        path: "sessions/:rootTaskId",
+        element: (
+          <LinkPreviewScope>
+            <SessionsPage />
+          </LinkPreviewScope>
+        ),
+      },
       {
         path: "chat",
         element: <ChatPage />,

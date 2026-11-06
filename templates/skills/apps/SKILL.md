@@ -137,7 +137,14 @@ An optional top-level `"theme"` sets the preset the dashboard applies to the app
 
 Viewers can override the preset per app from the app's settings drawer; the override rides the reserved `$theme` key of the user-config values (accepted on every app, even without a declared `userConfig` schema, and never visible at `/user/...`). A present override always beats the definition's `theme` — even an unrecognized one, which degrades to the dashboard theme — so treat `theme` as the app's default styling, not a guarantee.
 
-An optional top-level `"icon"` sets the app's icon on the dashboard Apps page, in the same shape as agent avatars: `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The server validates shape only; the dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name, so omitting `icon` is always safe.
+An optional top-level `"icon"` sets the app's icon on the dashboard Apps page. It takes one of three shapes:
+
+- `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name.
+- `{ "type": "url", "url": "https://..." }`: an https image link, at most 2048 characters, no credentials.
+- `{ "type": "agent-fs", "path": "/apps/<appId>/icon.png" }`: an image on the swarm's agent-fs drive. Add both `orgId` and `driveId` for another drive; never just one.
+
+The server validates shape only. The dashboard shows the grid glyph while an image loads, when it fails to load, and when the viewer has no agent-fs connected, so omitting `icon` is always safe. `app-patch` replaces `icon` whole, so switching shapes leaves no keys from the old one.
+
 
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
@@ -167,6 +174,8 @@ When a schema patch reports stale page/query bindings, repair them in that same 
   "theme": "ember"
 }
 ```
+
+Optional top-level `layout: "sidebar"` turns on the app shell (see Pages, routes, and page trees). Without it every page renders on the plain canvas, exactly as before.
 
 Model, reusable-element, element-prop, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 0-10 models and at most 20 reusable elements; each declared model has 1-40 columns. Zero-model apps are valid for pure UI utilities as long as their pages and reusable elements validate.
 
@@ -473,11 +482,58 @@ Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, pa
 
 Drawer variant: declare a route param on the containing page, set the Drawer `props.param` to that literal param name, and use the same `app.navigate` shape targeting that page with the row id assigned to the Drawer's param. The Drawer then opens from route state without a separate action contract.
 
+App shell (`layout: "sidebar"` at the top level of the definition): every page renders inside a left sidebar that lists the app's pages and a sticky page header. Per page:
+
+- `title`: the sidebar label and the header heading (defaults to the page name).
+- `icon`: one catalog icon name (the list under Component catalog) before the sidebar label; unknown names are rejected.
+- `description`: one line under the header title (at most 280 characters).
+- `headerActions`: the key of one element of this page, rendered in the header's actions slot (right side), e.g. a Refresh `Button` with `on.press: [{ "action": "app.refresh" }]` or a row `Stack` of buttons. It is a second root: it must exist in the page's `elements` and must NOT also be reachable from `root`. It shares the page's state and actions.
+- `nav: false`: leave the page out of the sidebar. Pages with a `required` param never list (they cannot open without it); open them with `app.navigate`.
+
+The sidebar lists pages in definition order and marks the current one. Below 768px it folds into a menu button at the left of the header. Crumbs back to the default page show in the header only on pages the sidebar does not list. The shell renders in every view mode: inside the bordered canvas (default view, under the dashboard header that names the app), under the slim bar in `?mode=full`, and as the whole viewport in `?mode=chromeless`, where the sidebar also shows the app name (it is the only navigation inside an iframe). `headerActions` and `nav` without `layout: "sidebar"` are rejected; `icon` and `description` are accepted and unused.
+
+```json
+{
+  "layout": "sidebar",
+  "defaultPage": "overview",
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "icon": "activity",
+      "description": "Deploys and spend, last 14 days.",
+      "headerActions": "refresh",
+      "root": "root",
+      "elements": {
+        "root": { "type": "Stack", "props": {}, "children": ["spend"] },
+        "spend": {
+          "type": "Chart",
+          "props": {
+            "kind": "area",
+            "data": { "$state": "/queries/days/data" },
+            "loading": { "$state": "/queries/days/loading" },
+            "x": "date",
+            "xType": "time",
+            "format": "currency",
+            "series": [{ "key": "spend", "label": "Spend" }]
+          }
+        },
+        "refresh": {
+          "type": "Button",
+          "props": { "label": "Refresh", "icon": "refresh-cw", "variant": "outline", "size": "sm" },
+          "on": { "press": [{ "action": "app.refresh" }] }
+        }
+      }
+    },
+    "settings": { "title": "Settings", "icon": "pencil", "root": "root", "elements": { "root": { "type": "Text", "props": { "content": "…" } } } }
+  }
+}
+```
+
 Param `kind` is `string` by default, or `number` / `boolean`; `required` defaults to false. The names `mode`, `apiUrl`, `apiKey`, `email`, and `name` are reserved. `/apps/<id>` renders `defaultPage`; `/apps/<id>/p/<page>?issueId=42` is the shareable deep link for another page. Browser navigation is client-side, so app state and polled data stay warm across page changes.
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, Section, and Drawer). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 34)
+## Component catalog (all 35)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -502,7 +558,8 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
-| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). |
+| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. |
+| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", or "bar"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. Wrap it in a `Card` for a title. |
 | `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon), `actionLabel` (a button inside the callout that emits `press`; wire it with `on.press`). |
 | `Badge` | `text` | `text` is string or number; `tone`; `icon` replaces the dot; `variant: "tag"` (default uppercase chip), `"status"` (sentence-case pill), `"count"` (numeric pill), or `"beta"` (the BETA tag); `status` (a lifecycle value renders the dashboard status chip); `hint` (tooltip; the beta tag's explanation). |
 | `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
@@ -614,6 +671,8 @@ Shortcut details:
 - `Button.shortcut` and `SearchInput.shortcut` are one key. Letters and digits match without Shift; symbols such as `/` and `?` match as typed. They do nothing while focus is in a text field, while Ctrl, Cmd, or Alt is held, or while a dialog or menu is open (unless the control is inside it, such as a Button in an open Drawer).
 
 ## Layout & interactivity
+
+For a multi-page app that should feel like a product (a sidebar of pages, a sticky title bar with actions), set `layout: "sidebar"` (see Pages, routes, and page trees) instead of building navigation out of Tabs or button rows. Pair `Metric` tiles (with `sparkline`) in a `Grid` with `Chart`s inside `Card`s for dashboards.
 
 Use `Stack` as the primary page and section layout; `Container` is the legacy two-prop primitive retained for existing pages. Stack supports vertical or horizontal flow, shared spacing, alignment, justification, wrapping, and padding; row Stacks (filter bars, button rows) should set `collapseBelow: "sm"|"md"|"lg"` so they stack vertically on phones. Use `Grid` for responsive card or metric strips: a bare column count is responsive shorthand (1 column on phones, 2 from `sm`, the count from `md` up), or pin breakpoints explicitly with `{ "base": 1, "md": 2, "lg": 3 }`. `Grid` and `Split` also accept `padding` on the shared spacing scale.
 

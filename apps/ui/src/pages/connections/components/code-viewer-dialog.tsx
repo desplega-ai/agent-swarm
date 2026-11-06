@@ -2,7 +2,7 @@ import Editor, { type Monaco } from "@monaco-editor/react";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTheme } from "@/hooks/use-theme";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { cn } from "@/lib/utils";
 import { CopyIconButton } from "./copy-icon-button";
 
@@ -23,14 +23,13 @@ export function JsonSourceViewer({
 }) {
   const { theme } = useTheme();
   const handleBeforeMount = (monaco: Monaco) => {
-    monaco.editor.defineTheme("github-light", monacoLightTheme);
-    monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+    defineGithubThemes(monaco);
   };
   return (
     <div className={cn("min-h-0 overflow-hidden rounded-md border bg-card", className)}>
       <Editor
         language="json"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={source}
         beforeMount={handleBeforeMount}
         height={height}

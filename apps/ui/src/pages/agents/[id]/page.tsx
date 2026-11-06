@@ -15,13 +15,13 @@ import type {
   SessionCost,
 } from "@/api/types";
 import { AgentActivityGraph } from "@/components/shared/agent-activity-graph";
-import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { AgentSlackIconField } from "@/components/shared/agent-slack-icon-field";
 import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
+import { MediaIconField } from "@/components/shared/media-icon-field";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -54,6 +54,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { resolveAgentIcon } from "@/lib/agent-icon";
 import { formatCost } from "@/lib/cost-format";
 import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { taskListTitle } from "@/lib/task-title";
@@ -305,10 +306,10 @@ export default function AgentDetailPage() {
     }
   }
 
-  function saveAvatar(avatar: AgentAvatar | null) {
-    if (id) {
-      updateProfile.mutate({ id, profile: { avatar } });
-    }
+  /** The Avatar field shows its own toast, so it awaits the save. */
+  async function saveAvatar(avatar: AgentAvatar | null) {
+    if (!id) return;
+    await updateProfile.mutateAsync({ id, profile: { avatar } });
   }
 
   const onTaskClicked = useMemo(
@@ -356,19 +357,7 @@ export default function AgentDetailPage() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
         {editing ? (
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-            <AgentAppearancePicker
-              avatar={agent.avatar}
-              onChange={saveAvatar}
-              trigger={
-                <button
-                  type="button"
-                  title="Edit avatar"
-                  className="shrink-0 rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring"
-                >
-                  <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" />
-                </button>
-              }
-            />
+            <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" className="shrink-0" />
             <Input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
@@ -455,6 +444,19 @@ export default function AgentDetailPage() {
                       )}
                       <InfoRow label="Runtime">
                         <AgentRuntimeSettings agent={agent} />
+                      </InfoRow>
+                      <InfoRow label="Avatar">
+                        <MediaIconField
+                          value={agent.avatar}
+                          fallback={resolveAgentIcon(null, {
+                            agentId: agent.id,
+                            isLead: agent.isLead,
+                            role: agent.role ?? null,
+                            agentName: agent.name,
+                          })}
+                          uploadPrefix={`/agents/${agent.id}/avatar`}
+                          onSave={saveAvatar}
+                        />
                       </InfoRow>
                       <InfoRow label="Slack icon">
                         <AgentSlackIconField agent={agent} />

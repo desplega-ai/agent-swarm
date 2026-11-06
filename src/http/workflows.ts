@@ -425,6 +425,8 @@ const retryWorkflowRunRoute = route({
   path: "/api/workflow-runs/{id}/retry",
   pattern: ["api", "workflow-runs", null, "retry"],
   summary: "Retry a failed workflow run",
+  description:
+    "Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {

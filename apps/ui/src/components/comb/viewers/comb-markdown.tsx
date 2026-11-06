@@ -134,7 +134,8 @@ type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProp
   node?: unknown;
 };
 
-const LINK_CLASS = "text-primary underline underline-offset-2 hover:opacity-80";
+// The shared markdown link look (`markdown.css`).
+const LINK_CLASS = "md-link";
 
 function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
   const ctx = useContext(CombDocContext);

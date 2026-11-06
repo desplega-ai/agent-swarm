@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prependContextPreamble } from "../commands/context-preamble";
 import { resolveCodexPrompt } from "../providers/codex-skill-resolver";
+import { resolveDevinPrompt } from "../providers/devin-skill-resolver";
 import type { ProviderEvent } from "../providers/types";
 
 /** Create a fresh tmp skills dir for each test to avoid cross-test leakage. */
@@ -164,5 +165,35 @@ describe("resolveCodexPrompt", () => {
 
     expect(result.startsWith(skillBody)).toBe(true);
     expect(result).toContain("User request: abc");
+  });
+
+  test("enforces 100,000-char default cap when MAX_SKILL_CHARS is non-finite, non-positive, or non-integer, and honors valid positive integer overrides", async () => {
+    const prev = process.env.MAX_SKILL_CHARS;
+    try {
+      const oversized = "x".repeat(100_050);
+      await writeSkill("huge-skill", oversized);
+
+      for (const badVal of ["Infinity", "-Infinity", "NaN", "0", "-50", "12.5", "not-a-number"]) {
+        process.env.MAX_SKILL_CHARS = badVal;
+        const codexRes = await resolveCodexPrompt("/huge-skill go", skillsDir);
+        expect(codexRes.startsWith("x".repeat(100_000) + "\n\n---\n\n")).toBe(true);
+
+        const devinRes = await resolveDevinPrompt("@skills:huge-skill go", skillsDir);
+        expect(devinRes.startsWith("x".repeat(100_000) + "\n\n---\n\n")).toBe(true);
+      }
+
+      process.env.MAX_SKILL_CHARS = "120";
+      const customCodex = await resolveCodexPrompt("/huge-skill go", skillsDir);
+      expect(customCodex.startsWith("x".repeat(120) + "\n\n---\n\n")).toBe(true);
+
+      const customDevin = await resolveDevinPrompt("@skills:huge-skill go", skillsDir);
+      expect(customDevin.startsWith("x".repeat(120) + "\n\n---\n\n")).toBe(true);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.MAX_SKILL_CHARS;
+      } else {
+        process.env.MAX_SKILL_CHARS = prev;
+      }
+    }
   });
 });

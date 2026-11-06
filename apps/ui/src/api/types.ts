@@ -63,6 +63,8 @@ export interface ModelProfile {
   seededFrom: string | null;
   /** Pooled-key allowlist: credential var → allowed key suffixes. Null uses the whole pool. */
   credentials: Record<string, string[]> | null;
+  /** Same-harness profiles a task hops to, in order, on a provider error. Unset on older APIs. */
+  fallbacks?: string[];
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -160,9 +162,8 @@ export interface AgentAcpStatus {
   reportedAt: number;
 }
 
-/** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
- * future avatar types (emoji, image, ...) can be added with no migration —
- * server validates shape only; the UI owns the icon catalog + fallback. */
+/** The lucide branch of `MediaIcon`. Server validates shape only; the UI owns
+ * the icon catalog + fallback. */
 export interface AgentAvatarLucide {
   type: "lucide";
   /** Kebab-case lucide icon name, e.g. "rocket". Must exist in AVATAR_ICON_CATALOG to render. */
@@ -170,10 +171,21 @@ export interface AgentAvatarLucide {
   /** `#RRGGBB`. Omitted = use the deterministic color derivation. */
   color?: string;
 }
-export type AgentAvatar = AgentAvatarLucide;
+/** Mirrors `MediaIconSchema` (backend `src/types.ts`): a lucide glyph, an https
+ * image link, or an image file in agent-fs. With neither `orgId` nor `driveId`,
+ * an agent-fs icon lives on the swarm drive. */
+export type MediaIcon =
+  | AgentAvatarLucide
+  | { type: "url"; url: string }
+  // Both drive IDs or neither (neither = the swarm drive), as the API enforces.
+  | { type: "agent-fs"; path: string; orgId?: never; driveId?: never }
+  | { type: "agent-fs"; path: string; orgId: string; driveId: string };
 
-/** Apps reuse the agent avatar shape for their dashboard icon. */
-export type AppIcon = AgentAvatar;
+/** Mirrors `AgentAvatarSchema`: an agent's avatar takes the same shapes as an app icon. */
+export type AgentAvatar = MediaIcon;
+
+/** Mirrors `AppIconSchema`: an app's dashboard icon. */
+export type AppIcon = MediaIcon;
 
 /** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
 export type AgentSlackIcon =
@@ -422,6 +434,26 @@ export interface AgentLatestModel {
   reasoningEffort?: ReasoningEffortLevel;
 }
 
+/** Why a provider session ended in a way another profile may survive. */
+export type ProviderErrorClass =
+  | "rate_limit"
+  | "model_window"
+  | "seat"
+  | "credits"
+  | "overloaded"
+  | "server_error"
+  | "auth"
+  | "pool_empty";
+
+/** One same-agent fallback hop: the work left `from` on `errorClass` and resumed on `profile`. */
+export interface FallbackHop {
+  from: string;
+  profile: string;
+  errorClass: ProviderErrorClass;
+  at: string;
+  skipped?: { profile: string; reason: string }[];
+}
+
 export interface AgentTask {
   id: string;
   key: string;
@@ -465,6 +497,8 @@ export interface AgentTask {
   profile?: string;
   /** Model profile the server applied at claim (the ask, the agent default, or a tier alias). */
   resolvedProfile?: string;
+  /** Provider-error fallback hops the work took, oldest first. */
+  fallbackHops?: FallbackHop[];
   /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
   /** Effort the session ran at (task effort, else the agent's setting). */
@@ -3980,6 +4014,14 @@ export interface AppPageDef {
   /** Display title (breadcrumb / header); defaults to the page name. */
   title?: string;
   params?: Record<string, AppPageParamDef>;
+  /** Sidebar layout: a catalog icon name shown next to the page in the sidebar. */
+  icon?: string;
+  /** Sidebar layout: one line under the title in the sticky page header. */
+  description?: string;
+  /** Sidebar layout: element key rendered in the sticky header's actions slot. */
+  headerActions?: string;
+  /** Sidebar layout: `false` leaves the page out of the sidebar. */
+  nav?: boolean;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -4056,6 +4098,8 @@ export interface AppDefinition {
   theme?: string;
   /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
   icon?: AppIcon;
+  /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
+  layout?: "sidebar";
 }
 
 /**
@@ -4385,4 +4429,78 @@ export interface FleetBenchmarkResponse {
   minFinishedTasks: number;
   generatedAt: string | null;
   comparisons: FleetComparison[];
+}
+
+// ─── Automation savings (GET /api/savings/jobs) ─────────────────────────────
+
+export type SavingsTier = "smol" | "regular" | "smart" | "ultra";
+
+/** An 80% range: p10 and p90 around the p50 point estimate. */
+export interface SavingsBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+export interface SavingsJobRow {
+  kind: "workflow";
+  workflowId: string;
+  name: string;
+  basis: "modelled";
+  runs: number;
+  substitutedRuns: number;
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  /** Measured spend of every run in the window. */
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured; 0 when recorded. */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate: `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`,
+   * the cost the saving subtracts.
+   */
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`. */
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  agentOnlyUsdPerRun: number;
+}
+
+export interface SavingsJobsResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  computedAt: string;
+  valid: boolean;
+  reason: "no-runs" | "too-many-runs" | null;
+  rows: SavingsJobRow[];
+}
+
+/** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
+export interface SavingsDailyPoint {
+  day: string;
+  savingUsd: number;
+  /** Scaled estimate: the day's measured and estimated spend times the substituted share. */
+  actualUsd: number;
+  /** The day's measured spend. */
+  measuredUsd: number;
+  /** The day's LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+}
+
+export interface SavingsDailyResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  computedAt: string;
+  valid: boolean;
+  reason: "no-runs" | "too-many-runs" | null;
+  points: SavingsDailyPoint[];
 }

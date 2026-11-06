@@ -132,6 +132,7 @@ import { handleRequestComposition } from "./request-composition";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
+import { handleSavings } from "./savings";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -430,6 +431,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleImprovements(req, res, pathSegments, queryParams),
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
+        () => handleSavings(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
@@ -860,9 +862,8 @@ httpServer
     // restart — which is what the Configuration page's "Restart required"
     // badge promises for HEARTBEAT_DISABLE / HEARTBEAT_INTERVAL_MS.
     if (!isEnvFlagEnabled("HEARTBEAT_DISABLE", false)) {
-      const { startHeartbeat } = await import("../heartbeat");
-      const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
-      startHeartbeat(heartbeatMs);
+      const { parseHeartbeatIntervalMs, startHeartbeat } = await import("../heartbeat");
+      startHeartbeat(parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS));
     }
 
     startPoolRouting();

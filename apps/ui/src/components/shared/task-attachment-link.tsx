@@ -1,4 +1,5 @@
 // No `@/` imports: unit tests render this from the repo root.
+import type { MouseEvent } from "react";
 import type { AgentFsState } from "../../lib/agent-fs/state";
 import { encodedPathToCombPath, isCombNavigable } from "../../lib/comb/links";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
@@ -12,7 +13,7 @@ const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
  * then `VITE_AGENT_FS_LIVE_URL` (for an API that predates Comb), then the
  * public host.
  */
-function getAgentFsLiveUrl(liveUrl?: string | null): string {
+export function resolveAgentFsLiveUrl(liveUrl?: string | null): string {
   const raw = liveUrl?.trim() || import.meta.env.VITE_AGENT_FS_LIVE_URL?.trim();
   return (raw || DEFAULT_AGENT_FS_LIVE_URL).replace(/\/+$/, "");
 }
@@ -65,7 +66,7 @@ function agentFsFile(
 }
 
 function liveFileUrl(file: AgentFsFile, liveUrl: string | null | undefined): string {
-  return `${getAgentFsLiveUrl(liveUrl)}/file/~/${file.orgId}/${file.driveId}/${file.encodedPath}`;
+  return `${resolveAgentFsLiveUrl(liveUrl)}/file/~/${file.orgId}/${file.driveId}/${file.encodedPath}`;
 }
 
 export function buildAgentFsLiveUrl(
@@ -122,10 +123,13 @@ export function AttachmentName({
   href,
   to,
   name,
+  onClick,
 }: {
   href: string | null;
   to?: string | null;
   name: string;
+  /** The link preview's click handler (task and session pages). */
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
 }) {
   const className = "truncate text-sm font-medium text-foreground";
   if (!to && !href) return <span className={className}>{name}</span>;
@@ -133,6 +137,7 @@ export function AttachmentName({
     <InAppOrExternalLink
       to={to}
       href={href}
+      onClick={onClick}
       className={`${className} hover:text-primary hover:underline`}
     >
       {name}
