@@ -12,6 +12,9 @@
  * threading a catch through each of them.
  */
 
+import { z } from "zod";
+import { swarmCatalogSpec } from "./catalog";
+
 export class ChainHaltError extends Error {
   constructor(message: string) {
     super(message);
@@ -119,28 +122,87 @@ function rewriteChain(value: unknown): unknown {
   return Array.isArray(value) ? mapStable(value, rewriteBinding) : rewriteBinding(value);
 }
 
-/** Prop keys that hold a chain: `actions` (rowActions, bulkActions) and `on<Event>` (onSubmit, onSelect, ...). */
-function isChainKey(key: string): boolean {
-  return key === "actions" || /^on[A-Z]/.test(key);
+/**
+ * Where a component's props hold chains, read off its catalog props schema: a
+ * path of prop keys and `[]` (each array item) ending at an action chain,
+ * e.g. `["onSubmit"]` or `["actions", "[]", "actions"]` (Drawer and Dialog
+ * footers, Table rowActions). Only these paths are rewritten, so row data,
+ * defaults and other payload props that happen to look like bindings (a Table
+ * row `{ actions: [{ action, onError }] }`) reach the handlers unchanged.
+ */
+type ChainPath = readonly string[];
+const EACH = "[]";
+
+/** A chain schema: an array of objects with a string `action` (`actionChainSchema`). */
+function isChainSchema(schema: z.ZodType): boolean {
+  if (!(schema instanceof z.ZodArray)) return false;
+  const element = schema.element;
+  return element instanceof z.ZodObject && element.shape.action instanceof z.ZodString;
 }
 
-/** Walks element props to the chain-valued keys, leaving everything else as is. */
-function rewriteProps(value: unknown): unknown {
-  if (Array.isArray(value)) return mapStable(value, rewriteProps);
-  if (!isRecord(value)) return value;
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    const out = isChainKey(key) && Array.isArray(child) ? rewriteChain(child) : rewriteProps(child);
-    if (out !== child) changed = true;
-    next[key] = out;
+function chainPathsOf(schema: z.ZodType, prefix: string[], out: string[][], depth = 0): void {
+  // shortcut: unwraps optional/nullable/default/union/array/object only; a chain behind z.lazy or a pipe is missed, so add the wrapper here when the catalog grows one.
+  if (depth > 8) return;
+  if (isChainSchema(schema)) {
+    out.push(prefix);
+    return;
   }
-  return changed ? next : value;
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodDefault
+  ) {
+    chainPathsOf(schema.unwrap() as z.ZodType, prefix, out, depth + 1);
+  } else if (schema instanceof z.ZodUnion) {
+    for (const option of schema.options as z.ZodType[])
+      chainPathsOf(option, prefix, out, depth + 1);
+  } else if (schema instanceof z.ZodArray) {
+    chainPathsOf(schema.element as z.ZodType, [...prefix, EACH], out, depth + 1);
+  } else if (schema instanceof z.ZodObject) {
+    for (const [key, child] of Object.entries(schema.shape as Record<string, z.ZodType>)) {
+      chainPathsOf(child, [...prefix, key], out, depth + 1);
+    }
+  }
+}
+
+let chainPathsByType: Map<string, ChainPath[]> | undefined;
+
+/** The chain paths of a catalog component type; none for a type the catalog does not define. */
+export function chainPathsFor(type: unknown): readonly ChainPath[] {
+  if (!chainPathsByType) {
+    chainPathsByType = new Map();
+    for (const [name, def] of Object.entries(swarmCatalogSpec.components)) {
+      const paths: string[][] = [];
+      chainPathsOf(def.props as z.ZodType, [], paths);
+      // Dedupe: a union can reach the same path twice.
+      const unique = new Map(paths.map((path) => [path.join("\u0000"), path]));
+      chainPathsByType.set(name, [...unique.values()]);
+    }
+  }
+  return typeof type === "string" ? (chainPathsByType.get(type) ?? []) : [];
+}
+
+/** Rewrites the chain at `path` inside `value`, leaving every other branch as is. */
+function rewriteAt(value: unknown, path: ChainPath): unknown {
+  if (path.length === 0) return rewriteChain(value);
+  const [head, ...rest] = path;
+  if (head === EACH) {
+    return Array.isArray(value) ? mapStable(value, (item) => rewriteAt(item, rest)) : value;
+  }
+  if (!isRecord(value) || head === undefined || !(head in value)) return value;
+  const out = rewriteAt(value[head], rest);
+  return out === value[head] ? value : { ...value, [head]: out };
+}
+
+function rewriteProps(type: unknown, props: unknown): unknown {
+  let next = props;
+  for (const path of chainPathsFor(type)) next = rewriteAt(next, path);
+  return next;
 }
 
 function rewriteElement(value: unknown): unknown {
   if (!isRecord(value)) return value;
-  const props = rewriteProps(value.props);
+  const props = rewriteProps(value.type, value.props);
   let on = value.on;
   if (isRecord(on)) {
     let changed = false;

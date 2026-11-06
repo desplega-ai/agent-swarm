@@ -31,8 +31,14 @@ mock.module("sonner", () => ({
 GlobalRegistrator.register();
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { createRoot } = await import("react-dom/client");
-const { ActionProvider, createStateStore, Renderer, StateProvider, VisibilityProvider } =
-  await import("@json-render/react");
+const {
+  ActionProvider,
+  createStateStore,
+  Renderer,
+  StateProvider,
+  useActions,
+  VisibilityProvider,
+} = await import("@json-render/react");
 const { createSwarmActionHandlers } = await import("./swarm-actions");
 const { createToastActionHandler } = await import("./toast-action");
 const { CHAIN_ON_ERROR_PARAM, withChainOnError, withChainOnErrorHandlers, isChainHalt } =
@@ -93,16 +99,48 @@ const registry = {
       Save
     </button>
   ),
+  Drawer: (arg: { element: { props: FooterProps } }) => <FooterStub {...arg} />,
+  Dialog: (arg: { element: { props: FooterProps } }) => <FooterStub {...arg} />,
   Txt: ({ element }: { element: { props: { text?: unknown } } }) => (
     <p data-testid="err">{String(element.props.text ?? "")}</p>
   ),
 };
 
+type FooterProps = { actions?: { label: string; actions: Record<string, unknown>[] }[] };
+
+/**
+ * A Drawer / Dialog footer button, run the way `DrawerActionsFooter` runs it:
+ * `useRowActionRunner` awaits `execute` over the button's chain, the binding
+ * spread as is (so an `onError` left on it would reach json-render).
+ */
+function FooterStub({ element }: { element: { props: FooterProps } }) {
+  const { execute } = useActions();
+  const button = element.props.actions?.[0];
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void (async () => {
+          for (const binding of button?.actions ?? []) await execute(binding as never);
+        })().catch((error: unknown) => {
+          pressError = error;
+        });
+      }}
+    >
+      {button?.label}
+    </button>
+  );
+}
+
 const failingCall = { action: "swarm.call", params: { method: "POST", endpoint: "/api/x" } };
 const savedToast = { action: "ui.toast", params: { message: "Saved", tone: "success" } };
 
 /** The production wiring of both surfaces (app-surface, json-page-renderer). */
-async function renderAndPress(chain: unknown[], fetchImpl: typeof fetch) {
+async function renderAndPress(
+  chain: unknown[],
+  fetchImpl: typeof fetch,
+  save: Record<string, unknown> = { type: "Btn", props: {}, on: { press: chain } },
+) {
   const store = createStateStore({});
   const handlers = withChainOnErrorHandlers(
     {
@@ -119,7 +157,7 @@ async function renderAndPress(chain: unknown[], fetchImpl: typeof fetch) {
     root: "stack",
     elements: {
       stack: { type: "Txt", props: { text: { $state: "/err" } }, children: [] },
-      save: { type: "Btn", props: {}, on: { press: chain } },
+      save,
     },
   });
   await act(async () => {
@@ -174,6 +212,36 @@ describe("onError does not suppress the chain halt (real Renderer)", () => {
     expect(bodies).toEqual([{ action: "deploy", onError: { action: "rollback" } }]);
     expect(shown).toContain("success: Saved");
   });
+
+  for (const type of ["Drawer", "Dialog"]) {
+    test(`a ${type} footer step with onError skips the next Saved toast`, async () => {
+      const chain = [
+        { ...failingCall, onError: { set: { "/err": "$error.message" } } },
+        savedToast,
+      ];
+      await renderAndPress(chain, fetchReturning(500), {
+        type,
+        props: { param: "id", actions: [{ label: "Save", actions: chain }] },
+      });
+      expect(calls).toHaveLength(1);
+      expect(shown).not.toContain("success: Saved");
+      expect(isChainHalt(pressError)).toBe(true);
+      expect(errText()).toBe("swarm.call POST /api/x: 500");
+    });
+
+    test(`control: a ${type} footer step that succeeds lets the toast run`, async () => {
+      const chain = [
+        { ...failingCall, onError: { set: { "/err": "$error.message" } } },
+        savedToast,
+      ];
+      await renderAndPress(chain, fetchReturning(200), {
+        type,
+        props: { param: "id", actions: [{ label: "Save", actions: chain }] },
+      });
+      expect(shown).toContain("success: Saved");
+      expect(pressError).toBeUndefined();
+    });
+  }
 
   test("control: a successful step with onError lets the toast run", async () => {
     await renderAndPress(
@@ -262,6 +330,61 @@ describe("withChainOnError", () => {
     expect(press[0]?.params.body).toEqual({ action: "deploy", onError: { action: "rollback" } });
     expect(CHAIN_ON_ERROR_PARAM in (press[0]?.params ?? {})).toBe(false);
     expect(out.elements.t.props.data).toEqual(rows);
+  });
+
+  test("Drawer and Dialog footer chains have their onError moved", () => {
+    const onError = { action: "mark" };
+    const footer = [{ label: "Save", actions: [{ action: "swarm.call", onError }, savedToast] }];
+    const spec = {
+      root: "d",
+      elements: {
+        d: { type: "Drawer", props: { param: "id", actions: footer } },
+        g: { type: "Dialog", props: { param: "id", actions: footer } },
+      },
+    };
+    const out = withChainOnError(spec);
+    for (const id of ["d", "g"] as const) {
+      const props = out.elements[id].props as unknown as FooterProps;
+      expect(props.actions?.[0]?.actions).toEqual([
+        { action: "swarm.call", params: { [CHAIN_ON_ERROR_PARAM]: onError } },
+        savedToast,
+      ]);
+      expect(props.actions?.[0]?.label).toBe("Save");
+    }
+  });
+
+  test("Table row data shaped like a chain is not rewritten; rowActions are", () => {
+    const rows = [
+      { id: 1, actions: [{ action: "deploy", onError: { action: "rollback" } }] },
+      { id: 2, onSubmit: [{ action: "deploy", onError: { set: { "/x": 1 } } }] },
+    ];
+    const onError = { set: { "/err": "$error.message" } };
+    const spec = {
+      root: "t",
+      elements: {
+        t: {
+          type: "Table",
+          props: {
+            data: rows,
+            rowActions: [{ label: "Go", actions: [{ action: "app.action", onError }] }],
+          },
+        },
+        // A type the catalog does not define: its props are never walked.
+        x: { type: "Custom", props: { actions: [{ action: "deploy", onError }] } },
+      },
+    };
+    const out = withChainOnError(spec);
+    const t = out.elements.t.props as unknown as {
+      data: unknown;
+      rowActions: { actions: unknown[] }[];
+    };
+    expect(t.data).toBe(rows);
+    expect(rows[0]?.actions?.[0]).toEqual({ action: "deploy", onError: { action: "rollback" } });
+    expect(t.rowActions[0]?.actions[0]).toEqual({
+      action: "app.action",
+      params: { [CHAIN_ON_ERROR_PARAM]: onError },
+    });
+    expect(out.elements.x).toBe(spec.elements.x);
   });
 
   test("a binding's own onError moves while its body keeps its onError", () => {
