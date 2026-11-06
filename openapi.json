@@ -51576,6 +51576,10 @@
                         null
                       ]
                     },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
                     "rows": {
                       "type": "array",
                       "items": {
@@ -52067,6 +52071,7 @@
                     "computedAt",
                     "valid",
                     "reason",
+                    "boundaryEstimated",
                     "rows",
                     "total"
                   ]
@@ -52220,6 +52225,10 @@
                         null
                       ]
                     },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
                     "points": {
                       "type": "array",
                       "items": {
@@ -52262,6 +52271,7 @@
                     "computedAt",
                     "valid",
                     "reason",
+                    "boundaryEstimated",
                     "points"
                   ]
                 }

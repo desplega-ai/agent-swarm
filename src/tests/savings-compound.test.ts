@@ -681,4 +681,35 @@ describe("each task counts under one root", () => {
     expect(depthOf.has(chain[11])).toBe(false);
     expect(tree.components).toHaveLength(10);
   });
+
+  test("links on the window's partial first day count by the share inside it", async () => {
+    const own = (await readWorkflowSavings({ days: 7, tier: "smart", now: NOW })).rows.find(
+      (r) => r.workflowId === chain[0],
+    )!;
+    const parent = "boundary-root";
+    // 7 x 24h ending 06:00 starts at 06:00 on the first day: 18 of its 24 hours count.
+    const now = Date.parse("2030-01-08T06:00:00.000Z");
+    const link = (day: string, n: number) =>
+      getDbClient().run(
+        `INSERT INTO automation_savings_links (day, parentJobId, childKind, childJobId, linkKind, n, actualUsd, keptUsd, modelVersion, computedAt)
+         VALUES (?, ?, 'workflow', 'boundary-child', 'step-workflow', ?, 0, 0, ?, ?)`,
+        [day, parent, n, MODEL_VERSION, new Date().toISOString()],
+      );
+    await link("2029-12-31", 2);
+    await link("2030-01-01", 4);
+    await link("2030-01-05", 1);
+    try {
+      const tree = await readWorkflowComponents({
+        days: 7,
+        tier: "smart",
+        now,
+        workflowId: parent,
+        own: { ...own, workflowId: parent },
+      });
+      expect(tree.components).toHaveLength(1);
+      expect(tree.components[0]!.runs).toBeCloseTo(4 * 0.75 + 1, 9);
+    } finally {
+      await getDbClient().run("DELETE FROM automation_savings_links WHERE parentJobId=?", [parent]);
+    }
+  });
 });
