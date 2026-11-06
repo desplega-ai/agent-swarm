@@ -19,9 +19,11 @@ import {
   isKnownScriptName,
   readFleetLlmUsd,
   readFleetSavings,
+  readScheduleSavings,
   readScriptSavings,
   readWorkflowSavings,
   type SavingsTotals,
+  type ScheduleSavingsRow,
   type WorkflowSavingsRead,
 } from "../be/savings/read";
 import { refreshWorkflowToday, utcDay } from "../be/savings/rollup";
@@ -100,6 +102,12 @@ const SavingsJobRowSchema = z.object({
   scriptName: z.string().optional(),
   name: z.string(),
   basis: z.literal("modelled"),
+  /** Set on a schedule's row (`scheduleId` or `kind=schedule`): the schedule whose target this row prices. */
+  scheduleId: z.string().optional(),
+  scheduleName: z.string().optional(),
+  scheduleEnabled: z.boolean().optional(),
+  /** `target-job` on a schedule's row: runs carry no schedule link, so this is the target's whole row, shared with any other schedule of it. */
+  scope: z.literal("target-job").optional(),
   /** True when the enabled-only rule priced only the runs with a downstream effect (an event router). */
   enabledOnlyRule: z.boolean(),
   runs: z.number().int(),
@@ -135,6 +143,24 @@ const SavingsJobRowSchema = z.object({
   agentOnlyUsdPerRun: z.number(),
 });
 
+/** What an agent-task schedule's tasks cost. There is no automation to substitute, so no saving. */
+const SavingsMeasuredRowSchema = z.object({
+  kind: z.literal("agent-task-schedule"),
+  scheduleId: z.string(),
+  scheduleName: z.string(),
+  scheduleEnabled: z.boolean(),
+  name: z.string(),
+  basis: z.literal("measured"),
+  runs: z.number().int().describe("Agent tasks the schedule created in the window."),
+  actualUsd: z
+    .number()
+    .describe(
+      "Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule.",
+    ),
+  actualHours: z.number(),
+  savingUsd: z.null(),
+});
+
 const SavingsTotalsSchema = z.object({
   runs: z.number().int(),
   substitutedRuns: z.number().int(),
@@ -159,7 +185,8 @@ const savingsMeta = {
   computedAt: z.string().nullable(),
   /** False when there is nothing to show: the window is not computed yet, or had no runs. Never $0. */
   valid: z.boolean(),
-  reason: z.enum(["not-computed", "no-runs"]).nullable(),
+  /** `target-missing`: `GET /api/savings/jobs?scheduleId=` for a schedule whose workflow or script is gone. */
+  reason: z.enum(["not-computed", "no-runs", "target-missing"]).nullable(),
   boundaryEstimated: z
     .boolean()
     .describe(
@@ -169,8 +196,8 @@ const savingsMeta = {
 
 const SavingsJobsResponseSchema = z.object({
   ...savingsMeta,
-  rows: z.array(SavingsJobRowSchema),
-  /** Sum of `rows`; the band is the single-job spread for one row and the fleet spread for more. */
+  rows: z.array(z.union([SavingsJobRowSchema, SavingsMeasuredRowSchema])),
+  /** Sum of `rows`; the band is the single-job spread for one row and the fleet spread for more. Null for schedule reads, where schedules of one target would count it twice. */
   total: SavingsTotalsSchema.nullable(),
 });
 
@@ -247,21 +274,22 @@ const savingsJobsRoute = route({
   pattern: ["api", "savings", "jobs"],
   summary: "Estimated automation savings per workflow or script",
   description:
-    "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+    "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
   tags: ["Savings"],
   query: z.object({
     workflowId: z.string().min(1).optional(),
     scriptName: z.string().min(1).optional(),
-    kind: z.enum(["workflow", "script"]).optional(),
+    scheduleId: z.string().min(1).optional(),
+    kind: z.enum(["workflow", "script", "schedule"]).optional(),
     ...windowQuery,
   }),
   responses: {
     200: { description: "Savings rows", schema: SavingsJobsResponseSchema },
     400: {
       description:
-        "Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value",
+        "Not exactly one of workflowId, scriptName, scheduleId and kind, or an unknown days or tier value",
     },
-    404: { description: "Workflow or script not found" },
+    404: { description: "Workflow, script or schedule not found" },
   },
 });
 
@@ -379,6 +407,27 @@ function toRow(row: ReadRow) {
   };
 }
 
+function toScheduleRow(row: ScheduleSavingsRow) {
+  const ref = {
+    scheduleId: row.scheduleId,
+    scheduleName: row.scheduleName,
+    scheduleEnabled: row.scheduleEnabled,
+  };
+  if (row.basis === "measured") {
+    return {
+      ...ref,
+      kind: row.kind,
+      name: row.name,
+      basis: row.basis,
+      runs: row.runs,
+      actualUsd: round2(row.actualUsd),
+      actualHours: round2(row.actualHours),
+      savingUsd: null,
+    };
+  }
+  return { ...toRow(row), ...ref, scope: "target-job" as const };
+}
+
 function toTotals(t: SavingsTotals) {
   return {
     ...t,
@@ -396,7 +445,10 @@ function roundKind(k: FleetKindTotals): FleetKindTotals {
   return { ...k, savingUsd: round2(k.savingUsd), hoursSaved: round2(k.hoursSaved) };
 }
 
-function notFound(res: ServerResponse, what: "Workflow" | "Script" = "Workflow"): true {
+function notFound(
+  res: ServerResponse,
+  what: "Workflow" | "Script" | "Schedule" = "Workflow",
+): true {
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: `${what} not found` }));
   return true;
@@ -501,7 +553,7 @@ function meta(
   },
   tier: (typeof SAVINGS_TIERS)[number],
   calibration: Calibration,
-  valid: { complete: boolean; hasRows: boolean },
+  valid: { complete: boolean; hasRows: boolean; targetMissing?: boolean },
 ) {
   return {
     window: read.window,
@@ -515,7 +567,9 @@ function meta(
       ? ("not-computed" as const)
       : valid.hasRows
         ? null
-        : ("no-runs" as const),
+        : valid.targetMissing
+          ? ("target-missing" as const)
+          : ("no-runs" as const),
     boundaryEstimated: read.boundaryEstimated,
   };
 }
@@ -599,12 +653,38 @@ export async function handleSavings(
   if (!savingsJobsRoute.match(req.method, pathSegments)) return false;
   const parsed = await savingsJobsRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
-  const { workflowId, scriptName, kind, days, tier } = parsed.query;
-  if ([workflowId, scriptName, kind].filter(Boolean).length !== 1) {
-    return badTarget(res, "Pass one of workflowId, scriptName, kind=workflow or kind=script");
+  const { workflowId, scriptName, scheduleId, kind, days, tier } = parsed.query;
+  if ([workflowId, scriptName, scheduleId, kind].filter(Boolean).length !== 1) {
+    return badTarget(
+      res,
+      "Pass one of workflowId, scriptName, scheduleId, kind=workflow, kind=script or kind=schedule",
+    );
   }
   const calibration = await activeCalibration(Date.now());
   const now = Date.now();
+  if (scheduleId || kind === "schedule") {
+    const read = await readScheduleSavings({
+      days,
+      tier,
+      now,
+      scheduleId,
+      sql: savingsRequestSql,
+      curve: calibration.curve,
+    });
+    if (!read) return notFound(res, "Schedule");
+    // Measured rows are read live, so they show even while the modelled rollup is incomplete.
+    const rows = read.complete ? read.rows : read.rows.filter((r) => r.basis === "measured");
+    savingsJobsRoute.respond(res, 200, {
+      ...meta(read, tier, calibration, {
+        complete: read.complete || rows.length > 0,
+        hasRows: rows.length > 0,
+        targetMissing: read.targetMissing,
+      }),
+      rows: rows.map(toScheduleRow),
+      total: null,
+    });
+    return true;
+  }
   const read: (Omit<WorkflowSavingsRead, "rows"> & { rows: ReadRow[] }) | null = workflowId
     ? await readOne(workflowId, days, tier, calibration.curve)
     : scriptName

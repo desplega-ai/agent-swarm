@@ -279,6 +279,54 @@
           "slackUserId": {
             "type": "string"
           },
+          "slackParticipants": {
+            "type": "object",
+            "properties": {
+              "people": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slackUserId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "enum": [
+                        "internal",
+                        "external",
+                        "unknown"
+                      ]
+                    },
+                    "starter": {
+                      "type": "boolean"
+                    },
+                    "newest": {
+                      "type": "boolean"
+                    },
+                    "asked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slackUserId",
+                    "trust"
+                  ]
+                }
+              },
+              "more": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "people",
+              "more"
+            ]
+          },
           "slackReplySent": {
             "type": "boolean",
             "default": false
@@ -36869,6 +36917,87 @@
                                   "name"
                                 ]
                               },
+                              "threadParticipants": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "more": {
+                                    "type": "integer"
+                                  },
+                                  "people": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "trust": {
+                                          "type": "string",
+                                          "enum": [
+                                            "internal",
+                                            "external",
+                                            "unknown"
+                                          ]
+                                        },
+                                        "starter": {
+                                          "type": "boolean"
+                                        },
+                                        "newest": {
+                                          "type": "boolean"
+                                        },
+                                        "asked": {
+                                          "type": "boolean"
+                                        },
+                                        "language": {
+                                          "type": "string"
+                                        },
+                                        "verbosity": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "label",
+                                        "trust"
+                                      ]
+                                    }
+                                  },
+                                  "starterProfile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "email": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "notes": {
+                                        "type": "string"
+                                      },
+                                      "comms": {
+                                        "$ref": "#/components/schemas/UserCommsPrefs"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "more",
+                                  "people"
+                                ]
+                              },
                               "credentialAllowlist": {
                                 "type": "object",
                                 "additionalProperties": {
@@ -39663,6 +39792,87 @@
                               "required": [
                                 "name"
                               ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
+                              ]
                             }
                           },
                           "required": [
@@ -39764,6 +39974,87 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
                               ]
                             }
                           },
@@ -51431,7 +51722,7 @@
     "/api/savings/jobs": {
       "get": {
         "summary": "Estimated automation savings per workflow or script",
-        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51462,9 +51753,19 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scheduleId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "workflow",
-                "script"
+                "script",
+                "schedule"
               ]
             },
             "required": false,
@@ -51567,6 +51868,7 @@
                       "enum": [
                         "not-computed",
                         "no-runs",
+                        "target-missing",
                         null
                       ]
                     },
@@ -51577,168 +51879,242 @@
                     "rows": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "workflow",
-                              "script-scheduled",
-                              "script-agent-invoked"
-                            ]
-                          },
-                          "workflowId": {
-                            "type": "string"
-                          },
-                          "scriptName": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "basis": {
-                            "type": "string",
-                            "enum": [
-                              "modelled"
-                            ]
-                          },
-                          "enabledOnlyRule": {
-                            "type": "boolean"
-                          },
-                          "runs": {
-                            "type": "integer"
-                          },
-                          "substitutedRuns": {
-                            "type": "integer"
-                          },
-                          "effectRuns": {
-                            "type": "integer"
-                          },
-                          "enabledOnlyRuns": {
-                            "type": "integer"
-                          },
-                          "capApplied": {
-                            "type": "boolean"
-                          },
-                          "opsPerRun": {
-                            "type": "number"
-                          },
-                          "measuredUsd": {
-                            "type": "number",
-                            "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
-                          },
-                          "estimatedLlmUsd": {
-                            "type": "number",
-                            "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
-                          },
-                          "actualUsd": {
-                            "type": "number",
-                            "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
-                          },
-                          "agentOnlyUsd": {
+                        "anyOf": [
+                          {
                             "type": "object",
                             "properties": {
-                              "p10": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "workflow",
+                                  "script-scheduled",
+                                  "script-agent-invoked"
+                                ]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "scriptName": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "modelled"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": [
+                                  "target-job"
+                                ]
+                              },
+                              "enabledOnlyRule": {
+                                "type": "boolean"
+                              },
+                              "runs": {
+                                "type": "integer"
+                              },
+                              "substitutedRuns": {
+                                "type": "integer"
+                              },
+                              "effectRuns": {
+                                "type": "integer"
+                              },
+                              "enabledOnlyRuns": {
+                                "type": "integer"
+                              },
+                              "capApplied": {
+                                "type": "boolean"
+                              },
+                              "opsPerRun": {
                                 "type": "number"
                               },
-                              "p50": {
-                                "type": "number"
+                              "measuredUsd": {
+                                "type": "number",
+                                "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
                               },
-                              "p90": {
+                              "estimatedLlmUsd": {
+                                "type": "number",
+                                "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
+                              },
+                              "agentOnlyUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "savingUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "actualHours": {
+                                "type": "number",
+                                "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
+                              },
+                              "agentOnlyHours": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "hoursSaved": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "agentOnlyUsdPerRun": {
                                 "type": "number"
                               }
                             },
                             "required": [
-                              "p10",
-                              "p50",
-                              "p90"
+                              "kind",
+                              "name",
+                              "basis",
+                              "enabledOnlyRule",
+                              "runs",
+                              "substitutedRuns",
+                              "effectRuns",
+                              "enabledOnlyRuns",
+                              "capApplied",
+                              "opsPerRun",
+                              "measuredUsd",
+                              "estimatedLlmUsd",
+                              "actualUsd",
+                              "agentOnlyUsd",
+                              "savingUsd",
+                              "actualHours",
+                              "agentOnlyHours",
+                              "hoursSaved",
+                              "agentOnlyUsdPerRun"
                             ]
                           },
-                          "savingUsd": {
+                          {
                             "type": "object",
                             "properties": {
-                              "p10": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-task-schedule"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "measured"
+                                ]
+                              },
+                              "runs": {
+                                "type": "integer",
+                                "description": "Agent tasks the schedule created in the window."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule."
+                              },
+                              "actualHours": {
                                 "type": "number"
                               },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
+                              "savingUsd": {
+                                "type": "null"
                               }
                             },
                             "required": [
-                              "p10",
-                              "p50",
-                              "p90"
+                              "kind",
+                              "scheduleId",
+                              "scheduleName",
+                              "scheduleEnabled",
+                              "name",
+                              "basis",
+                              "runs",
+                              "actualUsd",
+                              "actualHours",
+                              "savingUsd"
                             ]
-                          },
-                          "actualHours": {
-                            "type": "number",
-                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
-                          },
-                          "agentOnlyHours": {
-                            "type": "object",
-                            "properties": {
-                              "p10": {
-                                "type": "number"
-                              },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "p10",
-                              "p50",
-                              "p90"
-                            ]
-                          },
-                          "hoursSaved": {
-                            "type": "object",
-                            "properties": {
-                              "p10": {
-                                "type": "number"
-                              },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "p10",
-                              "p50",
-                              "p90"
-                            ]
-                          },
-                          "agentOnlyUsdPerRun": {
-                            "type": "number"
                           }
-                        },
-                        "required": [
-                          "kind",
-                          "name",
-                          "basis",
-                          "enabledOnlyRule",
-                          "runs",
-                          "substitutedRuns",
-                          "effectRuns",
-                          "enabledOnlyRuns",
-                          "capApplied",
-                          "opsPerRun",
-                          "measuredUsd",
-                          "estimatedLlmUsd",
-                          "actualUsd",
-                          "agentOnlyUsd",
-                          "savingUsd",
-                          "actualHours",
-                          "agentOnlyHours",
-                          "hoursSaved",
-                          "agentOnlyUsdPerRun"
                         ]
                       }
                     },
@@ -51859,7 +52235,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value",
+            "description": "Not exactly one of workflowId, scriptName, scheduleId and kind, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -51869,7 +52245,7 @@
             }
           },
           "404": {
-            "description": "Workflow or script not found",
+            "description": "Workflow, script or schedule not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -52008,6 +52384,7 @@
                       "enum": [
                         "not-computed",
                         "no-runs",
+                        "target-missing",
                         null
                       ]
                     },
@@ -52197,6 +52574,7 @@
                       "enum": [
                         "not-computed",
                         "no-runs",
+                        "target-missing",
                         null
                       ]
                     },

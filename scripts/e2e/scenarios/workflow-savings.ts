@@ -1,9 +1,9 @@
 // Automation savings, read from the hourly rollup: a run is priced on the
 // detail route right away, the daily points add up to it, the list route
 // answers, the fleet summary and fleet daily series agree, an idle workflow
-// is not valid (never $0), the script routes answer, bad input is rejected,
-// and the calibration routes report the shipped curve and apply nothing on a
-// dry run.
+// is not valid (never $0), the script and schedule routes answer, bad input is
+// rejected, and the calibration routes report the shipped curve and apply
+// nothing on a dry run.
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -146,6 +146,16 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [404], "daily: unknown script");
       response = await ctx.api("GET", `/api/savings/jobs?scriptName=x&workflowId=${ran}`);
       expectStatus(response, [400], "two targets");
+
+      // Schedules read the same rollup through their target.
+      response = await ctx.api("GET", "/api/savings/jobs?kind=schedule&days=7");
+      expectStatus(response, [200], "savings for every schedule");
+      json = asRecord(response.json);
+      expect(Array.isArray(json.rows) && json.total === null, `schedule list ${response.text}`);
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "unknown schedule");
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=x&workflowId=${ran}`);
+      expectStatus(response, [400], "schedule and workflow targets");
 
       // Calibration: the shipped curve is in use; a dry run on a fresh deployment applies nothing.
       response = await ctx.api("GET", "/api/savings/calibration");

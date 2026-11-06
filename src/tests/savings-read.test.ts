@@ -1,42 +1,203 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
   createAgent,
   createScheduledTask,
   createSessionCost,
+  createTaskExtended,
+  createWorkflow,
   getDbClient,
   initDb,
 } from "../be/db";
-import { emptyFacts } from "../be/savings/compute";
-import { CURVE, type CurveSet } from "../be/savings/model";
-import { readFleetSavings, resetSavingsReadCache } from "../be/savings/read";
-import {
-  resetSavingsRollupForTests,
-  utcDay,
-  writeScriptDay,
-  writeWorkflowDay,
-} from "../be/savings/rollup";
+import type { SavingsSql } from "../be/savings/compute";
+import { readScheduleSavings, readScriptSavings, readWorkflowSavings } from "../be/savings/read";
+import { resetSavingsRollupForTests, runSavingsRollupTick } from "../be/savings/rollup";
 import { handleSavings } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-// The routes read the clock, so the fixtures sit on the real UTC days of the
-// rolling 7-day window: seven full days ago through today, eight days.
+const TEST_DB_PATH = "./test-savings-read.sqlite";
+// The route reads the clock itself, so the fixture covers the 7 days ending today.
 const NOW = Date.now();
-const WEEK = Array.from({ length: 8 }, (_, i) => utcDay(NOW - (7 - i) * 86_400_000));
+const WEEK = Array.from({ length: 7 }, (_, i) =>
+  new Date(NOW - (6 - i) * 86_400_000).toISOString().slice(0, 10),
+);
+// Runs start at 00:00, one a minute: three a day stay before "now" at any time but just after midnight UTC.
+const RUNS_PER_DAY = 3;
+const DEFINITION = { nodes: [{ id: "hello", type: "notify", config: {} }] };
 
-describe("savings fleet read", () => {
+const inProcessSql: SavingsSql = (sql, params) => getDbClient().query(sql, params);
+
+async function removeDbFiles(path: string): Promise<void> {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await unlink(path + suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+async function workflowRuns(workflowId: string, day: string, count: number) {
+  await getDbClient().run(
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, status, startedAt)
+     WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i < ? - 1)
+     SELECT ? || '-' || ? || '-' || i, ?, 'schedule', 'completed',
+       strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || i || ' minutes') FROM seq`,
+    [count, workflowId, day, workflowId, `${day}T00:00:00.000Z`],
+  );
+  await getDbClient().run(
+    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, finishedAt)
+     SELECT id || '-s', id, 'hello', 'notify', 'completed', startedAt, startedAt
+     FROM workflow_runs WHERE workflowId=? AND startedAt>=? AND startedAt<?`,
+    [workflowId, `${day}T00:00:00.000Z`, `${day}T23:59:59.999Z`],
+  );
+}
+
+async function scriptRuns(agentId: string, name: string, day: string, count: number) {
+  await getDbClient().run(
+    `INSERT INTO script_runs (id, agentId, scriptName, source, status, startedAt, finishedAt)
+     WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i < ? - 1)
+     SELECT ? || '-' || ? || '-' || i, ?, ?, 'x', 'completed',
+       strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || i || ' minutes'),
+       strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || i || ' minutes', '+30 seconds') FROM seq`,
+    [count, name, day, agentId, name, `${day}T00:00:00.000Z`, `${day}T00:00:00.000Z`],
+  );
+}
+
+describe("savings read for schedules", () => {
+  let agentId: string;
   let server: Server;
   let port: number;
-  const get = async (path: string) => {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`);
+  const ids: Record<string, string> = {};
+
+  const get = async (query: string) => {
+    const res = await fetch(`http://localhost:${port}/api/savings/jobs?${query}`);
     return { status: res.status, body: (await res.json()) as Record<string, any> };
   };
 
   beforeAll(async () => {
-    initDb(":memory:");
+    await removeDbFiles(TEST_DB_PATH);
+    initDb(TEST_DB_PATH);
     await resetSavingsRollupForTests();
+    agentId = (await createAgent({ name: "savings-read-agent", isLead: false, status: "idle" })).id;
+    const wf = await createWorkflow({ name: "sched-wf", definition: DEFINITION });
+    const wfOff = await createWorkflow({ name: "sched-wf-off", definition: DEFINITION });
+    await getDbClient().run(
+      `INSERT INTO scripts (id, name, scope, source, description, intent, signatureJson, contentHash)
+       VALUES (?, 'sched-script', 'global', 'await a(); await b();', 'fixture', 'fixture', '{}', ?)`,
+      [crypto.randomUUID(), crypto.randomUUID()],
+    );
+    for (const day of WEEK) {
+      await workflowRuns(wf.id, day, RUNS_PER_DAY);
+      await workflowRuns(wfOff.id, day, RUNS_PER_DAY);
+      await scriptRuns(agentId, "sched-script", day, RUNS_PER_DAY);
+    }
+    const base = { intervalMs: 3_600_000 } as const;
+    ids.workflow = (
+      await createScheduledTask({
+        ...base,
+        name: "wf-schedule",
+        targetType: "workflow",
+        workflowId: wf.id,
+      })
+    ).id;
+    // Two schedules of one workflow share its row.
+    ids.workflowTwin = (
+      await createScheduledTask({
+        ...base,
+        name: "wf-schedule-twin",
+        targetType: "workflow",
+        workflowId: wf.id,
+      })
+    ).id;
+    ids.disabled = (
+      await createScheduledTask({
+        ...base,
+        name: "wf-schedule-off",
+        targetType: "workflow",
+        workflowId: wfOff.id,
+        enabled: false,
+      })
+    ).id;
+    ids.script = (
+      await createScheduledTask({
+        ...base,
+        name: "script-schedule",
+        targetType: "script",
+        scriptName: "sched-script",
+      })
+    ).id;
+    ids.missingScript = (
+      await createScheduledTask({
+        ...base,
+        name: "ghost-script-schedule",
+        targetType: "script",
+        scriptName: "ghost-script",
+      })
+    ).id;
+    ids.missingWorkflow = (
+      await createScheduledTask({
+        ...base,
+        name: "ghost-workflow-schedule",
+        targetType: "workflow",
+        workflowId: crypto.randomUUID(),
+      })
+    ).id;
+    // Configured with no workflow at all (the CHECK rejects it, so skip it for the insert):
+    // empty, not a deleted target.
+    ids.unsetWorkflow = (
+      await createScheduledTask({
+        ...base,
+        name: "unset-workflow-schedule",
+        targetType: "workflow",
+        workflowId: crypto.randomUUID(),
+      })
+    ).id;
+    await getDbClient().transaction(async (tx) => {
+      await tx.run("PRAGMA ignore_check_constraints=ON");
+      await tx.run("UPDATE scheduled_tasks SET workflowId=NULL WHERE id=?", [ids.unsetWorkflow]);
+      await tx.run("PRAGMA ignore_check_constraints=OFF");
+    });
+    ids.agentTask = (
+      await createScheduledTask({ ...base, name: "agent-schedule", taskTemplate: "do the thing" })
+    ).id;
+    ids.agentTaskIdle = (
+      await createScheduledTask({ ...base, name: "idle-agent-schedule", taskTemplate: "nothing" })
+    ).id;
+    for (const [i, usd] of [0.4, 0.6].entries()) {
+      const task = await createTaskExtended(`scheduled task ${i}`, {
+        agentId,
+        scheduleId: ids.agentTask,
+      });
+      await getDbClient().run("UPDATE agent_tasks SET createdAt=? WHERE id=?", [
+        `${WEEK[3]}T0${i}:00:00.000Z`,
+        task.id,
+      ]);
+      await createSessionCost({
+        sessionId: crypto.randomUUID(),
+        taskId: task.id,
+        agentId,
+        totalCostUsd: usd,
+        durationMs: 1_800_000,
+        numTurns: 3,
+        model: "claude-opus-5-5",
+      });
+    }
+    // Outside the 7-day window: not counted.
+    const old = await createTaskExtended("old scheduled task", {
+      agentId,
+      scheduleId: ids.agentTask,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt=? WHERE id=?", [
+      "2026-09-01T00:00:00.000Z",
+      old.id,
+    ]);
+
+    await runSavingsRollupTick(inProcessSql, { now: NOW });
+
     server = createHttpServer(async (req, res) => {
       const handled = await handleSavings(
         req,
@@ -54,139 +215,153 @@ describe("savings fleet read", () => {
 
   afterAll(async () => {
     server?.close();
+    await resetSavingsRollupForTests();
     closeDb();
+    await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("an empty DB is not valid, never $0", async () => {
-    const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
-    expect(read).toMatchObject({ complete: false, total: null, points: [] });
-    const { status, body } = await get("/api/savings/summary?days=7");
+  test("a workflow target returns the workflow's own row", async () => {
+    const read = await readScheduleSavings({
+      days: 7,
+      tier: "smart",
+      now: NOW,
+      scheduleId: ids.workflow,
+    });
+    const direct = await readWorkflowSavings({ days: 7, tier: "smart", now: NOW });
+    expect(read?.complete).toBe(true);
+    expect(read?.rows).toHaveLength(1);
+    const [row] = read?.rows ?? [];
+    expect(row).toMatchObject({
+      basis: "modelled",
+      scheduleId: ids.workflow,
+      scheduleName: "wf-schedule",
+      scheduleEnabled: true,
+      name: "sched-wf",
+      runs: 7 * RUNS_PER_DAY,
+    });
+    expect(row?.basis === "modelled" && row.savingUsd.p50).toBe(
+      direct.rows.find((r) => r.name === "sched-wf")?.savingUsd.p50 ?? -1,
+    );
+    expect(row?.basis === "modelled" && row.savingUsd.p50).toBeGreaterThan(0);
+  });
+
+  test("a script target returns the scheduled script's row", async () => {
+    const read = await readScheduleSavings({
+      days: 7,
+      tier: "smart",
+      now: NOW,
+      scheduleId: ids.script,
+    });
+    const direct = await readScriptSavings({
+      days: 7,
+      tier: "smart",
+      now: NOW,
+      scriptName: "sched-script",
+    });
+    expect(read?.rows).toHaveLength(1);
+    expect(read?.rows[0]).toMatchObject({
+      basis: "modelled",
+      kind: "script-scheduled",
+      scriptName: "sched-script",
+      runs: 7 * RUNS_PER_DAY,
+    });
+    const row = read?.rows[0];
+    expect(row?.basis === "modelled" && row.savingUsd.p50).toBe(
+      direct.rows[0]?.savingUsd.p50 ?? -1,
+    );
+  });
+
+  test("an agent-task target shows measured spend and no saving", async () => {
+    const { status, body } = await get(`scheduleId=${ids.agentTask}&days=7`);
     expect(status).toBe(200);
-    expect(body).toMatchObject({
+    expect(body.valid).toBe(true);
+    expect(body.total).toBeNull();
+    expect(body.rows).toEqual([
+      {
+        kind: "agent-task-schedule",
+        scheduleId: ids.agentTask,
+        scheduleName: "agent-schedule",
+        scheduleEnabled: true,
+        name: "agent-schedule",
+        basis: "measured",
+        runs: 2,
+        actualUsd: 1,
+        actualHours: 1,
+        savingUsd: null,
+      },
+    ]);
+  });
+
+  test("an agent-task schedule with no tasks in the window has no row", async () => {
+    const { body } = await get(`scheduleId=${ids.agentTaskIdle}&days=7`);
+    expect(body).toMatchObject({ valid: false, reason: "no-runs", rows: [] });
+  });
+
+  test("a disabled schedule is priced from its target's runs and flagged", async () => {
+    const { body } = await get(`scheduleId=${ids.disabled}&days=7`);
+    expect(body.valid).toBe(true);
+    expect(body.rows[0]).toMatchObject({
+      scheduleId: ids.disabled,
+      scheduleEnabled: false,
+      name: "sched-wf-off",
+      scope: "target-job",
+      runs: 7 * RUNS_PER_DAY,
+    });
+  });
+
+  test("a missing target is reported, not priced as $0", async () => {
+    for (const id of [ids.missingScript, ids.missingWorkflow]) {
+      const { status, body } = await get(`scheduleId=${id}&days=7`);
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ valid: false, reason: "target-missing", rows: [], total: null });
+    }
+  });
+
+  test("a workflow schedule with no workflow is empty, not a gone target", async () => {
+    const { status, body } = await get(`scheduleId=${ids.unsetWorkflow}&days=7`);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ valid: false, reason: "no-runs", rows: [], total: null });
+  });
+
+  test("an unknown schedule is a 404 and a second target parameter a 400", async () => {
+    expect((await get("scheduleId=nope&days=7")).status).toBe(404);
+    expect((await get(`scheduleId=${ids.script}&kind=schedule`)).status).toBe(400);
+  });
+
+  test("kind=schedule lists every schedule with a row; schedules of one target share it", async () => {
+    const { status, body } = await get("kind=schedule&days=7");
+    expect(status).toBe(200);
+    expect(body.total).toBeNull();
+    const byName = Object.fromEntries(
+      body.rows.map((r: { scheduleName: string }) => [r.scheduleName, r]),
+    );
+    expect(Object.keys(byName).sort()).toEqual([
+      "agent-schedule",
+      "script-schedule",
+      "wf-schedule",
+      "wf-schedule-off",
+      "wf-schedule-twin",
+    ]);
+    expect(byName["wf-schedule-twin"].savingUsd).toEqual(byName["wf-schedule"].savingUsd);
+    // Modelled rows first, by saving; measured rows last.
+    expect(body.rows.at(-1).basis).toBe("measured");
+  });
+
+  test("before the first tick the list keeps measured rows and drops modelled ones", async () => {
+    await getDbClient().run("DELETE FROM automation_savings_days");
+    const read = await readScheduleSavings({ days: 7, tier: "smart", now: NOW });
+    expect(read?.complete).toBe(false);
+    const { body } = await get("kind=schedule&days=7");
+    expect(body.valid).toBe(true);
+    expect(body.rows.map((r: { scheduleName: string }) => r.scheduleName)).toEqual([
+      "agent-schedule",
+    ]);
+    expect(body.rows[0].basis).toBe("measured");
+    // One modelled schedule alone is still not computed.
+    expect((await get(`scheduleId=${ids.workflow}&days=7`)).body).toMatchObject({
       valid: false,
       reason: "not-computed",
-      total: null,
-      byKind: null,
-      selfOptimizationRatio: null,
-    });
-    expect(body.assumptions.length).toBeGreaterThan(0);
-    const daily = await get("/api/savings/daily?days=7");
-    expect(daily.body).toMatchObject({ valid: false, points: [] });
-  });
-
-  test("computed days with no runs are valid-less with reason no-runs", async () => {
-    const at = new Date(NOW).toISOString();
-    for (const day of WEEK) {
-      await writeWorkflowDay(day, [], at);
-      await writeScriptDay(day, [], at);
-    }
-    const { body } = await get("/api/savings/summary?days=7");
-    expect(body).toMatchObject({ valid: false, reason: "no-runs", total: null });
-  });
-
-  describe("with workflows and scripts", () => {
-    beforeAll(async () => {
-      const at = new Date(NOW).toISOString();
-      await createScheduledTask({
-        name: "fleet-poll-hourly",
-        intervalMs: 3_600_000,
-        targetType: "script",
-        scriptName: "fleet-poll",
-      });
-      for (const day of WEEK) {
-        const a = { ...emptyFacts(10), countedRuns: 10, opsSum: 100, computeSecs: 20 };
-        const b = { ...emptyFacts(4), countedRuns: 4, opsSum: 8, agentUsd: 0.4, agentTasks: 1 };
-        await writeWorkflowDay(
-          day,
-          [
-            { workflowId: "wf-a", name: "fleet-a", facts: a },
-            { workflowId: "wf-b", name: "fleet-b", facts: b },
-          ],
-          at,
-        );
-        const script = { runs: 30, apiRuns: 0, effectRuns: 0, apiEffectRuns: 0, computeSecs: 60 };
-        await writeScriptDay(
-          day,
-          [
-            { scriptName: "fleet-poll", facts: { ...script, opsSum: 30 * 12 } },
-            { scriptName: "fleet-helper", facts: { ...script, runs: 5, opsSum: 5 * 20 } },
-          ],
-          at,
-        );
-      }
-      const agentId = (await createAgent({ name: "fleet-agent", isLead: false, status: "idle" }))
-        .id;
-      await createSessionCost({
-        sessionId: crypto.randomUUID(),
-        agentId,
-        totalCostUsd: 100,
-        durationMs: 60_000,
-        numTurns: 3,
-        model: "claude-opus-5-5",
-      });
-    });
-
-    test("the total sums the rows' p50 with the fleet band; the points sum to it", async () => {
-      const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
-      expect(read.complete).toBe(true);
-      const rows = [...read.workflows, ...read.scripts];
-      expect(rows).toHaveLength(4);
-      const p50 = rows.reduce((s, r) => s + r.savingUsd.p50, 0);
-      const total = read.total;
-      expect(total?.savingUsd.p50).toBeCloseTo(p50, 6);
-      // The fleet band is narrower than the sum of the rows' single-job bands.
-      expect(total?.savingUsd.p90).toBeLessThan(rows.reduce((s, r) => s + r.savingUsd.p90, 0));
-      expect(total?.savingUsd.p10).toBeGreaterThan(rows.reduce((s, r) => s + r.savingUsd.p10, 0));
-      expect(read.points).toHaveLength(WEEK.length);
-      expect(read.points.reduce((s, p) => s + p.savingUsd, 0)).toBeCloseTo(p50, 6);
-      expect(read.byKind.workflows.jobs).toBe(2);
-      expect(read.byKind.scheduledScripts).toMatchObject({ jobs: 1, substitutedRuns: 168 });
-      expect(read.byKind.agentInvokedScripts.jobs).toBe(1);
-      const kinds = read.byKind;
-      expect(
-        kinds.workflows.savingUsd +
-          kinds.scheduledScripts.savingUsd +
-          kinds.agentInvokedScripts.savingUsd,
-      ).toBeCloseTo(p50, 6);
-    });
-
-    test("the summary and fleet daily routes agree to the cent", async () => {
-      const { status, body } = await get("/api/savings/summary?days=7&tier=smol");
-      expect(status).toBe(200);
-      expect(body).toMatchObject({ valid: true, reason: null, tier: "smol", fleetLlmUsd: 100 });
-      expect(body.selfOptimizationRatio).toBeCloseTo((100 + body.total.savingUsd.p50) / 100, 2);
-      expect(body.excluded.enabledOnlyRuns).toBe(body.total.runs - body.total.substitutedRuns);
-      const daily = await get("/api/savings/daily?days=7&tier=smol");
-      expect(daily.body.valid).toBe(true);
-      const cents = Math.round(
-        daily.body.points.reduce((s: number, p: { savingUsd: number }) => s + p.savingUsd, 0) * 100,
-      );
-      expect(cents).toBe(Math.round(body.total.savingUsd.p50 * 100));
-      const both = await get("/api/savings/daily?workflowId=wf-a&scriptName=fleet-poll");
-      expect(both.status).toBe(400);
-    });
-
-    test("a deployment curve prices the fleet read, not the cached shipped one", async () => {
-      const shipped = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
-      const doubled = Object.fromEntries(
-        Object.entries(CURVE).map(([tier, c]) => [tier, { ...c, usd: c.usd.map((u) => u * 2) }]),
-      ) as CurveSet;
-      const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW, curve: doubled });
-      expect(read.total?.agentOnlyUsd.p50).toBeGreaterThan(shipped.total?.agentOnlyUsd.p50 ?? 0);
-      const again = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
-      expect(again.total).toEqual(shipped.total);
-    });
-
-    test("one job alone keeps the single-job band", async () => {
-      await getDbClient().run(
-        "DELETE FROM automation_savings_daily WHERE jobId IN ('wf-b','fleet-poll','fleet-helper')",
-      );
-      // A raw write skips the rollup's generation bump.
-      resetSavingsReadCache();
-      const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
-      const [row] = read.workflows;
-      expect(read.scripts).toHaveLength(0);
-      expect(read.total?.savingUsd).toEqual(row?.savingUsd);
+      rows: [],
     });
   });
 });
