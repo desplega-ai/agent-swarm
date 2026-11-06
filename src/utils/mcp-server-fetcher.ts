@@ -38,11 +38,19 @@ export async function fetchInstalledMcpServers(
         } catch {
           // invalid JSON — use empty args
         }
-        entries[srv.name] = {
-          command: srv.command,
-          args,
-          env: srv.resolvedEnv || {},
-        };
+        if (format === "opencode") {
+          entries[srv.name] = {
+            type: "local",
+            command: [srv.command, ...args],
+            environment: srv.resolvedEnv || {},
+          };
+        } else {
+          entries[srv.name] = {
+            command: srv.command,
+            args,
+            env: srv.resolvedEnv || {},
+          };
+        }
       } else if ((srv.transport === "http" || srv.transport === "sse") && srv.url) {
         let parsedHeaders: Record<string, string> = {};
         try {
