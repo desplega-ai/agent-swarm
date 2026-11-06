@@ -54,14 +54,33 @@ export async function resolveTaskAuditUserId(
   return null;
 }
 
+const firstHeader = (h: string | string[] | undefined) => (Array.isArray(h) ? h[0] : h);
+
 /**
- * HTTP variant of {@link resolveTaskAuditUserId}.
+ * The person an HTTP request acts for, for identity and authorization: a
+ * workflow run's or task's requester, asset-key and OAuth ownership, tracker
+ * authorization. Trusted request user first, else the ownership-validated
+ * `X-Source-Task-Id` task (or the caller's current task).
  *
- * Resolves the audit actor from trusted server-side request context first (an
- * authenticated request user is never client-controlled), then falls back to
- * the ownership-validated source task: `X-Source-Task-Id`, else the audit-only
- * `X-Audit-Source-Task-Id` that script `ctx.swarm` calls send. Scripts must not
- * send `X-Source-Task-Id`: kv, send-task and store-progress read it as task context.
+ * Never reads `X-Audit-Source-Task-Id`: a script run's task attributes its
+ * writes, but must not hand its requester to the workflows, tasks or grants
+ * the script creates.
+ */
+export async function resolveHttpRequesterUserId(
+  req: IncomingMessage,
+  callerAgentId: string | undefined,
+): Promise<string | null> {
+  const userId = authUserId(getRequestAuth(req));
+  if (userId) return userId;
+  return resolveTaskAuditUserId(firstHeader(req.headers["x-source-task-id"]), callerAgentId);
+}
+
+/**
+ * The person to record in a `created_by` / `updated_by` audit column. Same as
+ * {@link resolveHttpRequesterUserId}, plus the audit-only
+ * `X-Audit-Source-Task-Id` that script `ctx.swarm` calls send (same ownership
+ * gate). Use it for audit attribution only; identity and authorization use
+ * {@link resolveHttpRequesterUserId}.
  */
 export async function resolveHttpAuditUserId(
   req: IncomingMessage,
@@ -69,9 +88,9 @@ export async function resolveHttpAuditUserId(
 ): Promise<string | null> {
   const userId = authUserId(getRequestAuth(req));
   if (userId) return userId;
-  const first = (h: string | string[] | undefined) => (Array.isArray(h) ? h[0] : h);
   const sourceTaskId =
-    first(req.headers["x-source-task-id"]) ?? first(req.headers["x-audit-source-task-id"]);
+    firstHeader(req.headers["x-source-task-id"]) ??
+    firstHeader(req.headers["x-audit-source-task-id"]);
   return resolveTaskAuditUserId(sourceTaskId, callerAgentId);
 }
 

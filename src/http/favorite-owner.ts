@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import { findUserById } from "../be/users";
 import { authUserId, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 
@@ -67,6 +67,6 @@ export async function resolveHttpFavoriteOwner(
     };
   }
 
-  const userId = await resolveHttpAuditUserId(req, callerAgentId);
+  const userId = await resolveHttpRequesterUserId(req, callerAgentId);
   return userId ? { scope: `user:${userId}`, userId, actorId: userId } : null;
 }

@@ -141,7 +141,12 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
         const assetKey =
-          key === undefined ? undefined : await authorizeAssetKeyWrite(key, updatedBy);
+          key === undefined
+            ? undefined
+            : await authorizeAssetKeyWrite(
+                key,
+                await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+              );
         // Snapshot + update in one transaction: concurrent full updates would
         // otherwise allocate the same version number, and the loser would
         // fail (or worse, commit with no history row).

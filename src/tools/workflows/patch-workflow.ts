@@ -89,7 +89,10 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           undefined;
         const updates: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
         if (key !== undefined) {
-          updates.key = await authorizeAssetKeyWrite(key, updatedBy);
+          updates.key = await authorizeAssetKeyWrite(
+            key,
+            await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+          );
         }
         if (triggerSchema !== undefined) {
           updates.triggerSchema = triggerSchema;

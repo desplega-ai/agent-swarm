@@ -380,7 +380,12 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         const updatedBy =
           (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
-        if (key !== undefined) updateData.key = await authorizeAssetKeyWrite(key, updatedBy);
+        if (key !== undefined) {
+          updateData.key = await authorizeAssetKeyWrite(
+            key,
+            await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+          );
+        }
         const updated = await updateScheduledTask(schedule.id, {
           ...updateData,
           updatedBy: updatedBy ?? null,

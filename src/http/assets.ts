@@ -5,7 +5,7 @@ import { normalizeAssetKey } from "../assets/key";
 import { sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { auditAssetKeys } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AssetKeyMovesBlockedError,
   getDb,
@@ -281,7 +281,7 @@ export async function handleAssets(
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
     try {
-      const actor = await resolveHttpAuditUserId(req, myAgentId);
+      const actor = await resolveHttpRequesterUserId(req, myAgentId);
       const key = parsed.body.key
         ? await authorizeAssetKeyWrite(parsed.body.key, actor)
         : undefined;
@@ -381,7 +381,7 @@ export async function handleAssets(
     }
 
     try {
-      const actor = await resolveHttpAuditUserId(req, myAgentId);
+      const actor = await resolveHttpRequesterUserId(req, myAgentId);
       const key = await authorizeAssetKeyWrite(parsed.body.key, actor);
       const moved = await moveAssetKey({
         entityType: parsed.params.entityType,

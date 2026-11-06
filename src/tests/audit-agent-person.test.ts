@@ -31,6 +31,7 @@ import {
   getSkillById,
   getTaskById,
   getWorkflow,
+  getWorkflowRun,
   initDb,
 } from "../be/db";
 import { getScript } from "../be/scripts/db";
@@ -343,7 +344,7 @@ describe("scripts audit", () => {
   spawnTest(
     "inline run: the scratch auto-save and the run's ctx.swarm writes carry the person",
     async () => {
-      const scheduleName = unique("audit-ctx-run-schedule");
+      const workflowName = unique("audit-ctx-run-workflow");
       const run = await http(
         handleScripts,
         "POST",
@@ -351,8 +352,8 @@ describe("scripts audit", () => {
         {
           intent: unique("audit scratch"),
           source: `export default async (_args: unknown, ctx: any) => {
-            const r = await ctx.swarm.schedule_create({
-              name: "${scheduleName}", intervalMs: 3600000, taskTemplate: "audit",
+            const r = await ctx.swarm.workflow_create({
+              name: "${workflowName}", definition: ${JSON.stringify(WORKFLOW_DEFINITION)},
             });
             return r.success;
           };`,
@@ -367,12 +368,12 @@ describe("scripts audit", () => {
       expectAudit(await auditRow("scripts", scratch!.id), { updated: false });
 
       // The run request's task travelled into the script's SDK call (audit header).
-      const scheduleId = (
-        await getDbClient().get<{ id: string }>("SELECT id FROM scheduled_tasks WHERE name = ?", [
-          scheduleName,
+      const workflowId = (
+        await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [
+          workflowName,
         ])
       )?.id;
-      expectAudit(await auditRow("scheduled_tasks", scheduleId!), { updated: false });
+      expectAudit(await auditRow("workflows", workflowId!), { updated: false });
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -537,14 +538,18 @@ describe("schedules audit", () => {
     });
   });
 
-  test("ctx.swarm schedule_create", async () => {
+  // created_by is also who a schedule's tasks run as, so the audit header
+  // must not set it: the run's task is not the caller's current task.
+  test("ctx.swarm schedule_create leaves created_by to the requester", async () => {
     const result = (await scriptSdk(agentA, taskA).schedule_create({
       name: unique("audit-sched-sdk"),
       intervalMs: 3_600_000,
       taskTemplate: "audit",
     })) as { success: boolean; data: { id: string } };
     expect(result).toMatchObject({ success: true });
-    expectAudit(await auditRow("scheduled_tasks", result.data.id), { updated: false });
+    const row = await auditRow("scheduled_tasks", result.data.id);
+    expect(row.createdByAgentId).toBe(agentA);
+    expect(row.created_by).toBeNull();
   });
 
   test("negative control: another agent's source task leaves the person NULL", async () => {
@@ -755,6 +760,57 @@ describe("ctx.swarm sends the run's task for audit only", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  // The audit header attributes writes only. A workflow run's requester flows
+  // to its tasks, so the run's (non-current) task must not become it.
+  test("workflow_trigger keeps the requester off the audit header", async () => {
+    const created = await http(
+      handleWorkflows,
+      "POST",
+      "/api/workflows",
+      {
+        name: unique("audit-wf-trigger"),
+        definition: {
+          nodes: [{ id: "task", type: "agent-task", config: { template: "audit trigger" } }],
+        },
+      },
+      agentA,
+      taskA,
+    );
+    expect(created.status).toBe(201);
+    const id = created.json.id as string;
+    const runRequester = async (runId: string) => ({
+      run: (await getWorkflowRun(runId))?.createdBy ?? null,
+      tasks: (
+        await getDbClient().query<{ requestedByUserId: string | null }>(
+          "SELECT requestedByUserId FROM agent_tasks WHERE workflowRunId = ?",
+          [runId],
+        )
+      ).map((t) => t.requestedByUserId),
+    });
+
+    // Control: X-Source-Task-Id on the caller's own task sets the requester.
+    const viaHeader = await http(
+      handleWorkflows,
+      "POST",
+      `/api/workflows/${id}/trigger`,
+      {},
+      agentA,
+      taskA,
+    );
+    expect(viaHeader.status).toBe(201);
+    expect(await runRequester(viaHeader.json.runId as string)).toEqual({
+      run: userA,
+      tasks: [userA],
+    });
+
+    const viaScript = (await scriptSdk(agentA, taskA).workflow_trigger({ id })) as {
+      success: boolean;
+      data: { runId: string };
+    };
+    expect(viaScript).toMatchObject({ success: true });
+    expect(await runRequester(viaScript.data.runId)).toEqual({ run: null, tasks: [null] });
+  });
 
   test("negative control: another agent's task in the audit header leaves the person NULL", async () => {
     const result = (await scriptSdk(agentA, taskB).workflow_create({

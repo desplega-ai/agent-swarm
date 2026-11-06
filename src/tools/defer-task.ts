@@ -286,9 +286,9 @@ export const registerDeferTaskTool = (server: McpServer) => {
         : `at ${nextRunAt}`;
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
+      // Not the audit task: the wake-up task is requested by the schedule's created_by.
       const createdBy =
-        (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
-        undefined;
+        (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ?? undefined;
 
       // Validate before creating the schedule or changing the task.
       if (task.outputSchema) {

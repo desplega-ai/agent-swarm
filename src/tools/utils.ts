@@ -52,8 +52,9 @@ export type RequestInfo = {
   sourceTaskId: string | undefined;
   /**
    * Task for audit attribution only: `sourceTaskId`, else the
-   * `X-Audit-Source-Task-Id` header script `ctx.swarm` calls send. Pass it only
-   * to `resolveTaskAuditUserId`; never use it as task context.
+   * `X-Audit-Source-Task-Id` header script `ctx.swarm` calls send. Use it only
+   * for a `created_by` / `updated_by` value; never as task context, a
+   * requester, or an authorization identity (those use `sourceTaskId`).
    */
   auditSourceTaskId: string | undefined;
   contextKey: string | undefined;
