@@ -753,52 +753,120 @@ function scrubGitleaks(text: string): string {
   return out;
 }
 
+type VendorSpan = { start: number; end: number; id: string };
+type Edit = { start: number; end: number; len: number };
+
+/**
+ * Gitleaks spans shared by the pass 2 rules of one scrub call. The sweep runs
+ * at most once per call, on the first structural hit; each rule then moves the
+ * spans through its own edits instead of sweeping its output again.
+ */
+type VendorSpanCache = { spans: VendorSpan[] | null };
+
+let pass2SweepCount = 0;
+
+/** Test-only: how many pass 2 gitleaks sweeps ran since the last call. */
+export function takePass2SweepCountForTesting(): number {
+  const n = pass2SweepCount;
+  pass2SweepCount = 0;
+  return n;
+}
+
+function vendorSpansOf(text: string, cache: VendorSpanCache): VendorSpan[] {
+  if (cache.spans === null) {
+    pass2SweepCount++;
+    const { global } = getGitleaks();
+    cache.spans = activeGitleaksRules(text).flatMap((rule) =>
+      [...gitleaksSecretSpans(text, rule, global)].map(([s, e]) => ({
+        start: s,
+        end: e,
+        id: rule.id,
+      })),
+    );
+  }
+  return cache.spans;
+}
+
+/**
+ * Moves spans through sorted, non-overlapping edits. A span an edit touches
+ * is dropped: its secret was redacted or cut, and pass 5 still sweeps the
+ * final text for anything a fresh sweep would have found.
+ */
+function shiftSpans(spans: VendorSpan[], edits: Edit[]): VendorSpan[] {
+  if (edits.length === 0 || spans.length === 0) return spans;
+  const out: VendorSpan[] = [];
+  let i = 0;
+  let delta = 0;
+  for (const v of [...spans].sort((x, y) => x.start - y.start)) {
+    let e = edits[i];
+    while (e && e.end <= v.start) {
+      delta += e.len - (e.end - e.start);
+      e = edits[++i];
+    }
+    if (e && e.start < v.end) continue;
+    out.push({ start: v.start + delta, end: v.end + delta, id: v.id });
+  }
+  return out;
+}
+
+/** `text.replace(re, marker)` that also returns the edits it made. */
+function replaceAll(text: string, re: RegExp, marker: string): { out: string; edits: Edit[] } {
+  const edits: Edit[] = [];
+  const out = text.replace(re, (match: string, ...rest: unknown[]) => {
+    const start = rest.find((x) => typeof x === "number") as number;
+    edits.push({ start, end: start + match.length, len: marker.length });
+    return marker;
+  });
+  return { out, edits };
+}
+
 /**
  * Pass 2 for one structural rule. A gitleaks secret that strictly contains a
  * hit wins (longest span): it is redacted whole first, so a generic rule
  * matching inside it (`sk-…` in a Heroku key's tail) cannot leave its prefix
  * behind for pass 5 to miss.
  */
-function applyTokenRegex(text: string, name: string, re: RegExp): string {
-  type VendorSpan = { start: number; end: number; id: string };
+function applyTokenRegex(text: string, name: string, re: RegExp, cache: VendorSpanCache): string {
+  const marker = `[REDACTED:${name}]`;
   const covering: VendorSpan[] = [];
-  let vendor: VendorSpan[] | null = null;
+  const edits: Edit[] = [];
   const out = text.replace(re, (match: string, ...rest: unknown[]) => {
     const start = rest.find((x) => typeof x === "number") as number;
     const end = start + match.length;
-    if (vendor === null) {
-      const { global } = getGitleaks();
-      vendor = activeGitleaksRules(text).flatMap((rule) =>
-        [...gitleaksSecretSpans(text, rule, global)].map(([s, e]) => ({
-          start: s,
-          end: e,
-          id: rule.id,
-        })),
-      );
-    }
     let best: VendorSpan | undefined;
-    for (const v of vendor) {
+    for (const v of vendorSpansOf(text, cache)) {
       if (v.start <= start && end <= v.end && v.end - v.start > match.length) {
         if (!best || v.end - v.start > best.end - best.start) best = v;
       }
     }
-    if (!best) return `[REDACTED:${name}]`;
+    if (!best) {
+      edits.push({ start, end, len: marker.length });
+      return marker;
+    }
     covering.push(best);
     return match;
   });
-  if (covering.length === 0) return out;
+  if (covering.length === 0) {
+    if (cache.spans) cache.spans = shiftSpans(cache.spans, edits);
+    return out;
+  }
   // Redact the covering secrets right to left, longest first on a tie; one
   // that overlaps the marker to its right merges into that marker.
   covering.sort((x, y) => y.start - x.start || y.end - x.end);
   let result = text;
   let floor = Number.POSITIVE_INFINITY;
+  const vendorEdits: Edit[] = [];
   for (const v of covering) {
     if (v.start >= floor) continue;
-    const marker = v.end > floor ? "" : `[REDACTED:gitleaks:${v.id}]`;
-    result = result.slice(0, v.start) + marker + result.slice(Math.min(v.end, floor));
+    const end = Math.min(v.end, floor);
+    const vendorMarker = v.end > floor ? "" : `[REDACTED:gitleaks:${v.id}]`;
+    result = result.slice(0, v.start) + vendorMarker + result.slice(end);
+    vendorEdits.push({ start: v.start, end, len: vendorMarker.length });
     floor = v.start;
   }
-  return result.replace(re, `[REDACTED:${name}]`);
+  const structural = replaceAll(result, re, marker);
+  cache.spans = shiftSpans(shiftSpans(cache.spans ?? [], vendorEdits.reverse()), structural.edits);
+  return structural.out;
 }
 
 interface EnvValueEntry {
@@ -1005,7 +1073,8 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
   // Pass 2: structural patterns (catches secrets we never saw in env, e.g.
   // a token pasted into a tool_result by the operator or fetched from a
   // third-party API during a task).
-  for (const { name, re } of TOKEN_REGEXES) out = applyTokenRegex(out, name, re);
+  const vendorSpans: VendorSpanCache = { spans: null };
+  for (const { name, re } of TOKEN_REGEXES) out = applyTokenRegex(out, name, re, vendorSpans);
 
   // Pass 3: values of sensitive `KEY=value` assignments (env dumps, .env
   // files, shell traces), including ones too short for pass 1.

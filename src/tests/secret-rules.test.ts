@@ -6,6 +6,7 @@ import {
   clearVolatileSecretsForTesting,
   scrubSecrets,
   setGitleaksPassEnabledForTesting,
+  takePass2SweepCountForTesting,
 } from "../utils/secret-scrubber";
 import { buildNegatives, buildPositives } from "./fixtures/secret-corpus";
 import { randomToken } from "./synthetic-secret-helpers";
@@ -165,6 +166,33 @@ describe("secret corpus", () => {
     expect(scrubSecrets(`${a} ${bareSk}\n${b}`)).toBe(
       "[REDACTED:gitleaks:heroku-api-key-v2] [REDACTED:sk_key]\n[REDACTED:gitleaks:heroku-api-key-v2]",
     );
+  });
+
+  test("pass 2 sweeps gitleaks once per call, however many rules hit", () => {
+    const heroku = () => ["HRKU", "-AA", randomToken(14), "-sk-", randomToken(40)].join("");
+    const a = heroku();
+    const b = heroku();
+    // Hits of several structural rules ahead of each key shift its offsets.
+    const text = [
+      ["lin", "api", randomToken(24)].join("_"),
+      a,
+      ["AKIA", "Q7RW3MZPXK5TB2NH"].join(""),
+      ["sk", randomToken(32)].join("-"),
+      b,
+      ["xai", randomToken(48)].join("-"),
+    ].join(" ");
+    takePass2SweepCountForTesting();
+    expect(scrubSecrets(text)).toBe(
+      [
+        "[REDACTED:linear_api]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:aws_access_key]",
+        "[REDACTED:sk_key]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:xai_key]",
+      ].join(" "),
+    );
+    expect(takePass2SweepCountForTesting()).toBe(1);
   });
 
   test("redacts a token whose last character is a dash or equals sign", () => {
