@@ -14,6 +14,19 @@ export type ChartPoint = { __x: string | number } & Record<string, number | null
 
 // The brand color leads (chart-1 is off-brand blue in the dark theme), then the chart tokens.
 const PALETTE: ChartColor[] = ["primary", "chart-2", "chart-3", "chart-4", "chart-5"];
+/**
+ * Pie and donut slices sit side by side, so they need more distinct colors
+ * than series do: chart-3 (amber) is last because it is closest to primary.
+ */
+const PIE_PALETTE: ChartColor[] = [
+  "primary",
+  "chart-2",
+  "chart-4",
+  "chart-5",
+  "chart-1",
+  "muted",
+  "chart-3",
+];
 
 const COLOR_VARS: Record<ChartColor, string> = {
   "chart-1": "var(--color-chart-1)",
@@ -152,10 +165,17 @@ export function toPieSlices(
     kept.push({ label: raw === null || raw === undefined ? "" : String(raw), value });
   }
   const total = kept.reduce((sum, slice) => sum + slice.value, 0);
+  const colors = kept.map((_, index) => PIE_PALETTE[index % PIE_PALETTE.length] as ChartColor);
+  // The last slice touches the first: when the palette wraps onto the first
+  // color, take one that neither neighbour uses.
+  const last = colors.length - 1;
+  if (last > 1 && colors[last] === colors[0]) {
+    colors[last] = PIE_PALETTE.find((c) => c !== colors[0] && c !== colors[last - 1]) as ChartColor;
+  }
   return kept.map((slice, index) => ({
     ...slice,
     percent: slice.value / total,
-    color: seriesColor(undefined, index),
+    color: seriesColor(colors[index], index),
   }));
 }
 

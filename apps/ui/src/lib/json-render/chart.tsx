@@ -250,8 +250,9 @@ function PieView({
             data={data}
             dataKey="value"
             nameKey="label"
-            innerRadius={donut ? "55%" : 0}
-            outerRadius="80%"
+            // Share labels sit outside the ring; 70% leaves them room at the top and bottom.
+            innerRadius={donut ? "48%" : 0}
+            outerRadius="70%"
             stroke="var(--color-card)"
             strokeWidth={1}
             label={({ payload }: { payload?: PieSlice }) =>

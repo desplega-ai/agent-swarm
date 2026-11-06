@@ -114,6 +114,14 @@ describe("toPieSlices", () => {
     expect(slices[1]?.color).toBe("var(--color-chart-2)");
   });
 
+  test("adjacent slices never share a color, including the last and the first", () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ k: `s${i}`, v: 1 }));
+    for (const n of [2, 6, 7, 8, 15]) {
+      const colors = toPieSlices(rows(n), "k", "v").map((s) => s.color);
+      for (let i = 0; i < n; i++) expect(colors[i]).not.toBe(colors[(i + 1) % n]);
+    }
+  });
+
   test("drops zero, negative and non-numeric values before the shares", () => {
     const slices = toPieSlices(
       [
