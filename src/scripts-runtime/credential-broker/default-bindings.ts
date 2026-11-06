@@ -1,3 +1,4 @@
+import { getGitHubHostConfig } from "../../utils/github-host";
 import type { CredentialBinding } from "./types";
 
 /**
@@ -7,10 +8,11 @@ import type { CredentialBinding } from "./types";
  * logic: operators can add more bindings through swarm_config without editing
  * the runtime code.
  */
-export const DEFAULT_CREDENTIAL_BINDINGS: CredentialBinding[] = [
+export const defaultCredentialBindings = (): CredentialBinding[] => [
   {
     configKey: "GITHUB_TOKEN",
-    allowedHosts: ["api.github.com"],
+    // The configured GitHub API host only: on GHES the PAT never goes to api.github.com.
+    allowedHosts: [getGitHubHostConfig().apiHost],
     headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
     scope: "global",
     scopeId: null,

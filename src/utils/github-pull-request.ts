@@ -1,3 +1,5 @@
+import { getGitHubHostConfig } from "./github-host";
+
 export interface GitHubPullRequestUrl {
   url: string;
   owner: string;
@@ -12,10 +14,11 @@ const GITHUB_PATH_SEGMENT_RE = /^[\w.-]+$/;
 function parseGitHubPullRequestToken(token: string): GitHubPullRequestUrl | null {
   const candidate = token.replace(TRAILING_PROSE_PUNCTUATION_RE, "");
   const lowerCandidate = candidate.toLowerCase();
+  const { host, webUrl } = getGitHubHostConfig();
   if (
-    !lowerCandidate.startsWith("https://github.com/") &&
-    !lowerCandidate.startsWith("http://github.com/") &&
-    !lowerCandidate.startsWith("github.com/")
+    !lowerCandidate.startsWith(`https://${host}/`) &&
+    !lowerCandidate.startsWith(`http://${host}/`) &&
+    !lowerCandidate.startsWith(`${host}/`)
   ) {
     return null;
   }
@@ -28,7 +31,7 @@ function parseGitHubPullRequestToken(token: string): GitHubPullRequestUrl | null
     return null;
   }
   if (
-    parsed.host.toLowerCase() !== "github.com" ||
+    parsed.host.toLowerCase() !== host ||
     parsed.username.length > 0 ||
     parsed.password.length > 0
   ) {
@@ -49,7 +52,7 @@ function parseGitHubPullRequestToken(token: string): GitHubPullRequestUrl | null
   }
 
   return {
-    url: `https://github.com/${owner}/${repo}/pull/${numberText}`,
+    url: `${webUrl}/${owner}/${repo}/pull/${numberText}`,
     owner,
     repo,
     number: Number(numberText),

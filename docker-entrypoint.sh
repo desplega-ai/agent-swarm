@@ -633,12 +633,40 @@ fi  # /HARNESS_PROVIDER != claude-managed (MCP discovery skip)
 # Configure GitHub authentication if token is provided
 echo ""
 echo "=== GitHub Authentication ==="
+# GITHUB_URL targets a GitHub Enterprise Server instance (default github.com).
+# Same rules as src/utils/github-host.ts. An invalid value stops the boot rather
+# than falling back to github.com and sending a GHES token to the public host.
+GITHUB_WEB_URL="${GITHUB_URL%/}"
+GITHUB_HOST_BARE="github.com"
+if [ -n "$GITHUB_WEB_URL" ]; then
+    case "$GITHUB_WEB_URL" in
+        https://*|http://*) ;;
+        *) echo "ERROR: GITHUB_URL must start with https:// (got: $GITHUB_URL)"; exit 1 ;;
+    esac
+    GITHUB_HOST_BARE=$(printf '%s' "${GITHUB_WEB_URL#*://}" | tr '[:upper:]' '[:lower:]')
+    case "$GITHUB_HOST_BARE" in
+        ""|*/*|*@*|*\?*|*#*) echo "ERROR: GITHUB_URL must be the instance root, e.g. https://ghe.example.com (got: $GITHUB_URL)"; exit 1 ;;
+    esac
+    if [ "$GITHUB_HOST_BARE" = "www.github.com" ]; then GITHUB_HOST_BARE="github.com"; fi
+fi
 if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub authentication..."
 
-    # gh CLI will automatically use GITHUB_TOKEN env var for API calls
-    # Just need to configure git to use gh as credential helper
-    gh auth setup-git
+    if [ "$GITHUB_HOST_BARE" != "github.com" ]; then
+        # gh reads GH_TOKEN/GITHUB_TOKEN only for github.com; GHES needs
+        # GH_HOST plus GH_ENTERPRISE_TOKEN.
+        export GH_HOST="$GITHUB_HOST_BARE"
+        export GH_ENTERPRISE_TOKEN="$GITHUB_TOKEN"
+        # git: env-reading helper (same as GitLab below) in place of
+        # `gh auth setup-git`; the token never lands in ~/.gitconfig.
+        git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
+            '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
+        echo "GitHub Enterprise auth configured (host: $GH_HOST)"
+    else
+        # gh CLI will automatically use GITHUB_TOKEN env var for API calls
+        # Just need to configure git to use gh as credential helper
+        gh auth setup-git
+    fi
 
     # Set git user config for commits (use env vars or defaults)
     GIT_EMAIL="${GITHUB_EMAIL:-worker-agent@desplega.ai}"

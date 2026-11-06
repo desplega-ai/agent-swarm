@@ -391,3 +391,39 @@ describe("attachment-first task shipping evidence", () => {
     }
   });
 });
+
+describe("GitHub Enterprise host (GITHUB_URL)", () => {
+  const saved = process.env.GITHUB_URL;
+  afterAll(() => {
+    if (saved === undefined) delete process.env.GITHUB_URL;
+    else process.env.GITHUB_URL = saved;
+  });
+
+  async function hasPullRequest(output: string): Promise<number | undefined> {
+    const task = await createTaskExtended(`ghes: ${output}`, { agentId, source: "api" });
+    await getDbClient().run("UPDATE agent_tasks SET output = ? WHERE id = ?", [output, task.id]);
+    const sql = taskShippingEvidenceSql("t");
+    const row = await getDbClient().get<{ hasPullRequest: number }>(
+      `SELECT ${sql.hasPullRequest} AS hasPullRequest FROM agent_tasks t WHERE t.id = ?`,
+      [task.id],
+    );
+    return row?.hasPullRequest;
+  }
+
+  test("GHES mode: SQL and TS both match the GHES host, not github.com", async () => {
+    process.env.GITHUB_URL = "https://ghe.test";
+    expect(await hasPullRequest("Opened https://ghe.test/o/r/pull/7.")).toBe(1);
+    expect(extractGitHubPullRequestUrls("Opened https://ghe.test/o/r/pull/7.")).toEqual([
+      { url: "https://ghe.test/o/r/pull/7", owner: "o", repo: "r", number: 7 },
+    ]);
+    // Negative control: one deployment talks to one host.
+    expect(await hasPullRequest("Opened https://github.com/o/r/pull/7")).toBe(0);
+    expect(extractGitHubPullRequestUrls("https://github.com/o/r/pull/7")).toEqual([]);
+  });
+
+  test("default mode: a GHES-looking URL is not a PR", async () => {
+    delete process.env.GITHUB_URL;
+    expect(await hasPullRequest("Opened https://ghe.test/o/r/pull/7")).toBe(0);
+    expect(extractGitHubPullRequestUrls("https://ghe.test/o/r/pull/7")).toEqual([]);
+  });
+});

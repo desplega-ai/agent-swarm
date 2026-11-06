@@ -91,6 +91,7 @@ import {
   resolveCredentialPools,
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
+import { isGitHubUrl } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
@@ -3181,7 +3182,11 @@ export async function detectVcsForTask(
       vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    } else if (
+      remoteUrl.includes("github.com") ||
+      remoteUrl.includes("github") ||
+      isGitHubUrl(remoteUrl)
+    ) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()

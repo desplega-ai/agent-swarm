@@ -31,6 +31,12 @@ data:
   {{- if .Values.config.githubName }}
   GITHUB_NAME: {{ .Values.config.githubName | quote }}
   {{- end }}
+  {{- if .Values.config.githubUrl }}
+  GITHUB_URL: {{ .Values.config.githubUrl | quote }}
+  {{- end }}
+  {{- if .Values.config.githubApiUrl }}
+  GITHUB_API_URL: {{ .Values.config.githubApiUrl | quote }}
+  {{- end }}
   {{- range $k, $v := .Values.config.extraEnv }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
