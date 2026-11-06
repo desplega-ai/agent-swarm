@@ -22,7 +22,7 @@ ARG SKILLS_CLI_VERSION=1.5.20
 # context-mode pins BOTH the global CLI/MCP server (worker-base) and the
 # Claude/Codex plugin marketplaces (worker-full-base). Global so the two
 # stages cannot drift; each stage re-declares it.
-ARG CONTEXT_MODE_VERSION=2.1.4
+ARG CONTEXT_MODE_VERSION=1.0.169
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
@@ -230,7 +230,7 @@ ARG CONTEXT_MODE_VERSION
 USER root
 RUN test -n "${CONTEXT_MODE_VERSION}" \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g context-mode@${CONTEXT_MODE_VERSION} \
+    npm install -g --engine-strict context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
@@ -834,6 +834,7 @@ USER root
 # v2.0.0 raised engines.node to >=24.15.0, and on this image's Node 22 the
 # newer hook denies EVERY Bash call with NODE_TOO_OLD. Bump the tag only
 # together with NODE_VERSION when the target release needs a newer Node.
+# The worker-base global install enforces engines.node with --engine-strict.
 # The ref persists (Claude: known_marketplaces.json + settings.json
 # extraKnownMarketplaces; Codex: config.toml `ref`), so a runtime marketplace
 # refresh stays on the tag. Plugin auto-update is also off at runtime:
