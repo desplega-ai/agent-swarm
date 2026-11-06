@@ -242,6 +242,24 @@ const tabsProps = z.object({
   variant: z.enum(["line", "segmented"]).optional(),
 });
 
+const accordionItemSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  /** A muted line under the title. */
+  description: z.string().optional(),
+  icon: iconName.optional(),
+});
+
+const accordionProps = z.object({
+  /** State id: the open item keys are mirrored to `/ui/<id>/open` (an array). */
+  id: z.string(),
+  /** `single` (default) keeps at most one item open; `multiple` lets several open. */
+  type: z.enum(["single", "multiple"]).optional(),
+  items: z.array(accordionItemSchema).min(1),
+  /** Item keys open on first render. `single` uses the first one only. */
+  defaultOpen: z.array(z.string()).optional(),
+});
+
 const searchInputProps = z.object({
   /** State id — the debounced query lands at `/ui/<id>/value`. */
   id: z.string(),
@@ -975,6 +993,19 @@ const drawerProps = z.object({
   actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
 });
 
+const dialogProps = z.object({
+  /**
+   * Route param driving the open state, the same contract as `Drawer.param`:
+   * open exactly while `/route/params/<param>` is set; closing removes it.
+   */
+  param: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  size: z.enum(["sm", "md", "lg"]).optional(),
+  /** Footer buttons, the same shape and confirm rules as Drawer `actions`. */
+  actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
+});
+
 const detailListProps = z.object({
   /** Usually `{ "$state": "/queries/<name>/data/0" }` — one record object. */
   data: z.record(z.string(), z.unknown()).nullish(),
@@ -1124,6 +1155,7 @@ export type ActionChain = z.infer<typeof actionChainSchema>;
 export type TableFilters = z.infer<typeof tableProps>["filters"];
 export type GridColumns = z.infer<typeof gridProps>["columns"];
 export type TabsTab = z.infer<typeof tabsTabSchema>;
+export type AccordionItem = z.infer<typeof accordionItemSchema>;
 export type SelectOption = z.infer<typeof selectOptionSchema>;
 export type DetailListField = z.infer<typeof detailListFieldSchema>;
 export type CardGridField = z.infer<typeof cardGridFieldSchema>;
@@ -1170,6 +1202,12 @@ export const swarmCatalogSpec = {
       props: dividerProps,
       description:
         'Rule between sections, optionally with a centered `label` (e.g. `"Filters"`). `orientation: "vertical"` draws it between the items of a row `Stack`, as tall as the row.',
+    },
+    Accordion: {
+      props: accordionProps,
+      slots: ["default"],
+      description:
+        'Grouped collapsible sections. POSITIONAL children like Tabs: children[i] is the body of items[i], so declare exactly as many children as items, in the same order. `items: [{ key, title, description?, icon? }]`. `type: "single"` (default) keeps at most one item open (opening one closes the others, and the open one can be closed); `"multiple"` lets several open. The open keys are client state at `{ "$state": "/ui/<id>/open" }` (an array); `defaultOpen` lists the keys open on first render. Bodies mount only while open. For one collapsible block use `Section collapsible`.',
     },
     Tabs: {
       props: tabsProps,
@@ -1301,6 +1339,12 @@ export const swarmCatalogSpec = {
       props: formProps,
       description:
         'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.',
+    },
+    Dialog: {
+      props: dialogProps,
+      slots: ["default"],
+      description:
+        'Route-driven modal, centered over the page, for short forms ("New item"). The same contract as Drawer: open exactly while the page route param named by `param` is set (open it with `app.navigate`, e.g. from a `headerActions` Button), a deep link opens it, and closing (the X, Escape, a click outside) clears the param. `size` sm|md (default)|lg. `actions` render in its footer with the Drawer confirm rules; read the record id with `{ "$state": "/route/params/<param>" }`. Children mount only while open. A Form inside closes nothing by itself: add an `app.navigate` step without the param after the write.',
     },
     Drawer: {
       props: drawerProps,

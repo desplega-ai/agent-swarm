@@ -126,6 +126,13 @@ import {
   Card as UiCard,
 } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -167,6 +174,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
+import { AccordionComponent, type AccordionProps } from "./accordion";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
 import { ApprovalComponent } from "./approval";
@@ -3047,6 +3055,60 @@ function DrawerComponent({
   );
 }
 
+type DialogComponentProps = InferComponentProps<typeof swarmCatalog, "Dialog">;
+
+const dialogSizeClass: Record<"sm" | "md" | "lg", string> = {
+  sm: "sm:max-w-sm",
+  md: "sm:max-w-lg",
+  lg: "sm:max-w-2xl",
+};
+
+/**
+ * Route-driven modal: the Drawer's open/close contract (`useRouteParamPanel`)
+ * on a centered dialog. Escape, the X and a click outside all clear the param.
+ */
+function DialogComponent({
+  props,
+  children,
+}: {
+  props: DialogComponentProps;
+  children: ReactNode;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const { open, close } = useRouteParamPanel(props.param);
+  const title = props.title ?? "Details";
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close();
+      }}
+    >
+      <DialogContent
+        className={cn(
+          "flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0",
+          dialogSizeClass[props.size ?? "md"],
+        )}
+        data-testid="json-render-dialog"
+        {...themeAttr}
+      >
+        <DialogHeader className="shrink-0 border-b border-border py-3 pl-4 pr-12 text-left">
+          <DialogTitle className="truncate text-sm font-medium">{title}</DialogTitle>
+          {props.description ? (
+            <DialogDescription className="text-xs">{props.description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{`${title} dialog`}</DialogDescription>
+          )}
+        </DialogHeader>
+        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+        {props.actions && props.actions.length > 0 ? (
+          <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * The Drawer's sticky footer: one button per action, under the scrolling
  * body. Confirmation follows Table row actions (`confirmConfigFor`). Chains
@@ -4077,6 +4139,7 @@ const iconToneClass: Record<
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
   Drawer: ({ props, children }) => <DrawerComponent props={props}>{children}</DrawerComponent>,
+  Dialog: ({ props, children }) => <DialogComponent props={props}>{children}</DialogComponent>,
   DetailList: ({ props }) => <DetailListComponent props={props} />,
   CardGrid: ({ props }) => <CardGridComponent props={props} />,
   Stack: ({ props, children }) => <StackComponent props={props}>{children}</StackComponent>,
@@ -4084,6 +4147,9 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Split: ({ props, children }) => <SplitComponent props={props}>{children}</SplitComponent>,
   Divider: ({ props }) => <DividerComponent props={props} />,
   Tabs: ({ props, children }) => <TabsComponent props={props}>{children}</TabsComponent>,
+  Accordion: ({ props, children }) => (
+    <AccordionComponent props={props as AccordionProps}>{children}</AccordionComponent>
+  ),
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,

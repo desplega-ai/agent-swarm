@@ -200,3 +200,137 @@ describe("Drawer presentation split and vertical Divider", () => {
     );
   });
 });
+
+describe("Accordion and Dialog", () => {
+  const params = { item: { kind: "string" } };
+  const accordion = (props: Record<string, unknown>, children: string[]) => ({
+    root: { type: "Stack", props: {}, children: ["faq", "echo"] },
+    faq: {
+      type: "Accordion",
+      props: {
+        id: "faq",
+        items: [
+          { key: "billing", title: "Billing" },
+          { key: "limits", title: "Limits" },
+        ],
+        ...props,
+      },
+      children,
+    },
+    b1: { type: "Text", props: { content: "billing body" } },
+    b2: { type: "Text", props: { content: "limits body" } },
+    echo: { type: "Text", props: { content: { $state: "/ui/faq/open" } } },
+  });
+
+  test("an Accordion with one child per item, and a read of its open keys, validates", async () => {
+    const issues = await issuesFor(
+      appWith(accordion({ type: "multiple", defaultOpen: ["billing"] }, ["b1", "b2"])),
+    );
+    if (issues.length > 0) console.error(issues);
+    expect(issues).toEqual([]);
+  });
+
+  test("an items / children count mismatch is rejected", async () => {
+    const elements = accordion({}, ["b1"]) as Record<string, Element>;
+    delete elements.b2;
+    const issues = await issuesFor(appWith(elements));
+    expect(issues).toContainEqual({
+      path: `${el("faq")}.children`,
+      message: "Accordion children are positional: 2 items need 2 children (got 1)",
+    });
+  });
+
+  test("duplicate item keys and unknown defaultOpen keys are rejected", async () => {
+    const issues = await issuesFor(
+      appWith(
+        accordion(
+          {
+            items: [
+              { key: "a", title: "A" },
+              { key: "a", title: "A again" },
+            ],
+            defaultOpen: ["zzz"],
+          },
+          ["b1", "b2"],
+        ),
+      ),
+    );
+    expect(issues).toContainEqual({
+      path: `${el("faq")}.props.items.1.key`,
+      message: 'duplicate item key "a"',
+    });
+    expect(issues).toContainEqual({
+      path: `${el("faq")}.props.defaultOpen.0`,
+      message: 'unknown item key "zzz"',
+    });
+  });
+
+  test("a Dialog on a declared param with footer actions validates", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["dialog"] },
+          dialog: {
+            type: "Dialog",
+            props: {
+              param: "item",
+              title: "New item",
+              size: "sm",
+              actions: [
+                {
+                  label: "Close",
+                  actions: [{ action: "app.navigate", params: { page: "main" } }],
+                },
+              ],
+            },
+            children: ["body"],
+          },
+          body: { type: "Text", props: { content: "form" } },
+        },
+        params,
+      ),
+    );
+    if (issues.length > 0) console.error(issues);
+    expect(issues).toEqual([]);
+  });
+
+  test("a Dialog param not declared on the page is rejected", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["dialog"] },
+          dialog: { type: "Dialog", props: { param: "nope" } },
+        },
+        params,
+      ),
+    );
+    expect(issues).toContainEqual({
+      path: `${el("dialog")}.props.param`,
+      message: 'param "nope" is not declared on page "main"',
+    });
+  });
+
+  test("a Dialog footer chain is validated like a Drawer's", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["dialog"] },
+          dialog: {
+            type: "Dialog",
+            props: {
+              param: "item",
+              actions: [
+                { label: "Go", actions: [{ action: "app.navigate", params: { page: "ghost" } }] },
+              ],
+            },
+          },
+        },
+        params,
+      ),
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((entry) => entry.path.startsWith(`${el("dialog")}.props.actions.0`))).toBe(
+      true,
+    );
+  });
+});

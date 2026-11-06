@@ -5,6 +5,7 @@
     "Grid",
     "Split",
     "Divider",
+    "Accordion",
     "Tabs",
     "Container",
     "Card",
@@ -31,6 +32,7 @@
     "Chips",
     "Table",
     "Form",
+    "Dialog",
     "Drawer",
     "DetailList",
     "CardGrid",
@@ -199,6 +201,96 @@
             "enum": ["horizontal", "vertical"]
           }
         },
+        "additionalProperties": false
+      }
+    },
+    "Accordion": {
+      "description": "Grouped collapsible sections. POSITIONAL children like Tabs: children[i] is the body of items[i], so declare exactly as many children as items, in the same order. `items: [{ key, title, description?, icon? }]`. `type: \"single\"` (default) keeps at most one item open (opening one closes the others, and the open one can be closed); `\"multiple\"` lets several open. The open keys are client state at `{ \"$state\": \"/ui/<id>/open\" }` (an array); `defaultOpen` lists the keys open on first render. Bodies mount only while open. For one collapsible block use `Section collapsible`.",
+      "slots": ["default"],
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["single", "multiple"]
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string",
+                  "enum": [
+                    "plus",
+                    "refresh-cw",
+                    "search",
+                    "filter",
+                    "download",
+                    "upload",
+                    "external-link",
+                    "copy",
+                    "check",
+                    "x",
+                    "trash-2",
+                    "pencil",
+                    "eye",
+                    "calendar",
+                    "clock",
+                    "user",
+                    "users",
+                    "bot",
+                    "git-pull-request",
+                    "git-branch",
+                    "github",
+                    "slack",
+                    "mail",
+                    "link",
+                    "file-text",
+                    "folder",
+                    "database",
+                    "zap",
+                    "sparkles",
+                    "flag",
+                    "star",
+                    "tag",
+                    "alert-triangle",
+                    "info",
+                    "circle-check",
+                    "trending-up",
+                    "trending-down",
+                    "dollar-sign",
+                    "activity",
+                    "rocket"
+                  ]
+                }
+              },
+              "required": ["key", "title"],
+              "additionalProperties": false
+            }
+          },
+          "defaultOpen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "items"],
         "additionalProperties": false
       }
     },
@@ -2184,6 +2276,145 @@
           }
         },
         "required": ["id", "fields", "onSubmit"],
+        "additionalProperties": false
+      }
+    },
+    "Dialog": {
+      "description": "Route-driven modal, centered over the page, for short forms (\"New item\"). The same contract as Drawer: open exactly while the page route param named by `param` is set (open it with `app.navigate`, e.g. from a `headerActions` Button), a deep link opens it, and closing (the X, Escape, a click outside) clears the param. `size` sm|md (default)|lg. `actions` render in its footer with the Drawer confirm rules; read the record id with `{ \"$state\": \"/route/params/<param>\" }`. Children mount only while open. A Form inside closes nothing by itself: add an `app.navigate` step without the param after the write.",
+      "slots": ["default"],
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "param": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": ["sm", "md", "lg"]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "secondary",
+                    "outline",
+                    "ghost",
+                    "destructive",
+                    "destructive-outline"
+                  ]
+                },
+                "confirm": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "confirmLabel": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "params": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": ["action"],
+                    "additionalProperties": false
+                  }
+                },
+                "icon": {
+                  "type": "string",
+                  "enum": [
+                    "plus",
+                    "refresh-cw",
+                    "search",
+                    "filter",
+                    "download",
+                    "upload",
+                    "external-link",
+                    "copy",
+                    "check",
+                    "x",
+                    "trash-2",
+                    "pencil",
+                    "eye",
+                    "calendar",
+                    "clock",
+                    "user",
+                    "users",
+                    "bot",
+                    "git-pull-request",
+                    "git-branch",
+                    "github",
+                    "slack",
+                    "mail",
+                    "link",
+                    "file-text",
+                    "folder",
+                    "database",
+                    "zap",
+                    "sparkles",
+                    "flag",
+                    "star",
+                    "tag",
+                    "alert-triangle",
+                    "info",
+                    "circle-check",
+                    "trending-up",
+                    "trending-down",
+                    "dollar-sign",
+                    "activity",
+                    "rocket"
+                  ]
+                }
+              },
+              "required": ["label", "actions"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["param"],
         "additionalProperties": false
       }
     },

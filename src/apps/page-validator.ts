@@ -55,6 +55,7 @@ const UI_STATE_COMPONENTS = new Set([
   "Tree",
   "SchemaForm",
   "Table",
+  "Accordion",
 ]);
 
 // A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
@@ -88,6 +89,7 @@ const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]>
     ["columns", "onChange"],
   ],
   Drawer: [["actions", "actions"]],
+  Dialog: [["actions", "actions"]],
 };
 
 /** Route-driven panels: open exactly while their declared page `param` is set. */
@@ -1434,6 +1436,47 @@ function chartPropIssues(
 const CURRENCY_CODE = /^[A-Z]{3}$/;
 
 /**
+ * Accordion children are positional (`children[i]` is the body of
+ * `items[i]`), so the counts must match; item keys are unique, and
+ * `defaultOpen` names only declared keys.
+ */
+function accordionIssues(
+  element: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const props = element.props as Record<string, unknown>;
+  if (!Array.isArray(props.items)) return issues;
+  const keys = props.items.map((item) => (isPlainObject(item) ? item.key : undefined));
+  const childCount = Array.isArray(element.children) ? element.children.length : 0;
+  if (childCount !== keys.length) {
+    issues.push(
+      issue(
+        `${elementPath}.children`,
+        `Accordion children are positional: ${keys.length} items need ${keys.length} children (got ${childCount})`,
+      ),
+    );
+  }
+  const seen = new Set<unknown>();
+  for (const [index, key] of keys.entries()) {
+    if (typeof key === "string" && seen.has(key)) {
+      issues.push(issue(`${elementPath}.props.items.${index}.key`, `duplicate item key "${key}"`));
+    }
+    seen.add(key);
+  }
+  if (Array.isArray(props.defaultOpen)) {
+    for (const [index, key] of props.defaultOpen.entries()) {
+      if (typeof key === "string" && !seen.has(key)) {
+        issues.push(
+          issue(`${elementPath}.props.defaultOpen.${index}`, `unknown item key "${key}"`),
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+/**
  * `currency` must be an ISO 4217 code: on Chart and Metric props, on Table
  * columns (and their popover fields) and on DetailList fields. The catalog
  * carries it as a JSON-schema `pattern`, which the generic walker skips.
@@ -1640,6 +1683,7 @@ export function validatePage(
       collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
       if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
       issues.push(...currencyIssues(type, rawElement.props, elementPath));
+      if (type === "Accordion") issues.push(...accordionIssues(rawElement, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;
