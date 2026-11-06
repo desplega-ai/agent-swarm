@@ -4014,6 +4014,14 @@ export interface AppPageDef {
   /** Display title (breadcrumb / header); defaults to the page name. */
   title?: string;
   params?: Record<string, AppPageParamDef>;
+  /** Sidebar layout: a catalog icon name shown next to the page in the sidebar. */
+  icon?: string;
+  /** Sidebar layout: one line under the title in the sticky page header. */
+  description?: string;
+  /** Sidebar layout: element key rendered in the sticky header's actions slot. */
+  headerActions?: string;
+  /** Sidebar layout: `false` leaves the page out of the sidebar. */
+  nav?: boolean;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -4090,6 +4098,8 @@ export interface AppDefinition {
   theme?: string;
   /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
   icon?: AppIcon;
+  /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
+  layout?: "sidebar";
 }
 
 /**
@@ -4419,4 +4429,97 @@ export interface FleetBenchmarkResponse {
   minFinishedTasks: number;
   generatedAt: string | null;
   comparisons: FleetComparison[];
+}
+
+// ─── Automation savings (GET /api/savings/jobs) ─────────────────────────────
+
+export type SavingsTier = "smol" | "regular" | "smart" | "ultra";
+
+/** An 80% range: p10 and p90 around the p50 point estimate. */
+export interface SavingsBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+export interface SavingsJobRow {
+  kind: "workflow";
+  workflowId: string;
+  name: string;
+  basis: "modelled";
+  /** True when only the runs with a downstream effect count (an event router). */
+  enabledOnlyRule: boolean;
+  runs: number;
+  substitutedRuns: number;
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  /** Measured spend of every run in the window. */
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured; 0 when recorded. */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate: `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`,
+   * the cost the saving subtracts.
+   */
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`. */
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  agentOnlyUsdPerRun: number;
+}
+
+export interface SavingsTotals {
+  runs: number;
+  substitutedRuns: number;
+  enabledOnlyRuns: number;
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  hoursSaved: SavingsBand;
+}
+
+export interface SavingsJobsResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  /** Newest rollup time of the window; null before the first rollup. */
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  rows: SavingsJobRow[];
+  total: SavingsTotals | null;
+}
+
+/** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
+export interface SavingsDailyPoint {
+  day: string;
+  savingUsd: number;
+  /** Scaled estimate: the day's measured and estimated spend times the substituted share. */
+  actualUsd: number;
+  /** The day's measured spend. */
+  measuredUsd: number;
+  /** The day's LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+}
+
+export interface SavingsDailyResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  points: SavingsDailyPoint[];
 }

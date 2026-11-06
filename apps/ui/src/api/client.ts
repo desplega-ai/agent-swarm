@@ -121,6 +121,9 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
+  SavingsJobsResponse,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -4004,6 +4007,50 @@ class ApiClient {
     const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
     return (await res.json()) as { enabled: false };
+  }
+
+  /** Modelled saving of one workflow against doing its runs with agent tasks. */
+  async getWorkflowSavings(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsJobsResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /** The workflow's modelled saving per UTC day, from the same computation as `getWorkflowSavings`. */
+  async getWorkflowSavingsDaily(
+    workflowId: string,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const params = new URLSearchParams({ workflowId });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/daily?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load daily workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
+  }
+
+  /** Modelled saving of every workflow with runs in the window, from the hourly rollup. */
+  async getWorkflowsSavings(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsJobsResponse> {
+    const params = new URLSearchParams({ kind: "workflow" });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */

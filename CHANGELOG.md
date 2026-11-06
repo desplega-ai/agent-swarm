@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-06
+
+### Added
+- Models: a model profile can list same-harness `fallbacks`; a task that ends on a provider error (rate limit, seat, overload, auth, empty key pool) hops to the next one (#2736).
+- Workflows: the modelled automation saving shows in the workflow header, a Savings tab and a daily chart (#2768); the session cost curve recalibrates from a deployment's own sessions (#2770).
+- Apps: a Chart component, a Metric sparkline and a sidebar app shell (#2769).
+- UI: app icons and agent avatars from an https link or an agent-fs file (#2729); agent-fs style markdown on every Streamdown surface (#2765).
+- Docs: local TEI embeddings with a Compose overlay (#2751), an AI operations governance guide for small companies (#2742) and a small tech team operating model guide (#2744).
+
+### Changed
+- agent-fs pins bumped 0.18.18 -> 0.18.22 (#2761).
+- Docker: bumped amp (#2762).
+- Workflows: definition cleanup is scoped to deleted runs (#2740).
+
+### Fixed
+- CI: prod deploys when newer main commits skip the docker-and-deploy trigger (#2773).
+- Security: starting Linear/Jira OAuth requires admin auth (#2756); feedback endpoint URLs that include credentials are rejected (#2755).
+- Skills: YAML block scalar descriptions parse, and metadata after indented block scalars is kept (#2763, #2764).
+- Seed: template updates land on workflows whose only change is a setting (#2757).
+- Comb: `0.0.0.0` counts as unreachable in browser reachability checks (#2754).
+- Chat: `splitChatMessage` no longer loops on a surrogate pair at a tiny limit (#2753).
+- UI: markdown snippets share the GitHub Monaco theme (#2766).
+- Docs: step replay claim in the worker recovery guide (#2758).
+
 ## [2.8.1] - 2026-11-05
 
 ### Added
