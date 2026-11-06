@@ -153,7 +153,7 @@ export const platformbRepos: Scenario = {
         `swarm_repos row differs from the API: ${JSON.stringify(row)}`,
       );
 
-      // --- a task links a registered repo by URL or shorthand; the repo path is stored.
+      // --- a task links a registered repo by URL or shorthand; the repo URL is stored.
       for (const vcsRepo of [urlRepo.url, `e2e/${urlName}`]) {
         const taskResponse = await ctx.api("POST", "/api/tasks", {
           body: {
@@ -170,7 +170,7 @@ export const platformbRepos: Scenario = {
           await ctx.api("POST", `/api/tasks/${taskId}/cancel`, { body: {} });
         });
         expect(
-          task.vcsRepo === `e2e/${urlName}`,
+          task.vcsRepo === `https://git.example.invalid/e2e/${urlName}`,
           `Task stored vcsRepo ${String(task.vcsRepo)} for ${String(vcsRepo)}`,
         );
       }

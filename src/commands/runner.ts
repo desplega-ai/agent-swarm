@@ -240,13 +240,15 @@ export async function fetchRepoConfig(
   try {
     const named = await listRepos(vcsRepoName(vcsRepo));
     if (!named) return null;
-    const match = requireExactMatch
-      ? named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo))
-      : (named.find((r) => r.url.includes(vcsRepo)) ?? named[0]);
-    if (match) return match;
-    // A repo registered under a display name (`frontend` for acme/web) has no name hit:
-    // match its URL across all registered repos, as the API's vcsRepoId does.
-    return (await listRepos())?.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ?? null;
+    // An exact URL match wins, by name first, then across all registered repos (a repo
+    // registered under a display name, `frontend` for acme/web), as the API's vcsRepoId
+    // does. Only then does the loose legacy match run, so a same-named unrelated repo
+    // never shadows the task's repo.
+    const exact =
+      named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ??
+      (await listRepos())?.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
+    if (exact || requireExactMatch) return exact ?? null;
+    return named.find((r) => r.url.includes(vcsRepo)) ?? named[0] ?? null;
   } catch {
     return null;
   }

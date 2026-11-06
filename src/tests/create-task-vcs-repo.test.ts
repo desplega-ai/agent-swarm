@@ -1,21 +1,13 @@
-// POST /api/tasks takes an optional `vcsRepo`, resolved against swarm_repos the way the
-// worker's fetchRepoConfig resolves it, and stored as the repo path.
+// POST /api/tasks takes an optional `vcsRepo`, resolved against swarm_repos and stored as
+// the registered repo's URL, which the profile check and the worker resolve by equality.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import {
-  closeDb,
-  createAgent,
-  createSwarmRepo,
-  getSwarmRepoById,
-  getTaskById,
-  initDb,
-} from "../be/db";
+import { closeDb, createAgent, createSwarmRepo, getTaskById, initDb } from "../be/db";
 import { vcsRepoId } from "../be/model-profile-check";
 import { handleTasks } from "../http/tasks";
 import { setRequestAuth } from "../utils/request-auth-context";
-import { vcsRepoPath } from "../utils/vcs-repo-match";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-create-task-vcs-repo.sqlite";
@@ -29,6 +21,7 @@ async function removeDbFiles(path: string): Promise<void> {
 let server: Server;
 let baseUrl = "";
 let leadId = "";
+const repoIds: Record<string, string> = {};
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
@@ -36,8 +29,17 @@ beforeAll(async () => {
   leadId = (await createAgent({ name: "vcs-repo-lead", isLead: true, status: "idle" })).id;
   await createSwarmRepo({ url: "https://github.com/acme/widgets.git", name: "widgets" });
   await createSwarmRepo({ url: "git@gitlab.com:team/sub/tools.git", name: "tools" });
-  // A display name that is not the URL's last segment.
-  await createSwarmRepo({ url: "https://github.com/acme/web.git", name: "frontend" });
+  // A display name that is not the URL's last segment, an unrelated repo that takes
+  // its last segment as name, and the same path on another host.
+  repoIds.frontend = (
+    await createSwarmRepo({ url: "https://github.com/acme/web.git", name: "frontend" })
+  ).id;
+  repoIds.web = (
+    await createSwarmRepo({ url: "https://github.com/other/service.git", name: "web" })
+  ).id;
+  repoIds.gitlabWeb = (
+    await createSwarmRepo({ url: "https://gitlab.com/acme/web.git", name: "web-gitlab" })
+  ).id;
 
   server = createServer((req, res) => {
     setRequestAuth(req, { kind: "operator", fingerprint: "create-task-vcs-repo-test" });
@@ -73,22 +75,13 @@ async function createTask(body: Record<string, unknown>) {
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
 
-describe("vcsRepoPath", () => {
-  test("strips scheme, host and scp prefix", () => {
-    expect(vcsRepoPath("https://github.com/acme/widgets.git")).toBe("acme/widgets");
-    expect(vcsRepoPath("ssh://git@github.com/acme/widgets")).toBe("acme/widgets");
-    expect(vcsRepoPath("git@gitlab.com:team/sub/tools.git")).toBe("team/sub/tools");
-    expect(vcsRepoPath("acme/widgets/")).toBe("acme/widgets");
-    expect(vcsRepoPath("/srv/checkout")).toBe("/srv/checkout");
-  });
-});
-
 describe("POST /api/tasks vcsRepo", () => {
-  test("a registered repo by shorthand or URL is stored as its repo path", async () => {
+  test("a registered repo by shorthand or URL is stored as its URL", async () => {
     for (const [input, stored] of [
-      ["acme/widgets", "acme/widgets"],
-      ["https://github.com/acme/widgets.git", "acme/widgets"],
-      ["git@gitlab.com:team/sub/tools.git", "team/sub/tools"],
+      ["acme/widgets", "https://github.com/acme/widgets"],
+      ["https://github.com/acme/widgets.git", "https://github.com/acme/widgets"],
+      ["git@gitlab.com:team/sub/tools.git", "git@gitlab.com:team/sub/tools"],
+      ["team/sub/tools", "git@gitlab.com:team/sub/tools"],
     ]) {
       const { status, body } = await createTask({ vcsRepo: input });
       expect(status).toBe(201);
@@ -99,15 +92,32 @@ describe("POST /api/tasks vcsRepo", () => {
     }
   });
 
-  test("a repo registered under a display name resolves by URL", async () => {
-    for (const input of ["https://github.com/acme/web.git", "acme/web"]) {
+  test("a display-named repo resolves to itself, not the repo named after its last segment", async () => {
+    const { status, body } = await createTask({ vcsRepo: "https://github.com/acme/web.git" });
+    expect(status).toBe(201);
+    expect(body.vcsRepo).toBe("https://github.com/acme/web");
+    expect(await vcsRepoId(body.vcsRepo)).toBe(repoIds.frontend);
+  });
+
+  test("the same path on two hosts keeps the selected host", async () => {
+    for (const [input, id] of [
+      ["https://github.com/acme/web.git", repoIds.frontend],
+      ["https://gitlab.com/acme/web.git", repoIds.gitlabWeb],
+    ]) {
       const { status, body } = await createTask({ vcsRepo: input });
       expect(status).toBe(201);
-      expect(body.vcsRepo).toBe("acme/web");
-      const repoId = await vcsRepoId(body.vcsRepo);
-      expect(repoId).not.toBeNull();
-      expect((await getSwarmRepoById(repoId as string))?.name).toBe("frontend");
+      expect(body.vcsRepo).toBe(input.replace(/\.git$/, ""));
+      expect(await vcsRepoId(body.vcsRepo)).toBe(id);
     }
+    // A shorthand that names both is rejected instead of guessing a host.
+    const { status, body } = await createTask({ vcsRepo: "acme/web" });
+    expect(status).toBe(400);
+    expect(body.error).toContain("matches several registered repos");
+  });
+
+  test("existing shorthand task references still resolve", async () => {
+    expect(await vcsRepoId("acme/widgets")).not.toBeNull();
+    expect(await vcsRepoId("other/service")).toBe(repoIds.web);
   });
 
   test("an unregistered repo is a 400", async () => {
