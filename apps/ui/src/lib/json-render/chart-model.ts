@@ -5,8 +5,9 @@
 
 import { format as formatDate } from "date-fns";
 import type { ChartColor } from "./catalog";
+import { type NumberFormat, numberFormatter } from "./format-number";
 
-export type ChartValueFormat = "number" | "currency" | "percent";
+export type ChartValueFormat = NumberFormat;
 
 /** One plotted point: `__x` is the axis value (a label, or epoch ms on a time axis). */
 export type ChartPoint = { __x: string | number } & Record<string, number | null | string>;
@@ -79,22 +80,8 @@ export function toChartPoints(
   return points;
 }
 
-/** Number formatter for axis ticks (`compact`) and the tooltip. */
-export function chartValueFormatter(
-  format: ChartValueFormat = "number",
-  currency = "USD",
-  compact = false,
-): (value: number) => string {
-  const options: Intl.NumberFormatOptions =
-    format === "currency"
-      ? { style: "currency", currency, maximumFractionDigits: compact ? 0 : 2 }
-      : format === "percent"
-        ? { style: "percent", maximumFractionDigits: compact ? 0 : 1 }
-        : { maximumFractionDigits: 2 };
-  if (compact && format !== "percent") options.notation = "compact";
-  const formatter = new Intl.NumberFormat(undefined, options);
-  return (value) => formatter.format(value);
-}
+/** Axis-tick (`compact`) and tooltip formatter; see `numberFormatter`. */
+export const chartValueFormatter = numberFormatter;
 
 function isLocalMidnight(ms: number): boolean {
   const date = new Date(ms);

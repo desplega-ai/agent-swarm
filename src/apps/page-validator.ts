@@ -1401,14 +1401,49 @@ function chartPropIssues(
       seen.add(entry.key);
     }
   }
-  if (typeof props.currency === "string" && !/^[A-Z]{3}$/.test(props.currency)) {
-    issues.push(issue(`${propsPath}.currency`, "must be an ISO 4217 code like USD"));
-  }
   if (
     typeof props.height === "number" &&
     (!Number.isInteger(props.height) || props.height < 120 || props.height > 640)
   ) {
     issues.push(issue(`${propsPath}.height`, "must be an integer from 120 to 640"));
+  }
+  return issues;
+}
+
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+
+/**
+ * `currency` must be an ISO 4217 code: on Chart and Metric props, on Table
+ * columns (and their popover fields) and on DetailList fields. The catalog
+ * carries it as a JSON-schema `pattern`, which the generic walker skips.
+ */
+function currencyIssues(
+  type: unknown,
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const check = (value: unknown, path: string) => {
+    if (typeof value === "string" && !CURRENCY_CODE.test(value)) {
+      issues.push(issue(path, `must be an ISO 4217 code like USD (got "${value}")`));
+    }
+  };
+  const propsPath = `${elementPath}.props`;
+  if (type === "Chart" || type === "Metric") check(props.currency, `${propsPath}.currency`);
+  const listProp = type === "Table" ? "columns" : type === "DetailList" ? "fields" : null;
+  if (!listProp || !Array.isArray(props[listProp])) return issues;
+  for (const [index, entry] of (props[listProp] as unknown[]).entries()) {
+    if (!isPlainObject(entry)) continue;
+    const entryPath = `${propsPath}.${listProp}.${index}`;
+    check(entry.currency, `${entryPath}.currency`);
+    const popover = entry.popover;
+    if (isPlainObject(popover) && Array.isArray(popover.fields)) {
+      for (const [fieldIndex, field] of popover.fields.entries()) {
+        if (isPlainObject(field)) {
+          check(field.currency, `${entryPath}.popover.fields.${fieldIndex}.currency`);
+        }
+      }
+    }
   }
   return issues;
 }
@@ -1583,6 +1618,7 @@ export function validatePage(
       }
       collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
       if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
+      issues.push(...currencyIssues(type, rawElement.props, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;

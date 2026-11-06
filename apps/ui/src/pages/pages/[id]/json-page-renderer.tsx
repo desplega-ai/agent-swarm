@@ -41,6 +41,7 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import { installChainHaltGuard } from "@/lib/json-render/chain-halt";
 
 // Re-exported for backwards compatibility with existing importers of the
 // action schemas / catalog (they now live in `@/lib/json-render`).
@@ -132,6 +133,7 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     );
     return { kind: "ok", spec, registry, handlers: handlerMap };
   }, [body, fetchImpl]);
+  useEffect(() => installChainHaltGuard(), []);
   useEffect(() => {
     handlersRef.current = compiled.kind === "ok" ? compiled.handlers : null;
   }, [compiled]);

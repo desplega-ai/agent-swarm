@@ -132,6 +132,7 @@ import {
   DEFINING_APP_PARAM,
   OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
+import { haltChain, installChainHaltGuard, isChainHalt } from "@/lib/json-render/chain-halt";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
@@ -929,9 +930,16 @@ export function AppSurface({
   const handlersRef = useRef<ActionHandlerMap | null>(null);
 
   const compiled = useMemo(() => {
+    // A failed chain step shows as an error toast and halts its chain; the
+    // page banner is left to failures raised outside a chain (task watchers,
+    // Undo).
+    const reportStepFailure = (message: string) => {
+      toast.error(message);
+    };
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
       onError: (message) => setActionError(message),
+      onFailure: reportStepFailure,
     });
     const toastActions = createToastActionHandler({
       getHandlers: () => handlersRef.current,
@@ -963,7 +971,8 @@ export function AppSurface({
           const ctx = ctxRef.current;
           const targetAppId = definingAppOf(params, ctx.app.id);
           // A caller that must know whether the write landed (Table bulk
-          // actions) names a state path; this handler swallows its own errors.
+          // actions) names a state path: it reads the outcome there, since a
+          // halted chain only says that some step failed.
           const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
           const outcomePath =
             typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
@@ -997,9 +1006,12 @@ export function AppSurface({
             if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
             // A mutate dispatched from a Form carries its formId — scope the
             // failure to that form (`/forms/<id>/$error`, rendered inline
-            // under the fields) instead of the page-level banner.
-            if (params.formId) ctx.store.set(`/forms/${params.formId}/$error`, message);
-            else setActionError(message);
+            // under the fields) instead of a toast. Either way the chain halts.
+            if (params.formId) {
+              ctx.store.set(`/forms/${params.formId}/$error`, message);
+              haltChain(message, () => {});
+            }
+            haltChain(message, reportStepFailure);
           }
         },
         "app.refresh": async (params) => {
@@ -1055,8 +1067,7 @@ export function AppSurface({
               "app.action parentTaskId must resolve to a task id; a $chain binding only resolves inside a component that publishes chain scope";
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
-            return;
+            haltChain(message, reportStepFailure);
           }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
@@ -1098,12 +1109,13 @@ export function AppSurface({
               result: response.result,
             } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
+            haltChain(message, reportStepFailure);
           } catch (e) {
+            if (isChainHalt(e)) throw e;
             const message = e instanceof Error ? e.message : String(e);
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
+            haltChain(message, reportStepFailure);
           }
         },
       },
@@ -1121,6 +1133,7 @@ export function AppSurface({
   useEffect(() => {
     handlersRef.current = compiled.handlers;
   }, [compiled]);
+  useEffect(() => installChainHaltGuard(), []);
 
   let renderedSpec: React.ReactNode;
   if (!activePage) {

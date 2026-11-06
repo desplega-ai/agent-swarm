@@ -36,6 +36,7 @@ import { z } from "zod";
 // Relative (not `@/`) so `scripts/generate-catalog-schema.ts` can run under plain
 // `bun run` — bun does not resolve the vite alias from tsconfig.app.json.
 import { SWARM_SDK_METHODS, type SwarmSdkMethod } from "../swarm-sdk";
+import { CURRENCY_CODE } from "./format-number";
 import { ICON_NAMES } from "./icon-names";
 
 // ─── Action schemas (also exported for the discovery endpoint mirror) ───────
@@ -459,6 +460,9 @@ const badgeProps = z.object({
   hint: z.string().optional(),
 });
 
+/** ISO 4217 currency code (`USD`, `EUR`). */
+const currencyCode = z.string().regex(CURRENCY_CODE);
+
 const metricProps = z.object({
   label: z.string(),
   value: z.union([z.string(), z.number()]),
@@ -482,6 +486,10 @@ const metricProps = z.object({
     .optional(),
   /** Numeric row field the sparkline reads when `sparkline` holds rows. */
   sparklineKey: z.string().optional(),
+  /** Formats a numeric `value`; `percent` reads ratios (0.42 = 42%). Strings show as is. */
+  format: z.enum(["number", "currency", "percent"]).optional(),
+  /** ISO 4217 code for `format: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
 });
 
 /** Series colors: the dashboard chart palette plus the semantic status tokens. */
@@ -526,10 +534,7 @@ const chartProps = z.object({
   /** Axis and tooltip value format. `percent` reads values as ratios (0.42 = 42%). */
   format: z.enum(["number", "currency", "percent"]).optional(),
   /** ISO 4217 code for `format: "currency"`. Defaults to USD. */
-  currency: z
-    .string()
-    .regex(/^[A-Z]{3}$/)
-    .optional(),
+  currency: currencyCode.optional(),
   /** Plot height in px. Defaults to 240. */
   height: z.number().int().min(120).max(640).optional(),
   /** Defaults to on with two or more series. */
@@ -642,10 +647,14 @@ const detailListFieldSchema = z.object({
       "copy",
       "link",
       "json",
+      "currency",
+      "percent",
     ])
     .optional(),
   /** For `kind: "badge"` / `"status"` — value → badge tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** ISO 4217 code for `kind: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
   ...linkOptions,
 });
 
@@ -692,10 +701,14 @@ const tableColumnSchema = z.object({
       "checkbox",
       "link",
       "json",
+      "currency",
+      "percent",
     ])
     .optional(),
   /** For `kind: "badge"` / `"status"` — cell value → tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** ISO 4217 code for `kind: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
   width: z.number().optional(),
   /** Pin the column to an edge so it survives horizontal scroll (id, actions). */
   pinned: z.enum(["left", "right"]).optional(),
@@ -1203,7 +1216,7 @@ export const swarmCatalogSpec = {
     Metric: {
       props: metricProps,
       description:
-        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ "$state": "/queries/<name>/data" }`) read through `sparklineKey`. Fewer than two points draws nothing.',
+        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ "$state": "/queries/<name>/data" }`) read through `sparklineKey`. Fewer than two points draws nothing. `format` number | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) formats a numeric `value`, the same contract as Chart; a string value shows as is.',
     },
     Chart: {
       props: chartProps,
@@ -1274,7 +1287,7 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`); also bind `refreshing` to `/queries/<name>/fetching` so a poll or `app.refresh` over loaded rows shows a slim progress bar (`loading` alone is the first-load skeleton). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`); also bind `refreshing` to `/queries/<name>/fetching` so a poll or `app.refresh` over loaded rows shows a slim progress bar (`loading` alone is the first-load skeleton). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated), `currency` (a number as money, ISO 4217 `currency`, default USD: `$1,234.50`) and `percent` (a ratio as a percent, 0.42 = 42%). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
     },
     Form: {
       props: formProps,
@@ -1290,7 +1303,7 @@ export const swarmCatalogSpec = {
     DetailList: {
       props: detailListProps,
       description:
-        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block), `json` (collapsible JSON tree), and `currency` / `percent` (as Table columns, with `currency` the ISO 4217 code). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
     CardGrid: {
       props: cardGridProps,

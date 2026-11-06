@@ -202,6 +202,7 @@ import type {
   TabsTab,
 } from "./catalog";
 import { ChartComponent, Sparkline } from "./chart";
+import { numberFormatter } from "./format-number";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import {
@@ -1303,7 +1304,10 @@ function minWidthForKind(kind: TableColumn["kind"]): number {
       return 85;
     case "number":
     case "duration":
+    case "percent":
       return 95;
+    case "currency":
+      return 110;
     case "badge":
     case "enum":
       return 105;
@@ -1327,7 +1331,13 @@ function flexForKind(kind: TableColumn["kind"]): number {
 }
 
 /** Columns whose values read best right-aligned with tabular digits. */
-const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>(["number", "duration", "progress"]);
+const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>([
+  "number",
+  "duration",
+  "progress",
+  "currency",
+  "percent",
+]);
 
 /** Roughly `sm` button metrics: 24px of label padding + ~7px per character (+18px for an icon). */
 function rowActionButtonWidth(rowAction: TableRowAction): number {
@@ -2023,7 +2033,7 @@ function TableComponent({ props }: { props: TableProps }) {
       // inference and let the value formatter own the rendering.
       cellDataType: false,
       valueFormatter: (params) =>
-        template ? String(params.value ?? "") : formatValue(kind, params.value),
+        template ? String(params.value ?? "") : formatValue(kind, params.value, column.currency),
       cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
         const value = params.value;
         const row = (params.data ?? {}) as Record<string, unknown>;
@@ -2095,7 +2105,9 @@ function TableComponent({ props }: { props: TableProps }) {
               // never applies to one, so long titles hard-clip mid-word. Wrapping
               // the value in a real element gives the ellipsis something to bite on
               // (and a tooltip carrying the full text while it is cut).
-              const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
+              const text =
+                params.valueFormatted ??
+                (template ? raw : formatValue(kind, value, column.currency));
               if (!text) return null;
               // A column tooltip or popover already speaks for the cell.
               const hasOwnTip = Boolean(column.tooltip || column.popover);
@@ -2271,7 +2283,9 @@ function TableComponent({ props }: { props: TableProps }) {
   const mobileCellText = (key: string, row: Record<string, unknown>): string => {
     const column = columnByKey.get(key);
     if (column && isMutedValue(column, row[key])) return "";
-    return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
+    return column?.format
+      ? applyTemplate(column.format, row)
+      : formatValue(column?.kind, row[key], column?.currency);
   };
   const rowLabel = (row: Record<string, unknown>): string => {
     const text = titleKey ? mobileCellText(titleKey, row) : "";
@@ -2729,6 +2743,8 @@ function MetricComponent({ props }: { props: MetricComponentProps }) {
           <Skeleton inline className="h-7 w-16 align-middle" />
         ) : empty ? (
           "—"
+        ) : typeof value === "number" && props.format ? (
+          numberFormatter(props.format, props.currency)(value)
         ) : (
           String(value)
         )
@@ -3129,7 +3145,7 @@ function DetailFieldValue({
       </pre>
     );
   }
-  const text = formatValue(field.kind, value);
+  const text = formatValue(field.kind, value, field.currency);
   if (!text) return <span className="text-muted-foreground">—</span>;
   return <span className="break-words">{text}</span>;
 }
