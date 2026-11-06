@@ -603,7 +603,10 @@ export async function readWorkflowComponents(opts: {
   walk(opts.workflowId, 1, 1, new Set([opts.workflowId]));
 
   const list = [...components.values()].sort(
-    (a, b) => Number(a.inOwnRow) - Number(b.inOwnRow) || b.savingUsd.p50 - a.savingUsd.p50,
+    (a, b) =>
+      Number(a.inOwnRow) - Number(b.inOwnRow) ||
+      a.depth - b.depth ||
+      b.savingUsd.p50 - a.savingUsd.p50,
   );
   return { components: list, withComponents: sumTotals([opts.own, ...parts]) };
 }
