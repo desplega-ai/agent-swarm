@@ -700,7 +700,7 @@ Form details:
 
 - `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, `enum`, or `file`, and enum fields need `options`.
 - `kind: "file"` adds `dir`, `accept` (e.g. `[".pdf", "image/*"]`), `multiple` and `source`: `"upload"` (default) chooses local files, `"pick"` opens a browser of `dir` (or `/`) to attach a file that already exists in agent-fs, `"both"` offers both. `dir` is an absolute agent-fs folder, required unless `source` is `"pick"`. Files use the viewer's own agent-fs key on the swarm's default drive, like `Files`.
-- On submit, chosen files upload first, create-only, to `<dir>/<timestamp>-<sanitized name>`; then the chain runs. `$form.<name>` is the stored path, or an array of paths with `multiple: true`. An upload failure (the error shows agent-fs's text, e.g. its size limit) stops the chain and keeps the form's values. Without an agent-fs connection the field shows a "Connect agent-fs" card, and a required file field disables submit.
+- On submit, chosen files upload first, create-only, to `<dir>/<timestamp>-<id>-<n>-<sanitized name>`: a random id per submit and a counter across all fields, so two fields or two submits never write the same path; then the chain runs. `$form.<name>` is the stored path, or an array of paths with `multiple: true`. An upload failure (the error shows agent-fs's text, e.g. its size limit) stops the chain and keeps the form's values. Without an agent-fs connection the field shows a "Connect agent-fs" card, and a required file field disables submit.
 - Values live at `/forms/<formId>/<fieldName>`. `onSubmit` is an action chain.
 - The submit button shows a pending spinner while the chain runs, and `app.mutate` failures in the chain render inline under the fields (not the page banner) — no extra wiring needed.
 
@@ -840,7 +840,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.
 - `swarm.call`: `{ method, endpoint: "/api/...", body? }`, where `method` is `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, or `"PATCH"`; raw authenticated API call.
 
-A failed step halts its chain: when `app.action`, `app.mutate`, `swarm.sdk` or `swarm.call` fails (a thrown error, a script action that returns `ok: false`, a non-2xx `swarm.call`), the steps after it do not run and the error shows as an error toast. So a `ui.toast` after a write is a real success message. A `Form`'s failed `app.mutate` shows inline under the fields instead of a toast. A task-backed `app.action` succeeds once the task is created; the task's own failure shows in the page banner and does not halt the chain. A Table bulk action reads each step's own outcome, as before.
+A failed step halts its chain: when `app.action`, `app.mutate`, `swarm.sdk` or `swarm.call` fails (a thrown error, a script action that returns `ok: false`, a non-2xx `swarm.call`), the steps after it do not run and the error shows as an error toast. A step's `onError` (`{ set }` or `{ action }`) runs first, and the chain still halts. So a `ui.toast` after a write is a real success message. A `Form`'s failed `app.mutate` shows inline under the fields instead of a toast. A task-backed `app.action` succeeds once the task is created; the task's own failure shows in the page banner and does not halt the chain. A Table bulk action reads each step's own outcome, as before.
 
 ## Patch semantics
 

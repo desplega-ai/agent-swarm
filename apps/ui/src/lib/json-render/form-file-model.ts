@@ -27,14 +27,29 @@ export function uploadTimestamp(now: Date): string {
   return now.toISOString().replace(/[-:.]/g, "");
 }
 
+/** 8 lowercase hex chars from the platform RNG: one per submit. */
+export function uploadNonce(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /**
- * `<dir>/<timestamp>-<sanitized name>`. Several files in one submit share the
- * timestamp, so each gets its position too.
+ * `<dir>/<timestamp>-<nonce>-<seq>-<sanitized name>`. Uploads are create-only,
+ * so every path in a submit must be distinct: `seq` numbers the files across
+ * ALL fields of the submit (two fields may share a folder and a file name),
+ * and the per-submit `nonce` keeps two submits in the same millisecond (two
+ * tabs, a retry) apart.
  */
-export function fileUploadPath(dir: string, name: string, now: Date, index = 0, count = 1): string {
+export function fileUploadPath(
+  dir: string,
+  name: string,
+  now: Date,
+  nonce: string,
+  seq: number,
+): string {
   const folder = dir.replace(/\/+$/, "");
-  const stamp = count > 1 ? `${uploadTimestamp(now)}-${index + 1}` : uploadTimestamp(now);
-  return `${folder}/${stamp}-${sanitizeFileName(name)}`;
+  return `${folder}/${uploadTimestamp(now)}-${nonce}-${seq}-${sanitizeFileName(name)}`;
 }
 
 /** The stored paths of a file field: its state value as a list. */
@@ -82,8 +97,12 @@ export async function resolveFileFields(input: {
   pending: PendingFiles;
   upload: UploadFn | null;
   now?: Date;
+  /** Test seam; defaults to a fresh `uploadNonce()` per call (per submit). */
+  nonce?: string;
 }): Promise<FileFieldResolution> {
   const now = input.now ?? new Date();
+  const nonce = input.nonce ?? uploadNonce();
+  let seq = 0;
   const values: Record<string, unknown> = {};
   const writes: Record<string, unknown> = {};
   const queued: { field: FormField; stored: string[]; files: File[] }[] = [];
@@ -104,8 +123,9 @@ export async function resolveFileFields(input: {
   }
   for (const { field, stored, files } of queued) {
     const uploaded: string[] = [];
-    for (const [index, file] of files.entries()) {
-      const path = fileUploadPath(field.dir as string, file.name, now, index, files.length);
+    for (const file of files) {
+      seq += 1;
+      const path = fileUploadPath(field.dir as string, file.name, now, nonce, seq);
       try {
         uploaded.push(await (input.upload as UploadFn)(path, file));
       } catch (error) {

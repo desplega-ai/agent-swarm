@@ -46,11 +46,11 @@ describe("file names", () => {
     expect(sanitizeFileName("???")).toBe("file");
   });
 
-  test("uploads land at <dir>/<timestamp>-<name>", () => {
-    expect(fileUploadPath("/apps/deals/uploads/", "a b.pdf", NOW)).toBe(
-      `/apps/deals/uploads/${STAMP}-a-b.pdf`,
+  test("uploads land at <dir>/<timestamp>-<nonce>-<seq>-<name>", () => {
+    expect(fileUploadPath("/apps/deals/uploads/", "a b.pdf", NOW, "n0", 1)).toBe(
+      `/apps/deals/uploads/${STAMP}-n0-1-a-b.pdf`,
     );
-    expect(fileUploadPath("/d", "x.png", NOW, 1, 2)).toBe(`/d/${STAMP}-2-x.png`);
+    expect(fileUploadPath("/d", "x.png", NOW, "n0", 2)).toBe(`/d/${STAMP}-n0-2-x.png`);
   });
 
   test("$form value: a path, or an array with multiple", () => {
@@ -70,8 +70,9 @@ describe("resolveFileFields (the submit step before the chain)", () => {
       pending,
       upload,
       now: NOW,
+      nonce: "n0",
     });
-    const path = `/apps/deals/uploads/${STAMP}-deal.pdf`;
+    const path = `/apps/deals/uploads/${STAMP}-n0-1-deal.pdf`;
     expect(log).toEqual([`upload ${path} (4b)`]);
     expect(result).toEqual({ ok: true, values: { contract: path }, writes: { contract: path } });
   });
@@ -94,6 +95,7 @@ describe("resolveFileFields (the submit step before the chain)", () => {
           return path;
         },
         now: NOW,
+        nonce: "n0",
       });
       if (result.ok) order.push(`chain $form.contract=${String(result.values.contract)}`);
     })();
@@ -104,7 +106,7 @@ describe("resolveFileFields (the submit step before the chain)", () => {
     expect(order).toEqual([
       "upload started",
       "upload done",
-      `chain $form.contract=/apps/deals/uploads/${STAMP}-a.pdf`,
+      `chain $form.contract=/apps/deals/uploads/${STAMP}-n0-1-a.pdf`,
     ]);
   });
 
@@ -116,11 +118,12 @@ describe("resolveFileFields (the submit step before the chain)", () => {
       pending: { contract: [new File(["1"], "a.pdf"), new File(["2"], "b.pdf")] },
       upload,
       now: NOW,
+      nonce: "n0",
     });
     expect(result.ok && result.values.contract).toEqual([
       "/apps/deals/old.pdf",
-      `/apps/deals/uploads/${STAMP}-1-a.pdf`,
-      `/apps/deals/uploads/${STAMP}-2-b.pdf`,
+      `/apps/deals/uploads/${STAMP}-n0-1-a.pdf`,
+      `/apps/deals/uploads/${STAMP}-n0-2-b.pdf`,
     ]);
   });
 
@@ -132,6 +135,7 @@ describe("resolveFileFields (the submit step before the chain)", () => {
       pending: { contract: [new File(["x"], "big.pdf")] },
       upload,
       now: NOW,
+      nonce: "n0",
     });
     expect(result).toEqual({
       ok: false,
@@ -148,9 +152,99 @@ describe("resolveFileFields (the submit step before the chain)", () => {
       pending: { contract: [new File(["x"], "a.pdf")], annex: [new File(["y"], "b.pdf")] },
       upload,
       now: NOW,
+      nonce: "n0",
     });
     expect(result.ok).toBe(false);
-    expect(result.writes).toEqual({ contract: `/apps/deals/uploads/${STAMP}-a.pdf` });
+    expect(result.writes).toEqual({ contract: `/apps/deals/uploads/${STAMP}-n0-1-a.pdf` });
+  });
+
+  // Create-only, like agent-fs `putRaw`: a second write to a path is a 409.
+  function createOnlyDrive() {
+    const stored = new Set<string>();
+    const upload = async (path: string) => {
+      if (stored.has(path)) throw new Error("409 Conflict: file already exists");
+      stored.add(path);
+      return path;
+    };
+    return { stored, upload };
+  }
+
+  test("two fields, same folder, same file name: distinct paths, no 409", async () => {
+    const drive = createOnlyDrive();
+    const annex: FormField = { ...contract, name: "annex", label: "Annex" };
+    const result = await resolveFileFields({
+      fields: [contract, annex],
+      read: () => undefined,
+      pending: { contract: [new File(["a"], "scan.pdf")], annex: [new File(["b"], "scan.pdf")] },
+      upload: drive.upload,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    expect(drive.stored.size).toBe(2);
+    expect(result.ok && result.values.contract).not.toBe(result.ok && result.values.annex);
+  });
+
+  test("two multiple fields with the same names in one folder do not collide", async () => {
+    const drive = createOnlyDrive();
+    const result = await resolveFileFields({
+      fields: [
+        { ...contract, multiple: true },
+        { ...contract, name: "annex", multiple: true },
+      ],
+      read: () => undefined,
+      pending: {
+        contract: [new File(["1"], "a.pdf"), new File(["2"], "b.pdf")],
+        annex: [new File(["3"], "a.pdf"), new File(["4"], "b.pdf")],
+      },
+      upload: drive.upload,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    expect(drive.stored.size).toBe(4);
+  });
+
+  test("two submits in the same millisecond do not collide", async () => {
+    const drive = createOnlyDrive();
+    const submit = () =>
+      resolveFileFields({
+        fields: [contract],
+        read: () => undefined,
+        pending: { contract: [new File(["x"], "deal.pdf")] },
+        upload: drive.upload,
+        now: NOW,
+      });
+    const [first, second] = await Promise.all([submit(), submit()]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(drive.stored.size).toBe(2);
+  });
+
+  test("a retry after a failed field uploads to fresh paths", async () => {
+    const drive = createOnlyDrive();
+    let failAnnex = true;
+    const upload = async (path: string, file: File) => {
+      if (failAnnex && file.name === "b.pdf") throw new Error("network down");
+      return drive.upload(path);
+    };
+    const annex: FormField = { ...contract, name: "annex", multiple: true };
+    const pending = { annex: [new File(["a"], "a.pdf"), new File(["b"], "b.pdf")] };
+    const first = await resolveFileFields({
+      fields: [annex],
+      read: () => undefined,
+      pending,
+      upload,
+      now: NOW,
+    });
+    expect(first.ok).toBe(false);
+    failAnnex = false;
+    const retry = await resolveFileFields({
+      fields: [annex],
+      read: () => undefined,
+      pending,
+      upload,
+      now: NOW,
+    });
+    expect(retry.ok).toBe(true);
   });
 
   test("a required field with nothing attached is an error, with no upload", async () => {

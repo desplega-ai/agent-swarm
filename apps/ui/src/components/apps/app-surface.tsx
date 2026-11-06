@@ -134,7 +134,13 @@ import {
   DEFINING_APP_PARAM,
   OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
-import { haltChain, installChainHaltGuard, isChainHalt } from "@/lib/json-render/chain-halt";
+import {
+  haltChain,
+  installChainHaltGuard,
+  isChainHalt,
+  withChainOnError,
+  withChainOnErrorHandlers,
+} from "@/lib/json-render/chain-halt";
 import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
@@ -622,13 +628,14 @@ export function AppSurface({
   // namespaced ids, `/refs/<definingAppId>` data refs) so `<Renderer>` and the
   // component catalog stay stock. Memoized so the `Renderer` keeps hitting its
   // own spec-identity memo across the 5s poll re-renders.
-  const assembled = useMemo(
-    () =>
-      assemblePageSpec(app, activePageName, resolvedApps, {
-        pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
-      }),
-    [app, activePageName, resolvedApps, pendingAppIds],
-  );
+  const assembled = useMemo(() => {
+    const result = assemblePageSpec(app, activePageName, resolvedApps, {
+      pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
+    });
+    // Each binding's `onError` moves into its params, so a failed step still
+    // halts its chain (see `withChainOnError`).
+    return result.spec ? { ...result, spec: withChainOnError(result.spec) } : result;
+  }, [app, activePageName, resolvedApps, pendingAppIds]);
   const activeSpec = assembled.spec;
   // `layout: "sidebar"`: the page's `headerActions` subtree, rendered as a
   // second root (same elements, same state) in the shell's sticky header.
@@ -1125,11 +1132,15 @@ export function AppSurface({
     });
     return {
       registry,
-      handlers: handlers(
-        () => () => {
-          /* no-op SetState — handlers write through `store` / React state. */
-        },
-        () => ({}),
+      // A step's `onError` runs here and still halts its chain (`withChainOnError`).
+      handlers: withChainOnErrorHandlers(
+        handlers(
+          () => () => {
+            /* no-op SetState — handlers write through `store` / React state. */
+          },
+          () => ({}),
+        ),
+        { set: (path, value) => ctxRef.current.store.set(path, value) },
       ),
     };
   }, []);
