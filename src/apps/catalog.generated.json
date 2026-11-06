@@ -16,6 +16,7 @@
     "NumberInput",
     "Button",
     "Metric",
+    "Chart",
     "Alert",
     "Badge",
     "Icon",
@@ -623,7 +624,7 @@
       }
     },
     "Metric": {
-      "description": "Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: \"up\"|\"down\"|\"flat\", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ \"$state\": \"/queries/<name>/loading\" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash.",
+      "description": "Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: \"up\"|\"down\"|\"flat\", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ \"$state\": \"/queries/<name>/loading\" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ \"$state\": \"/queries/<name>/data\" }`) read through `sparklineKey`. Fewer than two points draws nothing.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -714,9 +715,127 @@
             },
             "required": ["direction", "label"],
             "additionalProperties": false
+          },
+          "sparkline": {
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              ]
+            }
+          },
+          "sparklineKey": {
+            "type": "string"
           }
         },
         "required": ["label", "value"],
+        "additionalProperties": false
+      }
+    },
+    "Chart": {
+      "description": "Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: \"category\"` (default) keeps row order, `\"time\"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `height` px (120-640, default 240). No rows renders `emptyMessage` (default \"No data yet\"). Wrap it in a `Card` for a title.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["line", "area", "bar"]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": ["string", "null"]
+          },
+          "x": {
+            "type": "string"
+          },
+          "xType": {
+            "type": "string",
+            "enum": ["category", "time"]
+          },
+          "series": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string",
+                  "enum": [
+                    "chart-1",
+                    "chart-2",
+                    "chart-3",
+                    "chart-4",
+                    "chart-5",
+                    "primary",
+                    "success",
+                    "warning",
+                    "error",
+                    "info",
+                    "muted"
+                  ]
+                }
+              },
+              "required": ["key"],
+              "additionalProperties": false
+            }
+          },
+          "stacked": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["number", "currency", "percent"]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 640
+          },
+          "legend": {
+            "type": "boolean"
+          },
+          "emptyMessage": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "x", "series"],
         "additionalProperties": false
       }
     },

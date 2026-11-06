@@ -211,8 +211,18 @@ export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<
 /** Set of MCP tool names (values of SDK_TOOL_NAME_MAP) that scripts may call via the bridge. */
 const MCP_TOOL_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SDK_TOOL_NAME_MAP));
 
+/**
+ * SDK methods backed by a REST route with no MCP tool, mapped in `bridgeRequestFor`.
+ * Scripts only: they are not in SDK_TOOL_NAME_MAP, so the MCP bridge, the workflow
+ * capability list and the MCP-tool registration check never see them.
+ */
+export const REST_ONLY_SDK_METHODS = ["savings_calibrationGet", "savings_calibrationRun"] as const;
+
 export function isSdkToolAllowed(name: string): boolean {
-  return (SDK_ALLOWLIST as readonly string[]).includes(name);
+  return (
+    (SDK_ALLOWLIST as readonly string[]).includes(name) ||
+    (REST_ONLY_SDK_METHODS as readonly string[]).includes(name)
+  );
 }
 
 /** True if `mcpToolName` (e.g. "trigger-workflow") corresponds to an allowlisted SDK method. */

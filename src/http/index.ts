@@ -133,6 +133,7 @@ import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
 import { handleSavings, savingsRollupSql } from "./savings";
+import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -431,6 +432,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
         () => handleSavings(req, res, pathSegments, queryParams),
+        () => handleSavingsCalibration(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),

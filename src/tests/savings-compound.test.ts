@@ -11,13 +11,20 @@ import {
   getDbClient,
   initDb,
   recordInlineScriptRun,
+  upsertSwarmConfig,
 } from "../be/db";
 import type { SavingsSql } from "../be/savings/compute";
-import { MODEL_VERSION } from "../be/savings/model";
+import {
+  CURVE,
+  type CurveSet,
+  MODEL_VERSION,
+  SAVINGS_CALIBRATION_KEY,
+  SAVINGS_TIERS,
+} from "../be/savings/model";
 import { readScriptSavings, readWorkflowComponents, readWorkflowSavings } from "../be/savings/read";
 import { resetSavingsRollupForTests, runSavingsRollupTick } from "../be/savings/rollup";
 import { mintScriptRunToken, resolveSessionToken } from "../be/users";
-import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
+import { clearCalibrationCache, handleSavings, resetSavingsRefreshCache } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
@@ -375,6 +382,51 @@ describe("savings with components", () => {
       ]),
     );
     expect(body.components).toHaveLength(3);
+  });
+
+  test("a stored deployment curve prices the components as it prices the root", async () => {
+    const deployed = Object.fromEntries(
+      SAVINGS_TIERS.map((t) => [
+        t,
+        { usd: CURVE[t].usd.map((v, i) => v * 3 + i * 0.01), hrs: CURVE[t].hrs },
+      ]),
+    ) as CurveSet;
+    const expectedTree = async (set?: CurveSet) => {
+      const now = Date.now();
+      const workflows = await readWorkflowSavings({ days: 7, tier: "smart", now, curve: set });
+      const scripts = await readScriptSavings({ days: 7, tier: "smart", now, curve: set });
+      const row = (id: string) => workflows.rows.find((r) => r.workflowId === id)!;
+      const helper = scripts.rows.find((r) => r.scriptName === "compound-helper")!;
+      return (
+        row(root).savingUsd.p50 +
+        row(child).savingUsd.p50 +
+        (row(grandchild).savingUsd.p50 * 4) / 5 +
+        helper.savingUsd.p50
+      );
+    };
+    try {
+      await upsertSwarmConfig({
+        scope: "global",
+        key: SAVINGS_CALIBRATION_KEY,
+        value: JSON.stringify({
+          calibratedAt: "2026-12-01",
+          model: "claude-opus-5-5",
+          curve: deployed,
+        }),
+      });
+      clearCalibrationCache();
+      resetSavingsRefreshCache();
+      const { body } = await get(`workflowId=${root}&components=true&days=7`);
+      expect(body.calibrationSource).toBe("deployment");
+      const shipped = await expectedTree();
+      const withCurve = await expectedTree(deployed);
+      expect(withCurve).toBeGreaterThan(shipped * 2);
+      expect(body.withComponents.savingUsd.p50).toBeCloseTo(withCurve, 1);
+    } finally {
+      await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [SAVINGS_CALIBRATION_KEY]);
+      clearCalibrationCache();
+      resetSavingsRefreshCache();
+    }
   });
 
   test("unowned tasks show on their workflow and count in its own row", async () => {

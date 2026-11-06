@@ -48,7 +48,9 @@ function calibrationNote(data: SavingsJobsResponse): string {
     year: "numeric",
     timeZone: "UTC",
   });
-  return `Modelled at ${TIER_MODEL[data.tier]} (${data.tier}), calibrated ${day}.`;
+  const source =
+    data.calibrationSource === "deployment" ? "this swarm's own sessions" : "shipped curve";
+  return `Modelled at ${TIER_MODEL[data.tier]} (${data.tier}), calibrated ${day} (${source}).`;
 }
 
 const isScript = (row: SavingsJobRow) => row.kind !== "workflow";
