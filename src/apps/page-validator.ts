@@ -55,6 +55,7 @@ const UI_STATE_COMPONENTS = new Set([
   "Tree",
   "SchemaForm",
   "Table",
+  "DateRange",
 ]);
 
 // A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
@@ -74,6 +75,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
   Files: ["onSelect"],
+  Timeline: ["onSelect"],
 };
 
 /**
@@ -1346,6 +1348,13 @@ function chartPropIssues(
       seen.add(entry.key);
     }
   }
+  if (
+    (props.kind === "pie" || props.kind === "donut") &&
+    Array.isArray(props.series) &&
+    props.series.length !== 1
+  ) {
+    issues.push(issue(`${propsPath}.series`, `kind "${props.kind}" takes exactly one series`));
+  }
   if (typeof props.currency === "string" && !/^[A-Z]{3}$/.test(props.currency)) {
     issues.push(issue(`${propsPath}.currency`, "must be an ISO 4217 code like USD"));
   }
@@ -1391,13 +1400,64 @@ function agentFsPropIssues(
 ): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
   const propsPath = `${elementPath}.props`;
-  if (
-    typeof props.path === "string" &&
-    (!props.path.startsWith("/") || props.path.split("/").includes(".."))
-  ) {
+  if (typeof props.path === "string" && !isAgentFsPath(props.path)) {
     issues.push(issue(`${propsPath}.path`, 'must be an absolute agent-fs path without ".."'));
   }
   if (type === "Files") collectFileRowIssues(props.onSelect, `${propsPath}.onSelect`, issues);
+  return issues;
+}
+
+function isAgentFsPath(value: string): boolean {
+  return value.startsWith("/") && !value.split("/").includes("..");
+}
+
+/**
+ * Form `kind: "file"` fields: `dir` is required unless `source: "pick"`, and
+ * a literal `dir` follows the `File` / `Files` path rules.
+ */
+function formFileFieldIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (!Array.isArray(props.fields)) return issues;
+  for (const [index, field] of props.fields.entries()) {
+    if (!isPlainObject(field) || field.kind !== "file") continue;
+    const fieldPath = `${elementPath}.props.fields.${index}`;
+    if (field.dir === undefined && field.source !== "pick") {
+      issues.push(issue(`${fieldPath}.dir`, 'is required for kind "file" unless source is "pick"'));
+    } else if (typeof field.dir === "string" && !isAgentFsPath(field.dir)) {
+      issues.push(issue(`${fieldPath}.dir`, 'must be an absolute agent-fs path without ".."'));
+    }
+  }
+  return issues;
+}
+
+/** `DateRange`: a plain-token id (it roots `/ui/<id>/from|to`) and a listed `defaultPreset`. */
+function dateRangePropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (
+    typeof props.id === "string" &&
+    (!SCHEMA_FORM_ID.test(props.id) || RESERVED_UI_IDS.has(props.id))
+  ) {
+    issues.push(
+      issue(
+        `${propsPath}.id`,
+        "DateRange id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+      ),
+    );
+  }
+  if (
+    Array.isArray(props.presets) &&
+    typeof props.defaultPreset === "string" &&
+    !props.presets.includes(props.defaultPreset)
+  ) {
+    issues.push(issue(`${propsPath}.defaultPreset`, "must be one of the listed presets"));
+  }
   return issues;
 }
 
@@ -1574,6 +1634,8 @@ export function validatePage(
       if (type === "File" || type === "Files") {
         issues.push(...agentFsPropIssues(type, rawElement.props, elementPath));
       }
+      if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
+      if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;

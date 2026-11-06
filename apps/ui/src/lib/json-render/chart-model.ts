@@ -143,3 +143,37 @@ export function sparklineValues(raw: unknown, key: string | undefined): (number 
   );
   return values.filter((value) => value !== null).length >= 2 ? values : [];
 }
+
+/** One pie or donut slice: the row's `x` label, its value and its share of the total. */
+export type PieSlice = { label: string; value: number; percent: number; color: string };
+
+/**
+ * Rows → pie slices, in row order. `x` is the slice label and `key` the one
+ * series value. A slice needs a positive number: zero, negative and missing
+ * values draw nothing, so they are dropped before the shares are computed.
+ */
+export function toPieSlices(
+  rows: readonly Record<string, unknown>[],
+  x: string,
+  key: string,
+): PieSlice[] {
+  const kept: { label: string; value: number }[] = [];
+  for (const row of rows) {
+    const value = toNumber(row[key]);
+    if (value === null || value <= 0) continue;
+    const raw = row[x];
+    kept.push({ label: raw === null || raw === undefined ? "" : String(raw), value });
+  }
+  const total = kept.reduce((sum, slice) => sum + slice.value, 0);
+  return kept.map((slice, index) => ({
+    ...slice,
+    percent: slice.value / total,
+    color: seriesColor(undefined, index),
+  }));
+}
+
+/** Slice label text: the share as a whole percent, `<1%` for a sliver. */
+export function pieShareLabel(percent: number): string {
+  if (percent > 0 && percent < 0.005) return "<1%";
+  return `${Math.round(percent * 100)}%`;
+}

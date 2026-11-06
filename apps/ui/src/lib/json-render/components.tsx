@@ -199,9 +199,13 @@ import type {
   TableRowAction,
   TableRowActionConfirm,
   TabsTab,
+  TimelineProps,
 } from "./catalog";
 import { ChartComponent, Sparkline } from "./chart";
+import { DateRangeComponent, TimelineView } from "./data-views";
 import { type FilesProps, FilesView, FileView } from "./files";
+import { FormFileField, useFormFileUploader } from "./form-file";
+import { filePaths, isFileField, type PendingFiles, resolveFileFields } from "./form-file-model";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import {
@@ -2765,8 +2769,13 @@ function FormComponent({ props }: { props: FormProps }) {
   const themeAttr = useJsonRenderThemeAttr();
   const [submitting, setSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Local files chosen for `kind: "file"` fields; they upload on submit.
+  const [pendingFiles, setPendingFiles] = useState<PendingFiles>({});
+  const upload = useFormFileUploader();
 
   const fields = (props.fields ?? []) as FormField[];
+  // A required file field cannot be filled without agent-fs.
+  const blockedByConnection = upload === null && fields.some((f) => isFileField(f) && f.required);
   const basePath = `/forms/${props.id}`;
   // Read through the reactive `state` snapshot (not `get()`) so a cleared form
   // — `app.mutate` sets `/forms/<id>` to `{}` after a create — re-renders.
@@ -2781,6 +2790,7 @@ function FormComponent({ props }: { props: FormProps }) {
   const submit = async () => {
     const values: Record<string, unknown> = {};
     for (const field of fields) {
+      if (isFileField(field)) continue;
       const value = coerceFieldValue(field, get(`${basePath}/${field.name}`));
       if (field.required && (value === undefined || value === "")) {
         setValidationError(`${field.label ?? field.name} is required`);
@@ -2792,6 +2802,31 @@ function FormComponent({ props }: { props: FormProps }) {
     set(`${basePath}/$error`, null);
     setSubmitting(true);
     try {
+      // Upload pending files before the chain: `$form.<name>` carries their paths.
+      if (fields.some(isFileField)) {
+        const resolved = await resolveFileFields({
+          fields,
+          read: (name) => get(`${basePath}/${name}`),
+          pending: pendingFiles,
+          upload,
+        });
+        for (const [name, value] of Object.entries(resolved.writes)) {
+          set(`${basePath}/${name}`, value);
+        }
+        if (Object.keys(resolved.writes).length > 0) {
+          setPendingFiles((prev) => {
+            const next = { ...prev };
+            for (const name of Object.keys(resolved.writes)) delete next[name];
+            return next;
+          });
+        }
+        if (!resolved.ok) {
+          setValidationError(resolved.error);
+          toast.error(resolved.error);
+          return;
+        }
+        Object.assign(values, resolved.values);
+      }
       const scope = { form: values, state: getSnapshot() };
       let mutated = false;
       for (const binding of props.onSubmit as ActionChain) {
@@ -2847,7 +2882,21 @@ function FormComponent({ props }: { props: FormProps }) {
             htmlFor={inputId}
             required={field.required}
           >
-            {kind === "text" ? (
+            {kind === "file" ? (
+              <FormFileField
+                field={field}
+                inputId={inputId}
+                paths={filePaths(value)}
+                files={pendingFiles[field.name] ?? []}
+                onChange={(next) => {
+                  set(
+                    `${basePath}/${field.name}`,
+                    field.multiple === true ? next.paths : (next.paths[0] ?? null),
+                  );
+                  setPendingFiles((prev) => ({ ...prev, [field.name]: next.files }));
+                }}
+              />
+            ) : kind === "text" ? (
               <Textarea
                 id={inputId}
                 value={value === undefined || value === null ? "" : String(value)}
@@ -2894,7 +2943,7 @@ function FormComponent({ props }: { props: FormProps }) {
         </AlertCallout>
       ) : null}
       <div>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting || blockedByConnection}>
           {submitting ? <Spinner className="size-3.5" /> : null}
           {props.submitLabel ?? "Submit"}
         </Button>
@@ -3242,6 +3291,22 @@ function FilesComponent({ props }: { props: FilesProps }) {
     <FilesView
       props={props}
       onSelect={(row) => void runChain(props.onSelect as ActionChain | undefined, { ...row })}
+    />
+  );
+}
+
+/** `Timeline` with its `onSelect` chain run with `$row` / `$rowIndex`. */
+function TimelineComponent({ props }: { props: TimelineProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <TimelineView
+      props={props}
+      onSelect={(row, index) =>
+        void runChain(props.onSelect as ActionChain | undefined, row, index)
+      }
+      renderStatus={(value, tones) => (
+        <StatusCell value={value} tones={tones as Record<string, BadgeTone> | undefined} />
+      )}
     />
   );
 }
@@ -4174,5 +4239,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Tree: ({ props }) => <TreeComponent props={props} />,
   Files: ({ props }) => <FilesComponent props={props} />,
   File: ({ props }) => <FileView props={props} />,
+  DateRange: ({ props }) => <DateRangeComponent props={props} />,
+  Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
 };

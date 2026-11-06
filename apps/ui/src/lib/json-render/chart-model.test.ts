@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   chartValueFormatter,
+  pieShareLabel,
   seriesColor,
   sparklineValues,
   timeTickFormatter,
   toChartPoints,
+  toPieSlices,
   toTimestamp,
 } from "./chart-model";
 
@@ -89,5 +91,53 @@ describe("timeTickFormatter", () => {
 
   test("points within one day show the clock only", () => {
     expect(ticks([at(3, 9), at(3, 17, 45)])).toEqual(["09:00", "17:45"]);
+  });
+});
+
+describe("toPieSlices", () => {
+  test("keeps row order, labels slices by x and computes shares", () => {
+    const slices = toPieSlices(
+      [
+        { agent: "lead", spend: 30 },
+        { agent: "coder", spend: "10" },
+        { agent: null, spend: 60 },
+      ],
+      "agent",
+      "spend",
+    );
+    expect(slices.map((s) => [s.label, s.value, s.percent])).toEqual([
+      ["lead", 30, 0.3],
+      ["coder", 10, 0.1],
+      ["", 60, 0.6],
+    ]);
+    expect(slices[0]?.color).toBe("var(--color-primary)");
+    expect(slices[1]?.color).toBe("var(--color-chart-2)");
+  });
+
+  test("drops zero, negative and non-numeric values before the shares", () => {
+    const slices = toPieSlices(
+      [
+        { k: "a", v: 0 },
+        { k: "b", v: -4 },
+        { k: "c", v: "x" },
+        { k: "d", v: 5 },
+      ],
+      "k",
+      "v",
+    );
+    expect(slices).toHaveLength(1);
+    expect(slices[0]?.percent).toBe(1);
+  });
+
+  test("no rows → no slices", () => {
+    expect(toPieSlices([], "k", "v")).toEqual([]);
+  });
+});
+
+describe("pieShareLabel", () => {
+  test("whole percents, with <1% for a sliver", () => {
+    expect(pieShareLabel(0.426)).toBe("43%");
+    expect(pieShareLabel(1)).toBe("100%");
+    expect(pieShareLabel(0.001)).toBe("<1%");
   });
 });

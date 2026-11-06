@@ -22,6 +22,7 @@ import { isAccessDenied, useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-ag
 import { ConnectCard } from "@/components/comb/connect-card";
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileKindIcon } from "@/components/comb/file-icon";
+import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
 import { VIEWERS } from "@/components/comb/viewers/file-viewer";
 import { TextGate } from "@/components/comb/viewers/text-gate";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
@@ -57,7 +58,7 @@ function isNotFound(error: unknown): boolean {
 // ─── Connection gate ────────────────────────────────────────────────────────
 
 /** Renders `children` with the swarm drive once the viewer's agent-fs key works. */
-function AgentFsGate({ children }: { children: (drive: Drive) => ReactNode }) {
+export function AgentFsGate({ children }: { children: (drive: Drive) => ReactNode }) {
   const agentFs = useOptionalAgentFs();
   if (!agentFs || agentFs.state === "disabled") {
     return <EmptyState compact icon={HardDrive} title="agent-fs is not set up on this swarm" />;
@@ -252,39 +253,75 @@ function FilesList({
     content = <ViewerSkeleton />;
   }
 
+  const upload = props.upload === true;
+  const crumbs = browser && folder !== root;
+  const list = (
+    <div
+      className={cn("min-w-0 overflow-y-auto", fill && "min-h-0 flex-1")}
+      style={fill ? undefined : { maxHeight: props.maxHeight ?? "480px" }}
+    >
+      {content}
+    </div>
+  );
+
   return (
     <>
-      {browser && folder !== root ? (
-        <nav aria-label="Folder" className="flex flex-wrap items-center gap-1 border-b px-3 py-2">
-          {folderCrumbs(root, folder).map((crumb, index, all) => (
-            <span key={crumb.path} className="flex items-center gap-1 text-sm">
-              {index > 0 ? (
-                <ChevronRight aria-hidden className="size-3 text-muted-foreground" />
-              ) : null}
-              {index === all.length - 1 ? (
-                <span aria-current="location" className="font-medium">
-                  {crumb.label}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => setOpened({ root, folder: crumb.path })}
-                >
-                  {crumb.label}
-                </button>
-              )}
-            </span>
-          ))}
-        </nav>
+      {crumbs || upload ? (
+        <div className="flex items-center gap-2 border-b px-3 py-1.5">
+          {crumbs ? (
+            <FolderCrumbs
+              root={root}
+              folder={folder}
+              onOpen={(path) => setOpened({ root, folder: path })}
+            />
+          ) : (
+            <span className="flex-1" />
+          )}
+          {upload ? <UploadButton folder={{ ...drive, path: folder }} /> : null}
+        </div>
       ) : null}
-      <div
-        className={cn("min-w-0 overflow-y-auto", fill && "min-h-0 flex-1")}
-        style={fill ? undefined : { maxHeight: props.maxHeight ?? "480px" }}
-      >
-        {content}
-      </div>
+      {upload ? (
+        <>
+          <UploadDropZone folder={{ ...drive, path: folder }}>{list}</UploadDropZone>
+          <UploadList />
+        </>
+      ) : (
+        list
+      )}
     </>
+  );
+}
+
+function FolderCrumbs({
+  root,
+  folder,
+  onOpen,
+}: {
+  root: string;
+  folder: string;
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <nav aria-label="Folder" className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-0.5">
+      {folderCrumbs(root, folder).map((crumb, index, all) => (
+        <span key={crumb.path} className="flex items-center gap-1 text-sm">
+          {index > 0 ? <ChevronRight aria-hidden className="size-3 text-muted-foreground" /> : null}
+          {index === all.length - 1 ? (
+            <span aria-current="location" className="font-medium">
+              {crumb.label}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => onOpen(crumb.path)}
+            >
+              {crumb.label}
+            </button>
+          )}
+        </span>
+      ))}
+    </nav>
   );
 }
 

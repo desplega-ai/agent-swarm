@@ -14,6 +14,8 @@ import {
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -25,11 +27,14 @@ import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
 import type { ChartProps } from "./catalog";
 import {
   chartValueFormatter,
+  type PieSlice,
+  pieShareLabel,
   seriesColor,
   sparklineValues,
   timeLabelFormatter,
   timeTickFormatter,
   toChartPoints,
+  toPieSlices,
 } from "./chart-model";
 
 const AXIS_TICK = { fontSize: 10, fill: "var(--color-muted-foreground)" };
@@ -40,10 +45,23 @@ export function ChartComponent({ props }: { props: ChartProps }) {
   const xType = props.xType ?? "category";
   const series = props.series ?? [];
   const seriesKeys = useMemo(() => series.map((entry) => entry.key), [series]);
+  const radial = props.kind === "pie" || props.kind === "donut";
   const points = useMemo(
-    () => toChartPoints(Array.isArray(props.data) ? props.data : [], props.x, xType, seriesKeys),
-    [props.data, props.x, xType, seriesKeys],
+    () =>
+      radial
+        ? []
+        : toChartPoints(Array.isArray(props.data) ? props.data : [], props.x, xType, seriesKeys),
+    [radial, props.data, props.x, xType, seriesKeys],
   );
+  // Pie and donut plot the first series only (the validator requires exactly one).
+  const slices = useMemo(
+    () =>
+      radial && seriesKeys[0]
+        ? toPieSlices(Array.isArray(props.data) ? props.data : [], props.x, seriesKeys[0])
+        : [],
+    [radial, props.data, props.x, seriesKeys],
+  );
+  const empty = radial ? slices.length === 0 : points.length === 0;
 
   if (props.error) {
     return (
@@ -54,14 +72,14 @@ export function ChartComponent({ props }: { props: ChartProps }) {
       </div>
     );
   }
-  if (props.loading && points.length === 0) {
+  if (props.loading && empty) {
     return (
       <div data-testid="json-render-chart">
         <Skeleton className="w-full" style={{ height }} />
       </div>
     );
   }
-  if (points.length === 0) {
+  if (empty) {
     return (
       <div
         className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border text-sm text-muted-foreground"
@@ -76,6 +94,17 @@ export function ChartComponent({ props }: { props: ChartProps }) {
 
   const tickValue = chartValueFormatter(props.format, props.currency, true);
   const tooltipValue = chartValueFormatter(props.format, props.currency);
+  if (radial) {
+    return (
+      <PieView
+        slices={slices}
+        donut={props.kind === "donut"}
+        height={height}
+        legend={props.legend ?? true}
+        formatValue={tooltipValue}
+      />
+    );
+  }
   const timeAxis = xType === "time";
   // Bars need a band axis; lines and areas get a true time scale (gaps stay gaps).
   const numericTime = timeAxis && props.kind !== "bar";
@@ -186,6 +215,67 @@ export function ChartComponent({ props }: { props: ChartProps }) {
     <div className="min-w-0" data-testid="json-render-chart">
       <ResponsiveContainer width="100%" height={height}>
         {chart}
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/**
+ * Pie or donut over the slices. Each slice is labelled with its share; the
+ * tooltip shows the value in the Chart's `format`, plus the share.
+ */
+function PieView({
+  slices,
+  donut,
+  height,
+  legend,
+  formatValue,
+}: {
+  slices: PieSlice[];
+  donut: boolean;
+  height: number;
+  legend: boolean;
+  formatValue: (value: number) => string;
+}) {
+  const data = slices.map((slice) => ({ ...slice, fill: slice.color }));
+  return (
+    <div
+      className="min-w-0"
+      data-testid="json-render-chart"
+      data-chart-kind={donut ? "donut" : "pie"}
+    >
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="label"
+            innerRadius={donut ? "55%" : 0}
+            outerRadius="80%"
+            stroke="var(--color-card)"
+            strokeWidth={1}
+            label={({ payload }: { payload?: PieSlice }) =>
+              payload ? pieShareLabel(payload.percent) : ""
+            }
+            labelLine={false}
+            isAnimationActive={false}
+          />
+          <Tooltip
+            contentStyle={rechartsTooltipStyle}
+            formatter={(value, _name, item) => {
+              const slice = (item as { payload?: PieSlice } | undefined)?.payload;
+              const text = typeof value === "number" ? formatValue(value) : String(value);
+              return slice ? `${text} (${pieShareLabel(slice.percent)})` : text;
+            }}
+          />
+          {legend ? (
+            <Legend
+              iconSize={10}
+              wrapperStyle={{ fontSize: 12 }}
+              formatter={(value) => <span className="text-muted-foreground">{value}</span>}
+            />
+          ) : null}
+        </PieChart>
       </ResponsiveContainer>
     </div>
   );

@@ -80,6 +80,20 @@ mock.module("@/components/comb/file-actions", () => ({
   OpenInAgentFsButton: () => <a href="https://live.example/x">Open in agent-fs</a>,
 }));
 mock.module("@/components/comb/file-icon", () => ({ FileKindIcon: () => <span /> }));
+// The real upload zone needs Comb's provider and query client; record its folder instead.
+mock.module("@/components/comb/upload-zone", () => ({
+  UploadButton: ({ folder }: { folder: { path: string } }) => (
+    <button type="button" data-testid="upload-button" data-folder={folder.path}>
+      Upload
+    </button>
+  ),
+  UploadDropZone: ({ folder, children }: { folder: { path: string }; children: ReactNode }) => (
+    <div data-testid="upload-drop-zone" data-folder={folder.path}>
+      {children}
+    </div>
+  ),
+  UploadList: () => <div data-testid="upload-list" />,
+}));
 const viewer =
   (kind: string) =>
   ({ file }: { file: { path: string } }) =>
@@ -249,6 +263,25 @@ describe("Files", () => {
     expect(rowNames(host)).toEqual(["setup.md"]);
     const current = host.querySelector('[aria-current="true"]');
     expect(current?.textContent).toContain("setup.md");
+  });
+
+  test("upload: true drops and uploads into the open folder", async () => {
+    const { host } = await mountFiles({ mode: "browser", upload: true });
+    const zone = () => host.querySelector('[data-testid="upload-drop-zone"]');
+    expect(zone()?.getAttribute("data-folder")).toBe("/apps/docs/");
+    expect(zone()?.querySelectorAll('[data-testid="app-files-row"]').length).toBe(3);
+    expect(host.querySelector('[data-testid="upload-list"]')).not.toBeNull();
+    await click(host.querySelector('[data-testid="app-files-row"]'));
+    expect(zone()?.getAttribute("data-folder")).toBe("/apps/docs/guides/");
+    expect(host.querySelector('[data-testid="upload-button"]')?.getAttribute("data-folder")).toBe(
+      "/apps/docs/guides/",
+    );
+  });
+
+  test("without upload there is no drop zone or Upload button", async () => {
+    const { host } = await mountFiles();
+    expect(host.querySelector('[data-testid="upload-drop-zone"]')).toBeNull();
+    expect(host.querySelector('[data-testid="upload-button"]')).toBeNull();
   });
 
   test("a missing folder shows the empty message", async () => {
