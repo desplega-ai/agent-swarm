@@ -9,7 +9,7 @@ import {
   initDb,
 } from "../be/db";
 import { emptyFacts } from "../be/savings/compute";
-import { readFleetSavings } from "../be/savings/read";
+import { readFleetSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   resetSavingsRollupForTests,
   utcDay,
@@ -168,6 +168,8 @@ describe("savings fleet read", () => {
       await getDbClient().run(
         "DELETE FROM automation_savings_daily WHERE jobId IN ('wf-b','fleet-poll','fleet-helper')",
       );
+      // A raw write skips the rollup's generation bump.
+      resetSavingsReadCache();
       const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
       const [row] = read.workflows;
       expect(read.scripts).toHaveLength(0);

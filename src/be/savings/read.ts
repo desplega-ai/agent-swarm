@@ -23,7 +23,7 @@ import {
   splitScriptByDay,
   type WorkflowFacts,
 } from "./model";
-import { dayStartIso, SAVINGS_FACT_COLUMNS, utcDay } from "./rollup";
+import { dayStartIso, SAVINGS_FACT_COLUMNS, savingsRollupGeneration, utcDay } from "./rollup";
 
 const DAY_MS = 86_400_000;
 
@@ -103,6 +103,87 @@ export function savingsWindow(days: number, now: number): SavingsWindow & { firs
 
 const isRetired = (name: string) => /-retired-\d{4}-\d{2}-\d{2}$/.test(name);
 
+/** At most this many UTC days of buckets per synchronous query. */
+const CHUNK_DAYS = 3;
+/** Jobs priced between two event-loop yields. */
+const PRICE_BATCH = 100;
+/** A cached fleet read is reused at most this long, even when nothing bumped. */
+const FLEET_CACHE_TTL_MS = 60_000;
+
+const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/**
+ * Run a bucket query over the window in CHUNK_DAYS slices and fold each slice
+ * with `onRows`, yielding to the event loop between them: a fleet window is
+ * ~100k rows, and one synchronous read and fold of them stalls every other
+ * request. `params` gets each slice's bounds; slices arrive oldest first.
+ */
+async function forEachDayChunk<T>(
+  sql: string,
+  params: (from: string, to: string) => DbParam[],
+  firstDay: string,
+  lastDay: string,
+  onRows: (rows: T[]) => void,
+): Promise<void> {
+  for (let from = firstDay; from <= lastDay; ) {
+    const toMs = Math.min(
+      Date.parse(dayStartIso(from)) + (CHUNK_DAYS - 1) * DAY_MS,
+      Date.parse(dayStartIso(lastDay)),
+    );
+    if (from !== firstDay) await yieldLoop();
+    onRows(await getDbClient().query<T>(sql, params(from, utcDay(toMs))));
+    from = utcDay(toMs + DAY_MS);
+  }
+}
+
+/** The priced part of a read, shared by every band: the band only picks the total. */
+type PricedCore<R> = {
+  computedAt: string | null;
+  rows: R[];
+  jobTotal: SavingsTotals | null;
+  fleetTotal: SavingsTotals | null;
+  points: SavingsDailyPoint[];
+};
+
+type FleetCacheEntry = { fingerprint: string; at: number; value: Promise<PricedCore<unknown>> };
+const fleetCache = new Map<string, FleetCacheEntry>();
+let fleetLoads = 0;
+
+/** Test hook: forget cached fleet reads. */
+export function resetSavingsReadCache(): void {
+  fleetCache.clear();
+  fleetLoads = 0;
+}
+
+/** Test hook: how many fleet reads hit the database since the last reset. */
+export const savingsFleetLoads = (): number => fleetLoads;
+
+/**
+ * One load per window, tier and rollup state: concurrent readers (the fleet
+ * page fires four) share the in-flight promise, and later ones reuse the
+ * result until a rollup write changes the fingerprint or the TTL runs out.
+ */
+function cachedFleet<R>(
+  key: string,
+  fingerprint: string,
+  load: () => Promise<PricedCore<R>>,
+): Promise<PricedCore<R>> {
+  const now = Date.now();
+  const hit = fleetCache.get(key);
+  if (hit && hit.fingerprint === fingerprint && now - hit.at < FLEET_CACHE_TTL_MS) {
+    return hit.value as Promise<PricedCore<R>>;
+  }
+  for (const [k, e] of fleetCache) if (now - e.at >= FLEET_CACHE_TTL_MS) fleetCache.delete(k);
+  fleetLoads++;
+  const value = load();
+  const entry: FleetCacheEntry = { fingerprint, at: now, value };
+  fleetCache.set(key, entry);
+  value.catch(() => {
+    if (fleetCache.get(key) === entry) fleetCache.delete(key);
+  });
+  return value;
+}
+
 /**
  * Price the workflows of a window from the rollup: every workflow when
  * `workflowId` is absent, else that one (its job's other versions still share
@@ -124,54 +205,83 @@ export async function readWorkflowSavings(opts: {
     [MODEL_VERSION, firstDay, lastDay],
   );
   const complete = Number(marker?.n) >= opts.days;
+  const markerAt = marker?.at ?? null;
+  const scope = { days: opts.days, tier: opts.tier, firstDay, lastDay, markerAt };
 
-  let keyFilter = "";
-  const params: DbParam[] = [MODEL_VERSION, firstDay, lastDay];
+  let core: PricedCore<WorkflowSavingsRow>;
   if (opts.workflowId) {
     const own = await client.get<{ jobKey: string }>(
       "SELECT jobKey FROM automation_savings_daily WHERE jobKind='workflow' AND jobId=? AND day>=? AND day<=? LIMIT 1",
       [opts.workflowId, firstDay, lastDay],
     );
     if (!own) {
-      return {
-        window,
-        computedAt: marker?.at ?? null,
-        complete,
-        rows: [],
-        total: null,
-        points: [],
-      };
+      return { window, computedAt: markerAt, complete, rows: [], total: null, points: [] };
     }
-    keyFilter = "AND jobKey=?";
-    params.push(own.jobKey);
+    core = await priceWorkflowBuckets({
+      ...scope,
+      jobKey: own.jobKey,
+      workflowId: opts.workflowId,
+    });
+  } else {
+    core = await cachedFleet(
+      `workflow:${opts.days}:${opts.tier}:${firstDay}:${lastDay}`,
+      `${savingsRollupGeneration()}:${marker?.n}:${markerAt}`,
+      () => priceWorkflowBuckets(scope),
+    );
   }
-  const buckets = await client.query<BucketRow & { computedAt: string }>(
+  const band = opts.band ?? (core.rows.length === 1 ? "job" : "fleet");
+  return {
+    window,
+    computedAt: core.computedAt,
+    complete,
+    rows: [...core.rows],
+    total: band === "job" ? core.jobTotal : core.fleetTotal,
+    points: [...core.points],
+  };
+}
+
+async function priceWorkflowBuckets(scope: {
+  days: number;
+  tier: SavingsTier;
+  firstDay: string;
+  lastDay: string;
+  markerAt: string | null;
+  jobKey?: string;
+  workflowId?: string;
+}): Promise<PricedCore<WorkflowSavingsRow>> {
+  const keyFilter = scope.jobKey !== undefined ? "AND jobKey=?" : "";
+  let computedAt = scope.markerAt;
+  const jobs = new Map<string, Job>();
+  const fold = (buckets: (BucketRow & { computedAt: string })[]) => {
+    for (const b of buckets) {
+      if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
+      let job = jobs.get(b.jobId);
+      if (!job) {
+        job = {
+          workflowId: b.jobId,
+          jobKey: b.jobKey,
+          name: b.jobName,
+          facts: zeroFacts(),
+          days: [],
+        };
+        jobs.set(b.jobId, job);
+      }
+      // The newest bucket carries the current name.
+      job.name = b.jobName;
+      addFacts(job.facts, b);
+      job.days.push(b);
+    }
+  };
+  await forEachDayChunk(
     `SELECT day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}
      FROM automation_savings_daily
      WHERE jobKind='workflow' AND subKind='' AND modelVersion=? AND day>=? AND day<=? ${keyFilter}
      ORDER BY day`,
-    params,
+    (from, to) => [MODEL_VERSION, from, to, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
+    scope.firstDay,
+    scope.lastDay,
+    fold,
   );
-  let computedAt = marker?.at ?? null;
-  const jobs = new Map<string, Job>();
-  for (const b of buckets) {
-    if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
-    let job = jobs.get(b.jobId);
-    if (!job) {
-      job = {
-        workflowId: b.jobId,
-        jobKey: b.jobKey,
-        name: b.jobName,
-        facts: zeroFacts(),
-        days: [],
-      };
-      jobs.set(b.jobId, job);
-    }
-    // The newest bucket carries the current name.
-    job.name = b.jobName;
-    addFacts(job.facts, b);
-    job.days.push(b);
-  }
 
   // Versions of one job share the schedule cap: the live version first, then
   // retired copies by name. A version priced by the enabled-only rule takes no
@@ -179,7 +289,7 @@ export async function readWorkflowSavings(opts: {
   const allocations = new Map<string, ScheduleAllocation>();
   const byKey = new Map<string, Job[]>();
   for (const job of jobs.values()) {
-    if (isEnabledOnlyRouter(job.facts, opts.days)) continue;
+    if (isEnabledOnlyRouter(job.facts, scope.days)) continue;
     byKey.set(job.jobKey, [...(byKey.get(job.jobKey) ?? []), job]);
   }
   for (const versions of byKey.values()) {
@@ -189,7 +299,7 @@ export async function readWorkflowSavings(opts: {
     );
     const shares = allocateSchedule(
       versions.map((v) => v.facts),
-      opts.days,
+      scope.days,
     );
     versions.forEach((v, i) => {
       allocations.set(v.workflowId, shares[i] as ScheduleAllocation);
@@ -197,31 +307,30 @@ export async function readWorkflowSavings(opts: {
   }
 
   const selected = [...jobs.values()].filter(
-    (j) => !opts.workflowId || j.workflowId === opts.workflowId,
+    (j) => !scope.workflowId || j.workflowId === scope.workflowId,
   );
-  const band = opts.band ?? (selected.length === 1 ? "job" : "fleet");
   const rows: WorkflowSavingsRow[] = [];
-  const totalParts: PricedWorkflow[] = [];
+  const jobParts: PricedWorkflow[] = [];
+  const fleetParts: PricedWorkflow[] = [];
   const dayParts: SavingsDailyPoint[][] = [];
-  for (const job of selected) {
-    const pricing = { tier: opts.tier, days: opts.days };
+  const pricing = { tier: scope.tier, days: scope.days };
+  for (const [i, job] of selected.entries()) {
+    if (i > 0 && i % PRICE_BATCH === 0) await yieldLoop();
     const allocation = allocations.get(job.workflowId);
     const priced = priceWorkflow(job.facts, { ...pricing, band: "job" }, allocation);
     rows.push({ ...priced, workflowId: job.workflowId, name: job.name });
-    totalParts.push(
-      band === "job" ? priced : priceWorkflow(job.facts, { ...pricing, band }, allocation),
-    );
+    jobParts.push(priced);
+    fleetParts.push(priceWorkflow(job.facts, { ...pricing, band: "fleet" }, allocation));
     dayParts.push(splitByDay(job.facts, job.days, pricing, priced));
   }
   rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
 
   return {
-    window,
     computedAt,
-    complete,
     rows,
-    total: totalParts.length > 0 ? sumTotals(totalParts) : null,
-    points: rows.length > 0 ? fillDays(dayParts.flat(), firstDay, opts.days) : [],
+    jobTotal: jobParts.length > 0 ? sumTotals(jobParts) : null,
+    fleetTotal: fleetParts.length > 0 ? sumTotals(fleetParts) : null,
+    points: rows.length > 0 ? fillDays(dayParts.flat(), scope.firstDay, scope.days) : [],
   };
 }
 
@@ -343,49 +452,91 @@ export async function readScriptSavings(opts: {
     [MODEL_VERSION, firstDay, lastDay],
   );
   const complete = Number(marker?.n) >= opts.days;
-  const params: DbParam[] = [MODEL_VERSION, firstDay, lastDay];
-  if (opts.scriptName !== undefined) params.push(opts.scriptName);
-  const buckets = await client.query<ScriptBucketRow>(
+  const scheduled = (
+    await client.query<{ scriptName: string }>(
+      "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL ORDER BY scriptName",
+    )
+  ).map((r) => r.scriptName);
+  const scope = {
+    days: opts.days,
+    tier: opts.tier,
+    firstDay,
+    lastDay,
+    markerAt: marker?.at ?? null,
+    scheduled: new Set(scheduled),
+    scriptName: opts.scriptName,
+  };
+  const core =
+    opts.scriptName !== undefined
+      ? await priceScriptBuckets(scope)
+      : await cachedFleet(
+          `script:${opts.days}:${opts.tier}:${firstDay}:${lastDay}`,
+          `${savingsRollupGeneration()}:${marker?.n}:${scope.markerAt}:${JSON.stringify(scheduled)}`,
+          () => priceScriptBuckets(scope),
+        );
+  const band = opts.band ?? (core.rows.length === 1 ? "job" : "fleet");
+  return {
+    window,
+    computedAt: core.computedAt,
+    complete,
+    rows: [...core.rows],
+    total: band === "job" ? core.jobTotal : core.fleetTotal,
+    points: [...core.points],
+  };
+}
+
+async function priceScriptBuckets(scope: {
+  days: number;
+  tier: SavingsTier;
+  firstDay: string;
+  lastDay: string;
+  markerAt: string | null;
+  scheduled: Set<string>;
+  scriptName?: string;
+}): Promise<PricedCore<ScriptSavingsRow>> {
+  const byName = scope.scriptName !== undefined;
+  let computedAt = scope.markerAt;
+  const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
+  await forEachDayChunk<ScriptBucketRow>(
     `SELECT day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs
      FROM automation_savings_daily
-     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${opts.scriptName !== undefined ? "AND jobId=?" : ""}
+     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${byName ? "AND jobId=?" : ""}
      ORDER BY day`,
-    params,
-  );
-  let computedAt = marker?.at ?? null;
-  const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
-  for (const b of buckets) {
-    if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
-    let job = jobs.get(b.jobId);
-    if (!job) {
-      job = { facts: zeroScriptFacts(), days: new Map() };
-      jobs.set(b.jobId, job);
-    }
-    addScriptBucket(job.facts, b);
-    const day = job.days.get(b.day) ?? zeroScriptFacts();
-    addScriptBucket(day, b);
-    job.days.set(b.day, day);
-  }
-  const scheduled = new Set(
-    (
-      await client.query<{ scriptName: string }>(
-        "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL",
-      )
-    ).map((r) => r.scriptName),
+    (from, to) => [MODEL_VERSION, from, to, ...(byName ? [scope.scriptName as string] : [])],
+    scope.firstDay,
+    scope.lastDay,
+    (buckets) => {
+      for (const b of buckets) {
+        if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
+        let job = jobs.get(b.jobId);
+        if (!job) {
+          job = { facts: zeroScriptFacts(), days: new Map() };
+          jobs.set(b.jobId, job);
+        }
+        addScriptBucket(job.facts, b);
+        const day = job.days.get(b.day) ?? zeroScriptFacts();
+        addScriptBucket(day, b);
+        job.days.set(b.day, day);
+      }
+    },
   );
 
-  const band = opts.band ?? (jobs.size === 1 ? "job" : "fleet");
   const rows: ScriptSavingsRow[] = [];
-  const totalParts: PricedWorkflow[] = [];
+  const jobParts: PricedWorkflow[] = [];
+  const fleetParts: PricedWorkflow[] = [];
   const dayParts: SavingsDailyPoint[][] = [];
+  let i = 0;
   for (const [scriptName, job] of jobs) {
-    const kind: ScriptKind = scheduled.has(scriptName)
+    if (i > 0 && i % PRICE_BATCH === 0) await yieldLoop();
+    i++;
+    const kind: ScriptKind = scope.scheduled.has(scriptName)
       ? "script-scheduled"
       : "script-agent-invoked";
-    const pricing = { tier: opts.tier, days: opts.days, kind };
+    const pricing = { tier: scope.tier, days: scope.days, kind };
     const priced = priceScript(job.facts, { ...pricing, band: "job" });
     rows.push({ ...priced, kind, scriptName, name: scriptName });
-    totalParts.push(band === "job" ? priced : priceScript(job.facts, { ...pricing, band }));
+    jobParts.push(priced);
+    fleetParts.push(priceScript(job.facts, { ...pricing, band: "fleet" }));
     dayParts.push(
       splitScriptByDay(
         job.facts,
@@ -397,12 +548,11 @@ export async function readScriptSavings(opts: {
   rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
 
   return {
-    window,
     computedAt,
-    complete,
     rows,
-    total: totalParts.length > 0 ? sumTotals(totalParts) : null,
-    points: rows.length > 0 ? fillDays(dayParts.flat(), firstDay, opts.days) : [],
+    jobTotal: jobParts.length > 0 ? sumTotals(jobParts) : null,
+    fleetTotal: fleetParts.length > 0 ? sumTotals(fleetParts) : null,
+    points: rows.length > 0 ? fillDays(dayParts.flat(), scope.firstDay, scope.days) : [],
   };
 }
 

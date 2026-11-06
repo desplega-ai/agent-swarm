@@ -52,6 +52,16 @@ const FACT_COLUMNS = [
 export { FACT_COLUMNS as SAVINGS_FACT_COLUMNS };
 
 type WorkflowRow = { id: string; name: string; definition: unknown };
+/**
+ * Bumped after every write to the rollup tables, so a cached fleet read
+ * (`read.ts`) knows its buckets changed. Every writer lives in this file.
+ */
+let generation = 0;
+export const savingsRollupGeneration = (): number => generation;
+const bumpGeneration = () => {
+  generation++;
+};
+
 export type WorkflowBucket = { workflowId: string; name: string; facts: WorkflowFacts };
 
 function parseDefinition(definition: unknown): unknown {
@@ -143,6 +153,7 @@ export async function writeWorkflowDay(
     for (const b of buckets) await tx.run(INSERT_BUCKET, bucketParams(day, b, computedAt));
     await markDay(tx, day, "workflow", computedAt);
   });
+  bumpGeneration();
 }
 
 async function markDay(
@@ -228,6 +239,7 @@ export async function writeScriptDay(
     }
     await markDay(tx, day, "script", computedAt);
   });
+  bumpGeneration();
 }
 
 /**
@@ -275,6 +287,7 @@ export async function refreshWorkflowToday(
       computedAt,
     ),
   );
+  bumpGeneration();
   return "computed";
 }
 
@@ -336,6 +349,7 @@ export function runSavingsRollupTick(
       const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
       await getDbClient().run("DELETE FROM automation_savings_daily WHERE day<?", [oldest]);
       await getDbClient().run("DELETE FROM automation_savings_days WHERE day<?", [oldest]);
+      bumpGeneration();
       const wf = await daysToCompute("workflow", now);
       const sc = await daysToCompute("script", now);
       // Newest day first; a day's workflows before its scripts.
@@ -426,5 +440,6 @@ export async function stopSavingsRollup(): Promise<void> {
 export async function resetSavingsRollupForTests(): Promise<void> {
   await stopSavingsRollup();
   rollupSql = null;
+  bumpGeneration();
   stats = { ticks: 0, lastTickAt: null, daysComputed: 0, daysPending: 0, lastError: null };
 }
