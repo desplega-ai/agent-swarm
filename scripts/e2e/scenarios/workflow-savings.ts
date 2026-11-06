@@ -49,14 +49,30 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [200], "daily savings for a workflow with a run");
       const daily = asRecord(response.json);
       const points = asRecords(daily, "points");
-      expect(daily.valid === true && points.length === 7, `7 daily points ${response.text}`);
+      // Seven rolling days touch every UTC day from the window start to its end
+      // (eight, unless the window starts on the minute of midnight).
+      const dailyWindow = asRecord(daily.window);
+      const firstDay = String(dailyWindow.start).slice(0, 10);
+      const lastDay = String(dailyWindow.end).slice(0, 10);
+      const windowDays = (Date.parse(lastDay) - Date.parse(firstDay)) / 86_400_000 + 1;
+      expect(
+        daily.valid === true &&
+          points.length === windowDays &&
+          points[0]?.day === firstDay &&
+          points.at(-1)?.day === lastDay,
+        `${windowDays} daily points from ${firstDay} to ${lastDay} ${response.text}`,
+      );
       const pointCents = Math.round(points.reduce((s, p) => s + Number(p.savingUsd), 0) * 100);
       expect(
         pointCents === Math.round(Number(band.p50) * 100),
         `daily points sum to the p50 saving ${pointCents} vs ${band.p50}`,
       );
 
-      response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
+      // The default 30-day window can still be backfilling after the 7-day one is done.
+      await pollUntil(async () => {
+        response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
+        return asRecord(response.json).reason !== "not-computed";
+      }, 30_000);
       expectStatus(response, [200], "daily savings for an idle workflow");
       json = asRecord(response.json);
       expect(
