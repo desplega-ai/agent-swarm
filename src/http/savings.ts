@@ -26,6 +26,7 @@ import {
   type SavingsComponent,
   type SavingsTotals,
   type ScheduleSavingsRow,
+  savingsWindow,
   type WorkflowComponentsRead,
   type WorkflowSavingsRead,
   type WorkflowSavingsRow,
@@ -735,15 +736,20 @@ export async function handleSavings(
     const parsed = await savingsSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { days, tier } = parsed.query;
-    const calibration = await activeCalibration(Date.now());
+    const now = Date.now();
+    // The spend sum needs only the window: it waits for the connection alongside the fleet read.
+    const llm = readFleetLlmUsd(savingsWindow(days, now));
+    // Settled here so a fleet read that throws leaves no unhandled rejection behind.
+    llm.catch(() => {});
+    const calibration = await activeCalibration(now);
     const read = await readFleetSavings({
       days,
       tier,
-      now: Date.now(),
+      now,
       sql: savingsRequestSql,
       curve: calibration.curve,
     });
-    const fleetLlmUsd = await readFleetLlmUsd(read.window);
+    const fleetLlmUsd = await llm;
     const total = read.complete ? read.total : null;
     savingsSummaryRoute.respond(res, 200, {
       ...meta(read, tier, calibration, { complete: read.complete, hasRows: read.total !== null }),
