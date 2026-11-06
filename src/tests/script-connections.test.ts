@@ -695,6 +695,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "284_model_profile_fallbacks.sql");
       // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
       markMigrationApplied(database, "293_savings_component_links.sql");
+      // 300 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
+      markMigrationApplied(database, "300_audit_agent_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

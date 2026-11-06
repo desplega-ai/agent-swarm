@@ -328,6 +328,7 @@ export {
   assertAssetKeyMovesAllowed,
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
+export { setSkillUpdatedBy } from "./db/skill-audit";
 export {
   getRunWorkflow,
   PINNED_WORKFLOW_KEYS,
@@ -11033,21 +11034,6 @@ export async function updateSkill(
   );
 
   return row ? rowToSkill(row) : null;
-}
-
-/**
- * Record who last changed a skill when the write went through a path that does
- * not call `updateSkill` (bundled file upsert / delete).
- */
-export async function setSkillUpdatedBy(
-  skillId: string,
-  actor: { agentId: string | null; userId: string | null },
-): Promise<void> {
-  await getDbClient().run("UPDATE skills SET updated_by = ?, updatedByAgentId = ? WHERE id = ?", [
-    actor.userId,
-    actor.agentId,
-    skillId,
-  ]);
 }
 
 async function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
