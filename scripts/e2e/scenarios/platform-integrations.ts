@@ -1,6 +1,6 @@
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { cleanupStack, deleteConfig, putConfig } from "./platform-helpers";
+import { cleanupStack, deleteConfig, putConfig, reloadConfig } from "./platform-helpers";
 
 // Operator-facing integration status, the Slack app manifest, the MCP client config and the
 // disabled adapters of the Chat SDK channel and the Claude Managed integration.
@@ -43,6 +43,7 @@ export const platformIntegrations: Scenario = {
       const row = await putConfig(ctx, { key: "PUBLIC_MCP_BASE_URL", value: publicOrigin });
       cleanup.add("delete PUBLIC_MCP_BASE_URL", async () => {
         await ctx.api("DELETE", `/api/config/${String(row.id)}`);
+        await reloadConfig(ctx);
       });
       const overridden = asRecord((await ctx.api("GET", "/api/integrations/mcp-user/config")).json);
       expect(
@@ -51,6 +52,8 @@ export const platformIntegrations: Scenario = {
         "PUBLIC_MCP_BASE_URL overrides the advertised origin",
       );
       await deleteConfig(ctx, String(row.id));
+      // The origin resolver also reads env, whose automatic reload is debounced.
+      await reloadConfig(ctx);
       expect(
         asRecord((await ctx.api("GET", "/api/integrations/mcp-user/config")).json).mcpBaseUrl ===
           base,
