@@ -1,6 +1,6 @@
 # TLA+ model: heartbeat and task lifecycle
 
-- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
+- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973), the worker handoffs to a pinned resume (API drain #1837, provider-error fallback #2736, `DRAIN_HANDOFF` / `PROVIDER_FALLBACK`) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
 - `HeartbeatSimple.tla` / `HeartbeatSimple.cfg`: a proposed replacement with two heartbeat actions. Not implemented.
 - `ACTIONS.md`: every TLA+ action → file:line and the SQL guard it models.
 - `CALIBRATION.md`: historical bugs the model finds when their guard is removed, and one drift case.

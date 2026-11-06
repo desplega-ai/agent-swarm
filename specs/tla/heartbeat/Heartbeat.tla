@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 7dc87f45. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 0bc29f13. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -25,6 +25,7 @@ CONSTANTS
     G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     DRAIN_HANDOFF,    \* API drain handoff (#1837), opt-in via API_DRAIN_MAX_MS > 0
+    PROVIDER_FALLBACK, \* provider-error fallback handoff (#2736), opt-in via a profile's fallbacks
     HYPO_REOFFER,     \* hypothetical path that re-offers an unassigned task
     BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
     G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
@@ -230,17 +231,14 @@ AbortTerminal(w, t) ==
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
                    alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
-\* API drain handoff (#1837): a worker that sees X-Swarm-Draining on /ping or
-\* /api/poll calls POST /api/tasks/:id/supersede for its own in-flight task
-\* (handOffTasksForApiDrain). The API runs supersedeTask (WHERE status NOT IN
-\* terminal, no stall CAS) and then createResumeFollowUp(graceful_shutdown),
-\* pinned to the same agent. The two writes are collapsed into one step: a
-\* hard crash between them is the HbWrite/HbResume gap, which HbRepair closes.
-\* The runner then aborts the session (AbortTerminal frees the slot). Enabled
-\* whenever the API is up, not only while draining (over-approximation); the
-\* drain's refusal to dispatch only removes behaviors and is not modeled.
-DrainHandoff(w, t) ==
-    /\ DRAIN_HANDOFF /\ apiUp /\ alive[w] /\ t \in running[w]
+\* Worker-initiated handoff: the worker calls POST /api/tasks/:id/supersede for
+\* its own in-flight task. The API runs supersedeTask (WHERE status NOT IN
+\* terminal, no stall CAS) and then createResumeFollowUp, pinned to the same
+\* agent. The two writes are collapsed into one step: a hard crash between
+\* them is the HbWrite/HbResume gap, which HbRepair closes. The runner then
+\* drops the slot (AbortTerminal). Voluntary, so it never sets liveKill.
+WorkerHandoff(w, t) ==
+    /\ apiUp /\ alive[w] /\ t \in running[w]
     /\ st[t] = "in_progress" /\ own[t] = w
     /\ \E s \in Free :
          /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
@@ -250,6 +248,22 @@ DrainHandoff(w, t) ==
          /\ pin' = [pin EXCEPT ![s] = TRUE]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
                    apiUp, wc, ac, liveKill, badAcc, bt>>
+
+\* API drain handoff (#1837): on X-Swarm-Draining from /ping or /api/poll
+\* (handOffTasksForApiDrain), reason graceful_shutdown. Enabled whenever the
+\* API is up, not only while draining (over-approximation); the drain's
+\* refusal to dispatch only removes behaviors and is not modeled.
+DrainHandoff(w, t) == DRAIN_HANDOFF /\ WorkerHandoff(w, t)
+
+\* Provider-error fallback (#2736): a session on a claimed profile ends on a
+\* provider error (or finds its key pool empty at spawn); the runner sends
+\* reason provider_fallback (requestProviderFallback) and the API resumes on
+\* the next fallback profile, pinned to the same agent (fallbackPin). The
+\* model has no profiles: a pick is this step; no pick (kind noFallback, or
+\* a workflow step) leaves the task untouched and the worker fails it, which
+\* is Complete. The session has already ended, so keeping t in running until
+\* AbortTerminal only adds behaviors.
+FallbackHandoff(w, t) == PROVIDER_FALLBACK /\ WorkerHandoff(w, t)
 
 WorkerCrash(w) ==
     /\ alive[w] /\ wc < MaxWorkerCrashes
@@ -507,7 +521,7 @@ Next ==
     \/ \E w \in Workers, t \in Tasks :
          ClaimRead(w, t) \/ AcceptRead(w, t) \/ PollStart(w, t) \/ RegisterSession(w, t)
          \/ SessionBeat(w, t) \/ Progress(w, t) \/ Complete(w, t) \/ AbortTerminal(w, t) \/ ReOffer(t, w)
-         \/ AutoAssign(t, w) \/ DrainHandoff(w, t)
+         \/ AutoAssign(t, w) \/ DrainHandoff(w, t) \/ FallbackHandoff(w, t)
     \/ \E w \in Workers : ClaimWrite(w) \/ AcceptWrite(w) \/ WorkerCrash(w) \/ WorkerRestart(w)
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)
          \/ CleanupSession(t) \/ RebootFail(t)
