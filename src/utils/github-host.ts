@@ -12,6 +12,8 @@
 
 const DEFAULT_WEB_URL = "https://github.com";
 const DEFAULT_API_URL = "https://api.github.com";
+/** Hosts the SQL helpers can splice into a string literal or GLOB pattern. */
+const SQL_SAFE_HOST = /^[a-z0-9._:-]+$/;
 
 export interface GitHubHostConfig {
   /** Web base, no trailing slash, e.g. `https://ghe.corp`. */
@@ -32,12 +34,24 @@ export type GitHubHostResult =
 
 type Env = Record<string, string | undefined>;
 
+const DEFAULT_CONFIG: GitHubHostConfig = {
+  webUrl: DEFAULT_WEB_URL,
+  apiUrl: DEFAULT_API_URL,
+  graphqlUrl: `${DEFAULT_API_URL}/graphql`,
+  host: "github.com",
+  apiHost: "api.github.com",
+  enterprise: false,
+};
+
+// Error messages never echo the raw value or its path: either can carry a token
+// (`https://user:ghp_x@host`, `https://host/ghp_x`), and they reach boot logs and /status.
+
 function parseBase(name: string, raw: string, allowPath: boolean): URL | string {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return `${name} is not a valid URL: ${raw}`;
+    return `${name} is not a valid URL`;
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     return `${name} must use https:// (got ${url.protocol})`;
@@ -47,7 +61,11 @@ function parseBase(name: string, raw: string, allowPath: boolean): URL | string 
     return `${name} must not contain a query or fragment`;
   }
   if (!allowPath && url.pathname !== "/") {
-    return `${name} must be the instance root, without a path (got ${url.pathname})`;
+    return `${name} must be the instance root, without a path`;
+  }
+  if (!SQL_SAFE_HOST.test(url.host)) {
+    // shortcut: IPv6 literals (`[::1]`) are refused because `[` is a GLOB class, upgrade by escaping if one is needed.
+    return `${name} host must be a DNS name or IPv4 address`;
   }
   return url;
 }
@@ -109,11 +127,24 @@ export function resolveGitHubHost(env: Env = process.env): GitHubHostResult {
   };
 }
 
-/** The resolved config. Throws on an invalid value rather than falling back to github.com. */
+/**
+ * The resolved config. Throws on an invalid value rather than falling back to github.com.
+ * For readers that pick where a token goes; parse/link readers use getGitHubLinkConfig.
+ */
 export function getGitHubHostConfig(): GitHubHostConfig {
   const result = resolveGitHubHost();
   if (!result.ok) throw new Error(`Invalid GitHub host config: ${result.error}`);
   return result.config;
+}
+
+/**
+ * The resolved config, or the github.com default when the config is invalid. Never throws.
+ * Only for readers that parse or link (PR extraction, SQL host match, citations, presets,
+ * VCS detection); never use it to pick where a token goes.
+ */
+export function getGitHubLinkConfig(): GitHubHostConfig {
+  const result = resolveGitHubHost();
+  return result.ok ? result.config : { ...DEFAULT_CONFIG };
 }
 
 export const getGitHubWebUrl = (): string => getGitHubHostConfig().webUrl;
@@ -133,14 +164,12 @@ export function githubWebLink(path: string): string {
 }
 
 /**
- * The configured host, safe to splice into a SQL string literal or GLOB pattern.
- * shortcut: IPv6 hosts (`[::1]`) are refused because `[` is a GLOB class, upgrade by escaping if one is needed.
+ * The configured host (github.com on an invalid config), safe to splice into a SQL
+ * string literal or GLOB pattern: resolveGitHubHost refuses any other host shape. Never throws.
  */
 export function getGitHubHostForSql(): string {
-  const host = getGitHubHost();
-  if (!/^[a-z0-9.:-]+$/.test(host))
-    throw new Error(`GitHub host not supported for SQL matching: ${host}`);
-  return host;
+  const host = getGitHubLinkConfig().host;
+  return SQL_SAFE_HOST.test(host) ? host : DEFAULT_CONFIG.host;
 }
 
 /**
@@ -158,11 +187,14 @@ function urlHost(url: string): string | null {
   }
 }
 
-/** True when `url` points at the configured GitHub host (plus www.github.com in default mode). */
+/**
+ * True when `url` points at the configured GitHub host (plus www.github.com in default mode).
+ * Parse-only: github.com rules on an invalid config. Never throws.
+ */
 export function isGitHubUrl(url: string): boolean {
   const host = urlHost(url.trim());
   if (!host) return false;
-  const config = getGitHubHostConfig();
+  const config = getGitHubLinkConfig();
   if (host === config.host) return true;
   // scp-like and ssh URLs never carry the web port.
   if (host === new URL(config.webUrl).hostname) return true;

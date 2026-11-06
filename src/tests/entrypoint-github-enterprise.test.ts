@@ -22,6 +22,7 @@ import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-pr
 
 const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
 const TOKEN = "ghp_syntheticGhesTestToken000000000000"; // gitleaks:allow (synthetic test fixture)
+const SECRET = "urlSecretMustNotBeLogged0000"; // gitleaks:allow (synthetic: a PAT pasted into GITHUB_URL)
 
 function extractGitHubAuthBlock(): string {
   const script = readFileSync(entrypointPath, "utf8");
@@ -101,6 +102,23 @@ describe("docker-entrypoint.sh: GitHub auth with GITHUB_URL", () => {
         expect(run.gitconfig).not.toContain("credential");
         expect(run.result.stdout).toContain("GH_HOST= GH_ENTERPRISE_TOKEN=");
       }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test.each([
+    ["credentials", `https://x-access-token:${SECRET}@ghe.test`],
+    ["invalid URL", `ftp://${SECRET}@ghe.test/x`],
+    ["path", `https://ghe.test/${SECRET}`],
+    ["no scheme", `${SECRET}.ghe.test`],
+  ])(
+    "%s: the rejected GITHUB_URL never reaches stdout or stderr",
+    async (_label, url) => {
+      const run = await runBlock(url);
+      expect(run.result.exitCode).not.toBe(0);
+      expect(run.result.stdout).toContain("ERROR: GITHUB_URL");
+      expect(run.result.stdout).not.toContain(SECRET);
+      expect(run.result.stderr).not.toContain(SECRET);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

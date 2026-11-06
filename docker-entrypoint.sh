@@ -636,16 +636,17 @@ echo "=== GitHub Authentication ==="
 # GITHUB_URL targets a GitHub Enterprise Server instance (default github.com).
 # Same rules as src/utils/github-host.ts. An invalid value stops the boot rather
 # than falling back to github.com and sending a GHES token to the public host.
+# Errors never echo the value: userinfo or a path can carry a token.
 GITHUB_WEB_URL="${GITHUB_URL%/}"
 GITHUB_HOST_BARE="github.com"
 if [ -n "$GITHUB_WEB_URL" ]; then
     case "$GITHUB_WEB_URL" in
         https://*|http://*) ;;
-        *) echo "ERROR: GITHUB_URL must start with https:// (got: $GITHUB_URL)"; exit 1 ;;
+        *) echo "ERROR: GITHUB_URL must start with https://"; exit 1 ;;
     esac
     GITHUB_HOST_BARE=$(printf '%s' "${GITHUB_WEB_URL#*://}" | tr '[:upper:]' '[:lower:]')
     case "$GITHUB_HOST_BARE" in
-        ""|*/*|*@*|*\?*|*#*) echo "ERROR: GITHUB_URL must be the instance root, e.g. https://ghe.example.com (got: $GITHUB_URL)"; exit 1 ;;
+        ""|*/*|*@*|*\?*|*#*) echo "ERROR: GITHUB_URL must be the instance root without credentials, e.g. https://ghe.example.com"; exit 1 ;;
     esac
     if [ "$GITHUB_HOST_BARE" = "www.github.com" ]; then GITHUB_HOST_BARE="github.com"; fi
 fi

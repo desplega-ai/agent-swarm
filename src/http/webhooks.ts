@@ -96,7 +96,7 @@ import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { getPublicMcpBaseUrl } from "../utils/constants";
-import { getGitHubHost } from "../utils/github-host";
+import { resolveGitHubHost } from "../utils/github-host";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
 import { getExecutorRegistry } from "../workflows";
@@ -464,9 +464,14 @@ export async function handleWebhooks(
     // GHES names its host on every delivery. A mismatch is a misconfiguration, not an
     // attack (the HMAC check above is the trust boundary), so warn and carry on.
     const enterpriseHost = req.headers["x-github-enterprise-host"] as string | undefined;
-    if (enterpriseHost && enterpriseHost.toLowerCase() !== getGitHubHost()) {
+    const configuredHost = resolveGitHubHost();
+    if (
+      enterpriseHost &&
+      configuredHost.ok &&
+      enterpriseHost.toLowerCase() !== configuredHost.config.host
+    ) {
       console.warn(
-        `[GitHub] Webhook from GHES host ${enterpriseHost}, but GITHUB_URL resolves to ${getGitHubHost()}`,
+        `[GitHub] Webhook from GHES host ${enterpriseHost}, but GITHUB_URL resolves to ${configuredHost.config.host}`,
       );
     }
 

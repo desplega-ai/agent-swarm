@@ -421,6 +421,20 @@ describe("GitHub Enterprise host (GITHUB_URL)", () => {
     expect(extractGitHubPullRequestUrls("https://github.com/o/r/pull/7")).toEqual([]);
   });
 
+  test("invalid GITHUB_URL: completeTask still completes and records github.com PRs", async () => {
+    process.env.GITHUB_URL = "https://ghe.test/path";
+    const task = await inProgressTask("invalid GITHUB_URL completion");
+    const done = await completeTask(
+      task.id,
+      "Done: https://github.com/o/r/pull/9 (not https://ghe.test/o/r/pull/9)",
+    );
+    expect(done?.status).toBe("completed");
+    expect((await getTaskAttachments(task.id)).map((attachment) => attachment.url)).toEqual([
+      "https://github.com/o/r/pull/9",
+    ]);
+    expect(await hasPullRequest("Opened https://github.com/o/r/pull/9")).toBe(1);
+  });
+
   test("default mode: a GHES-looking URL is not a PR", async () => {
     delete process.env.GITHUB_URL;
     expect(await hasPullRequest("Opened https://ghe.test/o/r/pull/7")).toBe(0);

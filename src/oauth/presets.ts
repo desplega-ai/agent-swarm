@@ -13,7 +13,7 @@
  * pickers and by the app-creation response.
  */
 
-import { getGitHubHostConfig } from "../utils/github-host";
+import { getGitHubLinkConfig } from "../utils/github-host";
 
 export interface OAuthPreset {
   /** Stable preset identifier referenced by the catalog manifest + pickers. */
@@ -230,7 +230,7 @@ export function listOAuthPresets(): OAuthPreset[] {
 /** Point the GitHub preset at the configured GitHub host (GHES); other presets pass through. */
 function withGitHubHost(preset: OAuthPreset): OAuthPreset {
   if (preset.id !== "github") return { ...preset };
-  const { webUrl, apiUrl, enterprise } = getGitHubHostConfig();
+  const { webUrl, apiUrl, enterprise } = getGitHubLinkConfig();
   if (!enterprise) return { ...preset };
   return {
     ...preset,

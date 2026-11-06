@@ -1,7 +1,7 @@
 import * as z from "zod";
 import type { TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
-import { getGitHubHostConfig } from "../utils/github-host";
+import { getGitHubLinkConfig } from "../utils/github-host";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { citationHttpUrl, type TaskCitation } from "../utils/task-citations";
 import { getDbClient } from "./db";
@@ -26,7 +26,7 @@ type CitationInput = z.infer<typeof CitationInputSchema>;
 
 /** Canonical github.com URL for `owner/repo#N`, `owner/repo@sha`, or a pull/issues/commit URL. */
 export function githubCitationUrl(ref: string): string | null {
-  const { host, webUrl } = getGitHubHostConfig();
+  const { host, webUrl } = getGitHubLinkConfig();
   const hostRe = host.replace(/[.]/g, "\\.");
   const repo = "([\\w.-]+)\\/([\\w.-]+)";
   const short = ref.trim().match(new RegExp(`^${repo}(?:#(\\d+)|@([0-9a-f]{7,40}))$`, "i"));

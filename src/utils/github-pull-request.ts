@@ -1,4 +1,4 @@
-import { getGitHubHostConfig } from "./github-host";
+import { getGitHubLinkConfig } from "./github-host";
 
 export interface GitHubPullRequestUrl {
   url: string;
@@ -14,7 +14,7 @@ const GITHUB_PATH_SEGMENT_RE = /^[\w.-]+$/;
 function parseGitHubPullRequestToken(token: string): GitHubPullRequestUrl | null {
   const candidate = token.replace(TRAILING_PROSE_PUNCTUATION_RE, "");
   const lowerCandidate = candidate.toLowerCase();
-  const { host, webUrl } = getGitHubHostConfig();
+  const { host, webUrl } = getGitHubLinkConfig();
   if (
     !lowerCandidate.startsWith(`https://${host}/`) &&
     !lowerCandidate.startsWith(`http://${host}/`) &&

@@ -8,6 +8,7 @@ import { githubCitationUrl } from "../be/task-citations";
 import { getOAuthPreset, listOAuthPresets } from "../oauth/presets";
 import { normalizeRepoUrl } from "../providers/claude-managed-adapter";
 import { defaultCredentialBindings } from "../scripts-runtime/credential-broker";
+import { buildEgressSecrets } from "../scripts-runtime/egress-secrets";
 import {
   getGitHubHostForSql,
   githubApiUrl,
@@ -117,9 +118,58 @@ describe("resolveGitHubHost: normalization and rejection", () => {
     expect(resolveGitHubHost({ GITHUB_URL: url }).ok).toBe(false);
   });
 
-  test("an invalid value throws from the getters instead of falling back", () => {
+  test("an invalid value throws from the token getters instead of falling back", () => {
     process.env.GITHUB_URL = "ftp://ghe.corp";
     expect(() => githubApiUrl("/user")).toThrow("Invalid GitHub host config");
+  });
+
+  test.each([
+    ["credentials", "https://x-access-token:ghp_secretInUrl0000@ghe.corp"],
+    ["unparseable", "not a url ghp_secretInUrl0000"],
+    ["path", "https://ghe.corp/ghp_secretInUrl0000"],
+  ])("the %s error never echoes the value", (_label, url) => {
+    for (const env of [{ GITHUB_URL: url }, { GITHUB_API_URL: url }]) {
+      const result = resolveGitHubHost(env);
+      if (result.ok) continue; // a path is legal on GITHUB_API_URL
+      expect(result.error).not.toContain("ghp_secretInUrl0000");
+      expect(result.error).not.toContain("ghe.corp");
+    }
+  });
+
+  test("IPv6 literal hosts are refused, so the SQL helper never sees one", () => {
+    expect(resolveGitHubHost({ GITHUB_URL: "https://[::1]" }).ok).toBe(false);
+  });
+});
+
+describe("invalid config: parse/link readers fall back, the token binding fails closed", () => {
+  beforeEach(() => {
+    process.env.GITHUB_URL = "https://ghe.test/path";
+  });
+
+  test("no GITHUB_TOKEN binding, no throw (never api.github.com)", async () => {
+    expect(defaultCredentialBindings()).toEqual([]);
+    const savedToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = "ghp_egressBindingTest0000";
+    try {
+      // The script-run egress path: resolves, and carries no GITHUB_TOKEN secret.
+      const secrets = await buildEgressSecrets();
+      expect(secrets.map((secret) => secret.configKey)).not.toContain("GITHUB_TOKEN");
+    } finally {
+      if (savedToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedToken;
+    }
+  });
+
+  test("parsers, SQL host, citations, presets and VCS detection use github.com", () => {
+    expect(extractGitHubPullRequestUrls("https://github.com/o/r/pull/1")).toEqual([
+      { url: "https://github.com/o/r/pull/1", owner: "o", repo: "r", number: 1 },
+    ]);
+    expect(getGitHubHostForSql()).toBe("github.com");
+    expect(githubCitationUrl("o/r#1")).toBe("https://github.com/o/r/issues/1");
+    expect(getOAuthPreset("github")?.tokenUrl).toBe("https://github.com/login/oauth/access_token");
+    expect(listOAuthPresets().length).toBeGreaterThan(0);
+    expect(detectVcsProvider("https://github.com/o/r")).toBe("github");
+    expect(isGitHubUrl("https://ghe.test/o/r")).toBe(false);
   });
 });
 

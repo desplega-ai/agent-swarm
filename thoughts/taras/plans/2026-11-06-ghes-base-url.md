@@ -16,7 +16,7 @@ last_updated_by: Researcher
 
 Make the GitHub host configurable so one swarm deployment can target either github.com (default) or a single GitHub Enterprise Server instance. One resolver owns the web, REST and GraphQL bases. Every GitHub call site, parser, worker auth step and UI link reads from it.
 
-- **Motivation**: A prospect on Discord (BrianPhillips) asked for GHES support. The App-auth plan ruled it out (`thoughts/taras/plans/2026-05-28-github-app-auth-setup.md:57`, `:321`). Taras approved it on 2026-11-06 ("pls implement"). We have no GHES instance; the prospect beta tests.
+- **Motivation**: A GHES support request. The App-auth plan ruled it out (`thoughts/taras/plans/2026-05-28-github-app-auth-setup.md:57`, `:321`). Taras approved it on 2026-11-06 ("pls implement"). We have no GHES instance; the manual GHES checklist below covers a live run.
 - **Related**: `src/github/app.ts`, `src/github/reactions.ts`, `src/github/handlers.ts`, `src/vcs/index.ts`, `src/commands/runner.ts`, `docker-entrypoint.sh`, `apps/ui/src/lib/swarm-links.ts`, `src/gitlab/auth.ts` (the self-hosted pattern we mirror).
 - **Assumptions**: Autopilot mode (swarm task, no interactive questions). Commit per phase. All line numbers are against `main` at `cac0563`.
 
@@ -165,7 +165,7 @@ Deliverable: every server-side GitHub request goes through the resolver, proven 
 - [ ] A broker test asserts that in GHES mode a script request to `api.github.com` gets no `GITHUB_TOKEN` header.
 
 #### Manual Verification:
-- [ ] None. GHES itself is verified in the beta checklist.
+- [ ] None. GHES itself is verified in the manual GHES checklist.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 2] server github calls via resolver`.
 
@@ -302,11 +302,11 @@ Deliverable: dashboard links, chips and repo provider badges point at the GHES h
 
 ---
 
-## Phase 6: Docs, env reference and beta checklist
+## Phase 6: Docs, env reference and GHES checklist
 
 ### Overview
 
-Deliverable: operator docs describe GHES setup end to end, and the beta checklist below is published in the GitHub integration guide.
+Deliverable: operator docs describe GHES setup end to end, and the manual GHES checklist below is published in the GitHub integration guide.
 
 ### Changes Required:
 
@@ -329,28 +329,28 @@ Deliverable: operator docs describe GHES setup end to end, and the beta checklis
 - [ ] Run the docs-site build and open the GitHub integration page with `agent-browser`. Confirm that the GHES section renders and that its links resolve.
 
 #### Manual Verification:
-- [ ] The prospect runs the beta checklist below on their GHES instance and reports each item.
+- [ ] An operator runs the manual GHES checklist below on a GHES instance and reports each item.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 6] ghes docs`.
 
 ---
 
-## Beta-tester checklist (prospect)
+## Manual GHES checklist
 
-What they set:
+What to set:
 1. On the GHES instance, create a GitHub App at `https://<host>/settings/apps/new` with contents, issues and pull requests read/write, and the webhook URL `https://<swarm-api>/api/github/webhook` plus a secret. Install it on a test repo.
 2. Create a PAT (or a bot-user token) on the GHES host with `repo` scope.
-3. On the API **and every worker**, set `GITHUB_URL=https://<host>`, plus `GITHUB_TOKEN`, `GITHUB_EMAIL` and `GITHUB_NAME`. On the API only, set `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`. Set `GITHUB_API_URL` only if their API is not at `/api/v3`.
+3. On the API **and every worker**, set `GITHUB_URL=https://<host>`, plus `GITHUB_TOKEN`, `GITHUB_EMAIL` and `GITHUB_NAME`. On the API only, set `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`. Set `GITHUB_API_URL` only if the API is not at `/api/v3`.
 
-What they verify (report pass/fail with the log line):
-- [ ] API boot logs the resolved web and API base for their host.
+What to verify (report pass/fail with the log line):
+- [ ] API boot logs the resolved web and API base for the host.
 - [ ] Worker boot logs "GitHub Enterprise auth configured (host: <host>)", and `gh auth status` inside the worker shows the host.
 - [ ] A registered repo auto-clones into `/workspace/repos/<name>`.
 - [ ] Mentioning the bot in an issue creates a swarm task and adds an eyes reaction.
 - [ ] An agent pushes a branch and opens a PR with `gh pr create`; the task links the PR, and the dashboard chip opens the GHES URL.
 - [ ] A PR review comment triggers a follow-up task that contains the review comments.
 - [ ] `grep -r api.github.com` over the API and worker logs returns nothing.
-- [ ] Their GHES version, and whether any request was rejected for the `X-GitHub-Api-Version: 2022-11-28` header.
+- [ ] The GHES version, and whether any request was rejected for the `X-GitHub-Api-Version: 2022-11-28` header.
 
 ---
 
@@ -433,7 +433,7 @@ Hits by area (pass 1): docs-site 518, `src/tests` 397, `apps/ui` 82, `skills/` 8
 **Tests with host literals** (397 lines; these keep passing in default mode): `task-artifacts.test.ts` 58, `task-pull-request-backfill-migration.test.ts` 43, `prompt-template-github.test.ts` 38, `github-event-filter.test.ts` 16, `github-handlers-reactions.test.ts` 14, `session-costs.test.ts` 12, `swarm-repos.test.ts` 12, `extensions-pre-task.test.ts` 11, `github-reactions.test.ts` 10, `vcs-tracking.test.ts` 10, `fetch-resolved-env.test.ts` 10, `apps-sync-engine.test.ts` 10, plus `apps/ui/src/lib/swarm-links.test.ts` 28.
 
 ### Follow-up plans
-- Seed scripts and skill helpers on GHES (category I). They run in the scripts runtime, which cannot see reserved env keys. Option: add `github: { webUrl, apiUrl }` to the `SwarmConfigPayload` sent over stdin, then switch the scripts to `ctx.swarm.github.apiUrl`. Not needed for the beta, because these are swarm-ops scripts.
+- Seed scripts and skill helpers on GHES (category I). They run in the scripts runtime, which cannot see reserved env keys. Option: add `github: { webUrl, apiUrl }` to the `SwarmConfigPayload` sent over stdin, then switch the scripts to `ctx.swarm.github.apiUrl`. Not needed for the first release, because these are swarm-ops scripts.
 - Mixed github.com plus GHES deployments would need a host on `vcsRepo`, context keys and repo records.
 
 ### Derail notes
@@ -441,8 +441,8 @@ Hits by area (pass 1): docs-site 518, `src/tests` 397, `apps/ui` 82, `skills/` 8
 - `src/github/app.ts:218` and `reactions.ts:243` log GitHub error bodies without `scrubSecrets`.
 
 ### Open questions for Taras
-- Env-only (reserved) versus a settable `swarm_config` row. This plan picks env-only, because the URL receives the PAT, the JWT and installation tokens. The cost: the prospect edits compose or Helm values, not the dashboard.
-- Is GHE.com (data residency) in scope for the beta? The resolver supports it cheaply, but nobody has asked for it.
+- Env-only (reserved) versus a settable `swarm_config` row. This plan picks env-only, because the URL receives the PAT, the JWT and installation tokens. The cost: the operator edits compose or Helm values, not the dashboard.
+- Is GHE.com (data residency) in scope for the first release? The resolver supports it cheaply, but nobody has asked for it.
 
 ### References
 - Prior plan: `thoughts/taras/plans/2026-05-28-github-app-auth-setup.md`
