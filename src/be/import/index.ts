@@ -109,7 +109,10 @@ function logReport(report: ImportReport): void {
     for (const line of report.error) console.error(`${tag}   ${line}`);
   }
   for (const r of report.results) {
-    if (r.created + r.updated + r.skippedUnchanged + r.skippedUserModified + r.failed.length === 0) {
+    if (
+      r.created + r.updated + r.skippedUnchanged + r.skippedUserModified + r.failed.length ===
+      0
+    ) {
       continue;
     }
     const kind = r.kind.split(":").pop();
