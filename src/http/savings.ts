@@ -1,14 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getWorkflow } from "../be/db";
+import { getSwarmConfigs, getWorkflow } from "../be/db";
 import type { DbParam } from "../be/db-client";
 import type { SavingsSql } from "../be/savings/compute";
 import {
-  CALIBRATED_AT,
-  CALIBRATION_MODEL,
+  type Calibration,
+  type CurveSet,
   type PricedWorkflow,
+  parseCalibration,
+  SAVINGS_CALIBRATION_KEY,
   SAVINGS_TIERS,
   type SavingsBand,
+  SHIPPED_CALIBRATION,
 } from "../be/savings/model";
 import {
   isKnownScriptName,
@@ -32,7 +35,7 @@ import { json } from "./utils";
  * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so they
  * can neither block the API's event loop nor pile up.
  */
-function boundedSql(budgetMs: () => number): SavingsSql {
+function budgetedSql(budgetMs: () => number): SavingsSql {
   return async <T>(sql: string, params: DbParam[]) => {
     const result = await executeReadOnlyQueryGated(sql, params, budgetMs(), 10_000);
     return result.rows.map((row) =>
@@ -41,8 +44,29 @@ function boundedSql(budgetMs: () => number): SavingsSql {
   };
 }
 
-/** Request-path scans (today's bucket of one workflow) use the HTTP db-query budget. */
-const requestSql = boundedSql(getDbQueryHttpBudgetMs);
+/** One scan at the HTTP db-query budget, without waiting out a full cap (the calibration run). */
+export const boundedSql = budgetedSql(getDbQueryHttpBudgetMs);
+
+/** Retries a scan refused by a full concurrency cap, `attempts` times in all, sleeping `stepMs` x attempt (at most 5 s) between them. */
+function waitOutCap(run: SavingsSql, attempts: number, stepMs: number): SavingsSql {
+  return async <T>(sql: string, params: DbParam[]) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run<T>(sql, params);
+      } catch (err) {
+        if (!(err instanceof DbQueryConcurrencyCapError) || attempt >= attempts) throw err;
+        await Bun.sleep(Math.min(5_000, stepMs * attempt));
+      }
+    }
+  };
+}
+
+/**
+ * Request-path scans (today's bucket of one workflow, the window's first day)
+ * use the HTTP db-query budget. A full cap is waited out for about 2 s, so
+ * parallel reads queue instead of falling back to an estimate.
+ */
+export const savingsRequestSql = waitOutCap(budgetedSql(getDbQueryHttpBudgetMs), 8, 75);
 
 /** The router's step scan for one day takes about 10 s. */
 const ROLLUP_QUERY_BUDGET_MS = 60_000;
@@ -51,17 +75,11 @@ const ROLLUP_QUERY_BUDGET_MS = 60_000;
  * Scans of the hourly rollup. They run in the background, so a full
  * concurrency cap is waited out (up to about a minute) instead of failing the day.
  */
-export const savingsRollupSql: SavingsSql = async <T>(sql: string, params: DbParam[]) => {
-  const run = boundedSql(() => ROLLUP_QUERY_BUDGET_MS);
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await run<T>(sql, params);
-    } catch (err) {
-      if (!(err instanceof DbQueryConcurrencyCapError) || attempt >= 20) throw err;
-      await Bun.sleep(Math.min(5_000, 250 * attempt));
-    }
-  }
-};
+export const savingsRollupSql = waitOutCap(
+  budgetedSql(() => ROLLUP_QUERY_BUDGET_MS),
+  20,
+  250,
+);
 
 const SavingsBandSchema = z.object({ p10: z.number(), p50: z.number(), p90: z.number() });
 
@@ -131,6 +149,8 @@ const savingsMeta = {
   tier: z.enum(SAVINGS_TIERS),
   calibrationModel: z.string(),
   calibratedAt: z.string(),
+  /** `shipped`: the constants in the release. `deployment`: derived from this swarm's own sessions. */
+  calibrationSource: z.enum(["shipped", "deployment"]),
   /** Newest rollup time of the window's days; null before the first rollup. */
   computedAt: z.string().nullable(),
   /** False when there is nothing to show: the window is not computed yet, or had no runs. Never $0. */
@@ -222,6 +242,26 @@ const savingsDailyRoute = route({
   },
 });
 
+/** The stored deployment curve is re-read this often, so a new calibration shows within a minute. */
+const CALIBRATION_TTL_MS = 60 * 1000;
+let calibrationCache: { at: number; value: Calibration } | null = null;
+
+async function activeCalibration(now: number): Promise<Calibration> {
+  if (calibrationCache && now - calibrationCache.at < CALIBRATION_TTL_MS) {
+    return calibrationCache.value;
+  }
+  const [row] = await getSwarmConfigs({ scope: "global", key: SAVINGS_CALIBRATION_KEY });
+  // A malformed row falls back to the shipped curve rather than failing every savings request.
+  const value = parseCalibration(row?.value) ?? SHIPPED_CALIBRATION;
+  calibrationCache = { at: now, value };
+  return value;
+}
+
+/** Forget the cached curve, so the next savings request reads the stored row. */
+export function clearCalibrationCache(): void {
+  calibrationCache = null;
+}
+
 const round2 = (x: number) => Math.round(x * 100) / 100;
 const roundBand = (b: SavingsBand): SavingsBand => ({
   p10: round2(b.p10),
@@ -304,9 +344,21 @@ function notFound(res: ServerResponse, what: "Workflow" | "Script" = "Workflow")
  * (an agent-invoked script can run thousands of times a day and its effect
  * probe is a LIKE scan); add one if a detail page needs minute-fresh numbers.
  */
-async function readScript(scriptName: string, days: number, tier: (typeof SAVINGS_TIERS)[number]) {
+async function readScript(
+  scriptName: string,
+  days: number,
+  tier: (typeof SAVINGS_TIERS)[number],
+  curve: CurveSet,
+) {
   if (!(await isKnownScriptName(scriptName))) return null;
-  return readScriptSavings({ days, tier, now: Date.now(), scriptName, sql: requestSql });
+  return readScriptSavings({
+    days,
+    tier,
+    now: Date.now(),
+    scriptName,
+    sql: savingsRequestSql,
+    curve,
+  });
 }
 
 function badTarget(res: ServerResponse, message: string): true {
@@ -344,7 +396,7 @@ function refreshToday(
   const at = scannedAt.get(key);
   if (at !== undefined && now - at < REFRESH_TTL_MS) return Promise.resolve();
   for (const [k, t] of scannedAt) if (now - t >= REFRESH_TTL_MS) scannedAt.delete(k);
-  const done = refreshWorkflowToday(workflow, requestSql, now)
+  const done = refreshWorkflowToday(workflow, savingsRequestSql, now)
     .then(
       (outcome) => {
         if (outcome !== "skipped") scannedAt.set(key, Date.now());
@@ -364,12 +416,17 @@ function refreshToday(
  * One workflow: bring today's bucket up to date first when it has a run newer
  * than the last rollup. Best effort: on a busy database the hourly bucket is served.
  */
-async function readOne(workflowId: string, days: number, tier: (typeof SAVINGS_TIERS)[number]) {
+async function readOne(
+  workflowId: string,
+  days: number,
+  tier: (typeof SAVINGS_TIERS)[number],
+  curve: CurveSet,
+) {
   const workflow = await getWorkflow(workflowId);
   if (!workflow) return null;
   const now = Date.now();
   await refreshToday(workflow, now);
-  return readWorkflowSavings({ days, tier, now, workflowId, sql: requestSql });
+  return readWorkflowSavings({ days, tier, now, workflowId, sql: savingsRequestSql, curve });
 }
 
 function meta(
@@ -379,13 +436,15 @@ function meta(
     boundaryEstimated: boolean;
   },
   tier: (typeof SAVINGS_TIERS)[number],
+  calibration: Calibration,
   valid: { complete: boolean; hasRows: boolean },
 ) {
   return {
     window: read.window,
     tier,
-    calibrationModel: CALIBRATION_MODEL,
-    calibratedAt: CALIBRATED_AT,
+    calibrationModel: calibration.model,
+    calibratedAt: calibration.calibratedAt,
+    calibrationSource: calibration.source,
     computedAt: read.computedAt,
     valid: valid.complete && valid.hasRows,
     reason: !valid.complete
@@ -408,9 +467,10 @@ export async function handleSavings(
     if (!parsed) return true;
     const { workflowId, scriptName, days, tier } = parsed.query;
     if (!workflowId === !scriptName) return badTarget(res, "Pass workflowId or scriptName");
+    const calibration = await activeCalibration(Date.now());
     const read = workflowId
-      ? await readOne(workflowId, days, tier)
-      : await readScript(scriptName as string, days, tier);
+      ? await readOne(workflowId, days, tier, calibration.curve)
+      : await readScript(scriptName as string, days, tier, calibration.curve);
     if (!read) return notFound(res, workflowId ? "Workflow" : "Script");
     const hasRows = read.rows.length > 0;
     const points = read.complete && hasRows ? read.points : [];
@@ -419,7 +479,7 @@ export async function handleSavings(
     const measured = roundToTotal(points.map((p) => p.measuredUsd));
     const estimated = roundToTotal(points.map((p) => p.estimatedLlmUsd));
     savingsDailyRoute.respond(res, 200, {
-      ...meta(read, tier, { complete: read.complete, hasRows }),
+      ...meta(read, tier, calibration, { complete: read.complete, hasRows }),
       points: points.map((p, i) => ({
         day: p.day,
         savingUsd: saving[i] as number,
@@ -438,17 +498,31 @@ export async function handleSavings(
   if ([workflowId, scriptName, kind].filter(Boolean).length !== 1) {
     return badTarget(res, "Pass one of workflowId, scriptName, kind=workflow or kind=script");
   }
+  const calibration = await activeCalibration(Date.now());
+  const now = Date.now();
   const read: (Omit<WorkflowSavingsRead, "rows"> & { rows: ReadRow[] }) | null = workflowId
-    ? await readOne(workflowId, days, tier)
+    ? await readOne(workflowId, days, tier, calibration.curve)
     : scriptName
-      ? await readScript(scriptName, days, tier)
+      ? await readScript(scriptName, days, tier, calibration.curve)
       : kind === "script"
-        ? await readScriptSavings({ days, tier, now: Date.now(), sql: requestSql })
-        : await readWorkflowSavings({ days, tier, now: Date.now(), sql: requestSql });
+        ? await readScriptSavings({
+            days,
+            tier,
+            now,
+            sql: savingsRequestSql,
+            curve: calibration.curve,
+          })
+        : await readWorkflowSavings({
+            days,
+            tier,
+            now,
+            sql: savingsRequestSql,
+            curve: calibration.curve,
+          });
   if (!read) return notFound(res, scriptName ? "Script" : "Workflow");
   const show = read.complete;
   savingsJobsRoute.respond(res, 200, {
-    ...meta(read, tier, { complete: read.complete, hasRows: read.rows.length > 0 }),
+    ...meta(read, tier, calibration, { complete: read.complete, hasRows: read.rows.length > 0 }),
     rows: show ? read.rows.map(toRow) : [],
     total: show && read.total ? toTotals(read.total) : null,
   });

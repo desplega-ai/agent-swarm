@@ -10,6 +10,7 @@ import {
   crossPageDefinitionIssues,
   type ElementReferenceContext,
   elementDefinitionIssues,
+  shellDefinitionIssues,
   validatePage,
 } from "./page-validator";
 import { resolveSyncRunAs } from "./sync-run-as";
@@ -380,6 +381,15 @@ const AppPageSchema = z
     elements: z.record(z.string(), z.unknown()),
     title: z.string().optional(),
     params: z.record(AppNameSchema, AppPageParamSchema).optional(),
+    // Sidebar layout (`layout: "sidebar"`) metadata. `icon` is a catalog icon
+    // name (checked against the generated catalog in `shellDefinitionIssues`).
+    icon: z.string().optional(),
+    /** One line under the title in the sticky page header. */
+    description: z.string().max(280).optional(),
+    /** Element of this page rendered in the header's actions slot, outside `root`'s tree. */
+    headerActions: z.string().optional(),
+    /** `false` leaves the page out of the sidebar. Pages with a required param never list. */
+    nav: z.boolean().optional(),
   })
   .strict();
 
@@ -468,6 +478,12 @@ export const AppDefinitionSchema = z
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
     theme: AppThemeIdSchema.optional(),
+    /**
+     * `sidebar` wraps every page in the app shell: a left sidebar listing the
+     * pages and a sticky page header (title, description, `headerActions`).
+     * Omitted = the plain page canvas.
+     */
+    layout: z.enum(["sidebar"]).optional(),
     /**
      * Icon shown for the app on the dashboard Apps page. One of:
      * - `{type:"lucide", icon, color?}`: a lucide icon name + optional hex color.
@@ -641,6 +657,7 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "schemaVersion",
   "theme",
   "icon",
+  "layout",
 ]);
 
 const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
@@ -1041,6 +1058,7 @@ export async function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
+    ...shellDefinitionIssues(parsed.data, catalog),
     ...(await elementDefinitionIssues(parsed.data, catalog, elementContext)),
   ];
   const grandfatheredScriptRefs = collectScriptReferencePathMap(elementContext.existingDefinition);

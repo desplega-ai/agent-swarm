@@ -11,9 +11,16 @@ import {
   getDbClient,
   getWorkflow,
   initDb,
+  upsertSwarmConfig,
 } from "../be/db";
 import { computeWorkflowWindow, type SavingsSql } from "../be/savings/compute";
-import { MODEL_VERSION, priceWorkflow } from "../be/savings/model";
+import {
+  CURVE,
+  MODEL_VERSION,
+  priceWorkflow,
+  SAVINGS_CALIBRATION_KEY,
+  SAVINGS_TIERS,
+} from "../be/savings/model";
 import { readWorkflowSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   daysToCompute,
@@ -26,7 +33,13 @@ import {
   utcDay,
   workflowDaysToCompute,
 } from "../be/savings/rollup";
-import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
+import { getDbQueryConcurrencyCap } from "../http/db-query-shared";
+import {
+  clearCalibrationCache,
+  handleSavings,
+  resetSavingsRefreshCache,
+  savingsRequestSql,
+} from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -356,7 +369,94 @@ describe("savings rollup", () => {
       expect(read.boundaryEstimated).toBe(true);
       // 22 of the first day's 24 hours are inside the window: 275 of its 300 runs.
       expect(read.rows[0]?.runs).toBe(275 + 300 * 6);
+      // The failed scan is not kept: the next read in the same minute scans again.
+      const again = await readWorkflowSavings({
+        days: 7,
+        tier: "smart",
+        now: NOW2,
+        workflowId: router,
+      });
+      expect(again.boundaryEstimated).toBe(false);
+      expect(again.rows[0]?.runs).toBe(180 + 300 * 6);
       resetSavingsReadCache();
+    });
+
+    describe("first-day scans through the bounded executor, above its concurrency cap", () => {
+      const read = (sql: SavingsSql, workflowId?: string) => {
+        resetSavingsReadCache();
+        return readWorkflowSavings({ days: 7, tier: "smart", now: NOW2, workflowId, sql });
+      };
+      let fanout: string;
+
+      beforeAll(async () => {
+        // Four versions of one job, each with two runs before the window's 02:00 start and one after.
+        const names = ["fanout", ...["09", "08", "07"].map((m) => `fanout-retired-2026-${m}-01`)];
+        for (const name of names) {
+          const id = (await createWorkflow({ name, definition: DEFINITION })).id;
+          if (name === "fanout") fanout = id;
+          for (const t of ["00:30", "01:30", "13:00"]) await runAt(id, `2026-10-25T${t}:00.000Z`);
+        }
+        await getDbClient().run("DELETE FROM automation_savings_days WHERE day='2026-10-25'");
+        await runSavingsRollupTick(inProcessSql, { now: NOW2 });
+      });
+
+      test("a fleet read scans every first day exactly", async () => {
+        const firstDay = await getDbClient().get<{ n: number }>(
+          "SELECT count(DISTINCT jobId) n FROM automation_savings_daily WHERE day='2026-10-25' AND runs>0",
+        );
+        // Control: more first-day workflows than the cap, so parallel scans would be refused.
+        expect(Number(firstDay?.n)).toBeGreaterThan(getDbQueryConcurrencyCap());
+        const bounded = await read(savingsRequestSql);
+        expect(bounded.boundaryEstimated).toBe(false);
+        expect(bounded.rows).toEqual((await read(inProcessSql)).rows);
+        // A time-scaled estimate would keep 28 of the 30 runs of cap-poll's first day; all fall before 02:00.
+        expect(bounded.rows.find((r) => r.workflowId === capLive)?.runs).toBe(30 * 6);
+        resetSavingsReadCache();
+      });
+
+      test("a detail read scans every version of its job exactly", async () => {
+        const bounded = await read(savingsRequestSql, fanout);
+        expect(bounded.boundaryEstimated).toBe(false);
+        // Only the 13:00 run is inside; an estimate would keep 3 x 22/24, so 3.
+        expect(bounded.rows).toHaveLength(1);
+        expect(bounded.rows[0]?.runs).toBe(1);
+        expect(bounded.rows).toEqual((await read(inProcessSql, fanout)).rows);
+        resetSavingsReadCache();
+      });
+
+      test("fleet list reads across the minutes of an hour scan each first-day workflow once", async () => {
+        resetSavingsReadCache();
+        const MINUTE = 60_000;
+        const scanned: string[] = [];
+        const counting: SavingsSql = (sql, params) => {
+          // Every first-day scan opens with this count.
+          if (sql.startsWith("SELECT count(*) n FROM workflow_runs WHERE workflowId=?")) {
+            scanned.push(String(params?.[0]));
+          }
+          return inProcessSql(sql, params);
+        };
+        const list = (now: number) =>
+          readWorkflowSavings({ days: 7, tier: "smart", now, sql: counting });
+        const firstDayIds = (
+          await getDbClient().query<{ jobId: string }>(
+            "SELECT DISTINCT jobId FROM automation_savings_daily WHERE day='2026-10-25' AND runs>0",
+          )
+        ).map((r) => r.jobId);
+
+        // Control: the first read scans every first-day workflow, once.
+        const first = await list(NOW2 + MINUTE);
+        expect(first.boundaryEstimated).toBe(false);
+        expect([...scanned].sort()).toEqual([...firstDayIds].sort());
+        const later = [];
+        for (const m of [2, 17, 59]) later.push(await list(NOW2 + m * MINUTE));
+        expect(scanned).toHaveLength(firstDayIds.length);
+        // Within the hour every list read prices the same slice, from 02:00.
+        for (const read of later) expect(read.rows).toEqual(first.rows);
+        // The next hour's window scans again.
+        await list(NOW2 + HOUR + MINUTE);
+        expect(scanned).toHaveLength(2 * firstDayIds.length);
+        resetSavingsReadCache();
+      });
     });
   });
 
@@ -474,6 +574,65 @@ describe("savings rollup", () => {
       expect(await runs()).toBe(1);
       resetSavingsRefreshCache();
       expect(await runs()).toBe(2);
+    });
+
+    test("a stored deployment curve prices the rollup routes and is named as the source", async () => {
+      await runSavingsRollupTick(inProcessSql);
+      const wf = (await createWorkflow({ name: "rollup-calibrated", definition: DEFINITION })).id;
+      await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf, triggerType: "manual" });
+      type Read = {
+        calibrationSource: string;
+        calibratedAt: string;
+        rows: { agentOnlyUsd: { p50: number }; savingUsd: { p50: number } }[];
+      };
+      const detail = async () =>
+        (await get(`/api/savings/jobs?workflowId=${wf}&days=7&tier=smart`)).body as Read;
+      const store = async (value: string) => {
+        await upsertSwarmConfig({ scope: "global", key: SAVINGS_CALIBRATION_KEY, value });
+        clearCalibrationCache();
+      };
+      const doubled = JSON.stringify({
+        calibratedAt: "2026-12-01",
+        model: "claude-opus-5-5",
+        curve: Object.fromEntries(
+          SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+        ),
+      });
+      try {
+        clearCalibrationCache();
+        const shipped = await detail();
+        expect(shipped.calibrationSource).toBe("shipped");
+        await store(doubled);
+        const deployed = await detail();
+        expect(deployed).toMatchObject({
+          calibrationSource: "deployment",
+          calibratedAt: "2026-12-01",
+        });
+        expect(deployed.rows[0]?.agentOnlyUsd.p50).toBeGreaterThan(
+          (shipped.rows[0]?.agentOnlyUsd.p50 as number) * 1.2,
+        );
+        // The daily points use the same curve, so they still add up to the row.
+        const daily = (await get(`/api/savings/daily?workflowId=${wf}&days=7&tier=smart`)).body as {
+          calibrationSource: string;
+          points: { savingUsd: number }[];
+        };
+        expect(daily.calibrationSource).toBe("deployment");
+        const cents = daily.points.reduce((sum, p) => sum + Math.round(p.savingUsd * 100), 0);
+        expect(cents).toBe(Math.round((deployed.rows[0]?.savingUsd.p50 ?? Number.NaN) * 100));
+        const list = (await get("/api/savings/jobs?kind=workflow&days=7")).body as Read;
+        expect(list.calibrationSource).toBe("deployment");
+        // A malformed row falls back to the shipped curve.
+        await store("{not json");
+        expect(await detail()).toMatchObject({
+          calibrationSource: "shipped",
+          calibratedAt: "2026-11-05",
+        });
+      } finally {
+        await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [
+          SAVINGS_CALIBRATION_KEY,
+        ]);
+        clearCalibrationCache();
+      }
     });
 
     test("bad input is rejected", async () => {

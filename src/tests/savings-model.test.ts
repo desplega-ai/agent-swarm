@@ -9,6 +9,7 @@ import {
   isEnabledOnlyRouter,
   jobKey,
   nodeOpsOf,
+  parseCalibration,
   priceScript,
   priceWorkflow,
   R,
@@ -438,5 +439,43 @@ describe("savings model", () => {
       expect(split.reduce((s, d) => s + d.savingUsd, 0)).toBeCloseTo(priced.savingUsd.p50, 6);
       expect(split.every((d) => d.actualUsd === 0)).toBe(true);
     });
+  });
+});
+
+describe("calibration", () => {
+  const stored = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ calibratedAt: "2026-12-01", model: "claude-opus-5-5", curve: CURVE, ...over });
+
+  test("a stored curve parses as a deployment calibration", () => {
+    expect(parseCalibration(stored())).toMatchObject({
+      source: "deployment",
+      calibratedAt: "2026-12-01",
+      model: "claude-opus-5-5",
+    });
+  });
+
+  test("a missing, malformed or wrongly shaped value is null, so callers use the shipped curve", () => {
+    expect(parseCalibration(null)).toBeNull();
+    expect(parseCalibration("not json")).toBeNull();
+    expect(parseCalibration(stored({ calibratedAt: "yesterday" }))).toBeNull();
+    const short = { ...CURVE, smart: { usd: CURVE.smart.usd.slice(1), hrs: CURVE.smart.hrs } };
+    expect(parseCalibration(stored({ curve: short }))).toBeNull();
+    const zero = { ...CURVE, smol: { usd: CURVE.smol.usd.map(() => 0), hrs: CURVE.smol.hrs } };
+    expect(parseCalibration(stored({ curve: zero }))).toBeNull();
+  });
+
+  test("priceWorkflow uses the given curve and the shipped one by default", () => {
+    const doubled = Object.fromEntries(
+      SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+    ) as typeof CURVE;
+    const f = facts({ opsSum: 10 });
+    const base = priceWorkflow(f, { tier: "smart", days: 30, band: "job" });
+    const same = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: CURVE });
+    const twice = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: doubled });
+    expect(same.agentOnlyUsdPerRun).toBe(base.agentOnlyUsdPerRun);
+    expect(twice.agentOnlyUsdPerRun - F_FOLLOWUP).toBeCloseTo(
+      2 * (base.agentOnlyUsdPerRun - F_FOLLOWUP),
+      6,
+    );
   });
 });
