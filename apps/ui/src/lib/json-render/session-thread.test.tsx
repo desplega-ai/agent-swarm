@@ -352,6 +352,38 @@ test("New session hides the current session until a newer root exists", async ()
   await unmount();
 });
 
+test("New session on one key does not hide another key's or viewer's older session", async () => {
+  roots = [
+    task({ id: "a", contextKey: KEY, createdAt: "2026-11-05T01:00:00.000Z" }),
+    task({
+      id: "b",
+      contextKey: "task:app:app-1:item-2:user:u1",
+      createdAt: "2026-11-05T00:30:00.000Z",
+    }),
+    task({
+      id: "c",
+      contextKey: "task:app:app-1:item-1:user:u2",
+      createdAt: "2026-11-05T00:20:00.000Z",
+    }),
+  ];
+  chains = { a: [roots[0]], b: [roots[1]], c: [roots[2]] };
+  const { host, rerender, unmount } = await mount({}, () => ({}));
+  expect(conversation?.rootTaskId).toBe("a");
+  const fresh = host.querySelector('button[aria-label="New session"]') as HTMLButtonElement;
+  await act(async () => fresh.click());
+  expect(host.textContent).toContain("No session yet");
+  await rerender({ sessionKey: "item-2" });
+  expect(conversation?.rootTaskId).toBe("b");
+  currentUserId = "u2";
+  await rerender({});
+  expect(conversation?.rootTaskId).toBe("c");
+  // Back on the first key and viewer, its own New session still holds.
+  currentUserId = "u1";
+  await rerender({});
+  expect(host.textContent).toContain("No session yet");
+  await unmount();
+});
+
 test("the thread has a fixed height, or fills a fill-aware parent", async () => {
   const fixed = await mount({}, () => ({}));
   const box = fixed.host.querySelector('[data-testid="json-render-session-thread"]');

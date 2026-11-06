@@ -165,8 +165,9 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const pageAppId = useAppScopeId();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  // "New session": only roots created after this one's `createdAt` count.
-  const [newerThan, setNewerThan] = useState<string | null>(null);
+  // "New session": only roots created after this one's `createdAt` count. Kept
+  // per context key, so another app, key or viewer starts without a cutoff.
+  const [cutoff, setCutoff] = useState<{ contextKey: string; after: string } | null>(null);
 
   const draftPath = `/ui/${props.id}/value`;
   const stored = getByPath(state, draftPath);
@@ -182,6 +183,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const contextKey =
     appId && sessionKey && userId ? threadContextKey(appId, sessionKey, userId) : null;
   const lookupReady = gate.supported && scope === "user" && contextKey !== null;
+  const newerThan = cutoff !== null && cutoff.contextKey === contextKey ? cutoff.after : null;
 
   const list = useSessions({
     contextKeyPrefix: contextKey ?? undefined,
@@ -317,7 +319,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
             variant="ghost"
             size="sm"
             disabled={starting}
-            onClick={() => setNewerThan(root.createdAt)}
+            onClick={() => contextKey && setCutoff({ contextKey, after: root.createdAt })}
             aria-label="New session"
             className="ml-auto h-6 gap-1 px-2 text-xs text-muted-foreground"
           >
