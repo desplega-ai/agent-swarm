@@ -21,6 +21,14 @@ export type ScriptApiCredential = {
 };
 
 /**
+ * Where a script run came from, bound to its token so the rows it creates can
+ * be traced back (`sourceStepId`, `parentScriptRunId`). `sourceStepId` is the
+ * swarm-script workflow step that started the run, inherited by nested runs;
+ * `sourceScriptRunId` is the run's own `script_runs` id.
+ */
+export type ScriptRunProvenance = { sourceStepId?: string; sourceScriptRunId?: string };
+
+/**
  * Resolve the api credential a script run acts as. When the run has a real
  * executing agent, mint a short-lived token bound to it so `ctx.swarm` calls
  * are scoped to that agent at the api, instead of carrying the swarm API key
@@ -28,11 +36,14 @@ export type ScriptApiCredential = {
  * pass sentinel ids like "schedule"/"workflow") keep the operator key, their
  * existing behavior. The caller must `release()` when the run ends.
  */
-export async function acquireScriptApiCredential(agentId: string): Promise<ScriptApiCredential> {
+export async function acquireScriptApiCredential(
+  agentId: string,
+  provenance: ScriptRunProvenance = {},
+): Promise<ScriptApiCredential> {
   if (!(await getAgentById(agentId))) {
     return { apiKey: undefined, release: async () => {} };
   }
-  const token = await mintScriptRunToken(agentId, SCRIPT_RUN_TOKEN_TTL_MS);
+  const token = await mintScriptRunToken(agentId, SCRIPT_RUN_TOKEN_TTL_MS, provenance);
   let released = false;
   return {
     apiKey: token.plaintext,
@@ -54,8 +65,9 @@ export async function acquireScriptApiCredential(agentId: string): Promise<Scrip
  */
 export async function runScriptWithRunCredential(
   input: Omit<RunScriptInput, "apiKey">,
+  provenance: ScriptRunProvenance = {},
 ): Promise<RunScriptOutput> {
-  const credential = await acquireScriptApiCredential(input.agentId);
+  const credential = await acquireScriptApiCredential(input.agentId, provenance);
   try {
     return await runScript({ ...input, apiKey: credential.apiKey });
   } finally {

@@ -417,6 +417,12 @@
     },
     "slackParticipants": {
       "exempt": "JSON participant list written by the API: Slack user ids, users.id identifiers, a trust enum and booleans"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "sourceScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "agentmail_inbox_mappings": {
@@ -752,6 +758,14 @@
   "automation_savings_days": {
     "day": { "exempt": "timestamp" },
     "jobKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
+  },
+  "automation_savings_links": {
+    "day": { "exempt": "timestamp" },
+    "parentJobId": { "exempt": "identifier" },
+    "childKind": { "exempt": "enum or fixed-format value" },
+    "childJobId": { "exempt": "workflow id or script name" },
+    "linkKind": { "exempt": "enum or fixed-format value" },
     "computedAt": { "exempt": "timestamp" }
   },
   "budget_refusal_notifications": {
@@ -2463,6 +2477,12 @@
     },
     "followUpGuard": {
       "exempt": "enum or fixed-format value"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "parentScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "script_versions": {
@@ -2784,6 +2804,12 @@
     },
     "lastUsedAt": {
       "exempt": "timestamp"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "sourceScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "skill_files": {
@@ -3693,6 +3719,9 @@
     },
     "definitionHash": {
       "exempt": "hash or digest"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
     }
   },
   "workflow_versions": {
