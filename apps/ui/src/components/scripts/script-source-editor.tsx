@@ -2,7 +2,7 @@ import Editor, { type Monaco } from "@monaco-editor/react";
 import { useCallback, useEffect, useRef } from "react";
 import type { ScriptTypeDefs } from "@/api/types";
 import { useTheme } from "@/hooks/use-theme";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { cn } from "@/lib/utils";
 
 const SDK_LIB_URI = "file:///swarm-sdk.d.ts";
@@ -67,8 +67,7 @@ export function ScriptSourceEditor({
   const handleBeforeMount = useCallback(
     (monaco: Monaco) => {
       monacoRef.current = monaco;
-      monaco.editor.defineTheme("github-light", monacoLightTheme);
-      monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+      defineGithubThemes(monaco);
       if (typeDefs) registerScriptTypeDefs(monaco, typeDefs);
     },
     [typeDefs],
@@ -84,7 +83,7 @@ export function ScriptSourceEditor({
     <div className={cn("min-h-0 overflow-hidden rounded-md border bg-card", className)}>
       <Editor
         language="typescript"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={source}
         onChange={(value) => onChange?.(value ?? "")}
         beforeMount={handleBeforeMount}

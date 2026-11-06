@@ -9,6 +9,7 @@ import {
   isEnabledOnlyRouter,
   jobKey,
   nodeOpsOf,
+  parseCalibration,
   priceScript,
   priceWorkflow,
   R,
@@ -391,6 +392,37 @@ describe("savings model", () => {
       expect(priced.savingUsd.p50).toBeCloseTo(804 * unit, 6);
     });
 
+    test("script runs keep no agent active, so agent-hours saved never go negative", () => {
+      const cases: [ScriptFacts, "script-scheduled" | "script-agent-invoked"][] = [
+        // One API run with an effect that took 30 seconds.
+        [script({ runs: 1, apiRuns: 1, apiEffectRuns: 1, computeSecs: 30 }), "script-scheduled"],
+        [
+          script({ runs: 1, apiRuns: 1, apiEffectRuns: 1, computeSecs: 30 }),
+          "script-agent-invoked",
+        ],
+        // Mixed API effect and non-API runs with long wall time.
+        [
+          script({ runs: 3, apiRuns: 1, apiEffectRuns: 1, computeSecs: 3 * 600 }),
+          "script-agent-invoked",
+        ],
+        // An agent-invoked run with no ops adds no turns, so it saves no hours.
+        [script({ runs: 1, computeSecs: 30 }), "script-agent-invoked"],
+      ];
+      for (const [f, kind] of cases) {
+        const priced = priceScript(f, { tier: "smart", days: 1, band: "job", kind });
+        expect(priced.actualHours).toBe(0);
+        expect(priced.hoursSaved).toEqual(priced.agentOnlyHours);
+        expect(priced.hoursSaved.p10).toBeGreaterThanOrEqual(0);
+      }
+      const api = priceScript(cases[0]?.[0] as ScriptFacts, {
+        tier: "smart",
+        days: 1,
+        band: "job",
+        kind: "script-scheduled",
+      });
+      expect(api.hoursSaved.p50).toBeCloseTo(R.p50 * curve(T0, "smart", "hrs"), 9);
+    });
+
     test("daily split sums to the window saving", () => {
       const days = [
         { day: "2026-10-01", ...script({ runs: 900, opsSum: 900 * 5 }) },
@@ -407,5 +439,43 @@ describe("savings model", () => {
       expect(split.reduce((s, d) => s + d.savingUsd, 0)).toBeCloseTo(priced.savingUsd.p50, 6);
       expect(split.every((d) => d.actualUsd === 0)).toBe(true);
     });
+  });
+});
+
+describe("calibration", () => {
+  const stored = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ calibratedAt: "2026-12-01", model: "claude-opus-5-5", curve: CURVE, ...over });
+
+  test("a stored curve parses as a deployment calibration", () => {
+    expect(parseCalibration(stored())).toMatchObject({
+      source: "deployment",
+      calibratedAt: "2026-12-01",
+      model: "claude-opus-5-5",
+    });
+  });
+
+  test("a missing, malformed or wrongly shaped value is null, so callers use the shipped curve", () => {
+    expect(parseCalibration(null)).toBeNull();
+    expect(parseCalibration("not json")).toBeNull();
+    expect(parseCalibration(stored({ calibratedAt: "yesterday" }))).toBeNull();
+    const short = { ...CURVE, smart: { usd: CURVE.smart.usd.slice(1), hrs: CURVE.smart.hrs } };
+    expect(parseCalibration(stored({ curve: short }))).toBeNull();
+    const zero = { ...CURVE, smol: { usd: CURVE.smol.usd.map(() => 0), hrs: CURVE.smol.hrs } };
+    expect(parseCalibration(stored({ curve: zero }))).toBeNull();
+  });
+
+  test("priceWorkflow uses the given curve and the shipped one by default", () => {
+    const doubled = Object.fromEntries(
+      SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+    ) as typeof CURVE;
+    const f = facts({ opsSum: 10 });
+    const base = priceWorkflow(f, { tier: "smart", days: 30, band: "job" });
+    const same = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: CURVE });
+    const twice = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: doubled });
+    expect(same.agentOnlyUsdPerRun).toBe(base.agentOnlyUsdPerRun);
+    expect(twice.agentOnlyUsdPerRun - F_FOLLOWUP).toBeCloseTo(
+      2 * (base.agentOnlyUsdPerRun - F_FOLLOWUP),
+      6,
+    );
   });
 });

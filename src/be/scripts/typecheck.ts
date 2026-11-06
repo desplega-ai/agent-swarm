@@ -228,6 +228,11 @@ export interface SwarmSdk {
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
   script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
+  // --- savings calibration (REST only) ---
+  /** The savings curve in use (shipped or derived from this deployment) and the stored row's metadata. */
+  savings_calibrationGet(): Promise<unknown>;
+  /** Derive the curve from the last \`days\` of sessions. Read-only unless \`apply\` is true (needs config write access). One run at a time; takes up to 120 s, so call it from a script with a long enough timeout. */
+  savings_calibrationRun(args?: { days?: number; end?: string; apply?: boolean }): Promise<unknown>;
   // --- swarm / agent ---
   swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
   agent_info(args?: Record<string, unknown>): Promise<unknown>;

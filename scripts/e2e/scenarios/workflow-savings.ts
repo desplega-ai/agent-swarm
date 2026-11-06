@@ -1,7 +1,8 @@
 // Automation savings, read from the hourly rollup: a run is priced on the
 // detail route right away, the daily points add up to it, the list route
 // answers, an idle workflow is not valid (never $0), the script and schedule routes answer,
-// and bad input is rejected.
+// bad input is rejected, and the calibration routes report the shipped curve
+// and apply nothing on a dry run.
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -50,14 +51,26 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [200], "daily savings for a workflow with a run");
       const daily = asRecord(response.json);
       const points = asRecords(daily, "points");
-      expect(daily.valid === true && points.length === 7, `7 daily points ${response.text}`);
+      // Seven rolling days touch every UTC day from the window start to its end
+      // (eight, unless the window starts on the minute of midnight).
+      const dailyWindow = asRecord(daily.window);
+      const firstDay = String(dailyWindow.start).slice(0, 10);
+      const lastDay = String(dailyWindow.end).slice(0, 10);
+      const windowDays = (Date.parse(lastDay) - Date.parse(firstDay)) / 86_400_000 + 1;
+      expect(
+        daily.valid === true &&
+          points.length === windowDays &&
+          points[0]?.day === firstDay &&
+          points.at(-1)?.day === lastDay,
+        `${windowDays} daily points from ${firstDay} to ${lastDay} ${response.text}`,
+      );
       const pointCents = Math.round(points.reduce((s, p) => s + Number(p.savingUsd), 0) * 100);
       expect(
         pointCents === Math.round(Number(band.p50) * 100),
         `daily points sum to the p50 saving ${pointCents} vs ${band.p50}`,
       );
 
-      // The default 30-day window is valid once the tick reaches its oldest day;
+      // The default 30-day window can still be backfilling after the 7-day one is done;
       // workflow and script days share the tick, newest first.
       await pollUntil(async () => {
         response = await ctx.api("GET", `/api/savings/daily?workflowId=${idle}`);
@@ -115,6 +128,18 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [404], "unknown schedule");
       response = await ctx.api("GET", `/api/savings/jobs?scheduleId=x&workflowId=${ran}`);
       expectStatus(response, [400], "schedule and workflow targets");
+
+      // Calibration: the shipped curve is in use; a dry run on a fresh deployment applies nothing.
+      response = await ctx.api("GET", "/api/savings/calibration");
+      expectStatus(response, [200], "calibration in use");
+      json = asRecord(response.json);
+      expect(json.source === "shipped" && json.stored === null, `shipped curve ${response.text}`);
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 7 } });
+      expectStatus(response, [200], "calibration dry run");
+      json = asRecord(response.json);
+      expect(json.applied === false, `a dry run applies nothing ${response.text}`);
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 0 } });
+      expectStatus(response, [400], "calibration: bad days");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
       await deleteWorkflowQuietly(ctx, idle);

@@ -20,14 +20,18 @@ function formatHours(hours: number): string {
   return Math.abs(hours) >= 10 ? `${formatCount(Math.round(hours))}h` : `${hours.toFixed(1)}h`;
 }
 
-export function calibrationNote(data: Pick<SavingsJobsResponse, "tier" | "calibratedAt">): string {
+export function calibrationNote(
+  data: Pick<SavingsJobsResponse, "tier" | "calibratedAt" | "calibrationSource">,
+): string {
   const day = new Date(`${data.calibratedAt}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
     timeZone: "UTC",
   });
-  return `Modelled at ${TIER_MODEL[data.tier]} (${data.tier}), calibrated ${day}.`;
+  const source =
+    data.calibrationSource === "deployment" ? "this swarm's own sessions" : "shipped curve";
+  return `Modelled at ${TIER_MODEL[data.tier]} (${data.tier}), calibrated ${day} (${source}).`;
 }
 
 const isScript = (row: SavingsJobRow) => row.kind !== "workflow";
@@ -98,7 +102,11 @@ function SavingsKpis({ row, note, days }: { row: SavingsJobRow; note: string; da
         label="Agent-hours saved"
         value={<span className="font-mono tabular-nums">{formatHours(row.hoursSaved.p50)}</span>}
         detail={`${formatHours(row.hoursSaved.p10)} to ${formatHours(row.hoursSaved.p90)}`}
-        info={`Agent-active hours the same work would have taken, minus the time it took. ${note}`}
+        info={
+          isScript(row)
+            ? `Agent-active hours the same work would have taken. A script run keeps no agent active, so nothing is subtracted. ${note}`
+            : `Agent-active hours the same work would have taken, minus the time it took. ${note}`
+        }
       />
       <StatPanel
         label="Substituted runs"
