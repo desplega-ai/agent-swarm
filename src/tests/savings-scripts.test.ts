@@ -8,9 +8,22 @@ import {
   createTaskExtended,
   getDbClient,
   initDb,
+  upsertSwarmConfig,
 } from "../be/db";
 import { computeScriptWindow, type SavingsSql } from "../be/savings/compute";
-import { curve, DEFAULT_OPS, F_FOLLOWUP, INLINE_SCRIPT_NAME, K, R, T0 } from "../be/savings/model";
+import {
+  CURVE,
+  type CurveSet,
+  curve,
+  DEFAULT_OPS,
+  F_FOLLOWUP,
+  INLINE_SCRIPT_NAME,
+  K,
+  R,
+  SAVINGS_CALIBRATION_KEY,
+  SAVINGS_TIERS,
+  T0,
+} from "../be/savings/model";
 import { readScriptSavings } from "../be/savings/read";
 import {
   daysToCompute,
@@ -18,7 +31,7 @@ import {
   resetSavingsRollupForTests,
   runSavingsRollupTick,
 } from "../be/savings/rollup";
-import { handleSavings } from "../http/savings";
+import { clearCalibrationCache, handleSavings } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -371,6 +384,108 @@ describe("savings scripts", () => {
         reason: "no-runs",
         rows: [],
       });
+    });
+
+    test("a stored deployment curve prices scheduled and agent-invoked scripts", async () => {
+      await catalogScript("calib-sched", "await a(); await b(); await c();");
+      await catalogScript("calib-helper", "await a(); await b(); await c(); await d(); await e();");
+      await createScheduledTask({
+        name: "calib-sched-hourly",
+        intervalMs: 3_600_000,
+        targetType: "script",
+        scriptName: "calib-sched",
+      });
+      // Fresh runs, so the on-read refresh of today picks them up.
+      const recent = async (name: string, count: number) => {
+        for (let i = 0; i < count; i++) {
+          const at = new Date(Date.now() - (i + 1) * 1000).toISOString();
+          await getDbClient().run(
+            `INSERT INTO script_runs (id, agentId, scriptName, source, status, startedAt, finishedAt)
+             VALUES (?, ?, ?, 'x', 'completed', ?, ?)`,
+            [`${name}-${i}`, agentId, name, at, at],
+          );
+        }
+      };
+      await recent("calib-sched", 4);
+      await recent("calib-helper", 3);
+      // Script buckets refresh only on the tick, and the test above computed
+      // today moments ago: drop today's marker so the tick rescans it.
+      await getDbClient().run(
+        "DELETE FROM automation_savings_days WHERE jobKind='script' AND day=?",
+        [new Date().toISOString().slice(0, 10)],
+      );
+      await runSavingsRollupTick(inProcessSql);
+      type Read = {
+        calibrationSource: string;
+        rows: {
+          kind: string;
+          substitutedRuns: number;
+          savingUsd: { p50: number };
+          agentOnlyUsdPerRun: number;
+        }[];
+      };
+      const read = async (name: string) =>
+        (await get(`/api/savings/jobs?scriptName=${name}&days=7&tier=smart`)).body as Read;
+      // Distinct from the shipped curve at every point, including the T0 baseline
+      // that agent-invoked runs subtract.
+      const deployed = Object.fromEntries(
+        SAVINGS_TIERS.map((t) => [
+          t,
+          { usd: CURVE[t].usd.map((v, i) => v * 3 + i * 0.01), hrs: CURVE[t].hrs },
+        ]),
+      ) as CurveSet;
+      const sched = (set?: CurveSet) => R.p50 * curve(T0 + K * 3, "smart", "usd", set) + F_FOLLOWUP;
+      const helper = (set?: CurveSet) =>
+        R.p50 * (curve(T0 + K * 5, "smart", "usd", set) - curve(T0, "smart", "usd", set));
+      const check = async (source: string, set?: CurveSet) => {
+        const s = await read("calib-sched");
+        const h = await read("calib-helper");
+        expect(s.calibrationSource).toBe(source);
+        expect(h.calibrationSource).toBe(source);
+        expect(s.rows[0]).toMatchObject({ kind: "script-scheduled", substitutedRuns: 4 });
+        expect(h.rows[0]).toMatchObject({ kind: "script-agent-invoked", substitutedRuns: 3 });
+        expect(s.rows[0]?.agentOnlyUsdPerRun).toBeCloseTo(sched(set), 2);
+        expect(s.rows[0]?.savingUsd.p50).toBeCloseTo(4 * sched(set), 1);
+        expect(h.rows[0]?.agentOnlyUsdPerRun).toBeCloseTo(helper(set), 2);
+        expect(h.rows[0]?.savingUsd.p50).toBeCloseTo(3 * helper(set), 1);
+      };
+      try {
+        clearCalibrationCache();
+        await check("shipped");
+        await upsertSwarmConfig({
+          scope: "global",
+          key: SAVINGS_CALIBRATION_KEY,
+          value: JSON.stringify({
+            calibratedAt: "2026-12-01",
+            model: "claude-opus-5-5",
+            curve: deployed,
+          }),
+        });
+        clearCalibrationCache();
+        await check("deployment", deployed);
+        // The script list and the daily series read the same curve.
+        const list = (await get("/api/savings/jobs?kind=script&days=7&tier=smart")).body as Read & {
+          rows: { scriptName: string }[];
+        };
+        expect(list.calibrationSource).toBe("deployment");
+        expect(list.rows.find((r) => r.scriptName === "calib-helper")?.savingUsd.p50).toBeCloseTo(
+          3 * helper(deployed),
+          1,
+        );
+        const daily = (await get("/api/savings/daily?scriptName=calib-sched&days=7&tier=smart"))
+          .body as { calibrationSource: string; points: { savingUsd: number }[] };
+        expect(daily.calibrationSource).toBe("deployment");
+        const cents = daily.points.reduce((sum, p) => sum + Math.round(p.savingUsd * 100), 0);
+        expect(cents / 100).toBeCloseTo(4 * sched(deployed), 1);
+        // The deployment curve is not the shipped one for either kind.
+        expect(sched(deployed)).toBeGreaterThan(sched() * 2);
+        expect(helper(deployed)).toBeGreaterThan(helper() * 2);
+      } finally {
+        await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [
+          SAVINGS_CALIBRATION_KEY,
+        ]);
+        clearCalibrationCache();
+      }
     });
 
     test("bad input is rejected", async () => {
