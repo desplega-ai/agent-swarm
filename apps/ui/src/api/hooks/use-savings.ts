@@ -45,3 +45,24 @@ export function useScriptsSavings() {
     retry: false,
   });
 }
+
+/** Saving of one schedule over the last 30 days. */
+export function useScheduleSavings(scheduleId: string | undefined) {
+  return useQuery({
+    queryKey: ["savings", "schedule", scheduleId],
+    queryFn: () => api.getSavingsSchedules({ scheduleId: scheduleId as string }, { days: 30 }),
+    enabled: !!scheduleId,
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}
+
+/** Saving of every schedule over the last 30 days, for the schedules list. */
+export function useSchedulesSavings() {
+  return useQuery({
+    queryKey: ["savings", "schedules"],
+    queryFn: () => api.getSavingsSchedules({ kind: "schedule" }, { days: 30 }),
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}

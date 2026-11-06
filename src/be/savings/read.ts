@@ -635,6 +635,191 @@ export async function readScriptSavings(opts: {
   };
 }
 
+export type ScheduleRef = { scheduleId: string; scheduleName: string; scheduleEnabled: boolean };
+
+/**
+ * A schedule's saving. `modelled`: the schedule's workflow or script target, whose
+ * row is the target's whole row because runs carry no schedule link (two schedules
+ * of one target show the same row). `measured`: an agent-task schedule, which has
+ * no automation to substitute, so it shows what its tasks cost and no saving.
+ */
+export type ScheduleSavingsRow =
+  | ((WorkflowSavingsRow | ScriptSavingsRow) & ScheduleRef & { basis: "modelled" })
+  | (ScheduleRef & {
+      basis: "measured";
+      kind: "agent-task-schedule";
+      name: string;
+      /** Agent tasks the schedule created in the window. */
+      runs: number;
+      /** Recorded cost of those tasks only; their review tasks and follow-ups are not linked to the schedule. */
+      actualUsd: number;
+      actualHours: number;
+    });
+
+export type ScheduleSavingsRead = {
+  window: SavingsWindow;
+  computedAt: string | null;
+  complete: boolean;
+  boundaryEstimated: boolean;
+  rows: ScheduleSavingsRow[];
+  /** Set for one schedule whose workflow or script no longer exists. */
+  targetMissing: boolean;
+};
+
+type ScheduleTarget = {
+  id: string;
+  name: string;
+  enabled: number;
+  targetType: "agent-task" | "workflow" | "script";
+  workflowId: string | null;
+  scriptName: string | null;
+};
+
+/**
+ * Price the schedules of a window: every schedule when `scheduleId` is absent,
+ * else that one, or null when it does not exist. A disabled schedule is still
+ * priced, from the runs of its target in the window, and flagged. Schedules whose
+ * target has no runs in the window, or no longer exists, have no row in a list.
+ */
+export async function readScheduleSavings(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+  scheduleId?: string;
+  sql?: SavingsSql;
+  curve?: CurveSet;
+}): Promise<ScheduleSavingsRead | null> {
+  const client = getDbClient();
+  const schedules = await client.query<ScheduleTarget>(
+    `SELECT id, name, enabled, targetType, workflowId, scriptName FROM scheduled_tasks ${opts.scheduleId ? "WHERE id=?" : ""}`,
+    opts.scheduleId ? [opts.scheduleId] : [],
+  );
+  if (opts.scheduleId && schedules.length === 0) return null;
+  const single = opts.scheduleId !== undefined;
+  const of = (targetType: ScheduleTarget["targetType"]) =>
+    schedules.filter((s) => s.targetType === targetType);
+  const base = {
+    days: opts.days,
+    tier: opts.tier,
+    now: opts.now,
+    sql: opts.sql,
+    curve: opts.curve,
+  };
+
+  // One rollup read per target type, narrowed to the target when asking for one schedule.
+  const workflowSchedules = of("workflow");
+  const scriptSchedules = of("script");
+  const workflows = workflowSchedules.some((s) => s.workflowId)
+    ? await readWorkflowSavings({
+        ...base,
+        workflowId: single ? (workflowSchedules[0]?.workflowId ?? undefined) : undefined,
+      })
+    : null;
+  const scripts = scriptSchedules.some((s) => s.scriptName)
+    ? await readScriptSavings({
+        ...base,
+        scriptName: single ? (scriptSchedules[0]?.scriptName ?? undefined) : undefined,
+      })
+    : null;
+  const workflowRows = new Map(workflows?.rows.map((r) => [r.workflowId, r]));
+  const scriptRows = new Map(scripts?.rows.map((r) => [r.scriptName, r]));
+
+  const window = savingsWindow(opts.days, opts.now);
+  const measured = of("agent-task").length > 0 ? await readMeasuredSpend(window.start, opts) : null;
+
+  const rows: ScheduleSavingsRow[] = [];
+  let targetMissing = false;
+  for (const s of schedules) {
+    const ref: ScheduleRef = {
+      scheduleId: s.id,
+      scheduleName: s.name,
+      scheduleEnabled: Boolean(s.enabled),
+    };
+    if (s.targetType === "agent-task") {
+      const spend = measured?.get(s.id);
+      if (spend) {
+        rows.push({
+          ...ref,
+          basis: "measured",
+          kind: "agent-task-schedule",
+          name: s.name,
+          runs: spend.runs,
+          actualUsd: spend.usd,
+          actualHours: spend.ms / 3_600_000,
+        });
+      }
+      continue;
+    }
+    const target =
+      s.targetType === "workflow"
+        ? s.workflowId
+          ? workflowRows.get(s.workflowId)
+          : undefined
+        : s.scriptName
+          ? scriptRows.get(s.scriptName)
+          : undefined;
+    if (target) rows.push({ ...target, ...ref, basis: "modelled" });
+    else if (single) targetMissing = !(await targetExists(s));
+  }
+  rows.sort(
+    (a, b) =>
+      Number(b.basis === "modelled") - Number(a.basis === "modelled") ||
+      (a.basis === "modelled" && b.basis === "modelled"
+        ? b.savingUsd.p50 - a.savingUsd.p50
+        : b.basis === "measured" && a.basis === "measured"
+          ? b.actualUsd - a.actualUsd
+          : 0),
+  );
+
+  const reads = [workflows, scripts].filter((r) => r !== null);
+  const newest = reads.map((r) => r.computedAt).filter((t): t is string => t !== null);
+  return {
+    window: { start: window.start, end: window.end, days: window.days },
+    // Measured spend is read live, so a measured-only response is computed now.
+    computedAt: newest.sort().at(-1) ?? (measured ? new Date(opts.now).toISOString() : null),
+    complete: reads.every((r) => r.complete),
+    boundaryEstimated: reads.some((r) => r.boundaryEstimated),
+    rows,
+    targetMissing,
+  };
+}
+
+async function targetExists(s: ScheduleTarget): Promise<boolean> {
+  // A schedule with no target configured has nothing that could be gone.
+  if (s.targetType === "workflow") {
+    return (
+      !s.workflowId ||
+      !!(await getDbClient().get("SELECT 1 FROM workflows WHERE id=?", [s.workflowId]))
+    );
+  }
+  return !s.scriptName || (await isKnownScriptName(s.scriptName));
+}
+
+/** Tasks created by schedules in the window and their recorded cost: all schedules, or one. */
+async function readMeasuredSpend(
+  start: string,
+  opts: { scheduleId?: string; now: number },
+): Promise<Map<string, { runs: number; usd: number; ms: number }>> {
+  const rows = await getDbClient().query<{
+    scheduleId: string;
+    runs: number;
+    usd: number | null;
+    ms: number | null;
+  }>(
+    `SELECT t.scheduleId, count(DISTINCT t.id) runs, sum(c.totalCostUsd) usd, sum(c.durationMs) ms
+     FROM agent_tasks t LEFT JOIN session_costs c ON c.taskId=t.id
+     WHERE ${opts.scheduleId ? "t.scheduleId=?" : "t.scheduleId IS NOT NULL"} AND t.createdAt>=? AND t.createdAt<=?
+     GROUP BY t.scheduleId`,
+    [...(opts.scheduleId ? [opts.scheduleId] : []), start, new Date(opts.now).toISOString()],
+  );
+  return new Map(
+    rows.map((r) => [
+      r.scheduleId,
+      { runs: Number(r.runs), usd: Number(r.usd) || 0, ms: Number(r.ms) || 0 },
+    ]),
+  );
+}
+
 /**
  * Replace each script's first-day facts with those of its runs inside the
  * window, scanned live (the window starts mid-day), and drop scripts left with

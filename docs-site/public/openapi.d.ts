@@ -20114,14 +20114,15 @@ export interface paths {
         };
         /**
          * Estimated automation savings per workflow or script
-         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
          */
         get: {
             parameters: {
                 query?: {
                     workflowId?: string;
                     scriptName?: string;
-                    kind?: "workflow" | "script";
+                    scheduleId?: string;
+                    kind?: "workflow" | "script" | "schedule";
                     days?: "7" | "30" | "90";
                     tier?: "smol" | "regular" | "smart" | "ultra";
                 };
@@ -20152,10 +20153,10 @@ export interface paths {
                             computedAt: string | null;
                             valid: boolean;
                             /** @enum {string|null} */
-                            reason: "not-computed" | "no-runs" | null;
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
                             /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
                             boundaryEstimated: boolean;
-                            rows: {
+                            rows: ({
                                 /** @enum {string} */
                                 kind: "workflow" | "script-scheduled" | "script-agent-invoked";
                                 workflowId?: string;
@@ -20163,6 +20164,11 @@ export interface paths {
                                 name: string;
                                 /** @enum {string} */
                                 basis: "modelled";
+                                scheduleId?: string;
+                                scheduleName?: string;
+                                scheduleEnabled?: boolean;
+                                /** @enum {string} */
+                                scope?: "target-job";
                                 enabledOnlyRule: boolean;
                                 runs: number;
                                 substitutedRuns: number;
@@ -20199,7 +20205,22 @@ export interface paths {
                                     p90: number;
                                 };
                                 agentOnlyUsdPerRun: number;
-                            }[];
+                            } | {
+                                /** @enum {string} */
+                                kind: "agent-task-schedule";
+                                scheduleId: string;
+                                scheduleName: string;
+                                scheduleEnabled: boolean;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "measured";
+                                /** @description Agent tasks the schedule created in the window. */
+                                runs: number;
+                                /** @description Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule. */
+                                actualUsd: number;
+                                actualHours: number;
+                                savingUsd: null;
+                            })[];
                             total: {
                                 runs: number;
                                 substitutedRuns: number;
@@ -20227,7 +20248,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value */
+                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20236,7 +20257,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Workflow or script not found */
+                /** @description Workflow, script or schedule not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -20301,7 +20322,7 @@ export interface paths {
                             computedAt: string | null;
                             valid: boolean;
                             /** @enum {string|null} */
-                            reason: "not-computed" | "no-runs" | null;
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
                             /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
                             boundaryEstimated: boolean;
                             points: {

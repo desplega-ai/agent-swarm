@@ -4512,6 +4512,37 @@ export interface SavingsJobsResponse {
   total: SavingsTotals | null;
 }
 
+/** A schedule's row: the schedule's workflow or script target (runs carry no schedule link), or its measured spend. */
+export interface SavingsScheduleRef {
+  scheduleId: string;
+  scheduleName: string;
+  scheduleEnabled: boolean;
+}
+
+/** The target job's whole row, shared with any other schedule of the same target. */
+export type SavingsTargetRow = SavingsJobRow & SavingsScheduleRef & { scope: "target-job" };
+
+/** An agent-task schedule: what its tasks cost, with no saving to model. */
+export interface SavingsMeasuredRow extends SavingsScheduleRef {
+  kind: "agent-task-schedule";
+  name: string;
+  basis: "measured";
+  /** Agent tasks the schedule created in the window. */
+  runs: number;
+  /** Recorded cost of those tasks; a floor, as their reviews and follow-ups are not linked to the schedule. */
+  actualUsd: number;
+  actualHours: number;
+  savingUsd: null;
+}
+
+export type SavingsScheduleRow = SavingsTargetRow | SavingsMeasuredRow;
+
+export interface SavingsScheduleResponse extends Omit<SavingsJobsResponse, "rows" | "reason"> {
+  /** `target-missing`: the schedule's workflow or script no longer exists. */
+  reason: SavingsJobsResponse["reason"] | "target-missing";
+  rows: SavingsScheduleRow[];
+}
+
 /** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
 export interface SavingsDailyPoint {
   day: string;
