@@ -9,19 +9,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatCount, formatUsd } from "@/pages/usage/usage-format";
 import { SavingsDailyChart } from "./savings-daily-chart";
 
-const TIER_MODEL: Record<SavingsTier, string> = {
+export const TIER_MODEL: Record<SavingsTier, string> = {
   smol: "haiku 5.5",
   regular: "sonnet 5.5",
   smart: "opus 5.5",
   ultra: "fable 5.1",
 };
 
-function formatHours(hours: number): string {
+export function formatHours(hours: number): string {
   return Math.abs(hours) >= 10 ? `${formatCount(Math.round(hours))}h` : `${hours.toFixed(1)}h`;
 }
 
 export function calibrationNote(
-  data: Pick<SavingsJobsResponse, "tier" | "calibratedAt" | "calibrationSource">,
+  data: Pick<SavingsJobsResponse, "calibratedAt" | "calibrationSource" | "tier">,
 ): string {
   const day = new Date(`${data.calibratedAt}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -80,7 +80,7 @@ export function SavingsHeaderAmount({
   );
 }
 
-function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+export function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-border/60 py-1.5 last:border-0">
       <dt className="text-muted-foreground">{label}</dt>

@@ -52259,8 +52259,8 @@
     },
     "/api/savings/daily": {
       "get": {
-        "summary": "Daily automation savings of a workflow or script",
-        "description": "The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.",
+        "summary": "Daily automation savings of a workflow, a script or the fleet",
+        "description": "The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.",
         "tags": [
           "Savings"
         ],
@@ -52443,7 +52443,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of workflowId and scriptName, or an unknown days or tier value",
+            "description": "Both workflowId and scriptName, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52454,6 +52454,388 @@
           },
           "404": {
             "description": "Workflow or script not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/summary": {
+      "get": {
+        "summary": "Fleet automation savings",
+        "description": "What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet savings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "computedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not-computed",
+                        "no-runs",
+                        "target-missing",
+                        null
+                      ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
+                    },
+                    "byKind": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "workflows": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "scheduledScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "agentInvokedScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workflows",
+                        "scheduledScripts",
+                        "agentInvokedScripts"
+                      ]
+                    },
+                    "fleetLlmUsd": {
+                      "type": "number",
+                      "description": "Measured session spend of the whole swarm in the window, as on the usage page."
+                    },
+                    "selfOptimizationRatio": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "`(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total."
+                    },
+                    "excluded": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "enabledOnlyRuns": {
+                          "type": "integer",
+                          "description": "Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs."
+                        }
+                      },
+                      "required": [
+                        "enabledOnlyRuns"
+                      ]
+                    },
+                    "assumptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "calibrationSource",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "boundaryEstimated",
+                    "total",
+                    "byKind",
+                    "fleetLlmUsd",
+                    "selfOptimizationRatio",
+                    "excluded",
+                    "assumptions"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
