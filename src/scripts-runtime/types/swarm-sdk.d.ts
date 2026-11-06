@@ -732,12 +732,70 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
   }
 
+  export interface RetryOptions {
+    /** Retries after the first call. Default 3, so at most 4 calls. */
+    retries?: number;
+    /** First backoff delay in ms. Doubles on each retry, with jitter. Default 200. */
+    minDelayMs?: number;
+    /** Cap on a single wait, including a Retry-After wait. Default 5000. */
+    maxDelayMs?: number;
+    /** Total time across all calls and waits, in ms. Default 30000. */
+    budgetMs?: number;
+    /**
+     * Decides whether to retry: gets the thrown error or the returned value and
+     * the 1-based attempt. Default: retry any throw, plus a failed fetch Response,
+     * ctx.api raw result or ctx.swarm envelope with status 429, 502, 503 or 504.
+     */
+    retryOn?: (errorOrResult: unknown, attempt: number) => boolean | Promise<boolean>;
+    /** Stops the retries: once it aborts, the wait ends and retry rejects with its reason. */
+    signal?: AbortSignal;
+  }
+
+  export interface FetchRetryOptions extends RetryOptions {
+    /**
+     * Sends an Idempotency-Key header, the same value on every attempt: true
+     * generates a UUID per call, a string is used as is. A POST or PATCH with
+     * the header also retries 502/503/504 and network errors. It only prevents
+     * a duplicate when the server dedupes by the key.
+     */
+    idempotencyKey?: boolean | string;
+  }
+
+  /**
+   * ctx.stdlib.fetch options. Default retries: 429 on every method (Retry-After
+   * honoured); 502/503/504 and network errors on GET, HEAD, OPTIONS, PUT, DELETE,
+   * or any request with an Idempotency-Key. A stream body gets one attempt.
+   */
+  export type FetchOptions = RequestInit & {
+    /** false: one attempt. true or omitted: the defaults above. An object tunes them. */
+    retry?: boolean | FetchRetryOptions;
+    /** @deprecated Use retry: { retries }. Total attempts, so retries: 1 is one attempt. */
+    retries?: number;
+    /** Per-attempt timeout in ms. Default 30000. */
+    timeoutMs?: number;
+  };
+
+  export interface Retry {
+    /**
+     * Calls fn(attempt) (sync or async) until it succeeds or a retry is not
+     * warranted. Out of attempts or budget: rethrows the last error or returns
+     * the last result. Honours Retry-After on a 429, capped by maxDelayMs.
+     */
+    <T>(fn: (attempt: number) => T | Promise<T>, options?: RetryOptions): Promise<Awaited<T>>;
+    /** Returns a reusable function with fn's arguments that retries each call. */
+    wrap<A extends unknown[], T>(
+      fn: (...args: A) => T | Promise<T>,
+      options?: RetryOptions,
+    ): (...args: A) => Promise<Awaited<T>>;
+  }
+
   export interface ScriptStdlib {
-    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-    fetchJson(input: string | URL | Request, init?: RequestInit): Promise<unknown>;
+    fetch(input: string | URL | Request, init?: FetchOptions): Promise<Response>;
+    fetchJson(input: string | URL | Request, init?: FetchOptions): Promise<unknown>;
     grep(pattern: string, files?: string | string[]): Promise<string>;
     glob(pattern: string): Promise<string[]>;
     table(rows: Array<Record<string, unknown>>): string;
+    retry: Retry;
     Redacted: RedactedStatic;
   }
 

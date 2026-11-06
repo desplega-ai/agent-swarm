@@ -378,6 +378,10 @@
       "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
       "scenarios": ["script-limits"]
     },
+    "script-retry": {
+      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), and a ctx.swarm call that retries a real 429 from the API.",
+      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge"]
+    },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
       "scenarios": ["script-runs-durable"]

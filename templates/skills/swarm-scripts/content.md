@@ -77,7 +77,8 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
-- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
+- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
+- Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
 
 ### Files and shell

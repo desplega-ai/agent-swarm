@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
+import { SDK_TOOL_NAME_MAP } from "../scripts-runtime/sdk-allowlist";
+import { isReadOnlyBridgeCall } from "../scripts-runtime/swarm-sdk";
 import { createServer } from "../server";
 import { ALL_TOOLS, CORE_TOOLS, DEFERRED_TOOLS } from "../tools/tool-config";
 
@@ -408,5 +410,33 @@ describe("Tool Annotations & Classification", () => {
     expect(destructive).toBeGreaterThanOrEqual(5); // delete-* tools
     expect(idempotent).toBeGreaterThanOrEqual(5); // update/register tools
     expect(openWorld).toBeGreaterThanOrEqual(3); // Slack tools
+  });
+
+  // === ctx.swarm bridge retry classification ===
+  // The bridge retries a 5xx or network error only for reads. Its read list is
+  // hand-kept, so cross-check it against the tool annotations both ways. The
+  // generic bridge sends every call as POST, the strictest case.
+  // poll-task is annotated read-only but claims work, so it must not repeat.
+  const READ_ANNOTATED_BUT_WRITES = new Set(["task_poll"]);
+
+  test("every read-only SDK method retries as a read on the ctx.swarm bridge", () => {
+    const missing = Object.entries(SDK_TOOL_NAME_MAP)
+      .filter(([, tool]) => tools[tool]?.annotations?.readOnlyHint === true)
+      .filter(([method]) => !READ_ANNOTATED_BUT_WRITES.has(method))
+      .filter(([method]) => !isReadOnlyBridgeCall(method, "POST"))
+      .map(([method]) => method);
+    expect(missing).toEqual([]);
+    for (const method of READ_ANNOTATED_BUT_WRITES) {
+      expect(isReadOnlyBridgeCall(method, "POST")).toBe(false);
+      expect(isReadOnlyBridgeCall(method, "GET")).toBe(false);
+    }
+  });
+
+  test("no SDK method the bridge repeats as a read is annotated as a write", () => {
+    const writes = Object.entries(SDK_TOOL_NAME_MAP)
+      .filter(([method]) => isReadOnlyBridgeCall(method, "POST"))
+      .filter(([, tool]) => tools[tool]?.annotations?.destructiveHint === true)
+      .map(([method]) => method);
+    expect(writes).toEqual([]);
   });
 });
