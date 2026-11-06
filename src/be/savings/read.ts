@@ -136,6 +136,8 @@ type SliceResult = { facts: WorkflowFacts } | { runs: number | null };
 /** First-day scans by workflow and window start, kept a little past their minute. */
 const sliceCache = new Map<string, { at: number; result: Promise<SliceResult> }>();
 const SLICE_TTL_MS = 2 * MINUTE_MS;
+/** First-day scans in flight per read: below the default db-query concurrency cap of 3. */
+const FIRST_DAY_SCAN_CONCURRENCY = 2;
 
 /** Test hook: forget the cached first-day scans. */
 export function resetSavingsReadCache(): void {
@@ -153,12 +155,14 @@ function scanSlice(
   const now = Date.now();
   // A window start of an older minute is never read again.
   for (const [k, v] of sliceCache) if (now - v.at > SLICE_TTL_MS) sliceCache.delete(k);
-  const result = computeWorkflowWindow(workflow, slice, sql).then(
+  const result: Promise<SliceResult> = computeWorkflowWindow(workflow, slice, sql).then(
     (out): SliceResult => (out.status === "ok" ? { facts: out.facts } : { runs: out.runs }),
     (err): SliceResult => {
       console.warn(
         `[savings-read] first-day scan of ${workflow.id} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
       );
+      // A failed scan is not kept: the next read scans again.
+      if (sliceCache.get(key)?.result === result) sliceCache.delete(key);
       return { runs: null };
     },
   );
@@ -354,23 +358,28 @@ async function clipFirstDay(
   };
   const dayShare = (Date.parse(slice.end) - Date.parse(slice.start)) / DAY_MS;
   let estimated = false;
+  const clip = async (b: BucketRow) => {
+    const result: SliceResult = defOf.has(b.jobId)
+      ? await scanSlice({ id: b.jobId, definition: defOf.get(b.jobId) }, slice, sql)
+      : { runs: null };
+    let facts: WorkflowFacts;
+    if ("facts" in result) {
+      facts = result.facts;
+    } else {
+      estimated = true;
+      const share =
+        result.runs !== null && Number(b.runs) > 0
+          ? Math.min(1, result.runs / Number(b.runs))
+          : dayShare;
+      facts = scaleBucket(b, share);
+    }
+    for (const c of SAVINGS_FACT_COLUMNS) b[c] = facts[c];
+  };
+  // A few scans at a time, below the bounded executor's concurrency cap.
+  const queue = [...first];
   await Promise.all(
-    first.map(async (b) => {
-      const result: SliceResult = defOf.has(b.jobId)
-        ? await scanSlice({ id: b.jobId, definition: defOf.get(b.jobId) }, slice, sql)
-        : { runs: null };
-      let facts: WorkflowFacts;
-      if ("facts" in result) {
-        facts = result.facts;
-      } else {
-        estimated = true;
-        const share =
-          result.runs !== null && Number(b.runs) > 0
-            ? Math.min(1, result.runs / Number(b.runs))
-            : dayShare;
-        facts = scaleBucket(b, share);
-      }
-      for (const c of SAVINGS_FACT_COLUMNS) b[c] = facts[c];
+    Array.from({ length: Math.min(FIRST_DAY_SCAN_CONCURRENCY, queue.length) }, async () => {
+      for (let b = queue.shift(); b; b = queue.shift()) await clip(b);
     }),
   );
   return estimated;

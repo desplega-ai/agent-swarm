@@ -35,8 +35,26 @@ function boundedSql(budgetMs: () => number): SavingsSql {
   };
 }
 
-/** Request-path scans (today's bucket of one workflow) use the HTTP db-query budget. */
-const requestSql = boundedSql(getDbQueryHttpBudgetMs);
+/** Retries a scan refused by a full concurrency cap, `attempts` times in all, sleeping `stepMs` x attempt (at most 5 s) between them. */
+function waitOutCap(run: SavingsSql, attempts: number, stepMs: number): SavingsSql {
+  return async <T>(sql: string, params: DbParam[]) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run<T>(sql, params);
+      } catch (err) {
+        if (!(err instanceof DbQueryConcurrencyCapError) || attempt >= attempts) throw err;
+        await Bun.sleep(Math.min(5_000, stepMs * attempt));
+      }
+    }
+  };
+}
+
+/**
+ * Request-path scans (today's bucket of one workflow, the window's first day)
+ * use the HTTP db-query budget. A full cap is waited out for about 2 s, so
+ * parallel reads queue instead of falling back to an estimate.
+ */
+export const savingsRequestSql = waitOutCap(boundedSql(getDbQueryHttpBudgetMs), 8, 75);
 
 /** The router's step scan for one day takes about 10 s. */
 const ROLLUP_QUERY_BUDGET_MS = 60_000;
@@ -45,17 +63,11 @@ const ROLLUP_QUERY_BUDGET_MS = 60_000;
  * Scans of the hourly rollup. They run in the background, so a full
  * concurrency cap is waited out (up to about a minute) instead of failing the day.
  */
-export const savingsRollupSql: SavingsSql = async <T>(sql: string, params: DbParam[]) => {
-  const run = boundedSql(() => ROLLUP_QUERY_BUDGET_MS);
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await run<T>(sql, params);
-    } catch (err) {
-      if (!(err instanceof DbQueryConcurrencyCapError) || attempt >= 20) throw err;
-      await Bun.sleep(Math.min(5_000, 250 * attempt));
-    }
-  }
-};
+export const savingsRollupSql = waitOutCap(
+  boundedSql(() => ROLLUP_QUERY_BUDGET_MS),
+  20,
+  250,
+);
 
 const SavingsBandSchema = z.object({ p10: z.number(), p50: z.number(), p90: z.number() });
 
@@ -296,7 +308,7 @@ function refreshToday(
   const at = scannedAt.get(key);
   if (at !== undefined && now - at < REFRESH_TTL_MS) return Promise.resolve();
   for (const [k, t] of scannedAt) if (now - t >= REFRESH_TTL_MS) scannedAt.delete(k);
-  const done = refreshWorkflowToday(workflow, requestSql, now)
+  const done = refreshWorkflowToday(workflow, savingsRequestSql, now)
     .then(
       (outcome) => {
         if (outcome !== "skipped") scannedAt.set(key, Date.now());
@@ -321,7 +333,7 @@ async function readOne(workflowId: string, days: number, tier: (typeof SAVINGS_T
   if (!workflow) return null;
   const now = Date.now();
   await refreshToday(workflow, now);
-  return readWorkflowSavings({ days, tier, now, workflowId, sql: requestSql });
+  return readWorkflowSavings({ days, tier, now, workflowId, sql: savingsRequestSql });
 }
 
 function meta(
@@ -390,7 +402,7 @@ export async function handleSavings(
   }
   const read = workflowId
     ? await readOne(workflowId, days, tier)
-    : await readWorkflowSavings({ days, tier, now: Date.now(), sql: requestSql });
+    : await readWorkflowSavings({ days, tier, now: Date.now(), sql: savingsRequestSql });
   if (!read) return notFound(res);
   const show = read.complete;
   savingsJobsRoute.respond(res, 200, {

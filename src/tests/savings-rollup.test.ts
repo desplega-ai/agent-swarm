@@ -25,7 +25,8 @@ import {
   utcDay,
   workflowDaysToCompute,
 } from "../be/savings/rollup";
-import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
+import { getDbQueryConcurrencyCap } from "../http/db-query-shared";
+import { handleSavings, resetSavingsRefreshCache, savingsRequestSql } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -355,7 +356,60 @@ describe("savings rollup", () => {
       expect(read.boundaryEstimated).toBe(true);
       // 22 of the first day's 24 hours are inside the window: 275 of its 300 runs.
       expect(read.rows[0]?.runs).toBe(275 + 300 * 6);
+      // The failed scan is not kept: the next read in the same minute scans again.
+      const again = await readWorkflowSavings({
+        days: 7,
+        tier: "smart",
+        now: NOW2,
+        workflowId: router,
+      });
+      expect(again.boundaryEstimated).toBe(false);
+      expect(again.rows[0]?.runs).toBe(180 + 300 * 6);
       resetSavingsReadCache();
+    });
+
+    describe("first-day scans through the bounded executor, above its concurrency cap", () => {
+      const read = (sql: SavingsSql, workflowId?: string) => {
+        resetSavingsReadCache();
+        return readWorkflowSavings({ days: 7, tier: "smart", now: NOW2, workflowId, sql });
+      };
+      let fanout: string;
+
+      beforeAll(async () => {
+        // Four versions of one job, each with two runs before the window's 02:00 start and one after.
+        const names = ["fanout", ...["09", "08", "07"].map((m) => `fanout-retired-2026-${m}-01`)];
+        for (const name of names) {
+          const id = (await createWorkflow({ name, definition: DEFINITION })).id;
+          if (name === "fanout") fanout = id;
+          for (const t of ["00:30", "01:30", "13:00"]) await runAt(id, `2026-10-25T${t}:00.000Z`);
+        }
+        await getDbClient().run("DELETE FROM automation_savings_days WHERE day='2026-10-25'");
+        await runSavingsRollupTick(inProcessSql, { now: NOW2 });
+      });
+
+      test("a fleet read scans every first day exactly", async () => {
+        const firstDay = await getDbClient().get<{ n: number }>(
+          "SELECT count(DISTINCT jobId) n FROM automation_savings_daily WHERE day='2026-10-25' AND runs>0",
+        );
+        // Control: more first-day workflows than the cap, so parallel scans would be refused.
+        expect(Number(firstDay?.n)).toBeGreaterThan(getDbQueryConcurrencyCap());
+        const bounded = await read(savingsRequestSql);
+        expect(bounded.boundaryEstimated).toBe(false);
+        expect(bounded.rows).toEqual((await read(inProcessSql)).rows);
+        // A time-scaled estimate would keep 28 of the 30 runs of cap-poll's first day; all fall before 02:00.
+        expect(bounded.rows.find((r) => r.workflowId === capLive)?.runs).toBe(30 * 6);
+        resetSavingsReadCache();
+      });
+
+      test("a detail read scans every version of its job exactly", async () => {
+        const bounded = await read(savingsRequestSql, fanout);
+        expect(bounded.boundaryEstimated).toBe(false);
+        // Only the 13:00 run is inside; an estimate would keep 3 x 22/24, so 3.
+        expect(bounded.rows).toHaveLength(1);
+        expect(bounded.rows[0]?.runs).toBe(1);
+        expect(bounded.rows).toEqual((await read(inProcessSql, fanout)).rows);
+        resetSavingsReadCache();
+      });
     });
   });
 
