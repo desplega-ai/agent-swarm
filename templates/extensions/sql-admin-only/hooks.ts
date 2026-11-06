@@ -15,14 +15,14 @@ const manifest = {
   config,
 } as const;
 
-/** One row: the task's creator and how many RBAC admin grants that user holds. */
-export const CREATOR_SQL = `SELECT t.requestedByUserId,
-       (SELECT COUNT(*) FROM principal_roles pr
-          JOIN roles r ON r.id = pr.roleId
-         WHERE pr.principalType = 'user'
-           AND pr.principalId = t.requestedByUserId
-           AND r.name = 'admin') AS adminGrants
+/**
+ * The task's creator and that user's `users.role`, the role the swarm shows for a
+ * requester (for example "Alice (admin)"). RBAC roles do not work here: every user is
+ * created with the RBAC `admin` role.
+ */
+export const CREATOR_SQL = `SELECT t.requestedByUserId, u.role
 FROM agent_tasks t
+LEFT JOIN users u ON u.id = t.requestedByUserId
 WHERE t.id = ?`;
 
 type Envelope = { success?: boolean; data?: { rows?: unknown[] }; rows?: unknown[] } | null;
@@ -66,7 +66,7 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
 
     // Creator lookup. Any failure blocks this SQL call only (fail closed).
     let creator: string;
-    let adminGrants: number;
+    let role: string;
     try {
       const q = (await withDeadline(
         ctx.swarm.db_query({ sql: CREATOR_SQL, params: [taskId] }),
@@ -76,7 +76,7 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
       const row = (q?.data?.rows ?? q?.rows ?? [])[0];
       if (!row) throw new Error(`task ${taskId} not found`);
       creator = String(cell(row, 0, "requestedByUserId") ?? "");
-      adminGrants = Number(cell(row, 1, "adminGrants") ?? 0);
+      role = String(cell(row, 1, "role") ?? "");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const reason = `${tool} is restricted to admin task creators, and the creator of task ${taskId} could not be verified (${message}).`;
@@ -85,9 +85,9 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
     }
 
     if (!creator) return;
-    if (adminGrants > 0) return;
+    if (role.trim().toLowerCase() === "admin") return;
 
-    const reason = `${tool} is restricted to admin task creators. Task ${taskId} was created by user ${creator}, who has no admin role.`;
+    const reason = `${tool} is restricted to admin task creators. Task ${taskId} was created by user ${creator}, whose role is ${role ? `"${role}"` : "not set"}.`;
     ctx.log.warn(reason, { tool, taskId, requestedByUserId: creator });
     return block(reason);
   });

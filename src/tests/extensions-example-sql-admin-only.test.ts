@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
-import { attachRole, detachRole } from "../be/rbac-roles";
 import * as contractRuntime from "../extensions/contract-runtime";
 import { executeReadOnlyQuery } from "../http/db-query";
 
@@ -40,11 +39,10 @@ beforeAll(async () => {
     status: "busy",
     capabilities: [],
   });
-  // Every new user gets the built-in admin role from trg_users_default_role.
-  const admin = await createUser({ name: "Admin" });
-  const requester = await createUser({ name: "Requester" });
-  await attachRole(requester.id, "requester");
-  await detachRole(requester.id, "admin");
+  // Both users also get the RBAC admin role from trg_users_default_role; the gate
+  // must ignore it and read users.role.
+  const admin = await createUser({ name: "Admin", role: "Admin" });
+  const requester = await createUser({ name: "Requester", role: "engineer" });
   requesterUserId = requester.id;
 
   const base = { agentId: agent.id, source: "mcp" as const };
@@ -143,6 +141,7 @@ describe("sql-admin-only extension", () => {
       reason: expect.stringContaining("db-query is restricted to admin task creators"),
     });
     expect(result.reason).toContain(requesterUserId);
+    expect(result.reason).toContain('"engineer"');
     expect(warns).toHaveLength(1);
   });
 
@@ -155,6 +154,25 @@ describe("sql-admin-only extension", () => {
     expect(result.action).toBe("block");
     expect(result.reason).toContain("could not be verified");
     expect(result.reason).toContain(detail);
+  });
+
+  test("blocks db-query when the creator has no role", async () => {
+    const agent = await createAgent({
+      name: `sql-admin-only-${crypto.randomUUID()}`,
+      isLead: false,
+      status: "busy",
+      capabilities: [],
+    });
+    const user = await createUser({ name: "No role" });
+    const task = await createTaskExtended("no role task", {
+      agentId: agent.id,
+      source: "mcp",
+      requestedByUserId: user.id,
+    });
+    const { ctx } = makeCtx();
+    const result = await handler(call("db-query", task.id), ctx);
+    expect(result.action).toBe("block");
+    expect(result.reason).toContain("role is not set");
   });
 
   test("blocks db-query when the task row does not exist", async () => {

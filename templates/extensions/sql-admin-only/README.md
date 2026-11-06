@@ -9,7 +9,7 @@ Blocks `db-query` tool calls made on a task whose creator (`requestedByUserId`) 
 | Set, no admin role | Blocked |
 | Set, but the lookup fails, times out, or the task row is missing | Blocked |
 
-No config. "Admin" means the user holds the RBAC role named `admin` (`principal_roles` joined to `roles`). It is not the free-text `users.role` label. Every new user gets the built-in `admin` role by default, so the gate only blocks users whose admin role was removed, for example users moved to `requester` or `viewer`.
+No config. "Admin" means the creator's `users.role` is `admin` (case-insensitive), the role the swarm shows next to a requester's name. Only Lead (`manage-user`) and REST callers with `user.role.manage` can set it. RBAC roles are not used, because every user is created with the RBAC `admin` role. A creator whose user row is gone counts as non-admin.
 
 The task comes from the call's `X-Source-Task-Id` header. The lookup gets 60% of `EXTENSION_HANDLER_TIMEOUT_MS` (default 5s), because the dispatcher lets a call through when a hook times out.
 
