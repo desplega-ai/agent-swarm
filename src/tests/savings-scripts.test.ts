@@ -440,8 +440,14 @@ describe("savings scripts", () => {
 
     test("scriptName, kind=script and the daily series read the script rollup", async () => {
       // The ticks above used a fixed clock; cover the real current window.
-      await runSavingsRollupTick(inProcessSql);
-      await bulkScriptRuns(agentId, "helper", new Date().toISOString().slice(0, 10), 2);
+      const today = new Date().toISOString().slice(0, 10);
+      await bulkScriptRuns(agentId, "helper", today, 2);
+      // Script buckets refresh only on the tick. Invalidate any earlier bucket
+      // after seeding so its freshness window cannot hide these new runs.
+      await getDbClient().run(
+        "DELETE FROM automation_savings_days WHERE jobKind='script' AND day=?",
+        [today],
+      );
       await runSavingsRollupTick(inProcessSql);
       const one = (await get("/api/savings/jobs?scriptName=helper&days=7")).body as {
         valid: boolean;
