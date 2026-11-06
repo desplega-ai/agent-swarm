@@ -6,18 +6,31 @@
  */
 import { getDbClient } from "../db";
 import type { DbParam } from "../db-client";
-import { computeWorkflowWindow, type SavingsSql } from "./compute";
+import {
+  computeScriptWindow,
+  computeWorkflowWindow,
+  countScriptRuns,
+  type DayFacts,
+  LIVE_MAX_RUNS,
+  type SavingsSql,
+  type ScriptWindowFacts,
+} from "./compute";
 import {
   allocateSchedule,
   type CurveSet,
+  INLINE_SCRIPT_NAME,
   isEnabledOnlyRouter,
   MODEL_VERSION,
   type PricedWorkflow,
+  priceScript,
   priceWorkflow,
   type SavingsBand,
   type SavingsTier,
   type ScheduleAllocation,
+  type ScriptFacts,
+  type ScriptKind,
   splitByDay,
+  splitScriptByDay,
   type WorkflowFacts,
 } from "./model";
 import { dayStartIso, SAVINGS_FACT_COLUMNS, utcDay } from "./rollup";
@@ -132,10 +145,12 @@ function daysBetween(firstDay: string, lastDay: string): string[] {
   return out;
 }
 
-/** Live facts of one workflow over the window's partial first day, or the run count (null when unknown) when they could not be read. */
-type SliceResult = { facts: WorkflowFacts } | { runs: number | null };
-/** First-day scans by workflow and slice start, kept a little past the slice start's minute or hour. */
-const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<SliceResult> }>();
+/** Live facts of one workflow over a first-day slice by UTC minute, or the slice's run count (null when unknown) when they could not be read. */
+type SliceResult = { byMinute: DayFacts[] } | { runs: number | null };
+/** Live facts by script name over a first-day slice by UTC minute, or null when they could not be read. */
+type ScriptSliceResult = ScriptWindowFacts[] | null;
+/** First-day scans by workflow (or script read) and slice start, kept a little past the slice start's minute or hour. */
+const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<unknown> }>();
 const SLICE_TTL_MS = 2 * MINUTE_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const FLEET_SLICE_TTL_MS = HOUR_MS + 2 * MINUTE_MS;
@@ -147,31 +162,47 @@ export function resetSavingsReadCache(): void {
   sliceCache.clear();
 }
 
+/** One scan per key at a time, kept for `ttl`; a failed scan reads as `failed` and is not kept. */
+function cachedScan<T>(
+  key: string,
+  ttl: number,
+  scan: () => Promise<T>,
+  failed: T,
+  label: string,
+): Promise<T> {
+  const hit = sliceCache.get(key);
+  if (hit) return hit.result as Promise<T>;
+  const now = Date.now();
+  // A slice start of an older minute (or hour) is never read again.
+  for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
+  const result: Promise<T> = scan().catch((err): T => {
+    console.warn(
+      `[savings-read] first-day scan of ${label} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
+    );
+    // A failed scan is not kept: the next read scans again.
+    if (sliceCache.get(key)?.result === result) sliceCache.delete(key);
+    return failed;
+  });
+  sliceCache.set(key, { at: now, ttl, result });
+  return result;
+}
+
 function scanSlice(
   workflow: { id: string; definition: unknown },
   slice: { start: string; end: string },
   sql: SavingsSql,
   ttl: number,
 ): Promise<SliceResult> {
-  const key = `${workflow.id}|${slice.start}`;
-  const hit = sliceCache.get(key);
-  if (hit) return hit.result;
-  const now = Date.now();
-  // A slice start of an older minute (or hour) is never read again.
-  for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
-  const result: Promise<SliceResult> = computeWorkflowWindow(workflow, slice, sql).then(
-    (out): SliceResult => (out.status === "ok" ? { facts: out.facts } : { runs: out.runs }),
-    (err): SliceResult => {
-      console.warn(
-        `[savings-read] first-day scan of ${workflow.id} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
-      );
-      // A failed scan is not kept: the next read scans again.
-      if (sliceCache.get(key)?.result === result) sliceCache.delete(key);
-      return { runs: null };
+  return cachedScan<SliceResult>(
+    `${workflow.id}|${slice.start}`,
+    ttl,
+    async () => {
+      const out = await computeWorkflowWindow(workflow, slice, sql, { bucket: "minute" });
+      return out.status === "ok" ? { byMinute: out.byDay } : { runs: out.runs };
     },
+    { runs: null },
+    workflow.id,
   );
-  sliceCache.set(key, { at: now, ttl, result });
-  return result;
 }
 
 const COUNT_COLUMNS = new Set<keyof WorkflowFacts>([
@@ -353,9 +384,9 @@ export async function readWorkflowSavings(opts: {
  *
  * A fleet read (no workflowId) scans from the window start floored to the hour
  * and keeps the scans for that hour, so list reads cost one scan per workflow
- * per hour, not per minute. Boundary tolerance: its window holds up to 59
- * minutes of runs before `window.start` (at most days x 24h + 59 min). A
- * single-workflow read stays exact to the minute.
+ * per hour, not per minute. The scan groups runs by minute, and every read
+ * keeps only the minutes from `window.start` on, so both reads stay exact to
+ * the minute. An estimate is scaled to the part of the slice inside the window.
  */
 async function clipFirstDay(
   buckets: BucketRow[],
@@ -365,10 +396,11 @@ async function clipFirstDay(
   sql: SavingsSql = (q, p) => getDbClient().query(q, p),
 ): Promise<boolean> {
   const startMs = Date.parse(window.start);
+  // A window starting at midnight keeps the whole first-day bucket.
+  if (window.start === dayStartIso(firstDay)) return false;
   const sliceStart = fleet
     ? new Date(Math.floor(startMs / HOUR_MS) * HOUR_MS).toISOString()
     : window.start;
-  if (sliceStart === dayStartIso(firstDay)) return false;
   const first = buckets.filter((b) => b.day === firstDay);
   if (first.length === 0) return false;
   const ids = [...new Set(first.map((b) => b.jobId))];
@@ -379,20 +411,25 @@ async function clipFirstDay(
   const defOf = new Map(defs.map((d) => [d.id, parseDefinition(d.definition)]));
   const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
   const ttl = fleet ? FLEET_SLICE_TTL_MS : SLICE_TTL_MS;
-  const dayShare = (Date.parse(slice.end) - Date.parse(slice.start)) / DAY_MS;
+  const endMs = Date.parse(slice.end);
+  const dayShare = (endMs - startMs) / DAY_MS;
+  // The part of the slice (floored to the hour on a fleet read) inside the window.
+  const sliceShare = (endMs - startMs) / (endMs - Date.parse(slice.start));
+  const startMinute = minuteKey(window.start);
   let estimated = false;
   const clip = async (b: BucketRow) => {
     const result: SliceResult = defOf.has(b.jobId)
       ? await scanSlice({ id: b.jobId, definition: defOf.get(b.jobId) }, slice, sql, ttl)
       : { runs: null };
     let facts: WorkflowFacts;
-    if ("facts" in result) {
-      facts = result.facts;
+    if ("byMinute" in result) {
+      facts = zeroFacts();
+      for (const m of result.byMinute) if (m.day >= startMinute) addFacts(facts, m);
     } else {
       estimated = true;
       const share =
         result.runs !== null && Number(b.runs) > 0
-          ? Math.min(1, result.runs / Number(b.runs))
+          ? Math.min(1, result.runs / Number(b.runs)) * sliceShare
           : dayShare;
       facts = scaleBucket(b, share);
     }
@@ -440,14 +477,241 @@ function dailyPoints(
   tier: SavingsTier,
   curve?: CurveSet,
 ): SavingsDailyPoint[] {
-  const split = new Map(
-    splitByDay(job.facts, job.days, { tier, days: windowDays, curve }, priced).map((p) => [
-      p.day,
-      p,
-    ]),
+  return fillDays(
+    splitByDay(job.facts, job.days, { tier, days: windowDays, curve }, priced),
+    calendarDays,
   );
+}
+
+function fillDays(points: SavingsDailyPoint[], calendarDays: string[]): SavingsDailyPoint[] {
+  const split = new Map(points.map((p) => [p.day, p]));
   return calendarDays.map(
     (day) =>
       split.get(day) ?? { day, savingUsd: 0, actualUsd: 0, measuredUsd: 0, estimatedLlmUsd: 0 },
   );
+}
+
+export type ScriptSavingsRow = PricedWorkflow & {
+  kind: ScriptKind;
+  scriptName: string;
+  name: string;
+};
+
+export type ScriptSavingsRead = Omit<WorkflowSavingsRead, "rows"> & { rows: ScriptSavingsRow[] };
+
+/** A script name the savings route answers for: one in the catalog, or the inline-source bucket. */
+export async function isKnownScriptName(name: string): Promise<boolean> {
+  if (name === INLINE_SCRIPT_NAME) return true;
+  return !!(await getDbClient().get<{ n: number }>("SELECT 1 n FROM scripts WHERE name=? LIMIT 1", [
+    name,
+  ]));
+}
+
+const zeroScriptFacts = (): ScriptFacts => ({
+  runs: 0,
+  apiRuns: 0,
+  effectRuns: 0,
+  apiEffectRuns: 0,
+  opsSum: 0,
+  computeSecs: 0,
+});
+
+type ScriptBucketRow = {
+  day: string;
+  jobId: string;
+  subKind: string;
+  computedAt: string;
+  runs: number;
+  effectRuns: number;
+  opsSum: number;
+  computeSecs: number;
+};
+
+/** Fold a bucket row (subKind '' = non-API runs, 'api' = API runs) into script facts. */
+function addScriptBucket(into: ScriptFacts, b: ScriptBucketRow): void {
+  const runs = Number(b.runs) || 0;
+  const effect = Number(b.effectRuns) || 0;
+  into.runs += runs;
+  into.opsSum += Number(b.opsSum) || 0;
+  into.computeSecs += Number(b.computeSecs) || 0;
+  if (b.subKind === "api") {
+    into.apiRuns += runs;
+    into.apiEffectRuns += effect;
+  } else {
+    into.effectRuns += effect;
+  }
+}
+
+/**
+ * Price the scripts of a window from the rollup: every script name when
+ * `scriptName` is absent, else that one. A script is "scheduled" when a
+ * schedule targets it now (v7 reads the same at run time); scripts are keyed
+ * by name, so an agent-scoped and a global script of one name share a row.
+ */
+export async function readScriptSavings(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+  scriptName?: string;
+  /** Runs the live scan of the window's partial first day. */
+  sql?: SavingsSql;
+  /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
+  curve?: CurveSet;
+}): Promise<ScriptSavingsRead> {
+  const client = getDbClient();
+  const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
+  const calendarDays = daysBetween(firstDay, lastDay);
+  const marker = await client.get<{ n: number; at: string | null }>(
+    "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
+    [MODEL_VERSION, firstDay, lastDay],
+  );
+  const complete = Number(marker?.n) >= calendarDays.length;
+  const params: DbParam[] = [MODEL_VERSION, firstDay, lastDay];
+  if (opts.scriptName !== undefined) params.push(opts.scriptName);
+  const buckets = await client.query<ScriptBucketRow>(
+    `SELECT day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs
+     FROM automation_savings_daily
+     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${opts.scriptName !== undefined ? "AND jobId=?" : ""}
+     ORDER BY day`,
+    params,
+  );
+  let computedAt = marker?.at ?? null;
+  const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
+  for (const b of buckets) {
+    if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
+    let job = jobs.get(b.jobId);
+    if (!job) {
+      job = { facts: zeroScriptFacts(), days: new Map() };
+      jobs.set(b.jobId, job);
+    }
+    addScriptBucket(job.facts, b);
+    const day = job.days.get(b.day) ?? zeroScriptFacts();
+    addScriptBucket(day, b);
+    job.days.set(b.day, day);
+  }
+  const boundaryEstimated = await clipScriptFirstDay(jobs, window, firstDay, opts);
+  const scheduled = new Set(
+    (
+      await client.query<{ scriptName: string }>(
+        "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL",
+      )
+    ).map((r) => r.scriptName),
+  );
+
+  const band = jobs.size === 1 ? "job" : "fleet";
+  const rows: ScriptSavingsRow[] = [];
+  const totalParts: PricedWorkflow[] = [];
+  for (const [scriptName, job] of jobs) {
+    const kind: ScriptKind = scheduled.has(scriptName)
+      ? "script-scheduled"
+      : "script-agent-invoked";
+    const pricing = { tier: opts.tier, days: opts.days, kind, curve: opts.curve };
+    const priced = priceScript(job.facts, { ...pricing, band: "job" });
+    rows.push({ ...priced, kind, scriptName, name: scriptName });
+    totalParts.push(band === "job" ? priced : priceScript(job.facts, { ...pricing, band }));
+  }
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+
+  const [only] = jobs.values();
+  const points =
+    jobs.size === 1 && only && rows[0]
+      ? fillDays(
+          splitScriptByDay(
+            only.facts,
+            [...only.days].map(([day, f]) => ({ ...f, day })),
+            rows[0],
+          ),
+          calendarDays,
+        )
+      : [];
+  return {
+    window,
+    computedAt,
+    complete,
+    boundaryEstimated,
+    rows,
+    total: totalParts.length > 0 ? sumTotals(totalParts) : null,
+    points,
+  };
+}
+
+/**
+ * Replace each script's first-day facts with those of its runs inside the
+ * window, scanned live (the window starts mid-day), and drop scripts left with
+ * no runs. When the scan fails or the slice has more than LIVE_MAX_RUNS runs,
+ * the day is scaled by the share of it inside the window instead; returns
+ * whether that happened. Scans are cached like the workflow slices: a fleet
+ * read (no scriptName) floors the slice start to the hour and a single-script
+ * read scans from the window start; both group runs by minute and keep only
+ * the minutes from `window.start` on.
+ */
+async function clipScriptFirstDay(
+  jobs: Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>,
+  window: SavingsWindow,
+  firstDay: string,
+  opts: { scriptName?: string; sql?: SavingsSql },
+): Promise<boolean> {
+  const fleet = opts.scriptName === undefined;
+  const startMs = Date.parse(window.start);
+  // A window starting at midnight keeps the whole first-day bucket.
+  if (window.start === dayStartIso(firstDay)) return false;
+  const sliceStart = fleet
+    ? new Date(Math.floor(startMs / HOUR_MS) * HOUR_MS).toISOString()
+    : window.start;
+  if (![...jobs.values()].some((j) => j.days.has(firstDay))) return false;
+  const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
+  const sql: SavingsSql = opts.sql ?? ((q, p) => getDbClient().query(q, p));
+  const scope = { scriptName: opts.scriptName };
+  const live = await cachedScan<ScriptSliceResult>(
+    `script\u0000${MODEL_VERSION}\u0000${opts.scriptName ?? "*"}\u0000${slice.start}`,
+    fleet ? FLEET_SLICE_TTL_MS : SLICE_TTL_MS,
+    async () => {
+      // Count first, so a busy slice never reaches the effect probe.
+      if ((await countScriptRuns(slice, sql, scope)) > LIVE_MAX_RUNS) return null;
+      return computeScriptWindow(slice, sql, { ...scope, bucket: "minute" });
+    },
+    null,
+    opts.scriptName ?? "scripts",
+  );
+  // The runs from the window start on: the cached slice may start up to 59 minutes earlier.
+  const startMinute = minuteKey(window.start);
+  const inWindow = new Map<string, ScriptFacts>();
+  for (const s of live ?? []) {
+    const facts = zeroScriptFacts();
+    for (const m of s.byDay) {
+      if (m.day < startMinute) continue;
+      for (const k of Object.keys(facts) as (keyof ScriptFacts)[]) facts[k] += m[k];
+    }
+    inWindow.set(s.scriptName, facts);
+  }
+  const dayShare = (Date.parse(slice.end) - startMs) / DAY_MS;
+  for (const [name, job] of jobs) {
+    const old = job.days.get(firstDay);
+    if (!old) continue;
+    const clipped = live
+      ? (inWindow.get(name) ?? zeroScriptFacts())
+      : scaleScriptFacts(old, dayShare);
+    for (const k of Object.keys(old) as (keyof ScriptFacts)[]) {
+      job.facts[k] += clipped[k] - old[k];
+    }
+    job.days.set(firstDay, clipped);
+    if (!(job.facts.runs > 0)) jobs.delete(name);
+  }
+  return live === null;
+}
+
+/** The UTC minute (`YYYY-MM-DDTHH:MM`) of an ISO timestamp: the key of a minute-bucketed scan. */
+function minuteKey(iso: string): string {
+  return iso.slice(0, 16);
+}
+
+function scaleScriptFacts(facts: ScriptFacts, share: number): ScriptFacts {
+  return {
+    runs: Math.round(facts.runs * share),
+    apiRuns: Math.round(facts.apiRuns * share),
+    effectRuns: Math.round(facts.effectRuns * share),
+    apiEffectRuns: Math.round(facts.apiEffectRuns * share),
+    opsSum: facts.opsSum * share,
+    computeSecs: facts.computeSecs * share,
+  };
 }

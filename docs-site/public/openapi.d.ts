@@ -20113,14 +20113,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Estimated automation savings per workflow
-         * @description What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         * Estimated automation savings per workflow or script
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
          */
         get: {
             parameters: {
                 query?: {
                     workflowId?: string;
-                    kind?: "workflow";
+                    scriptName?: string;
+                    kind?: "workflow" | "script";
                     days?: "7" | "30" | "90";
                     tier?: "smol" | "regular" | "smart" | "ultra";
                 };
@@ -20156,8 +20157,9 @@ export interface paths {
                             boundaryEstimated: boolean;
                             rows: {
                                 /** @enum {string} */
-                                kind: "workflow";
-                                workflowId: string;
+                                kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+                                workflowId?: string;
+                                scriptName?: string;
                                 name: string;
                                 /** @enum {string} */
                                 basis: "modelled";
@@ -20184,7 +20186,7 @@ export interface paths {
                                     p50: number;
                                     p90: number;
                                 };
-                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. */
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active. */
                                 actualHours: number;
                                 agentOnlyHours: {
                                     p10: number;
@@ -20225,7 +20227,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Neither workflowId nor kind, or an unknown days or tier value */
+                /** @description Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20234,7 +20236,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Workflow not found */
+                /** @description Workflow or script not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -20261,13 +20263,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Daily automation savings of a workflow
-         * @description The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.
+         * Daily automation savings of a workflow or script
+         * @description The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.
          */
         get: {
             parameters: {
-                query: {
-                    workflowId: string;
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
                     days?: "7" | "30" | "90";
                     tier?: "smol" | "regular" | "smart" | "ultra";
                 };
@@ -20314,7 +20317,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Missing workflowId, or an unknown days or tier value */
+                /** @description Not exactly one of workflowId and scriptName, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20323,7 +20326,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Workflow not found */
+                /** @description Workflow or script not found */
                 404: {
                     headers: {
                         [name: string]: unknown;

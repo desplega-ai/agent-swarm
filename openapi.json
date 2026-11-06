@@ -51721,8 +51721,8 @@
     },
     "/api/savings/jobs": {
       "get": {
-        "summary": "Estimated automation savings per workflow",
-        "description": "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "summary": "Estimated automation savings per workflow or script",
+        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51744,8 +51744,18 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scriptName",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
-                "workflow"
+                "workflow",
+                "script"
               ]
             },
             "required": false,
@@ -51863,10 +51873,15 @@
                           "kind": {
                             "type": "string",
                             "enum": [
-                              "workflow"
+                              "workflow",
+                              "script-scheduled",
+                              "script-agent-invoked"
                             ]
                           },
                           "workflowId": {
+                            "type": "string"
+                          },
+                          "scriptName": {
                             "type": "string"
                           },
                           "name": {
@@ -51951,7 +51966,7 @@
                           },
                           "actualHours": {
                             "type": "number",
-                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`."
+                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
                           },
                           "agentOnlyHours": {
                             "type": "object",
@@ -51997,7 +52012,6 @@
                         },
                         "required": [
                           "kind",
-                          "workflowId",
                           "name",
                           "basis",
                           "enabledOnlyRule",
@@ -52136,7 +52150,7 @@
             }
           },
           "400": {
-            "description": "Neither workflowId nor kind, or an unknown days or tier value",
+            "description": "Not exactly one of workflowId, scriptName and kind, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52146,7 +52160,7 @@
             }
           },
           "404": {
-            "description": "Workflow not found",
+            "description": "Workflow or script not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -52160,8 +52174,8 @@
     },
     "/api/savings/daily": {
       "get": {
-        "summary": "Daily automation savings of a workflow",
-        "description": "The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
+        "summary": "Daily automation savings of a workflow or script",
+        "description": "The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.",
         "tags": [
           "Savings"
         ],
@@ -52176,8 +52190,17 @@
               "type": "string",
               "minLength": 1
             },
-            "required": true,
+            "required": false,
             "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scriptName",
             "in": "query"
           },
           {
@@ -52334,7 +52357,7 @@
             }
           },
           "400": {
-            "description": "Missing workflowId, or an unknown days or tier value",
+            "description": "Not exactly one of workflowId and scriptName, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52344,7 +52367,7 @@
             }
           },
           "404": {
-            "description": "Workflow not found",
+            "description": "Workflow or script not found",
             "content": {
               "application/json": {
                 "schema": {

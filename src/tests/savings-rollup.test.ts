@@ -23,6 +23,7 @@ import {
 } from "../be/savings/model";
 import { readWorkflowSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
+  daysToCompute,
   getSavingsRollupStats,
   ROLLUP_DAYS,
   refreshWorkflowToday,
@@ -423,6 +424,41 @@ describe("savings rollup", () => {
         resetSavingsReadCache();
       });
 
+      test("fleet reads keep only the runs from a mid-hour or midnight window start", async () => {
+        const MINUTE = 60_000;
+        // fanout ran at 00:30, 01:30 and 13:00 on the first day.
+        const runsAt = async (now: number, workflowId?: string, sql = inProcessSql) =>
+          (await readWorkflowSavings({ days: 7, tier: "smart", now, workflowId, sql })).rows.find(
+            (r) => r.workflowId === (workflowId ?? fanout),
+          )?.runs;
+        resetSavingsReadCache();
+        // Mid-hour: a 01:10 start keeps 01:30 and 13:00.
+        expect(await runsAt(NOW2 - 50 * MINUTE)).toBe(2);
+        // The same hour's cached slice starts at 01:00; a 01:45 start drops 01:30.
+        expect(await runsAt(NOW2 - 15 * MINUTE)).toBe(1);
+        expect(await runsAt(NOW2 - 15 * MINUTE, fanout)).toBe(1);
+        // Midnight: a 00:45 start (slice floored to the day start) drops 00:30.
+        expect(await runsAt(NOW2 - 75 * MINUTE)).toBe(2);
+        // Control: a window starting at midnight keeps the whole first day.
+        expect(await runsAt(NOW2 - 2 * HOUR)).toBe(3);
+
+        // A failed scan scales the first day by the share of it from the window start, not the hour.
+        const failing: SavingsSql = async () => {
+          throw new Error("database is busy");
+        };
+        resetSavingsReadCache();
+        const fleet = await readWorkflowSavings({
+          days: 7,
+          tier: "smart",
+          now: NOW2 - 15 * MINUTE,
+          sql: failing,
+        });
+        expect(fleet.boundaryEstimated).toBe(true);
+        // 300 x 22.25/24 rounds to 278; from 01:00 it would be 288.
+        expect(fleet.rows.find((r) => r.workflowId === router)?.runs).toBe(278 + 300 * 6);
+        resetSavingsReadCache();
+      });
+
       test("fleet list reads across the minutes of an hour scan each first-day workflow once", async () => {
         resetSavingsReadCache();
         const MINUTE = 60_000;
@@ -447,10 +483,23 @@ describe("savings rollup", () => {
         expect(first.boundaryEstimated).toBe(false);
         expect([...scanned].sort()).toEqual([...firstDayIds].sort());
         const later = [];
-        for (const m of [2, 17, 59]) later.push(await list(NOW2 + m * MINUTE));
+        for (const m of [2, 17, 59]) later.push({ m, read: await list(NOW2 + m * MINUTE) });
         expect(scanned).toHaveLength(firstDayIds.length);
-        // Within the hour every list read prices the same slice, from 02:00.
-        for (const read of later) expect(read.rows).toEqual(first.rows);
+        // Within the hour every list read reuses the slice from 02:00 and keeps
+        // only the runs from its own start: router matches its exact detail read.
+        for (const { m, read } of later) {
+          const detail = await readWorkflowSavings({
+            days: 7,
+            tier: "smart",
+            now: NOW2 + m * MINUTE,
+            workflowId: router,
+          });
+          expect(read.rows.find((r) => r.workflowId === router)?.runs).toBe(detail.rows[0]?.runs);
+        }
+        // Control: router runs every few minutes, so the later starts drop some of them.
+        expect(later[2]?.read.rows.find((r) => r.workflowId === router)?.runs).toBeLessThan(
+          first.rows.find((r) => r.workflowId === router)?.runs ?? 0,
+        );
         // The next hour's window scans again.
         await list(NOW2 + HOUR + MINUTE);
         expect(scanned).toHaveLength(2 * firstDayIds.length);
@@ -476,19 +525,21 @@ describe("savings rollup", () => {
       "2026-10-20",
     ]);
     // Every scan takes a few ms against a 1 ms budget: one day per tick, a
-    // minute apart like catch-up ticks.
+    // minute apart like catch-up ticks. The script days are due too.
     const slowSql: SavingsSql = async (sql, params) => {
       await Bun.sleep(2);
       return inProcessSql(sql, params);
     };
-    for (let i = 0; i < due.length; i++) {
+    const ticks = due.length + (await daysToCompute("script", NOW)).length;
+    for (let i = 0; i < ticks; i++) {
       const stats = await runSavingsRollupTick(slowSql, {
         now: NOW + i * 60_000,
         budgetMs: 1,
       });
       expect(stats.lastError).toBeNull();
     }
-    expect(await workflowDaysToCompute(NOW + due.length * 60_000)).toEqual([]);
+    expect(await workflowDaysToCompute(NOW + ticks * 60_000)).toEqual([]);
+    expect(await daysToCompute("script", NOW + ticks * 60_000)).toEqual([]);
   });
 
   describe("routes", () => {

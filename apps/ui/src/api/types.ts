@@ -4442,9 +4442,20 @@ export interface SavingsBand {
   p90: number;
 }
 
+/** One workflow or one script (by name; scripts of one name share a row across scopes). */
+export type SavingsTarget = { workflowId: string } | { scriptName: string };
+
 export interface SavingsJobRow {
-  kind: "workflow";
-  workflowId: string;
+  /**
+   * `script-scheduled`: a schedule targets the script, priced as a standalone
+   * agent task. `script-agent-invoked`: priced as the extra turns it adds to
+   * the calling agent's session.
+   */
+  kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+  /** Set on workflow rows. */
+  workflowId?: string;
+  /** Set on script rows. */
+  scriptName?: string;
   name: string;
   basis: "modelled";
   /** True when only the runs with a downstream effect count (an event router). */
