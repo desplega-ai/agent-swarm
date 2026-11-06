@@ -130,6 +130,7 @@ export async function runtimeFetch(
   if (!replayable) return attempt();
   return retry(attempt, {
     ...retryOptions,
+    signal: signal ?? retryOptions.signal,
     retryOn: async (value, attemptNumber) => {
       if (signal?.aborted) return false;
       if (userRetryOn) return userRetryOn(value, attemptNumber);

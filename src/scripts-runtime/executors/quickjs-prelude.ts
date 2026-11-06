@@ -275,6 +275,35 @@ const checkNumber = (name, value, fallback, integer) => {
   }
   return value;
 };
+// No AbortController in the sandbox, so any object with aborted / reason /
+// addEventListener works as a signal. The host sleep cannot be cancelled; the
+// wait just stops listening to it, and the run's close() ends it.
+const abortReason = (signal) => {
+  if (signal.reason !== undefined) return signal.reason;
+  const error = new Error("This operation was aborted");
+  error.name = "AbortError";
+  return error;
+};
+const abortableSleep = (ms, signal) => {
+  if (!signal) return __host_sleep(ms);
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortReason(signal));
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(abortReason(signal));
+    };
+    if (typeof signal.addEventListener === "function") signal.addEventListener("abort", onAbort, { once: true });
+    __host_sleep(ms).then(() => {
+      if (typeof signal.removeEventListener === "function") signal.removeEventListener("abort", onAbort);
+      if (settled) return;
+      settled = true;
+      if (signal.aborted) reject(abortReason(signal));
+      else resolve();
+    });
+  });
+};
 const retryCall = async (fn, options) => {
   if (typeof fn !== "function") throw new TypeError("retry: first argument must be a function");
   const opts = options || {};
@@ -286,8 +315,10 @@ const retryCall = async (fn, options) => {
   if (retryOn !== undefined && typeof retryOn !== "function") {
     throw new TypeError("retry: \x60retryOn\x60 must be a function");
   }
+  const signal = opts.signal;
   const started = Date.now();
   for (let attempt = 1; ; attempt++) {
+    if (signal && signal.aborted) throw abortReason(signal);
     let threw = false;
     let value;
     try {
@@ -308,7 +339,7 @@ const retryCall = async (fn, options) => {
     const ceiling = Math.min(maxDelayMs, minDelayMs * 2 ** (attempt - 1));
     const delay = waitFor !== undefined ? Math.min(maxDelayMs, waitFor) : Math.round(ceiling / 2 + (Math.random() * ceiling) / 2);
     if (Date.now() - started + delay > budgetMs) return settle();
-    await __host_sleep(delay);
+    await abortableSleep(delay, signal);
   }
 };
 const retry = Object.assign(retryCall, {
@@ -346,9 +377,23 @@ const stdlibFetch = async (input, options) => {
   const repeatSafe = IDEMPOTENT_METHODS.has(method) || headerMap.has("idempotency-key");
   const request = toRequest(input, init);
   request.retry = false;
-  return retryCall(async () => new Response(await hostCall("stdlib.fetch", [request])), {
+  // The signal cannot reach the host fetch, so an abort lands between attempts.
+  const signal = opts.signal || retryOptions.signal;
+  return retryCall(async () => {
+    let response;
+    try {
+      response = new Response(await hostCall("stdlib.fetch", [request]));
+    } catch (error) {
+      if (signal && signal.aborted) throw abortReason(signal);
+      throw error;
+    }
+    if (signal && signal.aborted) throw abortReason(signal);
+    return response;
+  }, {
     ...retryOptions,
+    signal,
     retryOn: async (value, attempt) => {
+      if (signal && signal.aborted) return false;
       if (userRetryOn) return userRetryOn(value, attempt);
       if (value instanceof Response) return value.status === 429 || (repeatSafe && TRANSIENT_5XX.has(value.status));
       return repeatSafe;

@@ -146,9 +146,10 @@ network error.
   `ctx.swarm` envelope (`{ success: false, status }`) with a transient status.
   Options: `retries` (default 3), `minDelayMs` (200, doubled per retry with
   jitter), `maxDelayMs` (5000, also caps a `Retry-After` wait), `budgetMs`
-  (30000 in total), and `retryOn(errorOrResult, attempt)` to replace the
-  default rule. When attempts or budget run out it rethrows the last error or
-  returns the last result. `retry.wrap(fn, options?)` returns a reusable
+  (30000 in total), `retryOn(errorOrResult, attempt)` to replace the
+  default rule, and `signal`: once it aborts, `retry` stops waiting and rejects
+  with its reason (`ctx.stdlib.fetch` passes its own `signal`). When attempts or
+  budget run out it rethrows the last error or returns the last result. `retry.wrap(fn, options?)` returns a reusable
   function with `fn`'s arguments.
 
 ```ts

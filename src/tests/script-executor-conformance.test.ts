@@ -773,6 +773,71 @@ export default async (_args, ctx) => {
       expect(hitsOf(paths.legacy).length).toBe(2);
     });
 
+    // An abort during the backoff wait rejects at once with the signal's reason
+    // and starts no further attempt. quickjs has no AbortController, so the
+    // script falls back to a plain signal object there.
+    retryTest("an abort ends the retry wait at once", async () => {
+      const path = `/f/503-5-abort-${name}`;
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const controller = () => {
+    if (typeof AbortController === "function") return new AbortController();
+    const listeners = new Set();
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: (_type, fn) => listeners.add(fn),
+      removeEventListener: (_type, fn) => listeners.delete(fn),
+    };
+    return { signal, abort(reason) { signal.aborted = true; signal.reason = reason; for (const fn of [...listeners]) fn(); } };
+  };
+  const timed = async (start) => {
+    const c = controller();
+    setTimeout(() => c.abort(new Error("stop")), 100);
+    const started = Date.now();
+    try {
+      await start(c.signal);
+      return { error: null, ms: Date.now() - started };
+    } catch (error) {
+      return { error: error.message, ms: Date.now() - started };
+    }
+  };
+  const slow = { retries: 1, minDelayMs: 2000, maxDelayMs: 2000 };
+  let calls = 0;
+  const fetchAbort = await timed((signal) => ctx.stdlib.fetch(args.url, { signal, retry: slow }));
+  const retryAbort = await timed((signal) => ctx.stdlib.retry(() => { calls++; throw new Error("x"); }, { ...slow, signal }));
+  const retryCalls = calls;
+  calls = 0;
+  const early = controller();
+  early.abort(new Error("early"));
+  let preAborted;
+  try {
+    await ctx.stdlib.retry(() => { calls++; return 1; }, { signal: early.signal });
+  } catch (error) {
+    preAborted = [error.message, calls];
+  }
+  return { fetchAbort, retryAbort, retryCalls, preAborted };
+};`,
+        { url: `${retryBase}${path}` },
+      );
+      expect(output.error).toBeUndefined();
+      const result = output.result as {
+        fetchAbort: { error: string | null; ms: number };
+        retryAbort: { error: string | null; ms: number };
+        retryCalls: number;
+        preAborted: unknown;
+      };
+      // The first wait is at least 1000 ms, so anything under that is the abort.
+      expect(result.fetchAbort.error).toBe("stop");
+      expect(result.fetchAbort.ms).toBeLessThan(900);
+      expect(hitsOf(path).length).toBe(1);
+      expect(result.retryAbort.error).toBe("stop");
+      expect(result.retryAbort.ms).toBeLessThan(900);
+      expect(result.retryCalls).toBe(1);
+      expect(result.preAborted).toEqual(["early", 0]);
+    });
+
     retryTest("ctx.swarm retries 429 always and 5xx only when a repeat is safe", async () => {
       const keys = {
         write429: `429-1-w429-${name}`,

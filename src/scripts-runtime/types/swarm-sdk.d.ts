@@ -747,6 +747,8 @@ declare module "swarm-sdk" {
      * ctx.api raw result or ctx.swarm envelope with status 429, 502, 503 or 504.
      */
     retryOn?: (errorOrResult: unknown, attempt: number) => boolean | Promise<boolean>;
+    /** Stops the retries: once it aborts, the wait ends and retry rejects with its reason. */
+    signal?: AbortSignal;
   }
 
   export interface FetchRetryOptions extends RetryOptions {

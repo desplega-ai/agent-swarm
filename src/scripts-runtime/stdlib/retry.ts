@@ -21,6 +21,8 @@ export type RetryOptions = {
    * the 1-based attempt number. Replaces the default rule.
    */
   retryOn?: (errorOrResult: unknown, attempt: number) => boolean | Promise<boolean>;
+  /** Stops the retries: once it aborts, the wait ends and `retry` rejects with its reason. */
+  signal?: AbortSignal;
 };
 
 /** Statuses the default rule (and the swarm bridge) treat as transient. */
@@ -94,8 +96,24 @@ function checkNumber(name: string, value: unknown, fallback: number, integer = f
   return value;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("This operation was aborted", "AbortError");
+}
+
+/** Waits `ms`, or rejects with the signal's reason as soon as it aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortReason(signal));
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal as AbortSignal));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function retryCall<T>(
@@ -111,9 +129,11 @@ async function retryCall<T>(
   if (retryOn !== undefined && typeof retryOn !== "function") {
     throw new TypeError("retry: `retryOn` must be a function");
   }
+  const signal = options.signal;
   const started = Date.now();
 
   for (let attempt = 1; ; attempt++) {
+    if (signal?.aborted) throw abortReason(signal);
     let threw = false;
     let value: unknown;
     try {
@@ -138,7 +158,7 @@ async function retryCall<T>(
         ? Math.min(maxDelayMs, waitFor)
         : backoffMs(attempt, minDelayMs, maxDelayMs);
     if (Date.now() - started + delay > budgetMs) return settle();
-    await sleep(delay);
+    await sleep(delay, signal);
   }
 }
 
