@@ -20,9 +20,10 @@ import { handleSavings } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-// The routes read the clock, so the fixtures sit on the real last 7 UTC days.
+// The routes read the clock, so the fixtures sit on the real UTC days of the
+// rolling 7-day window: seven full days ago through today, eight days.
 const NOW = Date.now();
-const WEEK = Array.from({ length: 7 }, (_, i) => utcDay(NOW - (6 - i) * 86_400_000));
+const WEEK = Array.from({ length: 8 }, (_, i) => utcDay(NOW - (7 - i) * 86_400_000));
 
 describe("savings fleet read", () => {
   let server: Server;
@@ -135,7 +136,7 @@ describe("savings fleet read", () => {
       // The fleet band is narrower than the sum of the rows' single-job bands.
       expect(total?.savingUsd.p90).toBeLessThan(rows.reduce((s, r) => s + r.savingUsd.p90, 0));
       expect(total?.savingUsd.p10).toBeGreaterThan(rows.reduce((s, r) => s + r.savingUsd.p10, 0));
-      expect(read.points).toHaveLength(7);
+      expect(read.points).toHaveLength(WEEK.length);
       expect(read.points.reduce((s, p) => s + p.savingUsd, 0)).toBeCloseTo(p50, 6);
       expect(read.byKind.workflows.jobs).toBe(2);
       expect(read.byKind.scheduledScripts).toMatchObject({ jobs: 1, substitutedRuns: 168 });

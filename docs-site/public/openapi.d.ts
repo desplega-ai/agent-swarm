@@ -20085,6 +20085,8 @@ export interface paths {
                             valid: boolean;
                             /** @enum {string|null} */
                             reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
                             rows: {
                                 /** @enum {string} */
                                 kind: "workflow" | "script-scheduled" | "script-agent-invoked";
@@ -20230,6 +20232,8 @@ export interface paths {
                             valid: boolean;
                             /** @enum {string|null} */
                             reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
                             points: {
                                 day: string;
                                 savingUsd: number;
@@ -20314,6 +20318,8 @@ export interface paths {
                             valid: boolean;
                             /** @enum {string|null} */
                             reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
                             total: {
                                 runs: number;
                                 substitutedRuns: number;

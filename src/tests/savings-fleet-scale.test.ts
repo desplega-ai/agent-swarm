@@ -9,14 +9,15 @@ import { handleSavings } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-// Fleet scale: 1,000 workflows and 400 scripts with a bucket on each of 90 days
-// (126k rows). Before the chunked, shared read, the four reads of the fleet page
+// Fleet scale: 1,000 workflows and 400 scripts with a bucket on each of the 91 UTC days a 90-day window touches
+// (127k rows). Before the chunked, shared read, the four reads of the fleet page
 // held the event loop for over a second.
 const NOW = Date.now();
 const DAYS = 90;
 const WORKFLOWS = 1000;
 const SCRIPTS = 400;
-const FIRST_DAY = utcDay(NOW - (DAYS - 1) * 86_400_000);
+// A rolling window of DAYS days touches DAYS + 1 UTC days.
+const FIRST_DAY = utcDay(NOW - DAYS * 86_400_000);
 const pageReads = (days: number) => [
   `/api/savings/summary?days=${days}`,
   `/api/savings/daily?days=${days}`,
@@ -62,7 +63,7 @@ describe("savings fleet read at fleet scale", () => {
       `WITH RECURSIVE d(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM d WHERE i < ?)
        INSERT INTO automation_savings_days (day, jobKind, modelVersion, computedAt)
        SELECT date(?, '+' || i || ' days'), k.kind, ?, ? FROM d, (SELECT 'workflow' kind UNION ALL SELECT 'script') k`,
-      [DAYS - 1, FIRST_DAY, MODEL_VERSION, at],
+      [DAYS, FIRST_DAY, MODEL_VERSION, at],
     );
     await db.run(
       `WITH RECURSIVE d(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM d WHERE i < ?),
@@ -70,7 +71,7 @@ describe("savings fleet read at fleet scale", () => {
        INSERT INTO automation_savings_daily
          (day, jobKind, jobId, jobKey, jobName, subKind, runs, countedRuns, schedRuns, effectRuns, opsSum, agentTasks, agentUsd, computeSecs, modelVersion, computedAt)
        SELECT date(?, '+' || d.i || ' days'), 'workflow', 'wf-' || j.i, 'wf-' || j.i, 'wf ' || j.i, '', 30, 30, 24, 3, 270, 1, 0.5, 12, ?, ? FROM d, j`,
-      [DAYS - 1, WORKFLOWS - 1, FIRST_DAY, MODEL_VERSION, at],
+      [DAYS, WORKFLOWS - 1, FIRST_DAY, MODEL_VERSION, at],
     );
     await db.run(
       `WITH RECURSIVE d(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM d WHERE i < ?),
@@ -78,7 +79,7 @@ describe("savings fleet read at fleet scale", () => {
        INSERT INTO automation_savings_daily
          (day, jobKind, jobId, jobKey, jobName, subKind, runs, countedRuns, effectRuns, opsSum, computeSecs, modelVersion, computedAt)
        SELECT date(?, '+' || d.i || ' days'), 'script', 'sc-' || j.i, 'sc-' || j.i, 'sc-' || j.i, '', 20, 20, 2, 80, 5, ?, ? FROM d, j`,
-      [DAYS - 1, SCRIPTS - 1, FIRST_DAY, MODEL_VERSION, at],
+      [DAYS, SCRIPTS - 1, FIRST_DAY, MODEL_VERSION, at],
     );
     resetSavingsReadCache();
     server = createHttpServer(async (req, res) => {
@@ -113,7 +114,7 @@ describe("savings fleet read at fleet scale", () => {
       expect(summary?.valid).toBe(true);
       expect(summary?.byKind.workflows.jobs).toBe(WORKFLOWS);
       expect(summary?.byKind.agentInvokedScripts.jobs).toBe(SCRIPTS);
-      expect(daily?.points).toHaveLength(DAYS);
+      expect(daily?.points).toHaveLength(DAYS + 1);
       expect(workflows?.rows).toHaveLength(WORKFLOWS);
       expect(scripts?.rows).toHaveLength(SCRIPTS);
       // One workflow load and one script load serve all four reads.
@@ -139,7 +140,7 @@ describe("savings fleet read at fleet scale", () => {
       const bodies = cold.results.map((r) => ({ ...r.body, window: { ...r.body.window, end: 0 } }));
       const [summary, daily, workflows, scripts] = bodies;
       expect(summary?.byKind.workflows.jobs).toBe(WORKFLOWS);
-      expect(daily?.points).toHaveLength(30);
+      expect(daily?.points).toHaveLength(31);
       expect(workflows?.rows).toHaveLength(WORKFLOWS);
       expect(scripts?.rows).toHaveLength(SCRIPTS);
       // Every viewer gets the same answer from the same two loads.
@@ -156,7 +157,7 @@ describe("savings fleet read at fleet scale", () => {
 
       // A 90-day viewer arriving later is its own window: two more loads, not four.
       const wide = await pageLoad(DAYS, 2);
-      expect(wide.results[1]?.body.points).toHaveLength(DAYS);
+      expect(wide.results[1]?.body.points).toHaveLength(DAYS + 1);
       expect(savingsFleetLoads()).toBe(4);
       expect(wide.maxGapMs).toBeLessThan(150);
     },

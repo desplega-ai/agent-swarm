@@ -14,6 +14,7 @@ import { curve, DEFAULT_OPS, F_FOLLOWUP, INLINE_SCRIPT_NAME, K, R, T0 } from "..
 import { readScriptSavings } from "../be/savings/read";
 import {
   daysToCompute,
+  RECOMPUTE_AFTER_MS,
   resetSavingsRollupForTests,
   runSavingsRollupTick,
 } from "../be/savings/rollup";
@@ -199,7 +200,12 @@ describe("savings scripts", () => {
     const stats = await runSavingsRollupTick(inProcessSql, { now: NOW });
     expect(stats.lastError).toBeNull();
     expect(stats.daysPending).toBe(0);
-    expect(await daysToCompute("script", NOW)).toEqual(["2026-10-31", "2026-10-30"]);
+    // Today and yesterday are not final: they are due again once the computation ages.
+    expect(await daysToCompute("script", NOW)).toEqual([]);
+    expect(await daysToCompute("script", NOW + RECOMPUTE_AFTER_MS)).toEqual([
+      "2026-10-31",
+      "2026-10-30",
+    ]);
     const api = await getDbClient().get<{ n: number }>(
       "SELECT count(*) n FROM automation_savings_daily WHERE jobKind='script' AND subKind='api'",
     );
@@ -261,10 +267,44 @@ describe("savings scripts", () => {
       scriptName: "poll-sched",
     });
     expect(read.rows).toHaveLength(1);
-    expect(read.points).toHaveLength(30);
+    // Thirty rolling days touch thirty-one UTC days.
+    expect(read.points).toHaveLength(31);
     const saving = read.points.reduce((s, p) => s + p.savingUsd, 0);
     expect(saving).toBeCloseTo(read.rows[0]?.savingUsd.p50 ?? Number.NaN, 6);
     expect(read.points.filter((p) => p.savingUsd > 0).map((p) => p.day)).toEqual(WEEK);
+  });
+
+  test("the window's partial first day counts only the runs inside the window", async () => {
+    // Three rolling days from noon: the first day is a fixture day whose runs
+    // all start before noon, so none of them are inside the window.
+    const count = async (from: string, to = "9999") =>
+      Number(
+        (
+          await getDbClient().get<{ n: number }>(
+            "SELECT count(*) n FROM script_runs WHERE scriptName='poll-sched' AND startedAt>=? AND startedAt<?",
+            [from, to],
+          )
+        )?.n,
+      );
+    const opts = { days: 3, tier: "smart" as const, now: NOW, scriptName: "poll-sched" };
+    const live = await readScriptSavings({ ...opts, sql: inProcessSql });
+    expect(live.window.start).toBe("2026-10-28T12:00:00.000Z");
+    expect(live.boundaryEstimated).toBe(false);
+    expect(live.rows[0]?.runs).toBe(await count(live.window.start));
+    expect(live.points).toHaveLength(4);
+    expect(live.points[0]).toMatchObject({ day: WEEK[3], savingUsd: 0 });
+
+    // A failed scan scales the first day by the share of it inside the window.
+    const failing: SavingsSql = async () => {
+      throw new Error("database is busy");
+    };
+    const scaled = await readScriptSavings({ ...opts, sql: failing });
+    expect(scaled.boundaryEstimated).toBe(true);
+    const firstDay = await count(`${WEEK[3]}T00:00:00.000Z`, `${WEEK[4]}T00:00:00.000Z`);
+    expect(firstDay).toBeGreaterThan(0);
+    expect(scaled.rows[0]?.runs).toBe(
+      (await count(`${WEEK[4]}T00:00:00.000Z`)) + Math.round(firstDay / 2),
+    );
   });
 
   describe("routes", () => {
@@ -280,22 +320,39 @@ describe("savings scripts", () => {
       await runSavingsRollupTick(inProcessSql);
       const one = (await get("/api/savings/jobs?scriptName=helper&days=7")).body as {
         valid: boolean;
+        boundaryEstimated: boolean;
         window: { start: string };
         rows: { kind: string; scriptName: string; workflowId?: string; runs: number }[];
       };
       expect(one.valid).toBe(true);
       // The real window can also cover fixture days, so count its runs.
-      const inWindow = await getDbClient().get<{ n: number }>(
-        "SELECT count(*) n FROM script_runs WHERE scriptName='helper' AND startedAt>=?",
-        [one.window.start],
-      );
+      const count = async (from: string, to = "9999") =>
+        Number(
+          (
+            await getDbClient().get<{ n: number }>(
+              "SELECT count(*) n FROM script_runs WHERE scriptName='helper' AND startedAt>=? AND startedAt<?",
+              [from, to],
+            )
+          )?.n,
+        );
       expect(one.rows).toEqual([
-        expect.objectContaining({
-          kind: "script-agent-invoked",
-          scriptName: "helper",
-          runs: inWindow?.n,
-        }),
+        expect.objectContaining({ kind: "script-agent-invoked", scriptName: "helper" }),
       ]);
+      const runs = one.rows[0]?.runs ?? -1;
+      if (one.boundaryEstimated) {
+        // The live scan of the partial first day failed: that day was scaled.
+        const firstDay = one.window.start.slice(0, 10);
+        const secondDay = new Date(Date.parse(`${firstDay}T00:00:00.000Z`) + 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+        const after = await count(`${secondDay}T00:00:00.000Z`);
+        expect(runs).toBeGreaterThanOrEqual(after);
+        expect(runs).toBeLessThanOrEqual(
+          after + (await count(`${firstDay}T00:00:00.000Z`, `${secondDay}T00:00:00.000Z`)),
+        );
+      } else {
+        expect(runs).toBe(await count(one.window.start));
+      }
       expect(one.rows[0]?.workflowId).toBeUndefined();
       const list = (await get("/api/savings/jobs?kind=script&days=7")).body as {
         rows: { scriptName: string }[];
@@ -306,7 +363,7 @@ describe("savings scripts", () => {
         points: { savingUsd: number }[];
       };
       expect(daily.valid).toBe(true);
-      expect(daily.points).toHaveLength(7);
+      expect(daily.points).toHaveLength(8);
       // A catalog script with no runs in the window.
       await catalogScript("idle-script", "await a();");
       expect((await get("/api/savings/jobs?scriptName=idle-script&days=7")).body).toMatchObject({
