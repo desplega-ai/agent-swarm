@@ -580,6 +580,8 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
+| `Files` | `path` | `mode: "list"` (default) or `"browser"`, `selectedPath`, `emptyMessage`, `maxHeight` (default `480px`), `fill`, `onSelect`; an agent-fs folder listing read as the viewer; see below. |
+| `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
@@ -630,6 +632,16 @@ Tree details:
 - `nodes` is a doc-shaped value: `{ root: string | string[], elements: { <key>: { type, children?: string[] } } }`, the json-render flat element map. Usually bind it to a json column: `{ "$state": "/queries/<name>/data/0/<column>" }`. A malformed or absent value renders an empty state; a `children` key missing from `elements` shows as `key — ?`. Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.
 - Each row shows `key — type`. Clicking a row writes its key to `/ui/<id>/value`, and the row bound to that path renders selected; read the selection with `{ "$state": "/ui/<id>/value" }`. The Tree never writes `null`: when the selected key leaves the doc (a refetch, an edit) the stored key stays and no row renders selected. Selection and collapse are keyed by node key, so a key reachable through two parents selects and collapses in both places.
 - Rows scroll inside `maxHeight` (default `480px`). Set `fill: true` inside a `fill` Stack or Split pane to grow to that height instead and scroll within it (ignores `maxHeight`).
+
+Files and File details:
+
+- Both read agent-fs as the viewer, with the viewer's own agent-fs key (the one Comb saves in their browser), from the swarm's default drive (`agent_fs.comb` in `/status`). There is no `drive` prop yet. The swarm key never reaches agent-fs, and the viewer sees only what their drive membership allows; an app cannot widen it.
+- A viewer who has not connected agent-fs sees a "Connect agent-fs" card that opens Comb's connect flow. In a `?mode=chromeless` iframe the card links to the app in the dashboard instead, because the iframe has no saved key.
+- `path` is absolute. A literal path must not contain `..`; bind it with `$state` to follow a route param. A folder that does not exist yet lists as empty (`emptyMessage`).
+- `Files` sorts folders first. `mode: "browser"` opens subfolders in place, with crumbs that never go above `path`, and reopens on the folder holding `selectedPath`. A file click (in list mode, any row) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }`; `type` is `file` or `directory`, and a folder's `path` ends with `/`. Usually: `[{ "action": "app.navigate", "params": { "page": "docs", "params": { "file": { "$row": "path" } } } }]`, plus `"selectedPath": { "$state": "/route/params/file" }`.
+- `File` renders Markdown with raw HTML shown as text, images as `<img>` (SVG too, so its scripts never run), PDFs in the browser's viewer, video and audio in a player, CSV as a table, and text files (HTML as source) as lines. Other types show Download and "Open in agent-fs". An empty `path` shows "No file selected".
+- List and view: a `Split` with `Files` in the left pane and `File` with `"path": { "$state": "/route/params/file" }` in the right; declare `file` in the page's `params`.
+- Scripts: an `app.action` script runs as its owner agent, so `ctx.fs` `/afs` reads that agent's default drive, not the viewer's. It sees the same files only when the agent's default drive is the swarm's comb drive.
 
 SchemaForm details:
 

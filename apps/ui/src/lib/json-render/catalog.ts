@@ -320,6 +320,31 @@ const treeProps = z.object({
   fill: z.boolean().optional(),
 });
 
+const filesProps = z.object({
+  /** Absolute agent-fs folder in the swarm drive, e.g. "/apps/launch-tracker/docs". */
+  path: z.string(),
+  /** `list` shows one folder; `browser` lets the viewer open subfolders, with crumbs. */
+  mode: z.enum(["list", "browser"]).optional(),
+  /** The file path to highlight, usually `{ "$state": "/route/params/<param>" }`. */
+  selectedPath: z.string().optional(),
+  emptyMessage: z.string().optional(),
+  maxHeight: z
+    .string()
+    .optional()
+    .describe("CSS max-height for the scrollable list, e.g. '480px' (default '480px')"),
+  fill: z.boolean().optional(),
+  /** Chain run when a row is clicked; `$row` = `{ path, name, type, size, modifiedAt }`. */
+  onSelect: actionChainSchema.optional(),
+});
+
+const fileProps = z.object({
+  /** Absolute agent-fs file path in the swarm drive. Empty renders a "No file selected" state. */
+  path: z.string(),
+  /** CSS height of the scrolling view, e.g. '480px'. Without it the view sizes to content. */
+  height: z.string().optional(),
+  fill: z.boolean().optional(),
+});
+
 const schemaFormProps = z.object({
   /** State id — the current draft values object lands at `/ui/<id>/value`. */
   id: z.string(),
@@ -1305,6 +1330,16 @@ export const swarmCatalogSpec = {
       props: treeProps,
       description:
         'Collapsible tree view of a json-render flat element map. Bind `nodes` to a doc-shaped value (`{ root: string | string[], elements: Record<key,{type,children?}> }`) — usually `{ "$state": "/queries/<name>/data/0/<jsonColumn>" }`. Each row shows `key — type`; clicking one writes the node key to `/ui/<id>/value`, and the row bound to that path renders selected. A malformed or absent `nodes` value renders an empty state. Rows scroll inside a fixed-height viewport — `maxHeight` overrides the default `480px` — or set `fill: true` to grow inside a `fill`-aware parent and scroll within whatever height that gives it instead (ignores `maxHeight`). Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.',
+    },
+    Files: {
+      props: filesProps,
+      description:
+        'agent-fs folder listing, read as the VIEWER with their own agent-fs key (Comb\'s connection), from the swarm\'s default drive. `path` is an absolute folder. `mode: "list"` (default) shows that folder; `"browser"` also opens subfolders, with crumbs that never go above `path`. Folders sort first. Clicking a file (or, in list mode, a folder) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }` (`type` is `file` or `directory`), usually an `app.navigate` that puts `$row.path` in a route param a `File` reads. `selectedPath` highlights that row. A viewer who has not connected agent-fs sees a "Connect agent-fs" card instead; access is whatever their drive membership allows. Rows scroll inside `maxHeight` (default 480px), or set `fill: true` to grow inside a `fill`-aware parent.',
+    },
+    File: {
+      props: fileProps,
+      description:
+        "One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm's default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser's viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and \"Open in agent-fs\". An empty `path` shows a \"No file selected\" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a \"Connect agent-fs\" card.",
     },
     SchemaForm: {
       props: schemaFormProps,

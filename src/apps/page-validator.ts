@@ -73,6 +73,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
+  Files: ["onSelect"],
 };
 
 /**
@@ -1357,6 +1358,49 @@ function chartPropIssues(
   return issues;
 }
 
+/** The `$row` fields `Files.onSelect` publishes. */
+const FILE_ROW_FIELDS = new Set(["path", "name", "type", "size", "modifiedAt"]);
+
+function collectFileRowIssues(value: unknown, path: string, issues: AppValidationIssue[]): void {
+  if (isPlainObject(value) && typeof value.$row === "string") {
+    if (!FILE_ROW_FIELDS.has(value.$row)) {
+      issues.push(
+        issue(
+          appendPath(path, "$row"),
+          `unknown Files row field "${value.$row}" (one of ${[...FILE_ROW_FIELDS].join(", ")})`,
+        ),
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value) || isPlainObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      collectFileRowIssues(child, appendPath(path, key), issues);
+    }
+  }
+}
+
+/**
+ * `File` / `Files`: a literal `path` must be absolute without `..` segments.
+ * Hygiene only: agent-fs drive membership is the access boundary.
+ */
+function agentFsPropIssues(
+  type: "File" | "Files",
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (
+    typeof props.path === "string" &&
+    (!props.path.startsWith("/") || props.path.split("/").includes(".."))
+  ) {
+    issues.push(issue(`${propsPath}.path`, 'must be an absolute agent-fs path without ".."'));
+  }
+  if (type === "Files") collectFileRowIssues(props.onSelect, `${propsPath}.onSelect`, issues);
+  return issues;
+}
+
 /**
  * Sidebar-layout page metadata: `icon` from the catalog icon set, and
  * `headerActions` / `nav` only where the sidebar layout renders them.
@@ -1527,6 +1571,9 @@ export function validatePage(
       }
       collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
       if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
+      if (type === "File" || type === "Files") {
+        issues.push(...agentFsPropIssues(type, rawElement.props, elementPath));
+      }
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;

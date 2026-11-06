@@ -254,6 +254,7 @@ import {
 } from "./table-selection-ui";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { OverflowTip, Tip } from "./tip";
+import { FilesView, FileView, type FilesProps } from "./files";
 import { TreeComponent } from "./tree";
 import { usePageShortcut } from "./use-page-shortcut";
 
@@ -3234,6 +3235,17 @@ function useRowActionRunner() {
   }, []);
 }
 
+/** `Files` with its `onSelect` chain run with `$row` = the clicked entry. */
+function FilesComponent({ props }: { props: FilesProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <FilesView
+      props={props}
+      onSelect={(row) => void runChain(props.onSelect as ActionChain | undefined, { ...row })}
+    />
+  );
+}
+
 function BlockSkeleton({ testId }: { testId: string }) {
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
@@ -4160,5 +4172,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Calendar: ({ props }) => <CalendarComponent props={props} />,
   ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
   Tree: ({ props }) => <TreeComponent props={props} />,
+  Files: ({ props }) => <FilesComponent props={props} />,
+  File: ({ props }) => <FileView props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
 };
