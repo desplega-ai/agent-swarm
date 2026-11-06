@@ -23,6 +23,8 @@ type AgentDependencies = {
     newValue?: string;
   }) => Promise<AgentLog>;
   installSystemDefaultSkillsForAgent: (agentId: string) => Promise<AgentSkill[]>;
+  /** File-import assignments waiting for this agent (src/be/import/pending.ts). */
+  resolvePendingImportAssignments: (agent: { id: string; name: string }) => Promise<boolean>;
 };
 
 let dependencies: AgentDependencies;
@@ -212,6 +214,15 @@ export async function createAgent(
       (err as Error).message,
     );
   }
+  let importChanged = false;
+  try {
+    importChanged = await dependencies.resolvePendingImportAssignments({ id, name: agent.name });
+  } catch (err) {
+    console.warn(
+      "[db] Failed to apply pending import assignments for new agent:",
+      (err as Error).message,
+    );
+  }
   try {
     await dependencies.createLogEntry({
       eventType: "agent_joined",
@@ -219,7 +230,7 @@ export async function createAgent(
       newValue: agent.status,
     });
   } catch {}
-  return rowToAgent(row);
+  return importChanged ? ((await getAgentById(id)) ?? rowToAgent(row)) : rowToAgent(row);
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {

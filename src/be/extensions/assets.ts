@@ -59,7 +59,7 @@ export type ExtensionAssetKind = "script" | "schedule" | "workflow" | "skill";
  * Every script field the install writes. A user edit to any of them (the source, or
  * only the description) must mark the script as edited.
  */
-type ScriptSpec = {
+export type ScriptSpec = {
   source: string;
   description: string;
   intent: string;
@@ -85,7 +85,7 @@ type ScheduleSpec = {
 };
 type SchedulePlan = { kind: "schedule"; name: string; spec: ScheduleSpec; hash: string };
 
-type WorkflowSpec = {
+export type WorkflowSpec = {
   name: string;
   description: string | null;
   definition: ExtensionWorkflowFile["definition"];
@@ -96,12 +96,12 @@ type WorkflowSpec = {
 };
 type WorkflowPlan = { kind: "workflow"; name: string; spec: WorkflowSpec; hash: string };
 
-type SkillFileSpec = { path: string; content: string };
+export type SkillFileSpec = { path: string; content: string };
 /**
  * Every skill field `updateSkill` can change, except `isEnabled`. A user edit to any
  * of them (description, scope, model settings, ...) must mark the skill as edited.
  */
-type SkillSpec = {
+export type SkillSpec = {
   name: string;
   description: string;
   content: string;
@@ -188,11 +188,11 @@ function canonicalJson(value: unknown): unknown {
   return value;
 }
 
-function hashOf(value: unknown): string {
+export function hashOf(value: unknown): string {
   return computeContentHash(JSON.stringify(canonicalJson(value)));
 }
 
-function scriptHash(spec: ScriptSpec): string {
+export function scriptHash(spec: ScriptSpec): string {
   return hashOf({
     source: spec.source,
     description: spec.description,
@@ -203,7 +203,7 @@ function scriptHash(spec: ScriptSpec): string {
   });
 }
 
-function liveScriptSpec(script: ScriptRecord): ScriptSpec {
+export function liveScriptSpec(script: ScriptRecord): ScriptSpec {
   return {
     source: script.source,
     description: script.description,
@@ -230,7 +230,7 @@ function liveScheduleSpec(schedule: ScheduledTask): ScheduleSpec {
   };
 }
 
-function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
+export function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
   return {
     name: workflow.name,
     // An update writes "" for a missing description; hash it as missing.
@@ -243,7 +243,7 @@ function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
   };
 }
 
-function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
+export function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
   return {
     name: parsed.name,
     description: parsed.description,
@@ -267,7 +267,7 @@ function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
   };
 }
 
-function liveSkillSpec(skill: Skill): SkillSpec {
+export function liveSkillSpec(skill: Skill): SkillSpec {
   return {
     name: skill.name,
     description: skill.description,
@@ -290,7 +290,7 @@ function liveSkillSpec(skill: Skill): SkillSpec {
   };
 }
 
-function skillHash(spec: SkillSpec, files: SkillFileSpec[]): string {
+export function skillHash(spec: SkillSpec, files: SkillFileSpec[]): string {
   return hashOf({
     ...spec,
     files: [...files].sort((a, b) => a.path.localeCompare(b.path)).map((f) => [f.path, f.content]),

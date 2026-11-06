@@ -734,6 +734,17 @@ try {
   console.error("[startup] Failed to seed built-in entities:", err);
 }
 
+// Opt-in file import (SWARM_IMPORT_SOURCES[_FILE]); a no-op when unset. See src/be/import.
+try {
+  const { runImports } = await import("../be/import");
+  await runImports();
+} catch (err) {
+  console.error(
+    "[startup] File import failed:",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 try {
   await loadEnabledExtensions();
 } catch (err) {

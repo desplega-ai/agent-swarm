@@ -339,6 +339,9 @@ export {
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
   installSystemDefaultSkillsForAgent: (agentId) => installSystemDefaultSkillsForAgent(agentId),
+  // Lazy: the importer imports this facade.
+  resolvePendingImportAssignments: async (agent) =>
+    (await import("./import/pending")).resolvePendingImportAssignments(agent),
 });
 
 export {
