@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSteeringDispatchState, pollAndDispatchSteering } from "../commands/runner";
 import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
-import { userClaudeMdExclude } from "../providers/claude-flag-settings";
+import {
+  LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN,
+  userClaudeMdExclude,
+} from "../providers/claude-flag-settings";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import type { SteeringMessage } from "../types";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
@@ -413,6 +416,7 @@ describe("Claude SDK production adapter lifecycle", () => {
           "/workspace/CLAUDE.md",
           userClaudeMdExclude(),
         ],
+        enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
       });
       expect(argv).not.toContain(settingsFile);
       // The version probe carries the same merged settings value.

@@ -114,14 +114,9 @@ docker logs e2e-worker-$(git branch --show-current | tr '/' '-') 2>&1 | tail -5
 
 ## Step 6: Verify Registration
 
-Use `context-mode execute` (not curl directly due to hook restrictions):
-
-```javascript
-const headers = { 'Authorization': 'Bearer $API_KEY', 'Content-Type': 'application/json' };
-const agents = await (await fetch('http://localhost:$PORT/api/agents', { headers })).json();
-for (const a of agents.agents) {
-  console.log(`${a.name} | isLead: ${a.isLead} | status: ${a.status} | id: ${a.id}`);
-}
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" "http://localhost:$PORT/api/agents" \
+  | jq -r '.agents[] | "\(.name) | isLead: \(.isLead) | status: \(.status) | id: \(.id)"'
 ```
 
 Should show both lead and worker registered as `idle`. Save the agent IDs for task creation.

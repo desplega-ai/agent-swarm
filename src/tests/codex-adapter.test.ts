@@ -1623,21 +1623,9 @@ describe("computeCodexCostUsd", () => {
 describe("buildCodexConfig", () => {
   // Save and restore the global fetch so we don't leak mocks between tests.
   const originalFetch = globalThis.fetch;
-  // These tests assert the EXACT set of mcp_servers keys, which is only the
-  // installed-server merge logic. Disable the always-on context-mode entry so
-  // those exact-key assertions stay valid; a dedicated block below verifies
-  // the context-mode + features behavior. Save/restore the env to avoid leaks.
-  let prevContextModeDisabled: string | undefined;
-
-  beforeEach(() => {
-    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
-    process.env.CONTEXT_MODE_DISABLED = "true";
-  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
-    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
   });
 
   // Helper: build a ProviderSessionConfig pointed at a mock endpoint.
@@ -1937,12 +1925,12 @@ describe("buildCodexConfig", () => {
   });
 });
 
-// ─── Phase 3: buildCodexConfig — context-mode MCP + hook feature flags ───────
+// ─── buildCodexConfig — removed context-mode + hook feature flags ────────────
 
-describe("buildCodexConfig — context-mode + features", () => {
+describe("buildCodexConfig — legacy context-mode + features", () => {
   const originalFetch = globalThis.fetch;
-  // Explicitly own CONTEXT_MODE_DISABLED here. Save the ambient value up front
-  // and restore it after every test so we never leak the mutation to siblings.
+  // Own CONTEXT_MODE_DISABLED: the deprecated flag must be a no-op. Restore
+  // the ambient value after every test so we never leak the mutation.
   let prevContextModeDisabled: string | undefined;
 
   beforeEach(() => {
@@ -1980,49 +1968,22 @@ describe("buildCodexConfig — context-mode + features", () => {
     };
   }
 
-  test("includes the 'context-mode' mcp_servers entry by default", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
-
-    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
-    expect(mcp["context-mode"]?.command).toBe("context-mode");
-    expect(mcp["context-mode"]?.enabled).toBe(true);
-    expect(mcp["context-mode"]?.startup_timeout_sec).toBe(30);
-    expect(mcp["context-mode"]?.tool_timeout_sec).toBe(120);
-  });
-
+  // context-mode is removed: no value of the deprecated flag, from either env
+  // source, adds its MCP server, and a stale install of the plugin (older
+  // images) is always turned off so its own MCP server, skills and hooks
+  // never load.
   test.each([
-    "true",
-    "1",
-    "TRUE",
-  ])("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=%s", async (value) => {
-    process.env.CONTEXT_MODE_DISABLED = value;
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
-
-    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
-    expect(mcp["context-mode"]).toBeUndefined();
-  });
-
-  test("CONTEXT_MODE_DISABLED also turns the installed context-mode plugin off", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-
-    // The plugin registers its own MCP server, skills and hooks.
-    expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
-  });
-
-  // Production builds this config in the codex-session-runner subprocess,
-  // whose process.env lacks swarm config rows; they arrive via config.env.
-  test("honors CONTEXT_MODE_DISABLED from config.env when process.env lacks it", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
+    [undefined, undefined],
+    ["true", undefined],
+    ["false", undefined],
+    [undefined, "true"],
+    ["true", "false"],
+  ])("CONTEXT_MODE_DISABLED process=%s config=%s is a no-op", async (procValue, envValue) => {
+    if (procValue === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = procValue;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });
     const merged = await buildCodexConfig(
-      cfg({ env: { CONTEXT_MODE_DISABLED: "true" } }),
+      cfg(envValue === undefined ? {} : { env: { CONTEXT_MODE_DISABLED: envValue } }),
       "gpt-5.4",
       () => {},
     );
@@ -2030,28 +1991,6 @@ describe("buildCodexConfig — context-mode + features", () => {
 
     expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
     expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
-  });
-
-  test("config.env CONTEXT_MODE_DISABLED=false overrides a process.env true", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(
-      cfg({ env: { CONTEXT_MODE_DISABLED: "false" } }),
-      "gpt-5.4",
-      () => {},
-    );
-    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
-
-    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
-    expect(merged.plugins).toBeUndefined();
-  });
-
-  test("leaves the installed context-mode plugin alone by default", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-
-    expect(merged.plugins).toBeUndefined();
   });
 
   test("disables apps and enables hooks", async () => {
