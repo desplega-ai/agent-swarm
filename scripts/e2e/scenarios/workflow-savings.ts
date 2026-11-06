@@ -1,5 +1,6 @@
 // Automation savings for one workflow: a run is priced, its daily series sums to
-// the same saving, an idle workflow is not valid (never $0), and bad input is rejected.
+// the same saving, an idle workflow is not valid (never $0), bad input is rejected, and
+// the calibration routes report the shipped curve and apply nothing on a dry run.
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -74,6 +75,18 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [400], "unknown tier");
       response = await ctx.api("GET", "/api/savings/jobs");
       expectStatus(response, [400], "missing workflowId");
+
+      // Calibration: the shipped curve is in use; a dry run on a fresh deployment applies nothing.
+      response = await ctx.api("GET", "/api/savings/calibration");
+      expectStatus(response, [200], "calibration in use");
+      json = asRecord(response.json);
+      expect(json.source === "shipped" && json.stored === null, `shipped curve ${response.text}`);
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 7 } });
+      expectStatus(response, [200], "calibration dry run");
+      json = asRecord(response.json);
+      expect(json.applied === false, `a dry run applies nothing ${response.text}`);
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 0 } });
+      expectStatus(response, [400], "calibration: bad days");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
       await deleteWorkflowQuietly(ctx, idle);

@@ -11,9 +11,10 @@ import {
   createWorkflowRunStep,
   getDbClient,
   initDb,
+  upsertSwarmConfig,
 } from "../be/db";
 import { computeWorkflowWindow, LIVE_MAX_RUNS } from "../be/savings/compute";
-import { DEFAULT_OPS } from "../be/savings/model";
+import { CURVE, DEFAULT_OPS, SAVINGS_CALIBRATION_KEY, SAVINGS_TIERS } from "../be/savings/model";
 import { handleSavings, resetSavingsCache } from "../http/savings";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
@@ -299,6 +300,59 @@ describe("savings compute", () => {
       expect(b.rows[0]?.substitutedRuns).toBe(4);
       const band = b.rows[0]?.savingUsd;
       expect(band && band.p10 < band.p50 && band.p50 < band.p90).toBe(true);
+      expect((body as { calibrationSource: string }).calibrationSource).toBe("shipped");
+    });
+
+    describe("deployment calibration", () => {
+      const store = (value: string) =>
+        upsertSwarmConfig({ scope: "global", key: SAVINGS_CALIBRATION_KEY, value });
+      const p50 = async () =>
+        (
+          (await get(`workflowId=${workflowId}&days=7&tier=smart`)).body as {
+            rows: { agentOnlyUsd: { p50: number } }[];
+          }
+        ).rows[0]?.agentOnlyUsd.p50 as number;
+      const doubled = JSON.stringify({
+        calibratedAt: "2026-12-01",
+        model: "claude-opus-5-5",
+        curve: Object.fromEntries(
+          SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+        ),
+      });
+
+      afterAll(async () => {
+        await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [
+          SAVINGS_CALIBRATION_KEY,
+        ]);
+      });
+
+      test("a stored curve prices the response and is named as the source", async () => {
+        const shipped = await p50();
+        await store(doubled);
+        const { body } = await get(`workflowId=${workflowId}&days=7&tier=smart`);
+        expect(body).toMatchObject({ calibrationSource: "deployment", calibratedAt: "2026-12-01" });
+        expect(await p50()).toBeGreaterThan(shipped * 1.2);
+      });
+
+      test("the daily series uses the same stored curve, so it still sums to the header", async () => {
+        await store(doubled);
+        const jobs = (await get(`workflowId=${workflowId}&days=7`)).body as {
+          rows: { savingUsd: { p50: number } }[];
+        };
+        const daily = (await get(`workflowId=${workflowId}&days=7`, "daily")).body as {
+          calibrationSource: string;
+          points: { savingUsd: number }[];
+        };
+        expect(daily.calibrationSource).toBe("deployment");
+        const cents = daily.points.reduce((sum, p) => sum + Math.round(p.savingUsd * 100), 0);
+        expect(cents).toBe(Math.round((jobs.rows[0]?.savingUsd.p50 ?? Number.NaN) * 100));
+      });
+
+      test("a malformed stored curve falls back to the shipped one", async () => {
+        await store("{not json");
+        const { body } = await get(`workflowId=${workflowId}&days=7&tier=smart`);
+        expect(body).toMatchObject({ calibrationSource: "shipped", calibratedAt: "2026-11-05" });
+      });
     });
 
     test("the daily points sum to the header saving", async () => {

@@ -1,13 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getWorkflow } from "../be/db";
+import { getSwarmConfigs, getWorkflow } from "../be/db";
 import { computeWorkflowWindow, type SavingsSql, type WorkflowWindow } from "../be/savings/compute";
 import {
-  CALIBRATED_AT,
-  CALIBRATION_MODEL,
+  type Calibration,
+  parseCalibration,
   priceWorkflow,
+  SAVINGS_CALIBRATION_KEY,
   SAVINGS_TIERS,
   type SavingsBand,
+  SHIPPED_CALIBRATION,
   splitByDay,
 } from "../be/savings/model";
 import { executeReadOnlyQueryGated } from "./db-query";
@@ -27,7 +29,7 @@ const FACTS_TTL_MS = 10 * 60 * 1000;
  * wall-clock budget, sharing the swarm-wide db-query concurrency cap, so a
  * burst of requests can neither block the API's event loop nor pile up.
  */
-const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
+export const boundedSql: SavingsSql = async <T>(sql: string, params: unknown[]) => {
   const result = await executeReadOnlyQueryGated(sql, params, getDbQueryHttpBudgetMs(), 10_000);
   return result.rows.map((row) =>
     Object.fromEntries(result.columns.map((column, i) => [column, row[i]])),
@@ -77,6 +79,8 @@ const SavingsJobsResponseSchema = z.object({
   tier: z.enum(SAVINGS_TIERS),
   calibrationModel: z.string(),
   calibratedAt: z.string(),
+  /** `shipped`: the constants in the release. `deployment`: derived from this swarm's own sessions. */
+  calibrationSource: z.enum(["shipped", "deployment"]),
   computedAt: z.string(),
   /** False when there is nothing to show: no runs, or too many runs to compute live. */
   valid: z.boolean(),
@@ -111,6 +115,7 @@ const SavingsDailyResponseSchema = z.object({
   tier: z.enum(SAVINGS_TIERS),
   calibrationModel: z.string(),
   calibratedAt: z.string(),
+  calibrationSource: z.enum(["shipped", "deployment"]),
   computedAt: z.string(),
   valid: z.boolean(),
   reason: z.enum(["no-runs", "too-many-runs"]).nullable(),
@@ -164,9 +169,30 @@ const savingsDailyRoute = route({
 type CachedFacts = { at: number; start: string; end: string; result: Promise<WorkflowWindow> };
 const factsCache = new Map<string, CachedFacts>();
 
+/** The stored deployment curve is re-read this often, so a new calibration shows within a minute. */
+const CALIBRATION_TTL_MS = 60 * 1000;
+let calibrationCache: { at: number; value: Calibration } | null = null;
+
+async function activeCalibration(now: number): Promise<Calibration> {
+  if (calibrationCache && now - calibrationCache.at < CALIBRATION_TTL_MS) {
+    return calibrationCache.value;
+  }
+  const [row] = await getSwarmConfigs({ scope: "global", key: SAVINGS_CALIBRATION_KEY });
+  // A malformed row falls back to the shipped curve rather than failing every savings request.
+  const value = parseCalibration(row?.value) ?? SHIPPED_CALIBRATION;
+  calibrationCache = { at: now, value };
+  return value;
+}
+
+/** Forget the cached curve, so the next savings request reads the stored row. */
+export function clearCalibrationCache(): void {
+  calibrationCache = null;
+}
+
 /** Test hook. */
 export function resetSavingsCache(): void {
   factsCache.clear();
+  clearCalibrationCache();
 }
 
 function cachedWindow(
@@ -261,11 +287,13 @@ export async function handleSavings(
     }
     throw err;
   }
+  const calibration = await activeCalibration(Date.now());
   const base = {
     window: { start: entry.start, end: entry.end, days },
     tier,
-    calibrationModel: CALIBRATION_MODEL,
-    calibratedAt: CALIBRATED_AT,
+    calibrationModel: calibration.model,
+    calibratedAt: calibration.calibratedAt,
+    calibrationSource: calibration.source,
     computedAt: new Date(entry.at).toISOString(),
   };
   if (result.status === "too-many-runs" || result.facts.runs === 0) {
@@ -277,7 +305,10 @@ export async function handleSavings(
 
   if (!isJobs) {
     const split = new Map(
-      splitByDay(result.facts, result.byDay, { tier, days }).map((p) => [p.day, p]),
+      splitByDay(result.facts, result.byDay, { tier, days, curve: calibration.curve }).map((p) => [
+        p.day,
+        p,
+      ]),
     );
     const dayList = utcDays(entry.start, entry.end);
     const saving = roundToTotal(dayList.map((d) => split.get(d)?.savingUsd ?? 0));
@@ -299,7 +330,7 @@ export async function handleSavings(
     return true;
   }
 
-  const priced = priceWorkflow(result.facts, { tier, days, band: "job" });
+  const priced = priceWorkflow(result.facts, { tier, days, band: "job", curve: calibration.curve });
   savingsJobsRoute.respond(res, 200, {
     ...base,
     valid: true,
