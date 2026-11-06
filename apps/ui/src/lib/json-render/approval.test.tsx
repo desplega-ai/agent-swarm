@@ -14,12 +14,27 @@ const STUBBED = new Set([
   "@/components/shared/status-badge",
 ]);
 const SRC = join(import.meta.dir, "../..");
+const stubbedFiles: string[] = [];
 for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(SRC)) {
   if (/\.test\.tsx?$/.test(file)) continue;
   const specifier = `@/${file.replace(/\.tsx?$/, "").replace(/\/index$/, "")}`;
-  if (STUBBED.has(specifier)) continue;
+  if (STUBBED.has(specifier)) {
+    stubbedFiles.push(join(SRC, file));
+    continue;
+  }
   mock.module(specifier, async () => await import(join(SRC, file)));
 }
+// Evaluate the real stubbed modules before stubbing them: a later test file in
+// the same `bun test` process that `require()`s one would otherwise load it
+// fresh against this file's async `@/` mocks and fail ("require() async module").
+// Each stub also spreads the real module, so a later file that imports another
+// export from it still finds it.
+const realModules = new Map<string, Record<string, unknown>>();
+for (const file of stubbedFiles) {
+  const specifier = `@/${file.slice(SRC.length + 1).replace(/\.tsx?$/, "")}`;
+  realModules.set(specifier, await import(file));
+}
+const real = (specifier: string) => realModules.get(specifier) ?? {};
 
 GlobalRegistrator.register();
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -35,6 +50,7 @@ let fetchCount = 0;
 let respondImpl: (responses: Record<string, unknown>) => Promise<unknown> = async () => ({});
 
 mock.module("@/api/hooks/use-approval-requests", () => ({
+  ...real("@/api/hooks/use-approval-requests"),
   useLiveApprovalRequest: (id: string) =>
     useQuery({
       queryKey: ["approval-request", id],
@@ -52,6 +68,7 @@ mock.module("@/api/hooks/use-approval-requests", () => ({
 }));
 
 mock.module("@/components/shared/question-flow", () => ({
+  ...real("@/components/shared/question-flow"),
   // One button that submits a fixed answer; a rejection shows its message.
   QuestionFlow: ({ onSubmit }: { onSubmit: (v: Record<string, unknown>) => Promise<void> }) => (
     <button
@@ -69,6 +86,7 @@ mock.module("@/components/shared/question-flow", () => ({
 }));
 
 mock.module("@/components/shared/status-badge", () => ({
+  ...real("@/components/shared/status-badge"),
   StatusBadge: ({ status }: { status: string }) => <span data-testid="status">{status}</span>,
 }));
 
