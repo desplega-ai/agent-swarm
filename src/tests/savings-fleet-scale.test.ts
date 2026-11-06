@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { closeDb, getDbClient, initDb } from "../be/db";
 import { emptyFacts } from "../be/savings/compute";
 import { MODEL_VERSION } from "../be/savings/model";
@@ -25,9 +28,15 @@ const pageReads = (days: number) => [
   `/api/savings/jobs?kind=script&days=${days}`,
 ];
 
+const templateGlobals = globalThis as typeof globalThis & {
+  __testMigrationTemplate?: Uint8Array;
+  __savedFleetScaleTemplate?: Uint8Array;
+};
+
 describe("savings fleet read at fleet scale", () => {
   let server: Server;
   let port: number;
+  let dbDir: string | undefined;
   const get = async (path: string) => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`);
     return { status: res.status, body: (await res.json()) as Record<string, any> };
@@ -36,6 +45,8 @@ describe("savings fleet read at fleet scale", () => {
   /**
    * Fire the page's four reads at once, for `viewers` simultaneous viewers;
    * return the bodies (viewer by viewer) and the longest event-loop stall.
+   * The bodies are parsed after the ticker stops: the client shares this
+   * process only in the test, so its JSON parse is not the server's stall.
    */
   async function pageLoad(days = DAYS, viewers = 1) {
     let last = performance.now();
@@ -45,17 +56,35 @@ describe("savings fleet read at fleet scale", () => {
       maxGapMs = Math.max(maxGapMs, t - last);
       last = t;
     }, 2);
+    let raw: { status: number; text: string }[];
     try {
       const paths = Array.from({ length: viewers }, () => pageReads(days)).flat();
-      const results = await Promise.all(paths.map(get));
-      return { results, maxGapMs };
+      raw = await Promise.all(
+        paths.map(async (path) => {
+          const res = await fetch(`http://127.0.0.1:${port}${path}`);
+          return { status: res.status, text: await res.text() };
+        }),
+      );
     } finally {
       clearInterval(ticker);
     }
+    const results = raw.map((r) => ({
+      status: r.status,
+      body: JSON.parse(r.text) as Record<string, any>,
+    }));
+    return { results, maxGapMs };
   }
 
   beforeAll(async () => {
-    initDb(":memory:");
+    // A real file, as in production. The script read's first-day scan goes
+    // through the bounded db-query path, and on the in-memory test template
+    // that path snapshots the whole 127k-row database synchronously before it
+    // fails: a test-only stall that broke the bound on slow CI runners.
+    templateGlobals.__savedFleetScaleTemplate = templateGlobals.__testMigrationTemplate;
+    templateGlobals.__testMigrationTemplate = undefined;
+    closeDb();
+    dbDir = mkdtempSync(join(tmpdir(), "savings-fleet-scale-"));
+    initDb(join(dbDir, "fleet.sqlite"));
     await resetSavingsRollupForTests();
     const db = getDbClient();
     const at = new Date(NOW).toISOString();
@@ -100,6 +129,9 @@ describe("savings fleet read at fleet scale", () => {
   afterAll(() => {
     server?.close();
     closeDb();
+    templateGlobals.__testMigrationTemplate = templateGlobals.__savedFleetScaleTemplate;
+    templateGlobals.__savedFleetScaleTemplate = undefined;
+    if (dbDir) rmSync(dbDir, { recursive: true, force: true });
   });
 
   // Timing-sensitive: a stall bound on a shared CI runner. The unchunked read stalled

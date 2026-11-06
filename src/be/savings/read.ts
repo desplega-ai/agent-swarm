@@ -500,7 +500,7 @@ async function priceWorkflowBuckets(scope: {
   const rows: WorkflowSavingsRow[] = [];
   const jobParts: PricedWorkflow[] = [];
   const fleetParts: PricedWorkflow[] = [];
-  const dayParts: SavingsDailyPoint[][] = [];
+  const daily = dayTotals(scope.calendarDays);
   const pricing = { tier: scope.tier, days: scope.days, curve: scope.curve };
   for (const [i, job] of selected.entries()) {
     if (i > 0 && i % PRICE_BATCH === 0) await yieldLoop();
@@ -509,7 +509,7 @@ async function priceWorkflowBuckets(scope: {
     rows.push({ ...priced, workflowId: job.workflowId, name: job.name });
     jobParts.push(priced);
     fleetParts.push(priceWorkflow(job.facts, { ...pricing, band: "fleet" }, allocation));
-    dayParts.push(splitByDay(job.facts, job.days, pricing, priced));
+    daily.add(splitByDay(job.facts, job.days, pricing, priced));
   }
   rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
 
@@ -519,7 +519,7 @@ async function priceWorkflowBuckets(scope: {
     rows,
     jobTotal: jobParts.length > 0 ? sumTotals(jobParts) : null,
     fleetTotal: fleetParts.length > 0 ? sumTotals(fleetParts) : null,
-    points: rows.length > 0 ? fillDays(dayParts.flat(), scope.calendarDays) : [],
+    points: rows.length > 0 ? daily.points : [],
   };
 }
 
@@ -614,8 +614,13 @@ function sumTotals(parts: PricedWorkflow[]): SavingsTotals {
   };
 }
 
-/** One point per UTC day the window touches, adding up the points of each day; days without runs are zero. */
-function fillDays(points: SavingsDailyPoint[], calendarDays: string[]): SavingsDailyPoint[] {
+/**
+ * One point per UTC day the window touches; `add` adds up the points of each
+ * day, and days without runs stay zero. A fleet read adds each job's points
+ * as it prices the job, between its event-loop yields: one pass over the
+ * whole fleet's points (91k at fleet scale) stalled the loop for ~20ms.
+ */
+function dayTotals(calendarDays: string[]) {
   const days = calendarDays.map((day) => ({
     day,
     savingUsd: 0,
@@ -624,15 +629,26 @@ function fillDays(points: SavingsDailyPoint[], calendarDays: string[]): SavingsD
     estimatedLlmUsd: 0,
   }));
   const byDay = new Map(days.map((p) => [p.day, p]));
-  for (const p of points) {
-    const d = byDay.get(p.day);
-    if (!d) continue;
-    d.savingUsd += p.savingUsd;
-    d.actualUsd += p.actualUsd;
-    d.measuredUsd += p.measuredUsd;
-    d.estimatedLlmUsd += p.estimatedLlmUsd;
-  }
-  return days;
+  return {
+    points: days as SavingsDailyPoint[],
+    add(points: SavingsDailyPoint[]): void {
+      for (const p of points) {
+        const d = byDay.get(p.day);
+        if (!d) continue;
+        d.savingUsd += p.savingUsd;
+        d.actualUsd += p.actualUsd;
+        d.measuredUsd += p.measuredUsd;
+        d.estimatedLlmUsd += p.estimatedLlmUsd;
+      }
+    },
+  };
+}
+
+/** The day totals of `points`, one point per UTC day the window touches. */
+function fillDays(points: SavingsDailyPoint[], calendarDays: string[]): SavingsDailyPoint[] {
+  const totals = dayTotals(calendarDays);
+  totals.add(points);
+  return totals.points;
 }
 
 export type ScriptSavingsRow = PricedWorkflow & {
@@ -794,7 +810,7 @@ async function priceScriptBuckets(scope: {
   const rows: ScriptSavingsRow[] = [];
   const jobParts: PricedWorkflow[] = [];
   const fleetParts: PricedWorkflow[] = [];
-  const dayParts: SavingsDailyPoint[][] = [];
+  const daily = dayTotals(scope.calendarDays);
   let i = 0;
   for (const [scriptName, job] of jobs) {
     if (i > 0 && i % PRICE_BATCH === 0) await yieldLoop();
@@ -807,7 +823,7 @@ async function priceScriptBuckets(scope: {
     rows.push({ ...priced, kind, scriptName, name: scriptName });
     jobParts.push(priced);
     fleetParts.push(priceScript(job.facts, { ...pricing, band: "fleet" }));
-    dayParts.push(
+    daily.add(
       splitScriptByDay(
         job.facts,
         [...job.days].map(([day, f]) => ({ ...f, day })),
@@ -823,7 +839,7 @@ async function priceScriptBuckets(scope: {
     rows,
     jobTotal: jobParts.length > 0 ? sumTotals(jobParts) : null,
     fleetTotal: fleetParts.length > 0 ? sumTotals(fleetParts) : null,
-    points: rows.length > 0 ? fillDays(dayParts.flat(), scope.calendarDays) : [],
+    points: rows.length > 0 ? daily.points : [],
   };
 }
 
