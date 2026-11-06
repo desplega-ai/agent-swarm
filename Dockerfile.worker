@@ -398,6 +398,7 @@ FROM worker-base AS worker-slim
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
+COPY src/commands/entrypoint-provider-binary.ts /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)
@@ -818,6 +819,7 @@ FROM worker-full-base AS worker-full
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
+COPY src/commands/entrypoint-provider-binary.ts /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)
