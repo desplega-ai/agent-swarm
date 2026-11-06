@@ -410,6 +410,40 @@ describe("savings rollup", () => {
         expect(bounded.rows).toEqual((await read(inProcessSql, fanout)).rows);
         resetSavingsReadCache();
       });
+
+      test("fleet list reads across the minutes of an hour scan each first-day workflow once", async () => {
+        resetSavingsReadCache();
+        const MINUTE = 60_000;
+        const scanned: string[] = [];
+        const counting: SavingsSql = (sql, params) => {
+          // Every first-day scan opens with this count.
+          if (sql.startsWith("SELECT count(*) n FROM workflow_runs WHERE workflowId=?")) {
+            scanned.push(String(params?.[0]));
+          }
+          return inProcessSql(sql, params);
+        };
+        const list = (now: number) =>
+          readWorkflowSavings({ days: 7, tier: "smart", now, sql: counting });
+        const firstDayIds = (
+          await getDbClient().query<{ jobId: string }>(
+            "SELECT DISTINCT jobId FROM automation_savings_daily WHERE day='2026-10-25' AND runs>0",
+          )
+        ).map((r) => r.jobId);
+
+        // Control: the first read scans every first-day workflow, once.
+        const first = await list(NOW2 + MINUTE);
+        expect(first.boundaryEstimated).toBe(false);
+        expect([...scanned].sort()).toEqual([...firstDayIds].sort());
+        const later = [];
+        for (const m of [2, 17, 59]) later.push(await list(NOW2 + m * MINUTE));
+        expect(scanned).toHaveLength(firstDayIds.length);
+        // Within the hour every list read prices the same slice, from 02:00.
+        for (const read of later) expect(read.rows).toEqual(first.rows);
+        // The next hour's window scans again.
+        await list(NOW2 + HOUR + MINUTE);
+        expect(scanned).toHaveLength(2 * firstDayIds.length);
+        resetSavingsReadCache();
+      });
     });
   });
 

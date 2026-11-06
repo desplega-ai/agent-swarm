@@ -133,9 +133,11 @@ function daysBetween(firstDay: string, lastDay: string): string[] {
 
 /** Live facts of one workflow over the window's partial first day, or the run count (null when unknown) when they could not be read. */
 type SliceResult = { facts: WorkflowFacts } | { runs: number | null };
-/** First-day scans by workflow and window start, kept a little past their minute. */
-const sliceCache = new Map<string, { at: number; result: Promise<SliceResult> }>();
+/** First-day scans by workflow and slice start, kept a little past the slice start's minute or hour. */
+const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<SliceResult> }>();
 const SLICE_TTL_MS = 2 * MINUTE_MS;
+const HOUR_MS = 60 * MINUTE_MS;
+const FLEET_SLICE_TTL_MS = HOUR_MS + 2 * MINUTE_MS;
 /** First-day scans in flight per read: below the default db-query concurrency cap of 3. */
 const FIRST_DAY_SCAN_CONCURRENCY = 2;
 
@@ -148,13 +150,14 @@ function scanSlice(
   workflow: { id: string; definition: unknown },
   slice: { start: string; end: string },
   sql: SavingsSql,
+  ttl: number,
 ): Promise<SliceResult> {
   const key = `${workflow.id}|${slice.start}`;
   const hit = sliceCache.get(key);
   if (hit) return hit.result;
   const now = Date.now();
-  // A window start of an older minute is never read again.
-  for (const [k, v] of sliceCache) if (now - v.at > SLICE_TTL_MS) sliceCache.delete(k);
+  // A slice start of an older minute (or hour) is never read again.
+  for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
   const result: Promise<SliceResult> = computeWorkflowWindow(workflow, slice, sql).then(
     (out): SliceResult => (out.status === "ok" ? { facts: out.facts } : { runs: out.runs }),
     (err): SliceResult => {
@@ -166,7 +169,7 @@ function scanSlice(
       return { runs: null };
     },
   );
-  sliceCache.set(key, { at: now, result });
+  sliceCache.set(key, { at: now, ttl, result });
   return result;
 }
 
@@ -257,7 +260,13 @@ export async function readWorkflowSavings(opts: {
   );
   let computedAt = marker?.at ?? null;
   for (const b of buckets) if (!computedAt || b.computedAt > computedAt) computedAt = b.computedAt;
-  const boundaryEstimated = await clipFirstDay(buckets, window, firstDay, opts.sql);
+  const boundaryEstimated = await clipFirstDay(
+    buckets,
+    window,
+    firstDay,
+    !opts.workflowId,
+    opts.sql,
+  );
   const jobs = new Map<string, Job>();
   for (const b of buckets) {
     if (!(Number(b.runs) > 0)) continue;
@@ -336,14 +345,25 @@ export async function readWorkflowSavings(opts: {
  * Replace each first-day bucket with the facts of the runs inside the window,
  * scanned live (the window starts mid-day). Returns whether any of them had to
  * be estimated instead.
+ *
+ * A fleet read (no workflowId) scans from the window start floored to the hour
+ * and keeps the scans for that hour, so list reads cost one scan per workflow
+ * per hour, not per minute. Boundary tolerance: its window holds up to 59
+ * minutes of runs before `window.start` (at most days x 24h + 59 min). A
+ * single-workflow read stays exact to the minute.
  */
 async function clipFirstDay(
   buckets: BucketRow[],
   window: SavingsWindow,
   firstDay: string,
+  fleet: boolean,
   sql: SavingsSql = (q, p) => getDbClient().query(q, p),
 ): Promise<boolean> {
-  if (window.start === dayStartIso(firstDay)) return false;
+  const startMs = Date.parse(window.start);
+  const sliceStart = fleet
+    ? new Date(Math.floor(startMs / HOUR_MS) * HOUR_MS).toISOString()
+    : window.start;
+  if (sliceStart === dayStartIso(firstDay)) return false;
   const first = buckets.filter((b) => b.day === firstDay);
   if (first.length === 0) return false;
   const ids = [...new Set(first.map((b) => b.jobId))];
@@ -352,15 +372,13 @@ async function clipFirstDay(
     ids,
   );
   const defOf = new Map(defs.map((d) => [d.id, parseDefinition(d.definition)]));
-  const slice = {
-    start: window.start,
-    end: dayStartIso(utcDay(Date.parse(window.start) + DAY_MS)),
-  };
+  const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
+  const ttl = fleet ? FLEET_SLICE_TTL_MS : SLICE_TTL_MS;
   const dayShare = (Date.parse(slice.end) - Date.parse(slice.start)) / DAY_MS;
   let estimated = false;
   const clip = async (b: BucketRow) => {
     const result: SliceResult = defOf.has(b.jobId)
-      ? await scanSlice({ id: b.jobId, definition: defOf.get(b.jobId) }, slice, sql)
+      ? await scanSlice({ id: b.jobId, definition: defOf.get(b.jobId) }, slice, sql, ttl)
       : { runs: null };
     let facts: WorkflowFacts;
     if ("facts" in result) {
