@@ -6,7 +6,7 @@
  */
 import { getDbClient } from "../db";
 import type { DbParam } from "../db-client";
-import { computeWorkflowWindow, type SavingsSql } from "./compute";
+import { computeWorkflowWindow, countScriptRuns, LIVE_MAX_RUNS, type SavingsSql } from "./compute";
 import {
   allocateSchedule,
   type CurveSet,
@@ -139,8 +139,10 @@ function daysBetween(firstDay: string, lastDay: string): string[] {
 
 /** Live facts of one workflow over the window's partial first day, or the run count (null when unknown) when they could not be read. */
 type SliceResult = { facts: WorkflowFacts } | { runs: number | null };
-/** First-day scans by workflow and slice start, kept a little past the slice start's minute or hour. */
-const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<SliceResult> }>();
+/** Live facts by script name over the window's partial first day, or null when they could not be read. */
+type ScriptSliceResult = Map<string, ScriptFacts> | null;
+/** First-day scans by workflow (or script read) and slice start, kept a little past the slice start's minute or hour. */
+const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<unknown> }>();
 const SLICE_TTL_MS = 2 * MINUTE_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const FLEET_SLICE_TTL_MS = HOUR_MS + 2 * MINUTE_MS;
@@ -152,31 +154,47 @@ export function resetSavingsReadCache(): void {
   sliceCache.clear();
 }
 
+/** One scan per key at a time, kept for `ttl`; a failed scan reads as `failed` and is not kept. */
+function cachedScan<T>(
+  key: string,
+  ttl: number,
+  scan: () => Promise<T>,
+  failed: T,
+  label: string,
+): Promise<T> {
+  const hit = sliceCache.get(key);
+  if (hit) return hit.result as Promise<T>;
+  const now = Date.now();
+  // A slice start of an older minute (or hour) is never read again.
+  for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
+  const result: Promise<T> = scan().catch((err): T => {
+    console.warn(
+      `[savings-read] first-day scan of ${label} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
+    );
+    // A failed scan is not kept: the next read scans again.
+    if (sliceCache.get(key)?.result === result) sliceCache.delete(key);
+    return failed;
+  });
+  sliceCache.set(key, { at: now, ttl, result });
+  return result;
+}
+
 function scanSlice(
   workflow: { id: string; definition: unknown },
   slice: { start: string; end: string },
   sql: SavingsSql,
   ttl: number,
 ): Promise<SliceResult> {
-  const key = `${workflow.id}|${slice.start}`;
-  const hit = sliceCache.get(key);
-  if (hit) return hit.result;
-  const now = Date.now();
-  // A slice start of an older minute (or hour) is never read again.
-  for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
-  const result: Promise<SliceResult> = computeWorkflowWindow(workflow, slice, sql).then(
-    (out): SliceResult => (out.status === "ok" ? { facts: out.facts } : { runs: out.runs }),
-    (err): SliceResult => {
-      console.warn(
-        `[savings-read] first-day scan of ${workflow.id} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
-      );
-      // A failed scan is not kept: the next read scans again.
-      if (sliceCache.get(key)?.result === result) sliceCache.delete(key);
-      return { runs: null };
+  return cachedScan<SliceResult>(
+    `${workflow.id}|${slice.start}`,
+    ttl,
+    async () => {
+      const out = await computeWorkflowWindow(workflow, slice, sql);
+      return out.status === "ok" ? { facts: out.facts } : { runs: out.runs };
     },
+    { runs: null },
+    workflow.id,
   );
-  sliceCache.set(key, { at: now, ttl, result });
-  return result;
 }
 
 const COUNT_COLUMNS = new Set<keyof WorkflowFacts>([
@@ -606,9 +624,11 @@ export async function readScriptSavings(opts: {
 /**
  * Replace each script's first-day facts with those of its runs inside the
  * window, scanned live (the window starts mid-day), and drop scripts left with
- * no runs. When the scan fails, the day is scaled by the share of it inside the
- * window instead; returns whether that happened.
- * shortcut: one uncached scan per read; cache it per window minute like the workflow slices if script reads get hot.
+ * no runs. When the scan fails or the slice has more than LIVE_MAX_RUNS runs,
+ * the day is scaled by the share of it inside the window instead; returns
+ * whether that happened. Scans are cached like the workflow slices: a fleet
+ * read (no scriptName) floors the slice start to the hour, a single-script
+ * read stays exact to the minute.
  */
 async function clipScriptFirstDay(
   jobs: Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>,
@@ -616,27 +636,36 @@ async function clipScriptFirstDay(
   firstDay: string,
   opts: { scriptName?: string; sql?: SavingsSql },
 ): Promise<boolean> {
-  if (window.start === dayStartIso(firstDay)) return false;
+  const fleet = opts.scriptName === undefined;
+  const startMs = Date.parse(window.start);
+  const sliceStart = fleet
+    ? new Date(Math.floor(startMs / HOUR_MS) * HOUR_MS).toISOString()
+    : window.start;
+  if (sliceStart === dayStartIso(firstDay)) return false;
   if (![...jobs.values()].some((j) => j.days.has(firstDay))) return false;
-  const slice = {
-    start: window.start,
-    end: dayStartIso(utcDay(Date.parse(window.start) + DAY_MS)),
-  };
+  const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
   const sql: SavingsSql = opts.sql ?? ((q, p) => getDbClient().query(q, p));
-  let live: Map<string, ScriptFacts> | null = null;
-  try {
-    const scanned = await computeScriptSlice(slice, sql, { scriptName: opts.scriptName });
-    live = new Map(scanned.map((b) => [b.scriptName, b.facts]));
-  } catch (err) {
-    console.warn(
-      `[savings-read] first-day script scan failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
-    );
-  }
+  const scope = { scriptName: opts.scriptName };
+  const live = await cachedScan<ScriptSliceResult>(
+    `script\u0000${MODEL_VERSION}\u0000${opts.scriptName ?? "*"}\u0000${slice.start}`,
+    fleet ? FLEET_SLICE_TTL_MS : SLICE_TTL_MS,
+    async () => {
+      // Count first, so a busy slice never reaches the effect probe.
+      if ((await countScriptRuns(slice, sql, scope)) > LIVE_MAX_RUNS) return null;
+      const scanned = await computeScriptSlice(slice, sql, scope);
+      return new Map(scanned.map((b) => [b.scriptName, b.facts]));
+    },
+    null,
+    opts.scriptName ?? "scripts",
+  );
   const dayShare = (Date.parse(slice.end) - Date.parse(slice.start)) / DAY_MS;
   for (const [name, job] of jobs) {
     const old = job.days.get(firstDay);
     if (!old) continue;
-    const clipped = live ? (live.get(name) ?? zeroScriptFacts()) : scaleScriptFacts(old, dayShare);
+    // A copy: the cached facts are shared by every read of the slice.
+    const clipped = live
+      ? { ...(live.get(name) ?? zeroScriptFacts()) }
+      : scaleScriptFacts(old, dayShare);
     for (const k of Object.keys(old) as (keyof ScriptFacts)[]) {
       job.facts[k] += clipped[k] - old[k];
     }

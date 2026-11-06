@@ -227,6 +227,34 @@ export type ScriptWindowFacts = { scriptName: string; byDay: ScriptDayFacts[] };
 const DISPATCH_SQL =
   "(source LIKE '%task_send%' OR source LIKE '%send_task%' OR source LIKE '%sendTask%' OR source LIKE '%workflow_trigger%')";
 
+/** The script_runs filter of a window, narrowed to one script name (runs without one by INLINE_SCRIPT_NAME). */
+function scriptRunsFilter(
+  window: { start: string; end: string },
+  opts: { scriptName?: string },
+): { where: string; params: string[] } {
+  const span = [window.start, window.end];
+  return opts.scriptName === undefined
+    ? { where: "", params: span }
+    : {
+        where: "AND coalesce(scriptName, ?)=?",
+        params: [...span, INLINE_SCRIPT_NAME, opts.scriptName],
+      };
+}
+
+/** Runs of every script (or of one script) in the window. */
+export async function countScriptRuns(
+  window: { start: string; end: string },
+  sql: SavingsSql = defaultSql,
+  opts: { scriptName?: string } = {},
+): Promise<number> {
+  const { where, params } = scriptRunsFilter(window, opts);
+  const rows = await sql<{ n: number }>(
+    `SELECT count(*) n FROM script_runs WHERE startedAt>=? AND startedAt<? ${where}`,
+    params,
+  );
+  return num(rows[0]?.n);
+}
+
 /**
  * Facts of every script with runs in the window (or of one script), grouped by
  * the UTC day the runs started. Ported from v7 `scriptJobs`: runs are keyed by
@@ -242,9 +270,7 @@ export async function computeScriptWindow(
   opts: { scriptName?: string } = {},
 ): Promise<ScriptWindowFacts[]> {
   const span = [window.start, window.end];
-  const where = opts.scriptName === undefined ? "" : "AND coalesce(scriptName, ?)=?";
-  const params =
-    opts.scriptName === undefined ? span : [...span, INLINE_SCRIPT_NAME, opts.scriptName];
+  const { where, params } = scriptRunsFilter(window, opts);
   const runs = await sql<{ d: string; nm: string; n: number; api: number; secs: number | null }>(
     `SELECT substr(startedAt,1,10) d, coalesce(scriptName,'${INLINE_SCRIPT_NAME}') nm, count(*) n, sum(apiEndpointId IS NOT NULL) api,
       sum((julianday(coalesce(finishedAt,startedAt))-julianday(startedAt))*86400) secs
