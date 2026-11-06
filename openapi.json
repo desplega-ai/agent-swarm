@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.8.1",
+    "version": "2.8.2",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -51835,8 +51835,8 @@
     },
     "/api/savings/jobs": {
       "get": {
-        "summary": "Estimated automation savings for a workflow",
-        "description": "What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "summary": "Estimated automation savings per workflow",
+        "description": "What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51851,8 +51851,19 @@
               "type": "string",
               "minLength": 1
             },
-            "required": true,
+            "required": false,
             "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workflow"
+              ]
+            },
+            "required": false,
+            "name": "kind",
             "in": "query"
           },
           {
@@ -51887,7 +51898,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Savings rows for the workflow",
+            "description": "Savings rows",
             "content": {
               "application/json": {
                 "schema": {
@@ -51927,8 +51938,18 @@
                     "calibratedAt": {
                       "type": "string"
                     },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
                     "computedAt": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "valid": {
                       "type": "boolean"
@@ -51939,10 +51960,14 @@
                         "null"
                       ],
                       "enum": [
+                        "not-computed",
                         "no-runs",
-                        "too-many-runs",
                         null
                       ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
                     },
                     "rows": {
                       "type": "array",
@@ -51966,6 +51991,9 @@
                             "enum": [
                               "modelled"
                             ]
+                          },
+                          "enabledOnlyRule": {
+                            "type": "boolean"
                           },
                           "runs": {
                             "type": "integer"
@@ -52086,6 +52114,7 @@
                           "workflowId",
                           "name",
                           "basis",
+                          "enabledOnlyRule",
                           "runs",
                           "substitutedRuns",
                           "effectRuns",
@@ -52103,6 +52132,104 @@
                           "agentOnlyUsdPerRun"
                         ]
                       }
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
                     }
                   },
                   "required": [
@@ -52110,17 +52237,20 @@
                     "tier",
                     "calibrationModel",
                     "calibratedAt",
+                    "calibrationSource",
                     "computedAt",
                     "valid",
                     "reason",
-                    "rows"
+                    "boundaryEstimated",
+                    "rows",
+                    "total"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "Missing workflowId, or an unknown days or tier value",
+            "description": "Neither workflowId nor kind, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52138,34 +52268,14 @@
                 }
               }
             }
-          },
-          "408": {
-            "description": "A savings query ran past its time budget",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many concurrent database queries; retry shortly",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         }
       }
     },
     "/api/savings/daily": {
       "get": {
-        "summary": "Daily automation savings for a workflow",
-        "description": "The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.",
+        "summary": "Daily automation savings of a workflow",
+        "description": "The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.",
         "tags": [
           "Savings"
         ],
@@ -52216,7 +52326,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Daily savings points for the workflow",
+            "description": "Daily savings points",
             "content": {
               "application/json": {
                 "schema": {
@@ -52256,8 +52366,18 @@
                     "calibratedAt": {
                       "type": "string"
                     },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
                     "computedAt": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "valid": {
                       "type": "boolean"
@@ -52268,10 +52388,14 @@
                         "null"
                       ],
                       "enum": [
+                        "not-computed",
                         "no-runs",
-                        "too-many-runs",
                         null
                       ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
                     },
                     "points": {
                       "type": "array",
@@ -52312,9 +52436,11 @@
                     "tier",
                     "calibrationModel",
                     "calibratedAt",
+                    "calibrationSource",
                     "computedAt",
                     "valid",
                     "reason",
+                    "boundaryEstimated",
                     "points"
                   ]
                 }
@@ -52340,9 +52466,506 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/savings/calibration": {
+      "get": {
+        "summary": "The savings curve in use",
+        "description": "Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The active calibration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "active": {
+                      "type": "object",
+                      "properties": {
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "curve": {
+                          "type": "object",
+                          "properties": {
+                            "smol": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "regular": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "smart": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "ultra": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "smol",
+                            "regular",
+                            "smart",
+                            "ultra"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "calibratedAt",
+                        "model",
+                        "curve"
+                      ]
+                    },
+                    "stored": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "window": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string"
+                            },
+                            "end": {
+                              "type": "string"
+                            },
+                            "sessions": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end",
+                            "sessions"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "valid",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "active",
+                    "stored"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Derive the savings curve from this deployment's sessions",
+        "description": "Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90,
+                    "default": 30
+                  },
+                  "end": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "End of the window (ISO 8601); default now."
+                  },
+                  "apply": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The derived curve, or why there is none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "sessions": {
+                      "type": "integer",
+                      "description": "Opus sessions of 1 to 61 turns used."
+                    },
+                    "refusals": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Why no curve was derived, or why a derived one was not applied."
+                    },
+                    "calibration": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "curve": {
+                          "type": "object",
+                          "properties": {
+                            "smol": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "regular": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "smart": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "ultra": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "smol",
+                            "regular",
+                            "smart",
+                            "ultra"
+                          ]
+                        },
+                        "window": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string"
+                            },
+                            "end": {
+                              "type": "string"
+                            },
+                            "sessions": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end",
+                            "sessions"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "calibratedAt",
+                        "model",
+                        "curve"
+                      ],
+                      "description": "The derived curve; null when refused."
+                    },
+                    "speed": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    },
+                    "repriceMatch": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "meanRatio": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Derived smart-tier mean cost over the shipped one."
+                    },
+                    "gaps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "key": {
+                            "type": "string",
+                            "enum": [
+                              "usd",
+                              "hrs"
+                            ]
+                          },
+                          "median": {
+                            "type": "number",
+                            "description": "Median absolute deviation from the shipped curve, as a fraction."
+                          },
+                          "max": {
+                            "type": "number"
+                          },
+                          "over5pct": {
+                            "type": "integer",
+                            "description": "Turn counts more than 5% from the shipped curve."
+                          },
+                          "points": {
+                            "type": "integer"
+                          },
+                          "weighted": {
+                            "type": "number",
+                            "description": "Session-weighted mean of derived over shipped; 1 means the same price."
+                          }
+                        },
+                        "required": [
+                          "tier",
+                          "key",
+                          "median",
+                          "max",
+                          "over5pct",
+                          "points",
+                          "weighted"
+                        ]
+                      }
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "sessions",
+                    "refusals",
+                    "calibration",
+                    "speed",
+                    "repriceMatch",
+                    "meanRatio",
+                    "gaps",
+                    "applied"
+                  ]
+                }
+              }
+            }
           },
-          "408": {
-            "description": "A savings query ran past its time budget",
+          "400": {
+            "description": "Invalid days, end or apply",
             "content": {
               "application/json": {
                 "schema": {
@@ -52351,8 +52974,38 @@
               }
             }
           },
-          "429": {
-            "description": "Too many concurrent database queries; retry shortly",
+          "403": {
+            "description": "`apply` without permission to write config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "A session query ran past its time budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another calibration run is in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The run passed its 120 s deadline",
             "content": {
               "application/json": {
                 "schema": {

@@ -237,6 +237,12 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "script_run":
       return { method: "POST", path: "/api/scripts/run", body };
 
+    // ── savings calibration (REST only, no MCP tool) ──
+    case "savings_calibrationGet":
+      return { method: "GET", path: "/api/savings/calibration" };
+    case "savings_calibrationRun":
+      return { method: "POST", path: "/api/savings/calibration", body };
+
     // ── swarm / agent ──
     case "db_query":
       return { method: "POST", path: "/api/db-query", body };

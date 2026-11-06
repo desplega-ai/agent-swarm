@@ -4447,6 +4447,8 @@ export interface SavingsJobRow {
   workflowId: string;
   name: string;
   basis: "modelled";
+  /** True when only the runs with a downstream effect count (an event router). */
+  enabledOnlyRule: boolean;
   runs: number;
   substitutedRuns: number;
   effectRuns: number;
@@ -4471,15 +4473,32 @@ export interface SavingsJobRow {
   agentOnlyUsdPerRun: number;
 }
 
+export interface SavingsTotals {
+  runs: number;
+  substitutedRuns: number;
+  enabledOnlyRuns: number;
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  hoursSaved: SavingsBand;
+}
+
 export interface SavingsJobsResponse {
   window: { start: string; end: string; days: number };
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
-  computedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  /** Newest rollup time of the window; null before the first rollup. */
+  computedAt: string | null;
   valid: boolean;
-  reason: "no-runs" | "too-many-runs" | null;
+  reason: "not-computed" | "no-runs" | null;
   rows: SavingsJobRow[];
+  total: SavingsTotals | null;
 }
 
 /** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
@@ -4499,8 +4518,8 @@ export interface SavingsDailyResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
-  computedAt: string;
+  computedAt: string | null;
   valid: boolean;
-  reason: "no-runs" | "too-many-runs" | null;
+  reason: "not-computed" | "no-runs" | null;
   points: SavingsDailyPoint[];
 }

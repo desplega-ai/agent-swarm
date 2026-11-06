@@ -58,6 +58,7 @@ import "./script-runs";
 import "./script-connection-proxy";
 import "./session-data";
 import "./savings";
+import "./savings-calibration";
 import "./sessions";
 import "./skills";
 import "./slack-inbound";

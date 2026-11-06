@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  allocateSchedule,
   CURVE,
   curve,
   DEFAULT_OPS,
   F_FOLLOWUP,
+  isEnabledOnlyRouter,
   jobKey,
   nodeOpsOf,
+  parseCalibration,
   priceWorkflow,
   SAVINGS_TIERS,
   splitByDay,
@@ -17,6 +20,9 @@ const facts = (over: Partial<WorkflowFacts> = {}): WorkflowFacts => ({
   countedRuns: 1,
   schedRuns: 0,
   schedEffectRuns: 0,
+  eventRuns: 0,
+  effectRuns: 0,
+  effectOpsSum: 0,
   opsSum: 0,
   agentTasks: 0,
   agentUsd: 0,
@@ -244,5 +250,107 @@ describe("savings model", () => {
     const share = priced.substitutedRuns / window.runs;
     expect(points[0]?.savingUsd).toBeCloseTo(16 * unit - 0.4 * share, 9);
     expect(points[1]?.savingUsd).toBeCloseTo((8 + 1) * unit - 0.2 * share, 9);
+  });
+
+  test("versions share the cap in order; effect runs always count", () => {
+    // 30 days: cap 720. v7 arithmetic: the live version takes the cap, the
+    // retired copy only adds effect runs above it.
+    const shares = allocateSchedule(
+      [
+        { schedRuns: 1233, schedEffectRuns: 106 },
+        { schedRuns: 1150, schedEffectRuns: 109 },
+      ],
+      30,
+    );
+    expect(shares).toEqual([
+      { vSched: 720, vCap: 720 },
+      { vSched: 0, vCap: 0 },
+    ]);
+    // Effect runs above the cap: the job total is max(min(sched, cap), effects).
+    const busy = allocateSchedule(
+      [
+        { schedRuns: 1000, schedEffectRuns: 500 },
+        { schedRuns: 1000, schedEffectRuns: 400 },
+      ],
+      30,
+    );
+    expect(busy.reduce((s, v) => s + v.vSched, 0)).toBe(900);
+    const priced = priceWorkflow(
+      facts({ runs: 1150, countedRuns: 1150, schedRuns: 1150 }),
+      { tier: "smart", days: 30, band: "job" },
+      shares[1],
+    );
+    expect(priced.substitutedRuns).toBe(0);
+    expect(priced.capApplied).toBe(true);
+  });
+
+  test("the enabled-only rule flips a high-volume event router, not a busy event workflow", () => {
+    const router = facts({
+      runs: 359_356,
+      countedRuns: 359_356,
+      eventRuns: 359_356,
+      effectRuns: 907,
+      effectOpsSum: 907,
+      opsSum: 718_712,
+    });
+    expect(isEnabledOnlyRouter(router, 30)).toBe(true);
+    const priced = priceWorkflow(router, { tier: "smart", days: 30, band: "job" });
+    expect(priced.enabledOnlyRule).toBe(true);
+    expect(priced.substitutedRuns).toBe(907);
+    expect(priced.enabledOnlyRuns).toBe(359_356 - 907);
+    expect(priced.actualUsd).toBe(0);
+    // One decision at the effect runs' own ops (1 per run) plus the review.
+    expect(priced.savingUsd.p50).toBeCloseTo(
+      907 * (1.02 * curve(2 + 0.2753, "smart", "usd") + F_FOLLOWUP),
+      6,
+    );
+
+    // 41 event runs a day with no linked effect (an on-call poller): every run counts.
+    const oncall = facts({ runs: 1228, countedRuns: 1227, eventRuns: 1223, opsSum: 1228 * 12 });
+    expect(isEnabledOnlyRouter(oncall, 30)).toBe(false);
+    expect(priceWorkflow(oncall, { tier: "smart", days: 30, band: "job" }).substitutedRuns).toBe(
+      1227,
+    );
+    // Schedule-triggered high volume is the cap's job, not the rule's.
+    const poll = facts({ runs: 9000, countedRuns: 9000, schedRuns: 9000 });
+    expect(isEnabledOnlyRouter(poll, 30)).toBe(false);
+  });
+});
+
+describe("calibration", () => {
+  const stored = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ calibratedAt: "2026-12-01", model: "claude-opus-5-5", curve: CURVE, ...over });
+
+  test("a stored curve parses as a deployment calibration", () => {
+    expect(parseCalibration(stored())).toMatchObject({
+      source: "deployment",
+      calibratedAt: "2026-12-01",
+      model: "claude-opus-5-5",
+    });
+  });
+
+  test("a missing, malformed or wrongly shaped value is null, so callers use the shipped curve", () => {
+    expect(parseCalibration(null)).toBeNull();
+    expect(parseCalibration("not json")).toBeNull();
+    expect(parseCalibration(stored({ calibratedAt: "yesterday" }))).toBeNull();
+    const short = { ...CURVE, smart: { usd: CURVE.smart.usd.slice(1), hrs: CURVE.smart.hrs } };
+    expect(parseCalibration(stored({ curve: short }))).toBeNull();
+    const zero = { ...CURVE, smol: { usd: CURVE.smol.usd.map(() => 0), hrs: CURVE.smol.hrs } };
+    expect(parseCalibration(stored({ curve: zero }))).toBeNull();
+  });
+
+  test("priceWorkflow uses the given curve and the shipped one by default", () => {
+    const doubled = Object.fromEntries(
+      SAVINGS_TIERS.map((t) => [t, { usd: CURVE[t].usd.map((v) => v * 2), hrs: CURVE[t].hrs }]),
+    ) as typeof CURVE;
+    const f = facts({ opsSum: 10 });
+    const base = priceWorkflow(f, { tier: "smart", days: 30, band: "job" });
+    const same = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: CURVE });
+    const twice = priceWorkflow(f, { tier: "smart", days: 30, band: "job", curve: doubled });
+    expect(same.agentOnlyUsdPerRun).toBe(base.agentOnlyUsdPerRun);
+    expect(twice.agentOnlyUsdPerRun - F_FOLLOWUP).toBeCloseTo(
+      2 * (base.agentOnlyUsdPerRun - F_FOLLOWUP),
+      6,
+    );
   });
 });

@@ -31,6 +31,7 @@ import {
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
+import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
@@ -132,7 +133,8 @@ import { handleRequestComposition } from "./request-composition";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
-import { handleSavings } from "./savings";
+import { handleSavings, savingsRollupSql } from "./savings";
+import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -432,6 +434,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
         () => handleSavings(req, res, pathSegments, queryParams),
+        () => handleSavingsCalibration(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
@@ -549,6 +552,9 @@ async function shutdown() {
 
   // Stop opt-in session, agent-log, and event retention before closing SQLite.
   await stopDbRetention();
+
+  // Stop the automation-savings rollup before closing SQLite.
+  await stopSavingsRollup();
 
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
@@ -895,6 +901,9 @@ httpServer
     // Start the opt-in DB retention sweep after config hydration. Every key is
     // read on each tick, so config reloads take effect without a restart.
     await startDbRetention();
+
+    // Hourly automation-savings rollup (backfills 90 days in the background).
+    startSavingsRollup(savingsRollupSql);
 
     // Finish the human-free reclassification a request left queued (a very large
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.

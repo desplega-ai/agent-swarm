@@ -4039,6 +4039,20 @@ class ApiClient {
     return (await res.json()) as SavingsDailyResponse;
   }
 
+  /** Modelled saving of every workflow with runs in the window, from the hourly rollup. */
+  async getWorkflowsSavings(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsJobsResponse> {
+    const params = new URLSearchParams({ kind: "workflow" });
+    if (opts.days) params.set("days", String(opts.days));
+    if (opts.tier) params.set("tier", opts.tier);
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
   async getFleetBenchmark(): Promise<FleetBenchmarkResponse> {
     const url = `${this.getBaseUrl()}/api/fleet-benchmark`;
