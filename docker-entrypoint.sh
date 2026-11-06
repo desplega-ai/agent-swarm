@@ -654,14 +654,24 @@ if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub authentication..."
 
     if [ "$GITHUB_HOST_BARE" != "github.com" ]; then
-        # gh reads GH_TOKEN/GITHUB_TOKEN only for github.com; GHES needs
-        # GH_HOST plus GH_ENTERPRISE_TOKEN.
+        # gh < 2.93.0 sends the auth header to non-GitHub TUF mirror hosts
+        # (CVE-2026-48501, GHSA-8xvp-7hj6-mcj9).
+        GH_VERSION=$(gh --version 2>/dev/null | sed -n 's/^gh version \([0-9][0-9.]*\).*/\1/p' | head -1)
+        if [ -z "$GH_VERSION" ] || [ "$(printf '%s\n2.93.0\n' "$GH_VERSION" | sort -V | head -1)" != "2.93.0" ]; then
+            echo "ERROR: GitHub Enterprise needs gh >= 2.93.0 (found: ${GH_VERSION:-none})"; exit 1
+        fi
+        # gh sends GH_TOKEN/GITHUB_TOKEN to github.com, so the GHES PAT moves to
+        # GH_ENTERPRISE_TOKEN (GHES hosts only) and leaves the exported env.
+        # The shell keeps GITHUB_TOKEN for the checks below. The runner applies
+        # the same rule to session env (scopeGitHubTokenToEnterprise).
         export GH_HOST="$GITHUB_HOST_BARE"
         export GH_ENTERPRISE_TOKEN="$GITHUB_TOKEN"
+        export -n GITHUB_TOKEN
+        unset GH_TOKEN
         # git: env-reading helper (same as GitLab below) in place of
-        # `gh auth setup-git`; the token never lands in ~/.gitconfig.
+        # `gh auth setup-git`, scoped to the GHES host; the token never lands in ~/.gitconfig.
         git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
-            '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
+            '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN}"; }; f'
         echo "GitHub Enterprise auth configured (host: $GH_HOST)"
     else
         # gh CLI will automatically use GITHUB_TOKEN env var for API calls

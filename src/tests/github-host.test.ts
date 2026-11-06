@@ -15,6 +15,7 @@ import {
   githubWebLink,
   isGitHubUrl,
   resolveGitHubHost,
+  scopeGitHubTokenToEnterprise,
 } from "../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import { detectVcsProvider } from "../vcs";
@@ -249,5 +250,36 @@ describe("OAuth preset, credential binding and managed guard", () => {
     // The PAT must never be offered to api.github.com.
     expect(defaultCredentialBindings()[0]?.allowedHosts).toEqual(["ghe.test"]);
     expect(() => normalizeRepoUrl("o/r")).toThrow("GitHub Enterprise Server");
+  });
+});
+
+describe("scopeGitHubTokenToEnterprise (runner session env)", () => {
+  test("GHES: the PAT moves to GH_ENTERPRISE_TOKEN and leaves the github.com vars", () => {
+    const env: Record<string, string | undefined> = {
+      GITHUB_URL: "https://ghe.test",
+      GITHUB_TOKEN: "ghp_row",
+      GH_TOKEN: "ghp_other",
+    };
+    scopeGitHubTokenToEnterprise(env);
+    expect(env).toEqual({ GITHUB_URL: "https://ghe.test", GH_ENTERPRISE_TOKEN: "ghp_row" });
+  });
+
+  test("GHES boot env (token already moved) keeps GH_ENTERPRISE_TOKEN", () => {
+    const env: Record<string, string | undefined> = {
+      GITHUB_URL: "https://ghe.test",
+      GH_ENTERPRISE_TOKEN: "ghp_boot",
+    };
+    scopeGitHubTokenToEnterprise(env);
+    expect(env.GH_ENTERPRISE_TOKEN).toBe("ghp_boot");
+  });
+
+  test.each([
+    {},
+    { GITHUB_URL: "https://github.com" },
+    { GITHUB_URL: "https://ghe.test/path" },
+  ])("github.com or invalid config (%o): env unchanged", (extra) => {
+    const env: Record<string, string | undefined> = { ...extra, GITHUB_TOKEN: "ghp_x" };
+    scopeGitHubTokenToEnterprise(env);
+    expect(env).toEqual({ ...extra, GITHUB_TOKEN: "ghp_x" });
   });
 });

@@ -173,6 +173,21 @@ export function getGitHubHostForSql(): string {
 }
 
 /**
+ * On GHES, gh sends GITHUB_TOKEN / GH_TOKEN to github.com. Move the PAT to
+ * GH_ENTERPRISE_TOKEN (GHES hosts only) and drop the github.com variables, so a
+ * harness session never carries the GHES PAT where gh would send it to github.com.
+ * Mirrors the GHES branch of docker-entrypoint.sh. No-op on github.com or an invalid config.
+ */
+export function scopeGitHubTokenToEnterprise(env: Env): void {
+  const host = resolveGitHubHost(env);
+  if (!host.ok || !host.config.enterprise) return;
+  const token = env.GITHUB_TOKEN || env.GH_TOKEN;
+  if (token) env.GH_ENTERPRISE_TOKEN = token;
+  delete env.GITHUB_TOKEN;
+  delete env.GH_TOKEN;
+}
+
+/**
  * Host of a URL (https://, git://, ssh:// or scp-like `git@host:owner/repo`),
  * lowercased, or null.
  */

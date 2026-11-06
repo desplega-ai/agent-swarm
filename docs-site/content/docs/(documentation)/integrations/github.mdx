@@ -150,7 +150,7 @@ Setup on GHES:
 
 1. Create the GitHub App at `https://<host>/settings/apps/new` with the permissions and events above, and the webhook URL `https://<swarm-api>/api/github/webhook`. The GHES instance must reach that URL.
 2. Create a PAT (or bot-user token) on the GHES host with `repo` scope for `GITHUB_TOKEN`.
-3. Workers export `GH_HOST` and `GH_ENTERPRISE_TOKEN` for `gh`, and add a git credential helper for the GHES host. Boot logs `GitHub Enterprise auth configured (host: <host>)`.
+3. Workers export `GH_HOST` and `GH_ENTERPRISE_TOKEN` for `gh`, and add a git credential helper for the GHES host. The PAT moves out of `GITHUB_TOKEN` and `GH_TOKEN` in the worker and session env, because `gh` sends those to github.com. GHES mode needs `gh` 2.93.0 or later; an older `gh` stops the boot. Boot logs `GitHub Enterprise auth configured (host: <host>)`.
 
 Not supported: github.com and GHES in one deployment, the `claude-managed` harness (it refuses to start a repo task when `GITHUB_URL` is set), and remote skill install, which still reads public github.com repos.
 
