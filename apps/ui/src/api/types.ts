@@ -4529,6 +4529,7 @@ export interface SavingsDailyResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   computedAt: string | null;
   valid: boolean;
   reason: "not-computed" | "no-runs" | null;
@@ -4550,6 +4551,7 @@ export interface SavingsSummaryResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   computedAt: string | null;
   valid: boolean;
   reason: "not-computed" | "no-runs" | null;

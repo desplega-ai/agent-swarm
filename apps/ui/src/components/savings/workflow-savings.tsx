@@ -20,7 +20,9 @@ export function formatHours(hours: number): string {
   return Math.abs(hours) >= 10 ? `${formatCount(Math.round(hours))}h` : `${hours.toFixed(1)}h`;
 }
 
-export function calibrationNote(data: Pick<SavingsJobsResponse, "calibratedAt" | "tier">): string {
+export function calibrationNote(
+  data: Pick<SavingsJobsResponse, "calibratedAt" | "calibrationSource" | "tier">,
+): string {
   const day = new Date(`${data.calibratedAt}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
