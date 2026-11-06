@@ -55,14 +55,14 @@ export function TokensTable({ user }: { user: User }) {
     <>
       <Card>
         <CardContent className="p-4 space-y-4">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">MCP tokens</h2>
               <p className="text-xs text-muted-foreground">
                 Hosted client access for this user. Plaintext tokens are only shown at mint time.
               </p>
             </div>
-            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
               <ConnectChatGptButton user={user} />
               <Button size="sm" onClick={() => setMintOpen(true)}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
