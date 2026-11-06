@@ -6,6 +6,7 @@ import {
   clearVolatileSecretsForTesting,
   scrubSecrets,
   setGitleaksPassEnabledForTesting,
+  takePass2SweepCountForTesting,
 } from "../utils/secret-scrubber";
 import { buildNegatives, buildPositives } from "./fixtures/secret-corpus";
 import { randomToken } from "./synthetic-secret-helpers";
@@ -147,6 +148,51 @@ describe("secret corpus", () => {
         expect(out).toMatch(new RegExp(`^\\[REDACTED:[^\\]]+\\]${sep}\\[REDACTED:[^\\]]+\\]$`));
       }
     }
+  });
+
+  test("a vendor secret wins over a structural rule matching inside it", () => {
+    // A Heroku v2 key (`HRKU-AA` + 58 URL-safe chars) whose tail embeds
+    // `-sk-` + 20 alnum: pass 2's sk_key matched the tail first, and pass 5
+    // then missed the key, leaving its prefix in the output.
+    const heroku = () => ["HRKU", "-AA", randomToken(14), "-sk-", randomToken(40)].join("");
+    const bareSk = ["sk", randomToken(32)].join("-");
+    const a = heroku();
+    const b = heroku();
+    expect(a.length).toBe(65);
+    expect(scrubSecrets(`the response included ${a} in its body`)).toBe(
+      "the response included [REDACTED:gitleaks:heroku-api-key-v2] in its body",
+    );
+    // Two covered keys and an uncovered sk- key in one text keep their own labels.
+    expect(scrubSecrets(`${a} ${bareSk}\n${b}`)).toBe(
+      "[REDACTED:gitleaks:heroku-api-key-v2] [REDACTED:sk_key]\n[REDACTED:gitleaks:heroku-api-key-v2]",
+    );
+  });
+
+  test("pass 2 sweeps gitleaks once per call, however many rules hit", () => {
+    const heroku = () => ["HRKU", "-AA", randomToken(14), "-sk-", randomToken(40)].join("");
+    const a = heroku();
+    const b = heroku();
+    // Hits of several structural rules ahead of each key shift its offsets.
+    const text = [
+      ["lin", "api", randomToken(24)].join("_"),
+      a,
+      ["AKIA", "Q7RW3MZPXK5TB2NH"].join(""),
+      ["sk", randomToken(32)].join("-"),
+      b,
+      ["xai", randomToken(48)].join("-"),
+    ].join(" ");
+    takePass2SweepCountForTesting();
+    expect(scrubSecrets(text)).toBe(
+      [
+        "[REDACTED:linear_api]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:aws_access_key]",
+        "[REDACTED:sk_key]",
+        "[REDACTED:gitleaks:heroku-api-key-v2]",
+        "[REDACTED:xai_key]",
+      ].join(" "),
+    );
+    expect(takePass2SweepCountForTesting()).toBe(1);
   });
 
   test("redacts a token whose last character is a dash or equals sign", () => {
