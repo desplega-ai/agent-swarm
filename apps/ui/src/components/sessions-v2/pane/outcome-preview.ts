@@ -7,12 +7,13 @@ import { type JsonContainer, parseJsonOutput } from "../../../lib/json-output";
 import { markdownPreview } from "../../../lib/markdown-preview";
 import { promptTitle } from "../../../lib/prompt-display";
 import { plural } from "../../../lib/sessions-v2";
+import { DEFAULT_GITHUB_WEB_URL, githubHostOf } from "../../../lib/swarm-links";
 
 /** Fields a person reads first in a structured output. */
 const LEAD_KEYS = ["summary", "result", "message", "status", "title"];
 
 /** A GitHub PR or issue URL as "PR #2589" or "Issue #12", another URL as its host and path tail. */
-function shortUrl(value: string): string | null {
+function shortUrl(value: string, githubWebUrl: string): string | null {
   if (!/^https?:\/\/\S+$/.test(value)) return null;
   let url: URL;
   try {
@@ -21,7 +22,7 @@ function shortUrl(value: string): string | null {
     return null;
   }
   const github = /^\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/.exec(url.pathname);
-  if (url.hostname === "github.com" && github) {
+  if (url.host === githubHostOf(githubWebUrl) && github) {
     return `${github[1] === "pull" ? "PR" : "Issue"} #${github[2]}`;
   }
   const parts = url.pathname.split("/").filter(Boolean);
@@ -35,7 +36,7 @@ function shortUrl(value: string): string | null {
  * files: 3 items": the human fields first, then strings, numbers, booleans,
  * and array counts. Empty when nothing is left (`{}`, `[]`).
  */
-function jsonLine(data: JsonContainer): string {
+function jsonLine(data: JsonContainer, githubWebUrl: string): string {
   if (Array.isArray(data)) return data.length > 0 ? plural(data.length, "item") : "";
   const keys = Object.keys(data);
   const ordered = [
@@ -47,7 +48,7 @@ function jsonLine(data: JsonContainer): string {
     const value = data[key];
     if (Array.isArray(value)) fields.push(`${key}: ${plural(value.length, "item")}`);
     else if (typeof value === "string" && value.trim()) {
-      fields.push(`${key}: ${shortUrl(value.trim()) ?? value.trim()}`);
+      fields.push(`${key}: ${shortUrl(value.trim(), githubWebUrl) ?? value.trim()}`);
     } else if (typeof value === "number" || typeof value === "boolean") {
       fields.push(`${key}: ${value}`);
     }
@@ -95,7 +96,7 @@ const head = (text: string | undefined) => text?.trim().slice(0, PREVIEW_INPUT) 
  * work. A JSON object the cut breaks keeps its leading fields. Raw text only
  * when no field is found.
  */
-function outcomeLine(task: PreviewSource): string {
+function outcomeLine(task: PreviewSource, githubWebUrl: string): string {
   const text = head(
     task.status === "completed"
       ? task.output
@@ -104,9 +105,9 @@ function outcomeLine(task: PreviewSource): string {
         : task.progress,
   );
   const json = parseJsonOutput(text);
-  if (json) return jsonLine(json);
+  if (json) return jsonLine(json, githubWebUrl);
   const fields = text.startsWith("{") ? leadingJsonFields(text) : null;
-  return (fields && jsonLine(fields)) || text;
+  return (fields && jsonLine(fields, githubWebUrl)) || text;
 }
 
 /** A bare git SHA (40 or 64 hex digits) as its first 8. */
@@ -118,9 +119,13 @@ const SHA = /\b([0-9a-f]{8})(?:[0-9a-f]{56}|[0-9a-f]{32})\b/gi;
  * An open row shows the task's first line: the outcome is in full below it.
  * Capped, so the button's accessible name stays short.
  */
-export function outcomePreview(task: PreviewSource, open: boolean): string {
+export function outcomePreview(
+  task: PreviewSource,
+  open: boolean,
+  githubWebUrl: string = DEFAULT_GITHUB_WEB_URL,
+): string {
   const line = open
     ? promptTitle(task.task)
-    : outcomeLine(task) || head(task.progress) || promptTitle(task.task);
+    : outcomeLine(task, githubWebUrl) || head(task.progress) || promptTitle(task.task);
   return markdownPreview(line).replace(SHA, "$1").slice(0, 300);
 }

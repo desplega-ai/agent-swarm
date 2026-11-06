@@ -483,7 +483,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "github",
     name: "GitHub",
     description:
-      "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced.",
+      "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced. For GitHub Enterprise Server, set GITHUB_URL (and optionally GITHUB_API_URL) in the deployment env; they are not editable here.",
     category: "issues",
     iconKey: "github",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/github",

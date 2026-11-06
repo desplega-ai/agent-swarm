@@ -3681,6 +3681,8 @@ export interface StatusResponse {
   runtime_pools?: { enabled: boolean };
   /** Absent on servers that predate it. */
   instance?: StatusInstance;
+  /** The GitHub web base (`GITHUB_URL`). Absent on servers that predate it; treat absence as github.com. */
+  github?: { web_url: string; enterprise: boolean };
 }
 
 export interface TestConnectionResponse {

@@ -1,4 +1,6 @@
+import { useGitHubWebUrl } from "@/app/status-context";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { githubHostOf, githubOrigin } from "@/lib/swarm-links";
 import { BITBUCKET_FIELDS, GITHUB_APP_FIELDS, GITHUB_FIELDS, GITLAB_FIELDS } from "./catalog";
 import { ConnectedGate, ExternalTextLink, StepLine } from "./pane-parts";
 import { FieldGrid } from "./setup-field";
@@ -6,6 +8,7 @@ import { type PaneProps, useConfigForm } from "./use-config-form";
 
 export function GitHubPane({ configs, presence, connected }: PaneProps) {
   const form = useConfigForm(configs, presence);
+  const githubWebUrl = useGitHubWebUrl();
   return (
     <ConnectedGate
       connected={connected}
@@ -13,8 +16,8 @@ export function GitHubPane({ configs, presence, connected }: PaneProps) {
     >
       <StepLine n={1}>
         Create a token at{" "}
-        <ExternalTextLink href="https://github.com/settings/tokens">
-          github.com/settings/tokens
+        <ExternalTextLink href={`${githubOrigin(githubWebUrl)}/settings/tokens`}>
+          {githubHostOf(githubWebUrl)}/settings/tokens
         </ExternalTextLink>{" "}
         with the <Scope>repo</Scope> and <Scope>workflow</Scope> scopes.
       </StepLine>

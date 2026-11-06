@@ -1,6 +1,7 @@
 import { ChevronDown, Maximize2 } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
+import { useGitHubWebUrl } from "@/app/status-context";
 import { RelativeTime } from "@/components/shared/relative-time";
 import "streamdown/styles.css";
 import { ChainOfThought } from "@/components/sessions/chain-of-thought";
@@ -79,9 +80,10 @@ export function WorkerStep({
   const earlier = step.tries.slice(0, -1);
   // The session polls every 5 s: parse and clean the outcome only when it changes.
   const { status, output, failureReason, progress, task } = last;
+  const githubWebUrl = useGitHubWebUrl();
   const line = useMemo(
-    () => outcomePreview({ status, output, failureReason, progress, task }, open),
-    [status, output, failureReason, progress, task, open],
+    () => outcomePreview({ status, output, failureReason, progress, task }, open, githubWebUrl),
+    [status, output, failureReason, progress, task, open, githubWebUrl],
   );
   // A running step's closed row reads its progress: new words reveal between polls.
   const shownLine = useRevealText(line, !open && status === "in_progress");
