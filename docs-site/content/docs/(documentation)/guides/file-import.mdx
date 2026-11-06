@@ -106,7 +106,7 @@ A source owns only what it created or adopted.
 | Situation | `noop` | `overwrite` |
 |---|---|---|
 | A resource with the same name exists that the source did not create | Conflict: left as is, logged | Adopted, then updated from the file |
-| A resource owned by another source | Conflict | Conflict |
+| A resource owned by another source, or a built-in seeded one | Conflict | Conflict |
 | An owned resource was edited in the UI, through the API, or by an agent | Edit kept | File wins |
 
 An agent whose `IDENTITY.md` is empty or still the generated default counts as free, so instructions apply without a conflict.

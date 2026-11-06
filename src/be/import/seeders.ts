@@ -37,6 +37,7 @@ import {
   skillHash,
 } from "../extensions/assets";
 import { getScript, getScriptById, upsertScriptByName } from "../scripts/db";
+import { getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
 import type {
   ImportedAgent,
@@ -96,14 +97,17 @@ async function resolveTarget(
   source: ImportSource,
   kind: ImportKind,
   key: string,
+  name: string,
   exists: (id: string) => Promise<boolean>,
-  findByName: () => Promise<string | null>,
+  findByName: (name: string) => Promise<string | null>,
 ): Promise<Target> {
   const owned = await getOwnedId(source.id, kind, key);
   if (owned && (await exists(owned))) return { id: owned };
-  const named = await findByName();
+  const named = await findByName(name);
   if (!named) return { id: null };
   if (await isOwned(kind, named)) return "conflict";
+  // A built-in seeded row: adopting it would leave two seeders fighting over it.
+  if (await getSeedState(kind, name)) return "conflict";
   if (source.onConflict !== "overwrite") return "conflict";
   await recordOwnership(source.id, kind, key, named);
   return { id: named };
@@ -191,12 +195,13 @@ async function partition<T extends { key: string; hash: string }>(
   kind: ImportKind,
   items: readonly T[],
   exists: (id: string) => Promise<boolean>,
-  findByName: (item: T) => Promise<string | null>,
+  nameOf: (item: T) => string,
+  findByName: (name: string) => Promise<string | null>,
   conflicts: string[],
 ): Promise<Resolved<T>[]> {
   const resolved: Resolved<T>[] = [];
   for (const item of items) {
-    const target = await resolveTarget(source, kind, item.key, exists, () => findByName(item));
+    const target = await resolveTarget(source, kind, item.key, nameOf(item), exists, findByName);
     if (target === "conflict") {
       conflicts.push(
         `${kind} ${item.key}: a same-named ${kind} exists that this source does not own`,
@@ -379,7 +384,8 @@ export async function prepareSeeders(
     "script",
     pkg.scripts,
     async (id) => (await getScriptById(id)) !== null,
-    async (item) => (await getScript({ name: item.key, scope: "global" }))?.id ?? null,
+    (item) => item.key,
+    async (name) => (await getScript({ name, scope: "global" }))?.id ?? null,
     conflicts,
   );
   const skills = await partition(
@@ -387,12 +393,13 @@ export async function prepareSeeders(
     "skill",
     pkg.skills,
     async (id) => (await getSkillById(id)) !== null,
+    (item) => item.spec.name,
     // Any scope: an imported skill must not shadow a same-named skill anywhere.
-    async (item) =>
+    async (name) =>
       (
         await getDbClient().get<{ id: string }>(
           "SELECT id FROM skills WHERE name = ? ORDER BY createdAt LIMIT 1",
-          [item.spec.name],
+          [name],
         )
       )?.id ?? null,
     conflicts,
@@ -402,12 +409,10 @@ export async function prepareSeeders(
     "workflow",
     pkg.workflows,
     async (id) => (await getWorkflow(id)) !== null,
-    async (item) =>
-      (
-        await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [
-          item.spec.name,
-        ])
-      )?.id ?? null,
+    (item) => item.spec.name,
+    async (name) =>
+      (await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [name]))
+        ?.id ?? null,
     conflicts,
   );
 

@@ -26,6 +26,7 @@ import type { ImportSource } from "../be/import/schema";
 import { getOwnedId } from "../be/import/seeders";
 import { getScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { recordSeedState } from "../be/seed/state-db";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
@@ -264,6 +265,18 @@ agents:
     expect((await getAgentById(agent.id))?.identityMd).toBe("# Theirs\n");
     const rival = await importSource(src("rival", dir, "overwrite"));
     expect(rival.conflicts).toHaveLength(3);
+  });
+
+  test("a built-in seeded resource is a conflict even under overwrite", async () => {
+    const builtIn = await createWorkflow({
+      name: "seeded-builtin",
+      definition: { nodes: [{ id: "a", type: "agent-task", config: { template: "Built in" } }] },
+    });
+    await recordSeedState("workflow", "seeded-builtin", "hash");
+    const dir = await writePackage({ "workflows/b.yaml": WORKFLOW_YAML("seeded-builtin", "Mine") });
+    const report = await importSource(src("builtin", dir, "overwrite"));
+    expect(report.conflicts).toHaveLength(1);
+    expect(JSON.stringify((await getWorkflow(builtIn.id))?.definition)).toContain("Built in");
   });
 
   test("an invalid package writes nothing", async () => {
