@@ -121,6 +121,7 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import { AppScopeProvider } from "@/lib/json-render/app-scope";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
@@ -194,6 +195,13 @@ interface RuntimeCtx {
   modeParam: string | null;
   /** The dashboard's picked identity: the requester of a task an action creates. */
   userId: string | null;
+}
+
+/** `params.session` of an `app.action` step (`SessionThread` sets it). */
+function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
+  if (typeof value !== "object" || value === null) return false;
+  const { key, scope } = value as { key?: unknown; scope?: unknown };
+  return typeof key === "string" && (scope === undefined || scope === "user" || scope === "shared");
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -1052,6 +1060,7 @@ export function AppSurface({
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
             const followUp: unknown = (params as Record<string, unknown>).followUp;
+            const session: unknown = (params as Record<string, unknown>).session;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
@@ -1060,6 +1069,8 @@ export function AppSurface({
               {
                 // `followUp: false` (SessionThread sets it) skips the Lead review.
                 followUp: typeof followUp === "boolean" ? followUp : undefined,
+                // A SessionThread's session; the server builds the context key.
+                session: isThreadSession(session) ? session : undefined,
                 requestedByUserId: ctx.userId ?? undefined,
               },
             );
@@ -1198,11 +1209,13 @@ export function AppSurface({
           {actionError}
         </AlertCallout>
       )}
-      <StateProvider store={store}>
-        <VisibilityProvider>
-          <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
-        </VisibilityProvider>
-      </StateProvider>
+      <AppScopeProvider value={app.id}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </AppScopeProvider>
     </JsonRenderThemeProvider>
   );
 

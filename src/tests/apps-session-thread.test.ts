@@ -30,7 +30,7 @@ function sessionThreadDefinition(model = "screen", overrides: Record<string, unk
             type: "SessionThread",
             props: {
               id: "thread",
-              rootTaskId: { $state: "/queries/screenById/data/0/rootTaskId" },
+              sessionKey: "main",
               onDispatch: [
                 { action: "app.action", params: { name: "dispatchCoder", input: { $form: "" } } },
                 {
@@ -55,17 +55,17 @@ function sessionThreadDefinition(model = "screen", overrides: Record<string, unk
 }
 
 describe("SessionThread validation", () => {
-  test("accepts a SessionThread with a bound rootTaskId and an app.action + app.mutate onDispatch chain", async () => {
+  test("accepts a SessionThread with a sessionKey and an app.action + app.mutate onDispatch chain", async () => {
     const parsed = await parseAppDefinition(sessionThreadDefinition());
     expect(parsed.success).toBe(true);
   });
 
-  test("accepts a minimal SessionThread (only id) that still claims /ui/<id>", async () => {
-    // Every prop but `id` is optional, so `id` alone must validate, and
-    // `draftEcho` binding `/ui/thread/value` proves the bare component still
-    // registers its UI state slot.
+  test("accepts a minimal SessionThread (id and sessionKey) that still claims /ui/<id>", async () => {
+    // `id` and `sessionKey` are the only required props, and `draftEcho`
+    // binding `/ui/thread/value` proves the bare component still registers
+    // its UI state slot.
     const definition = sessionThreadDefinition();
-    definition.pages.main.elements.thread.props = { id: "thread" } as never;
+    definition.pages.main.elements.thread.props = { id: "thread", sessionKey: "main" } as never;
     const parsed = await parseAppDefinition(definition);
     expect(parsed.success).toBe(true);
   });
@@ -126,64 +126,34 @@ describe("SessionThread validation", () => {
     );
   });
 
-  test("accepts an onRootCreated app.mutate writing $chain.newTaskId onto rootTaskId", async () => {
-    const definition = sessionThreadDefinition("screen", {
-      onDispatch: [
-        {
-          action: "app.action",
-          params: {
-            name: "dispatchCoder",
-            input: { $form: "" },
-            parentTaskId: { $chain: "leafTaskId" },
-          },
-        },
-      ],
-      onRootCreated: [
-        {
-          action: "app.mutate",
-          params: {
-            model: "screen",
-            op: "update",
-            rowId: "r1",
-            values: { rootTaskId: { $chain: "newTaskId" } },
-          },
-        },
-      ],
-      onReset: [
-        {
-          action: "app.mutate",
-          params: { model: "screen", op: "update", rowId: "r1", values: { rootTaskId: "" } },
-        },
-      ],
-    });
-    const parsed = await parseAppDefinition(definition);
+  test("rejects a SessionThread with no sessionKey", async () => {
+    const definition = sessionThreadDefinition();
+    definition.pages.main.elements.thread.props = { id: "thread" } as never;
+    await expectParseIssue(definition, "is required");
+  });
+
+  test("rejects a literal sessionKey that is not a plain token", async () => {
+    await expectParseIssue(
+      sessionThreadDefinition("screen", { sessionKey: "a:b" }),
+      "SessionThread sessionKey must match ^[A-Za-z0-9_-]{1,128}$",
+    );
+  });
+
+  test("accepts a bound sessionKey (checked by the server at send time)", async () => {
+    const parsed = await parseAppDefinition(
+      sessionThreadDefinition("screen", {
+        sessionKey: { $state: "/queries/screenById/data/0/id" },
+        scope: "user",
+      }),
+    );
     if (!parsed.success) console.error(parsed.issues);
     expect(parsed.success).toBe(true);
   });
 
-  test("rejects an onRootCreated app.mutate against an undeclared model", async () => {
+  test('rejects scope "shared" until shared sessions land', async () => {
     await expectParseIssue(
-      sessionThreadDefinition("screen", {
-        onRootCreated: [
-          {
-            action: "app.mutate",
-            params: {
-              model: "ghost",
-              op: "update",
-              rowId: "r1",
-              values: { rootTaskId: { $chain: "newTaskId" } },
-            },
-          },
-        ],
-      }),
-      'unknown model "ghost"',
-    );
-  });
-
-  test("rejects an onReset step with an unknown action type", async () => {
-    await expectParseIssue(
-      sessionThreadDefinition("screen", { onReset: [{ action: "app.explode", params: {} }] }),
-      'unknown action type "app.explode"',
+      sessionThreadDefinition("screen", { scope: "shared" }),
+      'scope "shared" is not supported yet',
     );
   });
 

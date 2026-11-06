@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { AgentTask } from "@/api/types";
 import {
   appActionMessage,
+  dispatchAppId,
   isDispatchSettled,
+  isValidSessionKey,
+  pickSessionRoot,
   runDispatchChain,
-  runResetChain,
   SESSION_THREAD_MAX_REQUEST_CHARS,
+  threadContextKey,
   threadRequestText,
 } from "./session-thread-model";
 
@@ -24,202 +27,102 @@ function task(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
+type Executed = Array<{ action: string; params?: Record<string, unknown> }>;
+const SESSION = { key: "item-1", scope: "user" as const };
+
+/** Runs `onDispatch` with an app.action handler that reports `slot`. */
+async function dispatchWith(
+  onDispatch: Parameters<typeof runDispatchChain>[0]["onDispatch"],
+  options: { leafTaskId?: string | null; slot?: Record<string, unknown> } = {},
+) {
+  const state: Record<string, unknown> = {};
+  const executed: Executed = [];
+  const result = await runDispatchChain({
+    onDispatch,
+    message: "make it blue",
+    leafTaskId: options.leafTaskId ?? null,
+    session: SESSION,
+    execute: async (binding) => {
+      executed.push(binding);
+      if (binding.action === "app.action" && options.slot) {
+        state.actions = { [String(binding.params?.name)]: options.slot };
+      }
+    },
+    getSnapshot: () => state,
+  });
+  return { result, executed };
+}
+
 describe("runDispatchChain", () => {
   test("no-op when onDispatch is empty", async () => {
-    const calls: unknown[] = [];
-    const result = await runDispatchChain({
-      onDispatch: [],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
+    const { result, executed } = await dispatchWith([]);
     expect(result).toEqual({ newTaskId: undefined });
-    expect(calls).toEqual([]);
+    expect(executed).toEqual([]);
   });
 
-  test("first-ever dispatch (wasEmpty) fires onRootCreated with the new task id", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const result = await runDispatchChain({
-      onDispatch: [
+  test("a first message drops parentTaskId, carries the session and reads the new task id", async () => {
+    const { result, executed } = await dispatchWith(
+      [
         {
           action: "app.action",
-          params: { name: "generateScreen", input: {}, parentTaskId: { $chain: "leafTaskId" } },
+          params: { name: "ask", input: { $form: "" }, parentTaskId: { $chain: "leafTaskId" } },
         },
       ],
-      onRootCreated: [
-        {
-          action: "app.mutate",
-          params: {
-            model: "screen",
-            op: "update",
-            values: { rootTaskId: { $chain: "newTaskId" } },
-          },
-        },
-      ],
-      message: "add a button",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { generateScreen: { status: "running", taskId: "new-task-99" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
-
-    expect(result).toEqual({ newTaskId: "new-task-99" });
-    expect(executed).toHaveLength(2);
-    // No leaf yet: the chain scope publishes `leafTaskId: null`, so the
-    // `$chain: "leafTaskId"` param is dropped and the task starts as a root.
-    expect(executed[0]).toEqual({
-      action: "app.action",
-      params: { name: "generateScreen", input: {}, followUp: false },
-    });
-    expect(Object.hasOwn(executed[0].params ?? {}, "parentTaskId")).toBe(false);
-    expect(executed[1]).toEqual({
-      action: "app.mutate",
-      params: { model: "screen", op: "update", values: { rootTaskId: "new-task-99" } },
-    });
-  });
-
-  test("follow-up dispatch (not wasEmpty) carries parentTaskId and never fires onRootCreated", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    const result = await runDispatchChain({
-      onDispatch: [
-        {
-          action: "app.action",
-          params: { name: "generateScreen", input: {}, parentTaskId: { $chain: "leafTaskId" } },
-        },
-      ],
-      onRootCreated: [
-        { action: "app.mutate", params: { model: "screen", op: "update", values: {} } },
-      ],
-      message: "make it blue",
-      wasEmpty: false,
-      leafTaskId: "leaf-42",
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { generateScreen: { status: "running", taskId: "new-task-100" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
-
-    expect(result).toEqual({ newTaskId: "new-task-100" });
-    expect(executed).toHaveLength(1);
-    expect(executed[0]).toEqual({
-      action: "app.action",
-      params: { name: "generateScreen", input: {}, parentTaskId: "leaf-42", followUp: false },
-    });
-  });
-
-  test("no onRootCreated chain configured -> skipped even on first-ever dispatch", async () => {
-    const state: Record<string, unknown> = {};
-    const result = await runDispatchChain({
-      onDispatch: [{ action: "app.action", params: { name: "generateScreen" } }],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async () => {
-        state.actions = { generateScreen: { status: "running", taskId: "new-task-1" } };
-      },
-      getSnapshot: () => state,
-    });
-    expect(result).toEqual({ newTaskId: "new-task-1" });
-  });
-
-  test("a misspelled $chain key stays a sentinel on a new thread (the app.action guard rejects it)", async () => {
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runDispatchChain({
-      onDispatch: [
-        {
-          action: "app.action",
-          params: { name: "generateScreen", parentTaskId: { $chain: "leaf" } },
-        },
-      ],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(executed[0]?.params?.parentTaskId).toEqual({ $chain: "leaf" });
-  });
-
-  test("a follow-up after the leaf completed chains under the leaf, the root id is not rewritten", async () => {
-    const state: Record<string, unknown> = {};
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runDispatchChain({
-      onDispatch: [
-        { action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leafTaskId" } } },
-      ],
-      onRootCreated: [
-        { action: "app.mutate", params: { values: { rootTaskId: { $chain: "newTaskId" } } } },
-      ],
-      message: "again",
-      wasEmpty: false,
-      leafTaskId: "leaf",
-      execute: async (binding) => {
-        executed.push(binding);
-        if (binding.action === "app.action") {
-          state.actions = { ask: { status: "running", taskId: "next" } };
-        }
-      },
-      getSnapshot: () => state,
-    });
+      { slot: { status: "running", taskId: "new-1" } },
+    );
+    expect(result).toEqual({ newTaskId: "new-1" });
     expect(executed).toEqual([
-      { action: "app.action", params: { name: "ask", parentTaskId: "leaf", followUp: false } },
+      {
+        action: "app.action",
+        params: {
+          name: "ask",
+          input: { message: "make it blue" },
+          session: SESSION,
+          followUp: false,
+        },
+      },
     ]);
   });
-});
 
-describe("runDispatchChain follow-up opt-out", () => {
-  const run = async (params: Record<string, unknown>) => {
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runDispatchChain({
-      onDispatch: [
-        { action: "app.action", params },
-        { action: "app.mutate", params: { model: "m" } },
-      ],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: true,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({}),
+  test("a follow-up chains under the leaf", async () => {
+    const { executed } = await dispatchWith(
+      [{ action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leafTaskId" } } }],
+      { leafTaskId: "leaf-42" },
+    );
+    expect(executed[0]?.params).toEqual({
+      name: "ask",
+      parentTaskId: "leaf-42",
+      session: SESSION,
+      followUp: false,
     });
-    return executed;
-  };
+  });
 
-  test("an app.action step asks for no Lead follow-up; other steps are untouched", async () => {
-    const executed = await run({ name: "ask" });
-    expect(executed[0]?.params).toEqual({ name: "ask", followUp: false });
+  test("the thread's session always wins over one the step names", async () => {
+    const { executed } = await dispatchWith([
+      { action: "app.action", params: { name: "ask", session: { key: "other" } } },
+    ]);
+    expect(executed[0]?.params?.session).toEqual(SESSION);
+  });
+
+  test("a followUp the step sets explicitly wins; other steps are untouched", async () => {
+    const { executed } = await dispatchWith([
+      { action: "app.action", params: { name: "ask", followUp: true } },
+      { action: "app.mutate", params: { model: "m" } },
+    ]);
+    expect(executed[0]?.params?.followUp).toBe(true);
     expect(executed[1]?.params).toEqual({ model: "m" });
   });
 
-  test("a followUp the chain sets explicitly wins", async () => {
-    const executed = await run({ name: "ask", followUp: true });
-    expect(executed[0]?.params).toEqual({ name: "ask", followUp: true });
+  test("a misspelled $chain key stays a sentinel (the app.action guard rejects it)", async () => {
+    const { executed } = await dispatchWith([
+      { action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leaf" } } },
+    ]);
+    expect(executed[0]?.params?.parentTaskId).toEqual({ $chain: "leaf" });
   });
 });
 
 describe("runDispatchChain failures", () => {
-  test("an app.action error slot rejects and skips later steps and onRootCreated", async () => {
+  test("an app.action error slot rejects and skips later steps", async () => {
     const state: Record<string, unknown> = {};
     const executed: string[] = [];
     const run = runDispatchChain({
@@ -227,10 +130,9 @@ describe("runDispatchChain failures", () => {
         { action: "app.action", params: { name: "ask" } },
         { action: "ui.toast", params: { message: "sent" } },
       ],
-      onRootCreated: [{ action: "app.mutate", params: {} }],
       message: "hi",
-      wasEmpty: true,
       leafTaskId: null,
+      session: SESSION,
       execute: async (binding) => {
         executed.push(binding.action);
         if (binding.action === "app.action") {
@@ -247,10 +149,9 @@ describe("runDispatchChain failures", () => {
     const state: Record<string, unknown> = {};
     const run = runDispatchChain({
       onDispatch: [{ action: "app.action", params: { $app: "other", name: "ask" } }],
-      onRootCreated: undefined,
       message: "hi",
-      wasEmpty: true,
       leafTaskId: null,
+      session: SESSION,
       execute: async () => {
         state.refs = { other: { actions: { ask: { status: "error" } } } };
       },
@@ -258,83 +159,45 @@ describe("runDispatchChain failures", () => {
     });
     await expect(run).rejects.toThrow("Action ask failed");
   });
-
-  test("a follow-up with no leaf refuses to dispatch (it would start a disconnected root)", async () => {
-    const executed: unknown[] = [];
-    const run = runDispatchChain({
-      onDispatch: [
-        { action: "app.action", params: { name: "ask", parentTaskId: { $chain: "leafTaskId" } } },
-      ],
-      onRootCreated: undefined,
-      message: "hi",
-      wasEmpty: false,
-      leafTaskId: null,
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    await expect(run).rejects.toThrow("latest task is unknown");
-    expect(executed).toEqual([]);
-  });
 });
 
-describe("runResetChain", () => {
-  test("no-op when onReset is not configured", async () => {
-    const calls: unknown[] = [];
-    await runResetChain({
-      onReset: undefined,
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(calls).toEqual([]);
+describe("session lookup", () => {
+  test("the context key matches the server's", () => {
+    expect(threadContextKey("app-1", "item-1", "u1")).toBe("task:app:app-1:item-1:user:u1");
   });
 
-  test("no-op for an empty onReset chain", async () => {
-    const calls: unknown[] = [];
-    await runResetChain({
-      onReset: [],
-      execute: async (binding) => {
-        calls.push(binding);
-      },
-      getSnapshot: () => ({}),
-    });
-    expect(calls).toEqual([]);
+  test("session keys are plain tokens", () => {
+    expect(isValidSessionKey("item-1_A")).toBe(true);
+    for (const bad of ["", "a:b", "a b", "x".repeat(129), 3, undefined]) {
+      expect(isValidSessionKey(bad)).toBe(false);
+    }
   });
 
-  test("executes every onReset binding with the state scope resolved", async () => {
-    const executed: Array<{ action: string; params?: Record<string, unknown> }> = [];
-    await runResetChain({
-      onReset: [
-        {
-          action: "app.mutate",
-          params: {
-            model: "screen",
-            op: "update",
-            id: { $state: "/route/params/screenId" },
-            values: { rootTaskId: "" },
-          },
-        },
-      ],
-      execute: async (binding) => {
-        executed.push(binding);
-      },
-      getSnapshot: () => ({ route: { params: { screenId: "screen-7" } } }),
-    });
+  test("the newest root with exactly this key is the session", () => {
+    const key = "task:app:a:k:user:u";
+    const roots = [
+      { id: "old", createdAt: "2026-11-05T01:00:00Z", contextKey: key },
+      { id: "new", createdAt: "2026-11-05T03:00:00Z", contextKey: key },
+      { id: "other", createdAt: "2026-11-05T04:00:00Z", contextKey: `${key}x` },
+    ];
+    expect(pickSessionRoot(roots, key, null)?.id).toBe("new");
+    expect(pickSessionRoot([], key, null)).toBeNull();
+  });
 
-    expect(executed).toEqual([
-      {
-        action: "app.mutate",
-        params: {
-          model: "screen",
-          op: "update",
-          id: "screen-7",
-          values: { rootTaskId: "" },
-        },
-      },
-    ]);
+  test("after New session only roots created later count", () => {
+    const key = "task:app:a:k:user:u";
+    const roots = [{ id: "old", createdAt: "2026-11-05T01:00:00Z", contextKey: key }];
+    expect(pickSessionRoot(roots, key, "2026-11-05T01:00:00Z")).toBeNull();
+    const later = [...roots, { id: "fresh", createdAt: "2026-11-05T02:00:00Z", contextKey: key }];
+    expect(pickSessionRoot(later, key, "2026-11-05T01:00:00Z")?.id).toBe("fresh");
+  });
+
+  test("steps run on the app a borrowed element names, else the page's app", () => {
+    expect(
+      dispatchAppId([{ action: "app.action", params: { $app: "lib", name: "a" } }], "page"),
+    ).toBe("lib");
+    expect(dispatchAppId([{ action: "app.action", params: { name: "a" } }], "page")).toBe("page");
+    expect(dispatchAppId(undefined, null)).toBeNull();
   });
 });
 
@@ -358,7 +221,7 @@ describe("isDispatchSettled", () => {
     expect(isDispatchSettled({ pendingTaskId: "new", rootTaskId: "root", chain })).toBe(true);
   });
 
-  test("a first send settles once the page binds it as the root", () => {
+  test("a first send settles once the lookup finds it as the root", () => {
     expect(isDispatchSettled({ pendingTaskId: "new", rootTaskId: "new", chain: [] })).toBe(true);
   });
 });

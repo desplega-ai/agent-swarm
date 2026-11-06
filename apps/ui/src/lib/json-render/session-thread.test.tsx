@@ -9,10 +9,13 @@ const { createRoot } = await import("react-dom/client");
 const { StateProvider, ActionProvider } = await import("@json-render/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
-// The session hook is stubbed: each test sets the chain the component sees.
-let sessionChain: AgentTask[] | undefined;
+// The session hooks are stubbed: each test sets the viewer's listed roots,
+// the chain each root has, and the picked identity.
+let roots: AgentTask[] = [];
+let chains: Record<string, AgentTask[]> = {};
+let currentUserId: string | null = "u1";
+const lookups: Record<string, unknown>[] = [];
 
-/** The props the thread handed the shared conversation, on its latest render. */
 type ConversationProps = {
   rootTaskId: string;
   timeline?: string;
@@ -30,8 +33,13 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({ supported: true, requiredVersion: "1.76.0", currentVersion: "9.9.9" }),
 }));
 mock.module("@/api/hooks/use-sessions", () => ({
+  SESSION_LIST_KEY: ["sessions", "list"],
+  useSessions: (options: Record<string, unknown>) => {
+    lookups.push(options);
+    return { data: options.enabled ? { sessions: roots.map((root) => ({ root })) } : undefined };
+  },
   useSession: (rootTaskId: string | undefined) => ({
-    data: rootTaskId && sessionChain ? { chain: sessionChain } : undefined,
+    data: rootTaskId && chains[rootTaskId] ? { chain: chains[rootTaskId] } : undefined,
     isError: false,
   }),
 }));
@@ -72,11 +80,12 @@ mock.module("@/components/ui/button", () => ({
   ),
 }));
 mock.module("@/contexts/current-user-context", () => ({
-  useCurrentUser: () => ({ userId: "u1" }),
+  useCurrentUser: () => ({ userId: currentUserId }),
 }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { SessionThreadComponent } = await import("./session-thread");
+const { AppScopeProvider } = await import("./app-scope");
 type ThreadProps = Parameters<typeof SessionThreadComponent>[0]["props"];
 
 function task(overrides: Partial<AgentTask>): AgentTask {
@@ -96,7 +105,10 @@ function task(overrides: Partial<AgentTask>): AgentTask {
 
 beforeEach(() => {
   document.body.innerHTML = "";
-  sessionChain = undefined;
+  roots = [];
+  chains = {};
+  currentUserId = "u1";
+  lookups.length = 0;
   conversation = undefined;
 });
 
@@ -136,29 +148,32 @@ async function mount(props: Partial<ThreadProps>, slot: (params: Call) => Call) 
     act(async () =>
       root.render(
         <QueryClientProvider client={queryClient}>
-          <StateProvider initialState={{}}>
-            <ActionProvider handlers={handlers}>
-              <Capture />
-              <SessionThreadComponent
-                props={
-                  {
-                    id: "chat",
-                    onDispatch: [
-                      {
-                        action: "app.action",
-                        params: {
-                          name: "ask",
-                          input: { $form: "" },
-                          parentTaskId: { $chain: "leafTaskId" },
+          <AppScopeProvider value="app-1">
+            <StateProvider initialState={{}}>
+              <ActionProvider handlers={handlers}>
+                <Capture />
+                <SessionThreadComponent
+                  props={
+                    {
+                      id: "chat",
+                      sessionKey: "item-1",
+                      onDispatch: [
+                        {
+                          action: "app.action",
+                          params: {
+                            name: "ask",
+                            input: { $form: "" },
+                            parentTaskId: { $chain: "leafTaskId" },
+                          },
                         },
-                      },
-                    ],
-                    ...next,
-                  } as ThreadProps
-                }
-              />
-            </ActionProvider>
-          </StateProvider>
+                      ],
+                      ...next,
+                    } as ThreadProps
+                  }
+                />
+              </ActionProvider>
+            </StateProvider>
+          </AppScopeProvider>
         </QueryClientProvider>,
       ),
     );
@@ -185,36 +200,47 @@ async function typeMessage(host: HTMLElement, value: string) {
   });
 }
 
-test("a first message dispatches a root task (no parentTaskId) and clears the draft", async () => {
-  const { host, calls, unmount } = await mount({}, () => ({ status: "running", taskId: "new" }));
-  await typeMessage(host, "hello");
-  await act(async () => startButton(host).click());
-  expect(calls).toEqual([
-    { action: "app.action", params: { name: "ask", input: { message: "hello" }, followUp: false } },
-  ]);
-  expect(textarea(host).value).toBe("");
-  // No onRootCreated: nothing will bind the root, so the send does not wait.
-  expect(startButton(host).disabled).toBe(false);
+const KEY = "task:app:app-1:item-1:user:u1";
+const SESSION = { key: "item-1", scope: "user" };
+
+test("the thread looks up the viewer's sessions by the exact app, key and user", async () => {
+  const { unmount } = await mount({}, () => ({}));
+  expect(lookups.at(-1)).toMatchObject({
+    contextKeyPrefix: KEY,
+    requestedByUserId: "u1",
+    enabled: true,
+  });
   await unmount();
 });
 
-test("a first message with onRootCreated adopts the new task and waits until it is bound", async () => {
-  const { host, calls, rerender, unmount } = await mount(
-    {
-      onRootCreated: [
-        { action: "app.mutate", params: { rootTaskId: { $chain: "newTaskId" } } },
-      ] as never,
-    },
-    () => ({ status: "running", taskId: "new" }),
-  );
+test("with no identity picked the composer is disabled and nothing is looked up", async () => {
+  currentUserId = null;
+  const { host, unmount } = await mount({}, () => ({}));
+  expect(host.textContent).toContain("Pick an identity to chat");
+  expect(host.querySelector("button")?.disabled).toBe(true);
+  expect(lookups.at(-1)?.enabled).toBe(false);
+  await unmount();
+});
+
+test("a first message starts the session: no parentTaskId, the session and no Lead review", async () => {
+  const { host, calls, rerender, unmount } = await mount({}, () => ({
+    status: "running",
+    taskId: "new",
+  }));
   await typeMessage(host, "hello");
   await act(async () => startButton(host).click());
-  expect(calls.map((call) => call.action)).toEqual(["app.action", "app.mutate"]);
-  expect(calls[1]?.params).toEqual({ rootTaskId: "new" });
+  expect(calls).toEqual([
+    {
+      action: "app.action",
+      params: { name: "ask", input: { message: "hello" }, session: SESSION, followUp: false },
+    },
+  ]);
+  expect(textarea(host).value).toBe("");
+  // Busy until the lookup lists the new root.
   expect(startButton(host).disabled).toBe(true);
-  // The page binds the new root: the shared conversation takes over.
-  sessionChain = [task({ id: "new", status: "in_progress" })];
-  await rerender({ rootTaskId: "new" });
+  roots = [task({ id: "new", status: "in_progress", contextKey: KEY })];
+  chains = { new: roots };
+  await rerender({});
   expect(conversation?.rootTaskId).toBe("new");
   await unmount();
 });
@@ -228,9 +254,13 @@ test("a failed dispatch keeps the draft and shows the error", async () => {
   await unmount();
 });
 
-test("a bound root renders the shared Sessions v2 conversation with the app's send contract", async () => {
-  sessionChain = [task({ id: "root", status: "in_progress" })];
-  const { host, unmount } = await mount({ rootTaskId: "root", placeholder: "Ask…" }, () => ({}));
+test("the viewer's newest session renders the shared conversation with the app's send contract", async () => {
+  roots = [
+    task({ id: "old", contextKey: KEY, createdAt: "2026-11-05T00:00:00.000Z" }),
+    task({ id: "root", contextKey: KEY, createdAt: "2026-11-05T01:00:00.000Z" }),
+  ];
+  chains = { root: [task({ id: "root", status: "in_progress" })] };
+  const { host, unmount } = await mount({ placeholder: "Ask…" }, () => ({}));
   expect(host.querySelector("textarea")).toBeNull();
   expect(conversation).toMatchObject({
     rootTaskId: "root",
@@ -240,22 +270,22 @@ test("a bound root renders the shared Sessions v2 conversation with the app's se
     placeholder: "Ask…",
     value: "",
   });
-  // Person bubbles show the app action's message, not the agent prompt.
   const prompt = 'Do it.\n[App action] app=a action=ask input={"message":"make it blue"}';
   expect(conversation?.requestText?.(task({ task: prompt }))).toBe("make it blue");
-  // The draft is the page's `/ui/<id>/value`.
   await act(async () => conversation?.onValueChange?.("typed"));
   expect(conversation?.value).toBe("typed");
-  expect(host.textContent).toContain("typed");
   await unmount();
 });
 
 test("a follow-up chains the next task under the leaf and stays pending until it shows up", async () => {
-  sessionChain = [
-    task({ id: "root", createdAt: "2026-11-05T00:00:00.000Z" }),
-    task({ id: "leaf", createdAt: "2026-11-05T01:00:00.000Z" }),
-  ];
-  const { calls, rerender, unmount } = await mount({ rootTaskId: "root" }, () => ({
+  roots = [task({ id: "root", contextKey: KEY })];
+  chains = {
+    root: [
+      task({ id: "root", createdAt: "2026-11-05T00:00:00.000Z" }),
+      task({ id: "leaf", createdAt: "2026-11-05T01:00:00.000Z" }),
+    ],
+  };
+  const { calls, rerender, unmount } = await mount({}, () => ({
     status: "running",
     taskId: "next",
   }));
@@ -268,48 +298,57 @@ test("a follow-up chains the next task under the leaf and stays pending until it
   expect(calls).toEqual([
     {
       action: "app.action",
-      params: { name: "ask", input: { message: "again" }, parentTaskId: "leaf", followUp: false },
+      params: {
+        name: "ask",
+        input: { message: "again" },
+        parentTaskId: "leaf",
+        session: SESSION,
+        followUp: false,
+      },
     },
   ]);
-  // The new task is not in the chain yet, so the send is still pending.
   expect(settled).toBe(false);
-  sessionChain = [...sessionChain, task({ id: "next", createdAt: "2026-11-05T02:00:00.000Z" })];
-  await rerender({ rootTaskId: "root" });
+  chains = {
+    root: [...(chains.root ?? []), task({ id: "next", createdAt: "2026-11-05T02:00:00.000Z" })],
+  };
+  await rerender({});
   expect(settled).toBe(true);
   await unmount();
 });
 
-test("a bound root shows a disabled loading state until its chain loads", async () => {
-  const { host, unmount } = await mount({ rootTaskId: "root" }, () => ({}));
+test("a session root whose chain is still loading shows a disabled loading state", async () => {
+  roots = [task({ id: "root", contextKey: KEY })];
+  const { host, unmount } = await mount({}, () => ({}));
   expect(conversation).toBeUndefined();
   expect(host.textContent).toContain("Loading the conversation");
-  expect(host.querySelector("button")?.disabled).toBe(true);
+  expect((host.querySelector("form button") as HTMLButtonElement).disabled).toBe(true);
   await unmount();
 });
 
-test("a bound root whose loaded chain is empty says so and blocks sending", async () => {
-  sessionChain = [];
-  const { host, calls, unmount } = await mount({ rootTaskId: "gone" }, () => ({}));
-  expect(conversation).toBeUndefined();
+test("a session whose loaded chain is empty says so and blocks sending", async () => {
+  roots = [task({ id: "gone", contextKey: KEY })];
+  chains = { gone: [] };
+  const { host, calls, unmount } = await mount({}, () => ({}));
   expect(host.textContent).toContain("Conversation not found");
-  expect(host.textContent).not.toContain("No session yet");
-  expect(host.querySelector("button")?.disabled).toBe(true);
+  expect((host.querySelector("form button") as HTMLButtonElement).disabled).toBe(true);
   expect(calls).toEqual([]);
   await unmount();
 });
 
-test("Reset runs the onReset chain", async () => {
-  sessionChain = [task({ id: "root" })];
-  const { host, calls, unmount } = await mount(
-    {
-      rootTaskId: "root",
-      onReset: [{ action: "app.mutate", params: { rootTaskId: "" } }] as never,
-    },
-    () => ({}),
-  );
-  const reset = host.querySelector('button[aria-label="Reset session"]') as HTMLButtonElement;
-  await act(async () => reset.click());
-  expect(calls).toEqual([{ action: "app.mutate", params: { rootTaskId: "" } }]);
+test("New session hides the current session until a newer root exists", async () => {
+  roots = [task({ id: "root", contextKey: KEY, createdAt: "2026-11-05T01:00:00.000Z" })];
+  chains = { root: roots };
+  const { host, rerender, unmount } = await mount({}, () => ({}));
+  expect(conversation?.rootTaskId).toBe("root");
+  const fresh = host.querySelector('button[aria-label="New session"]') as HTMLButtonElement;
+  await act(async () => fresh.click());
+  expect(host.textContent).toContain("No session yet");
+  expect(startButton(host)).not.toBeNull();
+  roots = [...roots, task({ id: "next", contextKey: KEY, createdAt: "2026-11-05T02:00:00.000Z" })];
+  chains = { ...chains, next: [task({ id: "next" })] };
+  conversation = undefined;
+  await rerender({});
+  expect(conversation?.rootTaskId).toBe("next");
   await unmount();
 });
 

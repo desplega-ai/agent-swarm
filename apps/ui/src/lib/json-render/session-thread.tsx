@@ -1,45 +1,47 @@
 /**
- * `SessionThread` — bind an app page to a swarm task chain, rendered with the
- * same Sessions v2 pieces as the "Session about this page" side panel.
+ * `SessionThread` — a chat on an app page, rendered with the same Sessions v2
+ * pieces as the "Session about this page" side panel.
  *
- * - No `rootTaskId` bound: the panel's new-session look (a hint, then the
- *   shared `ComposerDock`). A send runs the `onDispatch` action chain with
- *   `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`
- *   — explicit absence, so a `parentTaskId: { "$chain": "leafTaskId" }` param
- *   is dropped and the task starts as a root. On success `onRootCreated` (when
- *   provided) runs with `$chain = { newTaskId }` so the app can `app.mutate`
- *   it back onto `rootTaskId`. This is the ONLY place `onRootCreated` fires.
- * - `rootTaskId` bound: the shared `SessionConversation` (turn timeline,
- *   "Latest" jump, `TaskComposer`), with the app keeping control of sends:
- *   - steer: the newest unfinished task of ANY agent (`steerTarget="any"`:
- *     app actions run on the action's agent, not necessarily the lead),
- *     attributed `source: "app-page"`. The shared `SteerComposer` offers the
- *     harness's Queue/Interrupt modes and reports a promoted steer.
- *   - follow up: `onFollowUp` runs the `onDispatch` chain again with
- *     `$chain.leafTaskId` = the composer's target (the newest task once all
- *     are finished), so the new task chains off the leaf. No task is created
- *     outside the page's own action; attachments and the mic are off.
- *   - a bound root whose chain is empty or not loaded rejects the follow-up
- *     (the draft stays), so a send never starts a disconnected root.
- *   - person bubbles show the `input.message` of each app action prompt
- *     (`threadRequestText`), not the whole agent prompt.
+ * The session is found by key, the way the panel finds its sessions: every
+ * task an `onDispatch` `app.action` step creates carries the thread's
+ * `session` (`{ key: sessionKey, scope }`), and the server keys it as
+ * `task:app:<appId>:<sessionKey>:user:<requester>` (`appSessionContextKey`).
+ * The thread lists the viewer's sessions with that exact context key
+ * (`useSessions`) and shows the newest root. No row stores a root id, and a
+ * page cannot write into another app's or person's sessions: the server
+ * builds the key from the app the action runs on and the resolved requester.
  *
- * Each `app.action` step of `onDispatch` goes out with `followUp: false`
- * (unless the step sets `followUp`), so the Lead adds no review task to the
- * chain. While a bound root's chain loads, or once it loads empty, the
- * composer is disabled under a notice instead of the conversation.
+ * `scope: "shared"` is reserved and rejected by the page validator and the
+ * server. Planned (follow-up PR): one session for everyone, made shared by an
+ * everyone:write `session_shares` row the server adds to the root when it
+ * creates it.
  *
- * After a dispatch that created a task, the send stays pending until the
- * chain shows that task (or, on the first send, the page binds it as
- * `rootTaskId`), up to `PENDING_DISPATCH_TIMEOUT_MS`, so a quick second
- * message cannot chain off the old leaf or start a second root.
+ * - No identity picked: a notice and a disabled composer (the session is per
+ *   person, so the server would refuse the send).
+ * - No session yet: the panel's new-session look (a hint, then the shared
+ *   `ComposerDock`). A send runs `onDispatch` with `$form = { message }` and
+ *   `$chain = { leafTaskId: null, newTaskId: null }` — explicit absence, so a
+ *   `parentTaskId: { "$chain": "leafTaskId" }` param is dropped and the
+ *   task becomes the session's root.
+ * - A session: the shared `SessionConversation` (turn timeline, "Latest"
+ *   jump, `TaskComposer`), with the app keeping control of sends:
+ *   - steer: the newest unfinished task of ANY agent (`steerTarget="any"`),
+ *     attributed `source: "app-page"`.
+ *   - follow up: `onFollowUp` runs `onDispatch` again with
+ *     `$chain.leafTaskId` = the composer's target, so the new task chains off
+ *     the leaf (and inherits the session's context key server-side).
+ *   - person bubbles show the `input.message` of each app action prompt.
+ * - "New session": the next message starts a new root, and the thread shows
+ *   only roots created after the current one from then on. Nothing is
+ *   deleted; the older session stays in the Sessions list.
  *
- * A static action chain cannot conditionally skip a step, so the
- * `onDispatch`/`onRootCreated` split keeps the first-ever dispatch (which must
- * adopt its new task as the root) distinct from every later one.
+ * Each `app.action` step goes out with the session and `followUp: false`
+ * (unless the step sets `followUp`), so the Lead adds no review task.
  *
- * `onReset` (a Reset control, only when provided and a root is bound) clears
- * `rootTaskId` so the next message deliberately starts a new chain.
+ * After a dispatch that created a task, the send stays pending until the new
+ * task shows up (as the session root, or in its chain), up to
+ * `PENDING_DISPATCH_TIMEOUT_MS`, so a quick second message cannot chain off
+ * the old leaf or start a second root.
  *
  * The composer draft is mirrored to `/ui/<id>/value`, so it survives
  * re-renders and other elements can bind it. Inside an element instance the
@@ -49,32 +51,36 @@
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import { useActions, useStateStore } from "@json-render/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RotateCcw } from "lucide-react";
+import { SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useSession } from "@/api/hooks/use-sessions";
+import { SESSION_LIST_KEY, useSession, useSessions } from "@/api/hooks/use-sessions";
 import type { AgentTask } from "@/api/types";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { SessionConversation } from "@/components/sessions/session-conversation";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { cn } from "@/lib/utils";
+import { useAppScopeId } from "./app-scope";
 import type { ActionChain, swarmCatalog } from "./catalog";
 import {
+  dispatchAppId,
   isDispatchSettled,
+  isValidSessionKey,
+  pickSessionRoot,
   runDispatchChain,
-  runResetChain,
+  threadContextKey,
   threadRequestText,
 } from "./session-thread-model";
 
 export type SessionThreadProps = InferComponentProps<typeof swarmCatalog, "SessionThread">;
 
-const SESSIONS_MIN_VERSION = "1.76.0";
+/** `contextKeyPrefix` on `GET /api/sessions`. */
+const SESSIONS_MIN_VERSION = "1.157.1";
 
 /**
- * Longest wait for a sent task to show up in the chain before the send
- * settles anyway, so a page that never binds the new root cannot lock the
- * composer.
+ * Longest wait for a sent task to show up before the send settles anyway, so
+ * a lagging list cannot lock the composer.
  */
 const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
 
@@ -89,8 +95,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * `waitForTask(id)` resolves once the dispatched task `id` is in the chain or
- * bound as the root (`isDispatchSettled`), or after the timeout.
+ * `waitForTask(id)` resolves once the dispatched task `id` is the session
+ * root or in its chain (`isDispatchSettled`), or after the timeout.
  */
 function useWaitForTask(rootTaskId: string, chain: readonly AgentTask[]) {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
@@ -118,43 +124,82 @@ function useWaitForTask(rootTaskId: string, chain: readonly AgentTask[]) {
     });
 }
 
+/** A notice in place of the conversation, over a disabled composer. */
+function DisabledThread({
+  notice,
+  draft,
+  onDraft,
+  placeholder,
+}: {
+  notice: string;
+  draft: string;
+  onDraft: (next: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6">
+        <p className="max-w-xs text-center text-sm text-muted-foreground" aria-live="polite">
+          {notice}
+        </p>
+      </div>
+      <ComposerDock
+        value={draft}
+        onChange={onDraft}
+        onSubmit={() => {}}
+        isPending={false}
+        placeholder={placeholder}
+        disabled
+        routeLabel={ROUTE_LABEL}
+      />
+    </>
+  );
+}
+
 export function SessionThreadComponent({ props }: { props: SessionThreadProps }) {
   const { state, set, getSnapshot } = useStateStore();
   const { execute } = useActions();
   const { userId } = useCurrentUser();
   const queryClient = useQueryClient();
   const gate = useFeatureGate(SESSIONS_MIN_VERSION);
+  const pageAppId = useAppScopeId();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [resetError, setResetError] = useState<string | null>(null);
+  // "New session": only roots created after this one's `createdAt` count.
+  const [newerThan, setNewerThan] = useState<string | null>(null);
 
   const draftPath = `/ui/${props.id}/value`;
   const stored = getByPath(state, draftPath);
   const draft = typeof stored === "string" ? stored : "";
   const setDraft = (next: string) => set(draftPath, next);
 
-  // An unresolved binding arrives as undefined/null; an empty string means the
-  // row column exists but no chain was started yet — both read as "no root".
-  // Accepted window: while the row query backing a `{ "$state": … }`
-  // rootTaskId binding is still in flight this also reads as "no root", so a
-  // send inside that first poll could start a second chain.
-  const rootTaskId =
-    typeof props.rootTaskId === "string" && props.rootTaskId !== "" ? props.rootTaskId : "";
-  const { data: detail, isError: loadFailed } = useSession(
-    gate.supported && rootTaskId ? rootTaskId : undefined,
-  );
+  const onDispatchChain = props.onDispatch as ActionChain | undefined;
+  const hasDispatchChain = Array.isArray(onDispatchChain) && onDispatchChain.length > 0;
+  const placeholder = props.placeholder ?? "Send a message…";
+  const scope = props.scope === "shared" ? "shared" : "user";
+  const sessionKey = isValidSessionKey(props.sessionKey) ? props.sessionKey : null;
+  const appId = dispatchAppId(onDispatchChain, pageAppId);
+  const contextKey =
+    appId && sessionKey && userId ? threadContextKey(appId, sessionKey, userId) : null;
+  const lookupReady = gate.supported && scope === "user" && contextKey !== null;
+
+  const list = useSessions({
+    contextKeyPrefix: contextKey ?? undefined,
+    requestedByUserId: userId ?? undefined,
+    limit: 20,
+    enabled: lookupReady,
+  });
+  const root =
+    lookupReady && list.data
+      ? pickSessionRoot(
+          list.data.sessions.map((item) => item.root),
+          contextKey,
+          newerThan,
+        )
+      : null;
+  const rootTaskId = root?.id ?? "";
+  const { data: detail, isError: loadFailed } = useSession(rootTaskId || undefined);
   const chain = detail?.chain ?? EMPTY_CHAIN;
-  // A bound root renders the conversation only once its chain has loaded and
-  // holds a task; until then the composer stays disabled with a notice.
-  const boundNotice = !rootTaskId
-    ? null
-    : detail
-      ? detail.chain.length > 0
-        ? null
-        : "Conversation not found — sending is disabled."
-      : loadFailed
-        ? "The conversation could not be loaded — sending is disabled."
-        : "Loading the conversation…";
   const waitForTask = useWaitForTask(rootTaskId, chain);
 
   // Stable refs so async continuations never run against a stale chain,
@@ -168,40 +213,30 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const detailRef = useRef(detail);
   detailRef.current = detail;
 
-  const onDispatchChain = props.onDispatch as ActionChain | undefined;
-  const hasDispatchChain = Array.isArray(onDispatchChain) && onDispatchChain.length > 0;
-  const onResetChain = props.onReset as ActionChain | undefined;
-  const hasResetChain = Array.isArray(onResetChain) && onResetChain.length > 0;
-  const placeholder = props.placeholder ?? "Send a message…";
-
   /**
-   * Runs `onDispatch` (and, on a first send, `onRootCreated`). Returns the
-   * new task's id when the send must wait for it to show up, else null.
+   * Runs `onDispatch`. Returns the new task's id when one was created (the
+   * send waits for it to show up), else null.
    */
   const dispatch = async (message: string, leafTaskId: string | null) => {
     const onDispatch = propsRef.current.onDispatch as ActionChain | undefined;
     if (!onDispatch || onDispatch.length === 0) {
       throw new Error("This thread has no onDispatch action chain.");
     }
-    const onRootCreated = propsRef.current.onRootCreated as ActionChain | undefined;
-    const wasEmpty = leafTaskId === null;
+    if (!sessionKey) throw new Error("This thread has no valid sessionKey.");
     const { newTaskId } = await runDispatchChain({
       onDispatch,
-      onRootCreated,
       message,
-      wasEmpty,
       leafTaskId,
+      session: { key: sessionKey, scope },
       execute: executeRef.current,
       getSnapshot: getSnapshotRef.current,
     });
+    void queryClient.invalidateQueries({ queryKey: SESSION_LIST_KEY });
     void queryClient.invalidateQueries({ queryKey: ["session"] });
-    // A first send without `onRootCreated` never binds a root, so there is
-    // nothing to wait for: the next message starts another root anyway.
-    const awaitsTask = !wasEmpty || (onRootCreated?.length ?? 0) > 0;
-    return newTaskId && awaitsTask ? newTaskId : null;
+    return newTaskId ?? null;
   };
 
-  /** The first message: a new root task. */
+  /** The first message: the session's root task. */
   const start = async () => {
     const message = draft.trim();
     if (message.length === 0 || starting) return;
@@ -231,18 +266,25 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
     if (pendingTaskId) await waitForTask(pendingTaskId);
   };
 
-  const reset = async () => {
-    setResetError(null);
-    try {
-      await runResetChain({
-        onReset: propsRef.current.onReset as ActionChain | undefined,
-        execute: executeRef.current,
-        getSnapshot: getSnapshotRef.current,
-      });
-    } catch (error) {
-      setResetError(errorMessage(error, "Failed to reset the session"));
-    }
-  };
+  const notice = !sessionKey
+    ? "This thread has no valid sessionKey."
+    : scope === "shared"
+      ? "Shared sessions are not supported yet."
+      : !appId
+        ? "This chat only works on an app page."
+        : !userId
+          ? "Pick an identity to chat."
+          : !list.data
+            ? list.isError
+              ? "Your sessions could not be loaded — sending is disabled."
+              : "Loading the conversation…"
+            : rootTaskId && !detail
+              ? loadFailed
+                ? "The conversation could not be loaded — sending is disabled."
+                : "Loading the conversation…"
+              : rootTaskId && detail && detail.chain.length === 0
+                ? "Conversation not found — sending is disabled."
+                : null;
 
   if (!gate.supported) {
     return (
@@ -251,7 +293,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
         data-testid="json-render-session-thread"
       >
         <p className="text-sm text-muted-foreground">
-          This session history view requires API ≥ {gate.requiredVersion}
+          This chat requires API ≥ {gate.requiredVersion}
           {gate.currentVersion ? ` (this swarm is running v${gate.currentVersion})` : ""}.
         </p>
       </div>
@@ -268,43 +310,29 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
       )}
       data-testid="json-render-session-thread"
     >
-      {rootTaskId && hasResetChain ? (
+      {root && !notice ? (
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
-          {resetError ? (
-            <p className="min-w-0 truncate text-xs text-status-error-strong" role="alert">
-              {resetError}
-            </p>
-          ) : null}
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => void reset()}
-            aria-label="Reset session"
+            disabled={starting}
+            onClick={() => setNewerThan(root.createdAt)}
+            aria-label="New session"
             className="ml-auto h-6 gap-1 px-2 text-xs text-muted-foreground"
           >
-            <RotateCcw className="h-3 w-3" />
-            Reset
+            <SquarePen className="h-3 w-3" />
+            New session
           </Button>
         </div>
       ) : null}
-      {boundNotice ? (
-        <>
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6">
-            <p className="max-w-xs text-center text-sm text-muted-foreground" aria-live="polite">
-              {boundNotice}
-            </p>
-          </div>
-          <ComposerDock
-            value={draft}
-            onChange={setDraft}
-            onSubmit={() => {}}
-            isPending={false}
-            placeholder={placeholder}
-            disabled
-            routeLabel={ROUTE_LABEL}
-          />
-        </>
+      {notice ? (
+        <DisabledThread
+          notice={notice}
+          draft={draft}
+          onDraft={setDraft}
+          placeholder={placeholder}
+        />
       ) : rootTaskId ? (
         <SessionConversation
           rootTaskId={rootTaskId}
@@ -335,8 +363,8 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
             isPending={starting}
             isError={startError !== null}
             errorMessage={startError ?? undefined}
-            placeholder={userId ? placeholder : "Pick an identity to send messages."}
-            disabled={!userId || !hasDispatchChain}
+            placeholder={placeholder}
+            disabled={!hasDispatchChain}
             routeLabel={ROUTE_LABEL}
             sendLabel="Start session"
           />

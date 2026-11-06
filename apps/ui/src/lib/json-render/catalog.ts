@@ -363,28 +363,23 @@ const schemaFormProps = z.object({
 const sessionThreadProps = z.object({
   /** State id — the composer draft lands at `/ui/<id>/value`. */
   id: z.string(),
-  rootTaskId: z
+  sessionKey: z
     .string()
+    .describe(
+      'App-chosen session key, a plain token (^[A-Za-z0-9_-]{1,128}$), e.g. "main", or a $state binding to a token such as { "$state": "/route/params/itemId" }. The server keys the session as task:app:<appId>:<sessionKey>:user:<viewer>, so each viewer has their own session per key and app.',
+    ),
+  scope: z
+    .enum(["user", "shared"])
     .optional()
     .describe(
-      'The chain\'s root task id — usually bound from a row column (e.g. screen.rootTaskId), but may just as well bind directly to stable context such as { "$state": "/route/params/sessionId" }. Not necessarily a row the app owns.',
+      '"user" (default): one session per viewer. "shared" is reserved for a follow-up PR (one session everyone on the page writes to) and is rejected today.',
     ),
   /** Composer placeholder (default "Send a message…"). */
   placeholder: z.string().optional(),
   onDispatch: actionChainSchema
     .optional()
     .describe(
-      'Action chain run with $form={message} to send a message. $chain={leafTaskId} is the current leaf task id, or null only when rootTaskId is empty — a null $chain key drops the param, so `"parentTaskId": {"$chain": "leafTaskId"}` starts a brand-new root task on the first message (follow it with onRootCreated to adopt it as the root) and chains a new task off the finished leaf on every later one. When rootTaskId is set but its chain cannot be found, sending is blocked instead. The chain should app.action a task.',
-    ),
-  onRootCreated: actionChainSchema
-    .optional()
-    .describe(
-      "Action chain run with $chain={newTaskId} immediately after a successful dispatch when NO rootTaskId was bound yet (the very first message in a new chain). Should app.mutate the new task's id onto rootTaskId. Never invoked on a follow-up dispatch (chaining off an existing root) — onDispatch's $chain={leafTaskId} covers that case via parentTaskId instead. Omit entirely when rootTaskId is sourced from something other than a row this app owns (e.g. externally-provided context) — there's nothing to write back.",
-    ),
-  onReset: actionChainSchema
-    .optional()
-    .describe(
-      "Action chain run when the user clicks Reset (rendered only when this is provided and rootTaskId is bound) — should clear rootTaskId so the next message starts a fresh chain.",
+      'Action chain run with $form={message} to send a message. $chain={leafTaskId} is the session\'s newest task, or null when the viewer has no session yet — a null $chain key drops the param, so `"parentTaskId": {"$chain": "leafTaskId"}` starts a new session on the first message and chains a new task off the leaf on every later one. Each app.action step is sent with the session (key and scope) and followUp: false. The chain should app.action a task.',
     ),
   /** Grow to fill a `fill`-aware parent instead of the fixed 420 px height —
    * the timeline scrolls inside whatever height the parent gives it, with the
@@ -1276,7 +1271,7 @@ export const swarmCatalogSpec = {
     SessionThread: {
       props: sessionThreadProps,
       description:
-        'Bind an app page to a swarm task chain, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). `rootTaskId` is usually a `{ "$state": … }` binding to a row column (or any other context-derived value) holding the chain root task id. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no root yet → run `onDispatch` (a new root task), then `onRootCreated` with `{ "$chain": "newTaskId" }`; a task in the chain not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished (completed, failed, cancelled, superseded, skipped or draft) → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` on a new thread, and a null `$chain` key drops the param, so one `onDispatch` covers both the first message and follow-ups. Each `app.action` step is sent with `followUp: false` unless it sets `followUp` itself, so the Lead adds no review task to the chain. Messages are text only (no attachments or mic). While a bound root\'s chain loads the composer is disabled. A bound `rootTaskId` whose chain cannot be found blocks sending, and after each send the composer stays busy until the new task shows up in the chain (at most 30 s). A static action chain cannot conditionally skip a step, so `onRootCreated` exists to keep `onDispatch` from re-overwriting the root on every follow-up. `onRootCreated` and `onReset` (clears `rootTaskId`) are optional — omit either when not meaningful for a given binding. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
+        'A chat on an app page, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). The session is found by key, not stored in a row: the server keys each task an `app.action` step creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer\'s newest session with that key. The viewer must have an identity: with none picked the composer is disabled. `scope: "shared"` (one session for everyone) comes in a follow-up PR and is rejected today. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no session yet → run `onDispatch`, whose `app.action` creates the session\'s root task; a task in the session not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` when there is no session, and a null `$chain` key drops the param, so one `onDispatch` covers the first message and follow-ups. Each `app.action` step is sent with the session and `followUp: false` (unless it sets `followUp` itself), so the Lead adds no review task. Messages are text only (no attachments or mic). After each send the composer stays busy until the new task shows up (at most 30 s). "New session" starts over: the next message creates a new root, and the older session is no longer shown. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
     },
     ElementRef: {
       props: elementRefProps,

@@ -519,7 +519,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
-| `SessionThread` | `id` | `rootTaskId`, `placeholder`, `onDispatch`, `onRootCreated`, `onReset`, `fill`; the dashboard's session conversation (the "Session about this page" panel) bound to a task chain, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
+| `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
@@ -576,29 +576,26 @@ SchemaForm details:
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
 - Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
 
-SessionThread details — a chat bound to a task chain (every task under `rootTaskId`, linked by `parentTaskId`):
+SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
 
-- `rootTaskId` is the chain root, usually `{ "$state": "/queries/<name>/data/0/rootTaskId" }` from a row the app owns, or stable context such as a route param. Empty or unbound means no chain yet.
+- `sessionKey` names the session, a plain token (`^[A-Za-z0-9_-]{1,128}$`): a literal such as `"main"`, or a `$state` binding to a token such as a route param or row id (`{ "$state": "/route/params/itemId" }`) for one session per item. No row stores the session: the server keys every task the thread's `app.action` creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer's newest session with that key. A page can only write sessions of its own app.
+- `scope` is `"user"` (the default): each viewer has their own session per key. The viewer needs an identity; with none picked the composer is disabled. `scope: "shared"` (one session everyone on the page writes to) comes in a follow-up PR: the validator rejects it today. The planned design adds an everyone:write session share on the root when the server creates it.
 - It renders the same conversation as the dashboard's "Session about this page" panel: the session turn timeline (each person message with the sender's name, the swarm's replies with a live Queued / Working status, worker steps, approvals) and the shared composer. A person bubble shows the `message` of an app-action input instead of the whole agent prompt, cut at 4,000 characters. The composer's attachments and mic are off: a message is text only.
 - Sending a message takes one of three routes:
-  1. No `rootTaskId` → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates a root task. `onRootCreated` then runs with `$chain.newTaskId` set to the new task id.
-  2. A task in the chain is not finished → the composer steers the newest such task, on any agent, with `source: "app-page"`. It offers Queue, and Interrupt where the harness supports it. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
-  3. Every task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the newest task id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. `onRootCreated` does not run.
-- Each `app.action` step of `onDispatch` is sent with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
-- While a bound `rootTaskId`'s chain loads, the composer is disabled with a loading notice. A bound `rootTaskId` whose chain cannot be found (deleted, or not visible to the viewer) blocks sending; `leafTaskId` is `null` only when there is no root. After a send, the composer stays busy until the new task appears in the chain (or, on the first send, until `rootTaskId` holds it), for at most 30 seconds.
-- Why `onRootCreated` is separate: a static chain cannot skip a step, so an `app.mutate` that adopts the new task as the root inside `onDispatch` would overwrite `rootTaskId` on every follow-up. Put that `app.mutate` (`values: { rootTaskId: { "$chain": "newTaskId" } }`) in `onRootCreated`. Omit it when `rootTaskId` does not come from a row the app writes.
-- `onReset` renders a Reset control once a root exists; it should clear `rootTaskId` so the next message starts a new chain.
+  1. No session yet → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates the session's root task.
+  2. A task in the session is not finished → the composer steers the newest such task, on any agent, with `source: "app-page"`. It offers Queue, and Interrupt where the harness supports it. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Every task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the newest task id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. The follow-up keeps the session's key.
+- Each `app.action` step of `onDispatch` is sent with the session (`{ key, scope }`) and with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
+- "New session" (shown once a session exists) starts over: the next message creates a new root, and the thread shows only sessions created after the current one. Nothing is deleted; older sessions stay in the dashboard's Sessions list.
+- While the session loads, the composer is disabled with a loading notice. A session whose chain cannot be found blocks sending. After a send, the composer stays busy until the new task shows up, for at most 30 seconds.
 - Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
 
 ```json
 { "type": "SessionThread", "props": {
   "id": "chat",
-  "rootTaskId": { "$state": "/queries/screen/data/0/rootTaskId" },
+  "sessionKey": { "$state": "/route/params/screenId" },
   "onDispatch": [{ "action": "app.action", "params": {
-    "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }],
-  "onRootCreated": [{ "action": "app.mutate", "params": {
-    "model": "screen", "op": "update", "rowId": { "$state": "/route/params/screenId" },
-    "values": { "rootTaskId": { "$chain": "newTaskId" } } } }]
+    "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }]
 } }
 ```
 
@@ -718,7 +715,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`, or `{ "$state": "/route/params/<param>" }` in a Drawer footer); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
-- `app.action`: `{ name, input?, parentTaskId?, followUp? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400. `followUp: false` creates the task with no Lead follow-up (the review task the Lead adds when a worker task finishes); script and sync actions ignore it. A task an action creates is attributed to the viewer's identity.
+- `app.action`: `{ name, input?, parentTaskId?, followUp? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400. `followUp: false` creates the task with no Lead follow-up (the review task the Lead adds when a worker task finishes); script and sync actions ignore it. A task an action creates is attributed to the viewer's identity. `session: { key, scope }` (SessionThread sets it) keys a task-kind action's task into the viewer's session; the server builds the key, never the page.
 - `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.

@@ -4457,8 +4457,14 @@ class ApiClient {
      * Task-kind actions only. `followUp: false` skips the Lead follow-up
      * (review) of the created task; `requestedByUserId` names the picked
      * identity, which the server honors only for a shared operator key.
+     * `session` puts the task in a SessionThread session.
      */
-    options: { followUp?: boolean; requestedByUserId?: string } = {},
+    options: {
+      followUp?: boolean;
+      requestedByUserId?: string;
+      /** A SessionThread session: the server keys the task by app, key and requester. */
+      session?: { key: string; scope?: "user" | "shared" };
+    } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
@@ -4469,6 +4475,7 @@ class ApiClient {
           ...(parentTaskId ? { parentTaskId } : {}),
           ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
           ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+          ...(options.session ? { session: options.session } : {}),
         }),
       },
       `Failed to run action ${name}`,

@@ -27,6 +27,7 @@ export async function runAppAction({
   parentTaskId,
   followUp,
   requestedByUserId,
+  contextKey,
   caller,
   actor,
 }: {
@@ -42,6 +43,11 @@ export async function runAppAction({
    * the caller (`resolveTaskRequester`). Falls back to the user in `actor`.
    */
   requestedByUserId?: string;
+  /**
+   * Task-kind actions only: the created task's `contextKey`, built by the
+   * caller from this app's id (`appSessionContextKey`), never client-supplied.
+   */
+  contextKey?: string;
   caller: AppActionCaller;
   actor: string;
 }) {
@@ -153,6 +159,7 @@ export async function runAppAction({
       // The worker task's Lead follow-up reviews its result; a chat-style
       // caller (SessionThread) opts out so each message stays one task.
       followUpConfig: followUp === false ? { disabled: true } : undefined,
+      contextKey,
     },
     { origin: "app" },
   );

@@ -65,6 +65,34 @@ const UI_STATE_COMPONENTS = new Set([
 // be a plain token.
 const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
 const PLAIN_TOKEN_ID_COMPONENTS = new Set(["SchemaForm", "SessionThread"]);
+
+/** Mirrors `APP_SESSION_KEY_PATTERN` (`src/tasks/context-key.ts`). */
+const SESSION_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * `SessionThread.sessionKey` lands in a server-built context key, so a literal
+ * must be a plain token (a binding is checked by the server at send time).
+ * `scope: "shared"` is reserved for a follow-up PR (planned: an
+ * everyone:write `session_shares` row on the root when it is created).
+ */
+function sessionThreadIssues(
+  props: Record<string, unknown>,
+  propsPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (typeof props.sessionKey === "string" && !SESSION_KEY.test(props.sessionKey)) {
+    issues.push(
+      issue(
+        `${propsPath}.sessionKey`,
+        "SessionThread sessionKey must match ^[A-Za-z0-9_-]{1,128}$",
+      ),
+    );
+  }
+  if (props.scope === "shared") {
+    issues.push(issue(`${propsPath}.scope`, 'scope "shared" is not supported yet'));
+  }
+  return issues;
+}
 const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
@@ -79,7 +107,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
-  SessionThread: ["onDispatch", "onRootCreated", "onReset"],
+  SessionThread: ["onDispatch"],
 };
 
 /**
@@ -1437,6 +1465,9 @@ export function validatePage(
             `${type} id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype`,
           ),
         );
+      }
+      if (type === "SessionThread" && isPlainObject(rawElement.props)) {
+        issues.push(...sessionThreadIssues(rawElement.props, propsPath));
       }
       if (
         typeof type === "string" &&

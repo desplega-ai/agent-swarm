@@ -4261,6 +4261,11 @@ export interface paths {
                         parentTaskId?: string;
                         followUp?: boolean;
                         requestedByUserId?: string;
+                        session?: {
+                            key: string;
+                            /** @enum {string} */
+                            scope?: "user" | "shared";
+                        };
                     };
                 };
             };
