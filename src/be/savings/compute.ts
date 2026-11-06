@@ -493,20 +493,32 @@ export async function computeWorkflowLinksDay(
     const c = childTasks.get(pid) ?? { usd: 0, ms: 0 };
     childTasks.set(pid, { usd: c.usd + usd, ms: c.ms + ms });
   };
+  // Each task counts under exactly one root: the walk stops at any other root
+  // of the day and at any task a step or a node owns (on any day), so all
+  // roots go in as one set.
   const roots = [...new Set([...stepTasks.keys(), ...nodeTasks.keys()])];
-  const trees = await inChunks(roots, (chunk) =>
-    sql<{ root: string; below: number; n: number; usd: number | null; ms: number | null }>(
-      `WITH RECURSIVE d(root, id, depth) AS (
-         SELECT value, value, 0 FROM json_each(?)
-         UNION ALL SELECT d.root, k.id, d.depth+1 FROM d JOIN agent_tasks k INDEXED BY idx_agent_tasks_parentTaskId ON k.parentTaskId=d.id
-           WHERE k.workflowRunId IS NULL AND d.depth<${MAX_TASK_DEPTH})
-       SELECT root, depth>0 below, count(*) n,
-         sum((SELECT sum(totalCostUsd) FROM session_costs c WHERE c.taskId=d.id)) usd,
-         sum((SELECT sum(durationMs) FROM session_costs c WHERE c.taskId=d.id)) ms
-       FROM d GROUP BY 1,2`,
-      [JSON.stringify(chunk)],
-    ),
-  );
+  const trees =
+    roots.length === 0
+      ? []
+      : await sql<{
+          root: string;
+          below: number;
+          n: number;
+          usd: number | null;
+          ms: number | null;
+        }>(
+          `WITH RECURSIVE r(id) AS (SELECT value FROM json_each(?)),
+           d(root, id, depth) AS (
+             SELECT id, id, 0 FROM r
+             UNION ALL SELECT d.root, k.id, d.depth+1 FROM d JOIN agent_tasks k INDEXED BY idx_agent_tasks_parentTaskId ON k.parentTaskId=d.id
+               WHERE k.workflowRunId IS NULL AND k.sourceStepId IS NULL AND k.id NOT IN (SELECT id FROM r)
+                 AND d.depth<${MAX_TASK_DEPTH})
+           SELECT root, depth>0 below, count(*) n,
+             sum((SELECT sum(totalCostUsd) FROM session_costs c WHERE c.taskId=d.id)) usd,
+             sum((SELECT sum(durationMs) FROM session_costs c WHERE c.taskId=d.id)) ms
+           FROM d GROUP BY 1,2`,
+          [JSON.stringify(roots)],
+        );
   for (const t of trees) {
     const root = String(t.root);
     const below = num(t.below) === 1;

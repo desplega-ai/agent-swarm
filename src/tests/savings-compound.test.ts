@@ -14,7 +14,7 @@ import {
 } from "../be/db";
 import type { SavingsSql } from "../be/savings/compute";
 import { MODEL_VERSION } from "../be/savings/model";
-import { readScriptSavings, readWorkflowSavings } from "../be/savings/read";
+import { readScriptSavings, readWorkflowComponents, readWorkflowSavings } from "../be/savings/read";
 import { resetSavingsRollupForTests, runSavingsRollupTick } from "../be/savings/rollup";
 import { mintScriptRunToken, resolveSessionToken } from "../be/users";
 import { handleSavings, resetSavingsRefreshCache } from "../http/savings";
@@ -517,5 +517,168 @@ describe("run provenance stamping", () => {
     // Outside a script run's request nothing is stamped.
     const plain = await createTaskExtended("made by hand", { agentId });
     expect(await col("agent_tasks", plain.id, "sourceStepId")).toBeNull();
+  });
+});
+
+describe("each task counts under one root", () => {
+  let agentId: string;
+  let chained: string;
+  let nodeOwned: string;
+  let crossDay: string;
+  const chain: string[] = [];
+  // Two closed days: D1 then D2.
+  const D1 = new Date(NOW - 3 * 86_400_000).toISOString().slice(0, 10);
+  const D2 = new Date(NOW - 2 * 86_400_000).toISOString().slice(0, 10);
+  const on = (day: string, sec: number) =>
+    new Date(Date.parse(`${day}T10:00:00.000Z`) + sec * 1000).toISOString();
+
+  async function task(
+    createdAt: string,
+    usd: number,
+    opts: { parentTaskId?: string; workflowRunId?: string; sourceStepId?: string } = {},
+  ) {
+    const t = await createTaskExtended(`root fixture ${createdAt}`, {
+      agentId,
+      ...(opts.parentTaskId ? { parentTaskId: opts.parentTaskId } : {}),
+      ...(opts.workflowRunId ? { source: "workflow", workflowRunId: opts.workflowRunId } : {}),
+    });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt=?, sourceStepId=? WHERE id=?", [
+      createdAt,
+      opts.sourceStepId ?? null,
+      t.id,
+    ]);
+    await createSessionCost({
+      sessionId: crypto.randomUUID(),
+      taskId: t.id,
+      agentId,
+      totalCostUsd: usd,
+      durationMs: 60_000,
+      numTurns: 3,
+      model: "claude-opus-5-5",
+    });
+    return t.id;
+  }
+
+  const childTaskUsd = async (day: string, workflowId: string) =>
+    Number(
+      (
+        await getDbClient().get<{ v: number }>(
+          "SELECT childTaskUsd v FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=?",
+          [day, workflowId],
+        )
+      )?.v,
+    );
+
+  beforeAll(async () => {
+    initDb(":memory:");
+    await resetSavingsRollupForTests();
+    agentId = (await createAgent({ name: "roots-agent", isLead: false, status: "idle" })).id;
+    const scripted = {
+      nodes: [
+        { id: "start", type: "swarm-script", config: { scriptName: "roots-helper" } },
+        { id: "work", type: "agent-task", config: {} },
+      ],
+    };
+    chained = (await createWorkflow({ name: "roots-chained", definition: scripted })).id;
+    nodeOwned = (await createWorkflow({ name: "roots-node", definition: scripted })).id;
+    crossDay = (await createWorkflow({ name: "roots-cross-day", definition: scripted })).id;
+
+    // Step task A ($1) and step task B ($2) below it: 3, not 5.
+    await run("ca", chained, "manual", on(D1, 0));
+    await step("ca-start", "ca", "start", "swarm-script", on(D1, 0));
+    const a = await task(on(D1, 1), 1, { sourceStepId: "ca-start" });
+    await task(on(D1, 2), 2, { sourceStepId: "ca-start", parentTaskId: a });
+
+    // Node task N ($0.50, its own row) with a stamped child B ($2): 2, not 4.
+    await run("na", nodeOwned, "manual", on(D1, 10));
+    await step("na-start", "na", "start", "swarm-script", on(D1, 10));
+    const n = await task(on(D1, 11), 0.5, { workflowRunId: "na" });
+    await task(on(D1, 12), 2, { sourceStepId: "na-start", parentTaskId: n });
+
+    // Across midnight: step task A on D1 ($1), its unstamped child C on D2
+    // ($4, A's), and a stamped child B on D2 ($2, D2's own root).
+    await run("xa", crossDay, "manual", on(D1, 20));
+    await step("xa-start", "xa", "start", "swarm-script", on(D1, 20));
+    await run("xb", crossDay, "manual", on(D2, 20));
+    await step("xb-start", "xb", "start", "swarm-script", on(D2, 20));
+    const x = await task(on(D1, 21), 1, { sourceStepId: "xa-start" });
+    await task(on(D2, 22), 4, { parentTaskId: x });
+    await task(on(D2, 23), 2, { sourceStepId: "xb-start", parentTaskId: x });
+
+    // A chain of 12 workflows, each run starting the next as a sub-workflow.
+    for (let i = 0; i < 12; i++) {
+      chain.push(
+        (
+          await createWorkflow({
+            name: `roots-chain-${i}`,
+            definition: { nodes: [{ id: "next", type: "sub-workflow", config: {} }] },
+          })
+        ).id,
+      );
+      await run(`q${i}`, chain[i] as string, "manual", on(D1, 100 + i), {
+        ...(i > 0 ? { parentStepId: `q${i - 1}-next` } : {}),
+      });
+      await step(`q${i}-next`, `q${i}`, "next", "sub-workflow", on(D1, 100 + i));
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const stats = await runSavingsRollupTick(inProcessSql, { now: NOW, budgetMs: 60_000 });
+      expect(stats.lastError).toBeNull();
+      if (stats.daysPending === 0) break;
+    }
+  });
+
+  afterAll(async () => {
+    await resetSavingsRollupForTests();
+    closeDb();
+  });
+
+  test("a step task below another step task counts once", async () => {
+    expect(await childTaskUsd(D1, chained)).toBeCloseTo(3, 6);
+  });
+
+  test("a stamped task below a node task counts under its own step", async () => {
+    expect(await childTaskUsd(D1, nodeOwned)).toBeCloseTo(2, 6);
+  });
+
+  test("a chain across midnight splits at the stamped task", async () => {
+    expect(await childTaskUsd(D1, crossDay)).toBeCloseTo(5, 6);
+    expect(await childTaskUsd(D2, crossDay)).toBeCloseTo(2, 6);
+  });
+
+  test("the kept spend moves measured spend, not the saving", async () => {
+    const read = async () =>
+      (await readWorkflowSavings({ days: 7, tier: "smart", now: NOW })).rows.find(
+        (r) => r.workflowId === chained,
+      )!;
+    const counted = await read();
+    await getDbClient().run(
+      "UPDATE automation_savings_daily SET childTaskUsd=0, childTaskMs=0 WHERE jobKind='workflow' AND jobId=?",
+      [chained],
+    );
+    const without = await read();
+    expect(counted.measuredUsd - without.measuredUsd).toBeCloseTo(3, 6);
+    expect(counted.savingUsd.p50).toBeGreaterThan(0);
+    for (const q of ["p10", "p50", "p90"] as const) {
+      expect(counted.savingUsd[q]).toBeCloseTo(without.savingUsd[q], 9);
+    }
+  });
+
+  test("the component tree stops at depth 10", async () => {
+    const own = (await readWorkflowSavings({ days: 7, tier: "smart", now: NOW })).rows.find(
+      (r) => r.workflowId === chain[0],
+    )!;
+    const tree = await readWorkflowComponents({
+      days: 7,
+      tier: "smart",
+      now: NOW,
+      workflowId: chain[0] as string,
+      own,
+    });
+    const depthOf = new Map(tree.components.map((c) => [c.workflowId, c.depth]));
+    expect(Math.max(...depthOf.values())).toBe(10);
+    expect(depthOf.get(chain[10])).toBe(10);
+    expect(depthOf.has(chain[11])).toBe(false);
+    expect(tree.components).toHaveLength(10);
   });
 });
