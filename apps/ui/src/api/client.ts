@@ -802,6 +802,8 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+    vcsRepo?: string;
     /**
      * Create in `draft` status (#1240) — visible to the owner but not
      * dispatch-eligible. Used while attachments are still uploading; the
