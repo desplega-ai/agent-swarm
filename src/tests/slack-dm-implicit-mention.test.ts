@@ -34,6 +34,7 @@ type MessageEventArg = {
   user?: string;
   subtype?: string;
   thread_ts?: string;
+  user_team?: string;
   files?: Array<{ id: string; name: string; mimetype: string; size: number }>;
 };
 
@@ -54,6 +55,7 @@ const mockClient = {
 let createTaskSpy: any;
 let getAllAgentsSpy: any;
 let fetchSlackFilesSpy: any;
+let resolveUserSpy: any;
 const spies: any[] = [];
 let handler: (args: HandlerArgs) => Promise<void>;
 let resetCaches: () => void;
@@ -102,6 +104,9 @@ beforeAll(async () => {
   createTaskSpy = spyOn(siblingAwarenessModule, "createTaskWithSiblingAwareness");
   getAllAgentsSpy = spyOn(dbModule, "getAllAgents");
   fetchSlackFilesSpy = spyOn(inboundFilesModule, "fetchSlackFiles");
+  resolveUserSpy = spyOn(slackEnrichModule, "resolveSlackUserId").mockImplementation(
+    async () => undefined,
+  );
   spies.push(
     createTaskSpy,
     getAllAgentsSpy,
@@ -113,7 +118,7 @@ beforeAll(async () => {
     ),
     spyOn(dbModule, "getMostRecentTaskInThread").mockImplementation(async () => null),
     spyOn(dbModule, "getTasksByAgentId").mockImplementation(async () => []),
-    spyOn(slackEnrichModule, "resolveSlackUserId").mockImplementation(async () => undefined),
+    resolveUserSpy,
     spyOn(slackEnrichModule, "enrichSlackUserEmail").mockImplementation(async () => null),
     spyOn(slackEventDedupModule, "wasEventSeen").mockImplementation(() => false),
   );
@@ -156,6 +161,20 @@ describe("registerMessageHandler — top-level 1:1 DM is addressed to the bot", 
     const [description, options] = createTaskSpy.mock.calls[0];
     expect(description).toContain("Can you check why the nightly digest did not post?");
     expect(options).toMatchObject({ agentId: LEAD.id, slackTriggerMessageTs: ts });
+  });
+
+  test("passes the sender's Slack team to the requester resolver", async () => {
+    // A Slack Connect sender: without userTeam the resolver cannot tell them
+    // from a member, and a company-domain email would create a member row.
+    await deliver({
+      channel: "D_DM_IMPLICIT",
+      channel_type: "im",
+      text: "hello from another workspace",
+      user_team: "T_OTHER_WORKSPACE",
+    });
+
+    expect(resolveUserSpy).toHaveBeenCalledTimes(1);
+    expect(resolveUserSpy.mock.calls[0][2]).toMatchObject({ userTeam: "T_OTHER_WORKSPACE" });
   });
 
   test("untagged top-level DM creates a Lead task when no agent is online", async () => {

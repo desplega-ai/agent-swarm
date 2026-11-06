@@ -5,7 +5,16 @@
  */
 import { getDbClient } from "../db";
 import type { DbParam } from "../db-client";
-import { JEV_PER_M, nodeOpsOf, scriptOpsFromAwaitCount, type WorkflowFacts } from "./model";
+import {
+  DEFAULT_OPS,
+  INLINE_OPS,
+  INLINE_SCRIPT_NAME,
+  JEV_PER_M,
+  nodeOpsOf,
+  type ScriptFacts,
+  scriptOpsFromAwaitCount,
+  type WorkflowFacts,
+} from "./model";
 
 /** Runs a read query. The default is the API's own DB client. */
 export type SavingsSql = <T>(sql: string, params: DbParam[]) => Promise<T[]>;
@@ -56,24 +65,38 @@ async function scriptOps(names: string[], sql: SavingsSql): Promise<Map<string, 
   const ops = new Map<string, number>();
   const unique = [...new Set(names.filter(Boolean))];
   if (unique.length === 0) return ops;
-  const rows = await sql<{ name: string; aw: number }>(
-    `SELECT name, ${AWAITS_SQL} aw FROM scripts WHERE isScratch=0 AND name IN (${unique.map(() => "?").join(",")}) ORDER BY scope='global'`,
-    unique,
-  );
-  for (const row of rows) ops.set(row.name, scriptOpsFromAwaitCount(row.aw));
+  // Chunked: a day can have over a thousand script names.
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const rows = await sql<{ name: string; aw: number }>(
+      `SELECT name, ${AWAITS_SQL} aw FROM scripts WHERE isScratch=0 AND name IN (${chunk.map(() => "?").join(",")}) ORDER BY scope='global'`,
+      chunk,
+    );
+    for (const row of rows) ops.set(row.name, scriptOpsFromAwaitCount(row.aw));
+  }
   return ops;
 }
 
-/** UTC day (`YYYY-MM-DD`) of an ISO `startedAt`. */
-const DAY_SQL = "substr(r.startedAt,1,10)";
+/**
+ * How runs are grouped: by UTC day (`YYYY-MM-DD`), or by UTC minute
+ * (`YYYY-MM-DDTHH:MM`) so a reader can drop the runs before a window start
+ * that falls inside the scanned slice.
+ */
+export type SavingsBucket = "day" | "minute";
 
-/** Every run's facts, grouped by the UTC day it started; the window facts are their sum. */
+/** The SQL key of an ISO `startedAt` column for `bucket`. */
+function bucketSql(column: string, bucket: SavingsBucket = "day"): string {
+  return `substr(${column},1,${bucket === "minute" ? 16 : 10})`;
+}
+
+/** Every run's facts, grouped by the UTC day (or minute) it started; the window facts are their sum. */
 export async function computeWorkflowWindow(
   workflow: { id: string; definition: unknown },
   window: { start: string; end: string },
   sql: SavingsSql = defaultSql,
-  opts: { maxRuns?: number } = {},
+  opts: { maxRuns?: number; bucket?: SavingsBucket } = {},
 ): Promise<WorkflowWindow> {
+  const DAY_SQL = bucketSql("r.startedAt", opts.bucket);
   const span = [workflow.id, window.start, window.end];
   const maxRuns = opts.maxRuns ?? LIVE_MAX_RUNS;
   // Index-only count first, so a high-volume workflow never reaches the step scans.
@@ -204,4 +227,123 @@ export async function computeWorkflowWindow(
     for (const k of Object.keys(facts) as (keyof WorkflowFacts)[]) facts[k] += f[k];
   }
   return { status: "ok", facts, byDay };
+}
+
+/** One script's facts per UTC day. */
+export type ScriptDayFacts = ScriptFacts & { day: string };
+export type ScriptWindowFacts = { scriptName: string; byDay: ScriptDayFacts[] };
+
+/** Source that can create an agent task or start a workflow; only these scripts are probed for effects. */
+const DISPATCH_SQL =
+  "(source LIKE '%task_send%' OR source LIKE '%send_task%' OR source LIKE '%sendTask%' OR source LIKE '%workflow_trigger%')";
+
+/** The script_runs filter of a window, narrowed to one script name (runs without one by INLINE_SCRIPT_NAME). */
+function scriptRunsFilter(
+  window: { start: string; end: string },
+  opts: { scriptName?: string },
+): { where: string; params: string[] } {
+  const span = [window.start, window.end];
+  return opts.scriptName === undefined
+    ? { where: "", params: span }
+    : {
+        where: "AND coalesce(scriptName, ?)=?",
+        params: [...span, INLINE_SCRIPT_NAME, opts.scriptName],
+      };
+}
+
+/** Runs of every script (or of one script) in the window. */
+export async function countScriptRuns(
+  window: { start: string; end: string },
+  sql: SavingsSql = defaultSql,
+  opts: { scriptName?: string } = {},
+): Promise<number> {
+  const { where, params } = scriptRunsFilter(window, opts);
+  const rows = await sql<{ n: number }>(
+    `SELECT count(*) n FROM script_runs WHERE startedAt>=? AND startedAt<? ${where}`,
+    params,
+  );
+  return num(rows[0]?.n);
+}
+
+/**
+ * Facts of every script with runs in the window (or of one script), grouped by
+ * the UTC day (or minute) the runs started. Ported from v7 `scriptJobs`: runs are keyed by
+ * `scriptName` (runs without one by INLINE_SCRIPT_NAME), ops are the `await`
+ * count of the catalog source (the global row wins), and a run had an effect
+ * when its output names an agent task created while it ran (up to 20 minutes
+ * after it started), counted on the day the run started. v7 folds names beyond its first 900 into a tail row; here
+ * every name keeps its own row and ops.
+ */
+export async function computeScriptWindow(
+  window: { start: string; end: string },
+  sql: SavingsSql = defaultSql,
+  opts: { scriptName?: string; bucket?: SavingsBucket } = {},
+): Promise<ScriptWindowFacts[]> {
+  const span = [window.start, window.end];
+  const { where, params } = scriptRunsFilter(window, opts);
+  const runs = await sql<{ d: string; nm: string; n: number; api: number; secs: number | null }>(
+    `SELECT ${bucketSql("startedAt", opts.bucket)} d, coalesce(scriptName,'${INLINE_SCRIPT_NAME}') nm, count(*) n, sum(apiEndpointId IS NOT NULL) api,
+      sum((julianday(coalesce(finishedAt,startedAt))-julianday(startedAt))*86400) secs
+      FROM script_runs WHERE startedAt>=? AND startedAt<? ${where} GROUP BY 1,2`,
+    params,
+  );
+  if (runs.length === 0) return [];
+  const names = [...new Set(runs.map((r) => String(r.nm)))].filter((n) => n !== INLINE_SCRIPT_NAME);
+  const ops = await scriptOps(names, sql);
+
+  const dispatchers: string[] = [];
+  for (let i = 0; i < names.length; i += 500) {
+    const chunk = names.slice(i, i + 500);
+    const rows = await sql<{ name: string }>(
+      `SELECT DISTINCT name FROM scripts WHERE isScratch=0 AND name IN (${chunk.map(() => "?").join(",")}) AND ${DISPATCH_SQL}`,
+      chunk,
+    );
+    dispatchers.push(...rows.map((r) => String(r.name)));
+  }
+  // Effect runs per day the run started, like their runs: a run at 23:59 whose
+  // task lands after midnight still credits its own day, so tasks are read up
+  // to 20 minutes past the window end.
+  const effects = new Map<string, { other: number; api: number }>();
+  if (dispatchers.length > 0) {
+    const rows = await sql<{ d: string; nm: string; api: number; n: number }>(
+      `SELECT ${bucketSql("r.startedAt", opts.bucket)} d, r.scriptName nm, (r.apiEndpointId IS NOT NULL) api, count(DISTINCT r.id) n
+        FROM agent_tasks t INDEXED BY idx_agent_tasks_created
+        JOIN script_runs r INDEXED BY idx_script_runs_scriptName_startedAt ON r.scriptName IN (${dispatchers.map(() => "?").join(",")})
+          AND r.startedAt>=strftime('%Y-%m-%dT%H:%M:%fZ',t.createdAt,'-20 minutes') AND r.startedAt<=t.createdAt AND r.output LIKE '%'||t.id||'%'
+          AND r.startedAt>=? AND r.startedAt<?
+        WHERE t.createdAt>=? AND t.createdAt<strftime('%Y-%m-%dT%H:%M:%fZ',?,'+20 minutes') GROUP BY 1,2,3`,
+      [...dispatchers, ...span, ...span],
+    );
+    for (const row of rows) {
+      const key = `${row.nm}\u0000${row.d}`;
+      const e = effects.get(key) ?? { other: 0, api: 0 };
+      if (num(row.api)) e.api += num(row.n);
+      else e.other += num(row.n);
+      effects.set(key, e);
+    }
+  }
+
+  const byName = new Map<string, ScriptDayFacts[]>();
+  const push = (nm: string, f: ScriptDayFacts) => byName.set(nm, [...(byName.get(nm) ?? []), f]);
+  for (const r of runs) {
+    const nm = String(r.nm);
+    const n = num(r.n);
+    const perRun = nm === INLINE_SCRIPT_NAME ? INLINE_OPS : (ops.get(nm) ?? DEFAULT_OPS);
+    const e = effects.get(`${nm}\u0000${r.d}`);
+    push(nm, {
+      day: String(r.d),
+      runs: n,
+      apiRuns: num(r.api),
+      effectRuns: e?.other ?? 0,
+      apiEffectRuns: e?.api ?? 0,
+      opsSum: perRun * n,
+      computeSecs: num(r.secs),
+    });
+  }
+  return [...byName.entries()]
+    .map(([scriptName, byDay]) => ({
+      scriptName,
+      byDay: byDay.sort((a, b) => a.day.localeCompare(b.day)),
+    }))
+    .sort((a, b) => a.scriptName.localeCompare(b.scriptName));
 }

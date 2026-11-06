@@ -4442,9 +4442,20 @@ export interface SavingsBand {
   p90: number;
 }
 
+/** One workflow or one script (by name; scripts of one name share a row across scopes). */
+export type SavingsTarget = { workflowId: string } | { scriptName: string };
+
 export interface SavingsJobRow {
-  kind: "workflow";
-  workflowId: string;
+  /**
+   * `script-scheduled`: a schedule targets the script, priced as a standalone
+   * agent task. `script-agent-invoked`: priced as the extra turns it adds to
+   * the calling agent's session.
+   */
+  kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+  /** Set on workflow rows. */
+  workflowId?: string;
+  /** Set on script rows. */
+  scriptName?: string;
   name: string;
   basis: "modelled";
   /** True when only the runs with a downstream effect count (an event router). */
@@ -4501,6 +4512,37 @@ export interface SavingsJobsResponse {
   total: SavingsTotals | null;
 }
 
+/** A schedule's row: the schedule's workflow or script target (runs carry no schedule link), or its measured spend. */
+export interface SavingsScheduleRef {
+  scheduleId: string;
+  scheduleName: string;
+  scheduleEnabled: boolean;
+}
+
+/** The target job's whole row, shared with any other schedule of the same target. */
+export type SavingsTargetRow = SavingsJobRow & SavingsScheduleRef & { scope: "target-job" };
+
+/** An agent-task schedule: what its tasks cost, with no saving to model. */
+export interface SavingsMeasuredRow extends SavingsScheduleRef {
+  kind: "agent-task-schedule";
+  name: string;
+  basis: "measured";
+  /** Agent tasks the schedule created in the window. */
+  runs: number;
+  /** Recorded cost of those tasks; a floor, as their reviews and follow-ups are not linked to the schedule. */
+  actualUsd: number;
+  actualHours: number;
+  savingUsd: null;
+}
+
+export type SavingsScheduleRow = SavingsTargetRow | SavingsMeasuredRow;
+
+export interface SavingsScheduleResponse extends Omit<SavingsJobsResponse, "rows" | "reason"> {
+  /** `target-missing`: the schedule's workflow or script no longer exists. */
+  reason: SavingsJobsResponse["reason"] | "target-missing";
+  rows: SavingsScheduleRow[];
+}
+
 /** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
 export interface SavingsDailyPoint {
   day: string;
@@ -4518,8 +4560,42 @@ export interface SavingsDailyResponse {
   tier: SavingsTier;
   calibrationModel: string;
   calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
   computedAt: string | null;
   valid: boolean;
   reason: "not-computed" | "no-runs" | null;
   points: SavingsDailyPoint[];
+}
+
+/** One kind of job in the fleet savings summary; p50 values. */
+export interface SavingsKindTotals {
+  jobs: number;
+  runs: number;
+  substitutedRuns: number;
+  savingUsd: number;
+  hoursSaved: number;
+}
+
+/** GET /api/savings/summary: every workflow and script, with the fleet band. */
+export interface SavingsSummaryResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  total: SavingsTotals | null;
+  byKind: {
+    workflows: SavingsKindTotals;
+    scheduledScripts: SavingsKindTotals;
+    agentInvokedScripts: SavingsKindTotals;
+  } | null;
+  /** Measured session spend of the whole swarm in the window. */
+  fleetLlmUsd: number;
+  /** `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`; null without spend or a valid total. */
+  selfOptimizationRatio: number | null;
+  excluded: { enabledOnlyRuns: number } | null;
+  assumptions: string[];
 }

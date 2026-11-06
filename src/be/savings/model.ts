@@ -49,6 +49,10 @@ export const ERR_JOB: SavingsBand = { p10: 0.542, p50: 1.0, p90: 1.508 };
 export const ERR_FLEET: SavingsBand = { p10: 0.746, p50: 1.0, p90: 1.325 };
 /** Ops of a swarm-script node whose script is not in the catalog. */
 export const DEFAULT_OPS = 9;
+/** Ops of a script run with inline source (no catalog entry), from v7. */
+export const INLINE_OPS = 3.9;
+/** Job id of the script runs that carry no script name (inline source). */
+export const INLINE_SCRIPT_NAME = "(inline source)";
 /** Upper bound on the ops counted for one script. */
 export const MAX_SCRIPT_OPS = 100;
 /**
@@ -514,4 +518,146 @@ export function splitByDay(
       estimatedLlmUsd,
     };
   });
+}
+
+/** Tier-independent facts about one script (by name) over a window. */
+export type ScriptFacts = {
+  /** Every run that started in the window. */
+  runs: number;
+  /** Runs started through an API endpoint: enabled-only unless they had an effect. */
+  apiRuns: number;
+  /** Non-API runs whose output names an agent task created while they ran. */
+  effectRuns: number;
+  /** API runs with such an effect. */
+  apiEffectRuns: number;
+  /** Ops summed over every run (ops per run times runs). */
+  opsSum: number;
+  /** Wall time of the runs. */
+  computeSecs: number;
+};
+
+export type ScriptKind = "script-scheduled" | "script-agent-invoked";
+
+/**
+ * Price one script's facts at a tier, as v7 `scriptJobs` does. A scheduled
+ * script (a schedule targets it) is a standalone agent task with a lead
+ * review; any other script is priced as the extra turns it would add to the
+ * calling agent's session (no bootstrap, no review). Non-API runs count at
+ * most 24 a day, unless they had a downstream effect. An API run counts only
+ * when it had an effect, then as a standalone decision with a review.
+ * Scripts record no LLM spend and keep no agent active, so their actual
+ * cost and agent-hours are 0.
+ */
+export function priceScript(
+  facts: ScriptFacts,
+  opts: {
+    tier: SavingsTier;
+    days: number;
+    band: "job" | "fleet";
+    kind: ScriptKind;
+    curve?: CurveSet;
+  },
+): PricedWorkflow {
+  const runs = facts.runs;
+  const nonApi = runs - facts.apiRuns;
+  const vCap = Math.min(nonApi, CAP_PER_DAY * opts.days);
+  const v = Math.max(vCap, Math.min(nonApi, facts.effectRuns));
+  const apiV = facts.apiEffectRuns;
+  const opsPerRun = runs > 0 ? facts.opsSum / runs : 0;
+  const tau = Math.min(TAU_MAX, T0 + K * opsPerRun);
+  const fullUsd = curve(tau, opts.tier, "usd", opts.curve);
+  const fullHrs = curve(tau, opts.tier, "hrs", opts.curve);
+  const scheduled = opts.kind === "script-scheduled";
+  const unitUsd = scheduled
+    ? fullUsd
+    : Math.max(0, fullUsd - curve(T0, opts.tier, "usd", opts.curve));
+  const unitHrs = scheduled
+    ? fullHrs
+    : Math.max(0, fullHrs - curve(T0, opts.tier, "hrs", opts.curve));
+  const review = scheduled ? F_FOLLOWUP : 0;
+  const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
+  const agentOnlyUsd = bandOf(
+    (q) => v * (R[q] * unitUsd * err[q] + review) + apiV * (R[q] * fullUsd * err[q] + F_FOLLOWUP),
+  );
+  const agentOnlyHours = bandOf(
+    (q) => v * R[q] * unitHrs * err[q] + apiV * R[q] * fullHrs * err[q],
+  );
+  // A script run keeps no agent active: scheduled and API runs have no agent,
+  // and an agent-invoked run's wait is already inside the turns `unitHrs`
+  // removes. v7 subtracted the runs' wall time, which made short runs negative.
+  const actualHours = 0;
+  return {
+    enabledOnlyRule: false,
+    runs,
+    substitutedRuns: v + apiV,
+    effectRuns: v - vCap + apiV,
+    enabledOnlyRuns: runs - v - apiV,
+    capApplied: vCap < nonApi,
+    opsPerRun,
+    measuredUsd: 0,
+    estimatedLlmUsd: 0,
+    actualUsd: 0,
+    agentOnlyUsd,
+    savingUsd: agentOnlyUsd,
+    actualHours,
+    agentOnlyHours,
+    hoursSaved: bandOf((q) => agentOnlyHours[q] - actualHours),
+    agentOnlyUsdPerRun: R.p50 * unitUsd + review,
+  };
+}
+
+/**
+ * Split a script's window p50 saving across the UTC days its runs started
+ * on, so the days sum to `priceScript` over the window. Counted non-API runs
+ * are spread pro rata over the days' non-API runs; API effect runs count on
+ * their own day.
+ */
+export function splitScriptByDay(
+  facts: ScriptFacts,
+  byDay: readonly (ScriptFacts & { day: string })[],
+  priced: PricedWorkflow,
+): {
+  day: string;
+  savingUsd: number;
+  actualUsd: number;
+  measuredUsd: number;
+  estimatedLlmUsd: number;
+}[] {
+  const nonApi = facts.runs - facts.apiRuns;
+  const v = priced.substitutedRuns - facts.apiEffectRuns;
+  const apiUnit =
+    facts.apiEffectRuns > 0
+      ? (priced.agentOnlyUsd.p50 - v * priced.agentOnlyUsdPerRun) / facts.apiEffectRuns
+      : 0;
+  return byDay.map((d) => ({
+    day: d.day,
+    savingUsd:
+      (nonApi > 0 ? (v * (d.runs - d.apiRuns)) / nonApi : 0) * priced.agentOnlyUsdPerRun +
+      d.apiEffectRuns * apiUnit,
+    actualUsd: 0,
+    measuredUsd: 0,
+    estimatedLlmUsd: 0,
+  }));
+}
+
+const TIER_MODEL: Record<SavingsTier, string> = {
+  smol: "haiku-5-5",
+  regular: "sonnet-5-5",
+  smart: "opus-5-5",
+  ultra: "fable-5-1",
+};
+
+/** The model's assumptions in words, from the v7 estimator, with this port's constants. */
+export function savingsAssumptions(tier: SavingsTier): string[] {
+  return [
+    `Tier ${tier} prices sessions at ${TIER_MODEL[tier]} on the fleet's measured session token profile (${CALIBRATION_MODEL}, calibrated ${CALIBRATED_AT}).`,
+    `Agent turns per deterministic op K=${K}, bootstrap T0=${T0} turns, session length capped at ${TAU_MAX} turns (fleet p95).`,
+    `Schedule-triggered runs count at most ${CAP_PER_DAY} a day per job (an agent would not poll faster than hourly) unless they caused a downstream effect; event and manual runs count 1:1; skipped and cancelled runs are excluded.`,
+    `Event routers (over ${ROUTER_MIN_RUNS_PER_DAY} event runs a day, under ${ROUTER_MAX_EFFECT_SHARE * 100}% with an effect) and API-invoked script runs are enabled-only: an effect run counts as one agent decision, never as the job it starts, which is priced on its own row.`,
+    "Effect links: a workflow run created an agent task (agent_tasks.workflowRunId) or started a child workflow run (workflow_runs.parentStepId); a script run wrote the id of an agent task created during the run into its output.",
+    `Failure and retry multiplier R=${R.p50} (p10 ${R.p10}, p90 ${R.p90}) from scheduled agent tasks; lead follow-up review $${F_FOLLOWUP} per standalone agent task.`,
+    "Scripts no schedule targets are priced as the extra turns they add to the calling agent's session (no bootstrap, no review).",
+    "Agent-task nodes inside workflows count at their actual cost on both sides; only the deterministic glue is substituted.",
+    "Scripts record no LLM spend, so their actual cost counts as $0; LLM calls made inside scripts are not counted.",
+  ];
 }

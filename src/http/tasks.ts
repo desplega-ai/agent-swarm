@@ -106,7 +106,12 @@ import {
   rejectGuest,
   requestPrincipal,
 } from "./request-principal";
-import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
+import {
+  buildTaskRequestedBy,
+  buildTaskThreadParticipants,
+  TaskRequestedBySchema,
+  TaskThreadParticipantsSchema,
+} from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
@@ -723,6 +728,7 @@ const listPausedTasks = route({
             // Same requester projection a fresh task_assigned trigger carries,
             // so a resumed session gets the same requester-profile prompt.
             requestedBy: TaskRequestedBySchema.optional(),
+            threadParticipants: TaskThreadParticipantsSchema.optional(),
             // The claimed profile's pooled-key allowlist, read again from the
             // profile, so the recovery spawn picks keys as the claim did.
             credentialAllowlist: ModelProfileCredentialsSchema.optional(),
@@ -1957,6 +1963,7 @@ export async function handleTasks(
     const tasks = await Promise.all(
       pausedTasks.map(async (task) => {
         const requestedBy = await buildTaskRequestedBy(task);
+        const threadParticipants = await buildTaskThreadParticipants(task);
         const profile = task.resolvedProfile
           ? await getModelProfileByName(task.resolvedProfile)
           : null;
@@ -1972,6 +1979,7 @@ export async function handleTasks(
           ...task,
           attachments: await getTaskAttachments(task.id),
           ...(requestedBy && { requestedBy }),
+          ...(threadParticipants && { threadParticipants }),
           ...(profile?.credentials && { credentialAllowlist: profile.credentials }),
         };
       }),

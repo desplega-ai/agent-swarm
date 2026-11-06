@@ -123,6 +123,9 @@ import type {
   RuntimePoolRuntime,
   SavingsDailyResponse,
   SavingsJobsResponse,
+  SavingsScheduleResponse,
+  SavingsSummaryResponse,
+  SavingsTarget,
   SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
@@ -4009,48 +4012,64 @@ class ApiClient {
     return (await res.json()) as { enabled: false };
   }
 
-  /** Modelled saving of one workflow against doing its runs with agent tasks. */
-  async getWorkflowSavings(
-    workflowId: string,
+  /**
+   * Modelled saving of one workflow or script (`target`), or of every workflow
+   * or script with runs in the window (`{ kind }`), from the hourly rollup.
+   */
+  async getSavingsJobs(
+    target: SavingsTarget | { kind: "workflow" | "script" },
     opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
   ): Promise<SavingsJobsResponse> {
-    const params = new URLSearchParams({ workflowId });
-    if (opts.days) params.set("days", String(opts.days));
-    if (opts.tier) params.set("tier", opts.tier);
-    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
-      headers: this.getHeaders(),
-    });
-    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load savings: ${res.status}`);
     return (await res.json()) as SavingsJobsResponse;
   }
 
-  /** The workflow's modelled saving per UTC day, from the same computation as `getWorkflowSavings`. */
-  async getWorkflowSavingsDaily(
-    workflowId: string,
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
+  }
+
+  /**
+   * The modelled saving of one workflow or script per UTC day, from the same
+   * rollup as `getSavingsJobs`; with no target, of the whole fleet.
+   */
+  async getSavingsDaily(
+    target: SavingsTarget | undefined,
     opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
   ): Promise<SavingsDailyResponse> {
-    const params = new URLSearchParams({ workflowId });
-    if (opts.days) params.set("days", String(opts.days));
-    if (opts.tier) params.set("tier", opts.tier);
-    const res = await fetch(`${this.getBaseUrl()}/api/savings/daily?${params}`, {
-      headers: this.getHeaders(),
-    });
-    if (!res.ok) throw new Error(`Failed to load daily workflow savings: ${res.status}`);
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target ?? {}, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load daily savings: ${res.status}`);
     return (await res.json()) as SavingsDailyResponse;
   }
 
-  /** Modelled saving of every workflow with runs in the window, from the hourly rollup. */
-  async getWorkflowsSavings(
+  /** The fleet's modelled saving, spend and assumptions, from the savings rollup. */
+  async getSavingsSummary(
     opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
-  ): Promise<SavingsJobsResponse> {
-    const params = new URLSearchParams({ kind: "workflow" });
-    if (opts.days) params.set("days", String(opts.days));
-    if (opts.tier) params.set("tier", opts.tier);
-    const res = await fetch(`${this.getBaseUrl()}/api/savings/jobs?${params}`, {
+  ): Promise<SavingsSummaryResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/summary?${savingsParams({}, opts)}`, {
       headers: this.getHeaders(),
     });
-    if (!res.ok) throw new Error(`Failed to load workflow savings: ${res.status}`);
-    return (await res.json()) as SavingsJobsResponse;
+    if (!res.ok) throw new Error(`Failed to load the savings summary: ${res.status}`);
+    return (await res.json()) as SavingsSummaryResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
@@ -4573,3 +4592,13 @@ export interface ExecutorTypeInfo {
 }
 
 export const api = new ApiClient();
+
+function savingsParams(
+  target: Record<string, string>,
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier },
+): URLSearchParams {
+  const params = new URLSearchParams(target);
+  if (opts.days) params.set("days", String(opts.days));
+  if (opts.tier) params.set("tier", opts.tier);
+  return params;
+}

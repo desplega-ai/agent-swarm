@@ -16,6 +16,10 @@ import { useWorkflows } from "@/api/hooks/use-workflows";
 import type { AgentTask, ScheduledTask } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
 import {
+  ScheduleSavingsHeaderAmount,
+  ScheduleSavingsStats,
+} from "@/components/savings/schedule-savings";
+import {
   EMPTY_SCHEDULE_TARGET,
   isScheduleTargetInvalid,
   ScheduleTargetFields,
@@ -227,6 +231,16 @@ export default function ScheduleDetailPage() {
             {schedule.taskType}
           </Badge>
         )}
+        <ScheduleSavingsHeaderAmount
+          scheduleId={schedule.id}
+          targetHref={
+            schedule.targetType === "workflow"
+              ? `/workflows/${schedule.workflowId}?tab=savings`
+              : linkedScript
+                ? `/scripts/${linkedScript.id}?tab=savings`
+                : undefined
+          }
+        />
         {/* On a phone the actions take their own row, left-aligned under the
             badges, instead of hanging off the right edge. */}
         <div className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto sm:shrink-0">
@@ -483,6 +497,7 @@ export default function ScheduleDetailPage() {
                 label="Last Run"
                 value={schedule.lastRunAt ? formatSmartTime(schedule.lastRunAt) : "Never"}
               />
+              <ScheduleSavingsStats scheduleId={schedule.id} />
               {(schedule.model || schedule.modelTier) && (
                 <QuickStat
                   label="Model"

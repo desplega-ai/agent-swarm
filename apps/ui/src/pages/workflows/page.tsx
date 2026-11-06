@@ -71,7 +71,8 @@ export default function WorkflowsPage() {
   // One request for the whole list, joined by workflow id.
   const savingsById = useMemo(() => {
     const m = new Map<string, SavingsJobRow>();
-    if (savings?.valid) for (const row of savings.rows) m.set(row.workflowId, row);
+    if (savings?.valid)
+      for (const row of savings.rows) if (row.workflowId) m.set(row.workflowId, row);
     return m;
   }, [savings]);
   const { data: status } = useStatusContext();

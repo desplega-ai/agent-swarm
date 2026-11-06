@@ -2533,6 +2533,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     status?: string;
     contextKey?: string;
     requestedBy?: Trigger["requestedBy"];
+    threadParticipants?: Trigger["threadParticipants"];
     /** The profile claim applied, and its pooled-key allowlist read again at fetch. */
     resolvedProfile?: string;
     credentialAllowlist?: Record<string, string[]>;
@@ -2573,6 +2574,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         output?: string;
         status?: string;
         requestedBy?: Trigger["requestedBy"];
+        threadParticipants?: Trigger["threadParticipants"];
         resolvedProfile?: string;
         credentialAllowlist?: Record<string, string[]>;
       }>;
@@ -3469,6 +3471,21 @@ interface Trigger {
     /** Structured communication preferences from `users.metadata.comms`. */
     comms?: { tone?: string; language?: string; verbosity?: string };
   };
+  /** People in a multi-person Slack thread (server: `buildTaskThreadParticipants`). */
+  threadParticipants?: {
+    total: number;
+    more: number;
+    people: Array<{
+      label: string;
+      trust: "internal" | "external" | "unknown";
+      starter?: boolean;
+      newest?: boolean;
+      asked?: boolean;
+      language?: string;
+      verbosity?: string;
+    }>;
+    starterProfile?: NonNullable<Trigger["requestedBy"]>;
+  };
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -3512,32 +3529,129 @@ function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
 }
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
+type ThreadParticipants = NonNullable<Trigger["threadParticipants"]>;
 
-export async function buildRequesterProfilePrompt(
-  requestedBy: RequesterProfile | undefined,
-): Promise<string> {
-  const comms = requestedBy?.comms;
+/** Comms and notes lines of a profile block, or undefined when it has nothing to say. */
+function profileSections(
+  profile: RequesterProfile | undefined,
+): { role: string; comms: string; notes: string } | undefined {
+  const comms = profile?.comms;
   const commsParts = [
     comms?.tone ? `tone: ${comms.tone}` : undefined,
     comms?.language ? `language: ${comms.language}` : undefined,
     comms?.verbosity ? `verbosity: ${comms.verbosity}` : undefined,
   ].filter((part): part is string => Boolean(part));
-  if (!requestedBy?.role && !requestedBy?.notes && commsParts.length === 0) return "";
+  if (!profile?.role && !profile?.notes && commsParts.length === 0) return undefined;
+  const notes = profile?.notes?.trim();
+  return {
+    role: profile?.role ? ` (${profile.role})` : "",
+    comms:
+      commsParts.length > 0 ? `\nTheir communication preferences: ${commsParts.join(", ")}.` : "",
+    notes: notes ? `\nTheir stated notes for how you should respond and act:\n${notes}` : "",
+  };
+}
 
-  const commsSection =
-    commsParts.length > 0 ? `\nTheir communication preferences: ${commsParts.join(", ")}.` : "";
-  const notes = requestedBy?.notes?.trim();
-  const notesSection = notes
-    ? `\nTheir stated notes for how you should respond and act:\n${notes}`
-    : "";
+export async function buildRequesterProfilePrompt(
+  requestedBy: RequesterProfile | undefined,
+  inThread = false,
+): Promise<string> {
+  const sections = profileSections(requestedBy);
+  if (!sections) return "";
   const result = await resolveTemplateAsync("task.requester.profile", {
     requester_name: requestedBy?.name ?? "",
-    requester_role_suffix: requestedBy?.role ? ` (${requestedBy.role})` : "",
-    requester_comms_section: commsSection,
-    requester_notes_section: notesSection,
+    requester_role_suffix: sections.role,
+    requester_thread_suffix: inThread ? ", who sent the newest message in this thread" : "",
+    requester_comms_section: sections.comms,
+    requester_notes_section: sections.notes,
   });
 
   return result.skipped ? "" : result.text.trim();
+}
+
+export async function buildThreadStarterProfilePrompt(
+  starter: RequesterProfile | undefined,
+): Promise<string> {
+  const sections = profileSections(starter);
+  if (!starter || !sections) return "";
+  const result = await resolveTemplateAsync("task.thread.starter_profile", {
+    starter_name: starter.name,
+    starter_role_suffix: sections.role,
+    starter_comms_section: sections.comms,
+    starter_notes_section: sections.notes,
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+export async function buildUntrustedRequesterPrompt(requesterLabel: string): Promise<string> {
+  const result = await resolveTemplateAsync("task.thread.untrusted_requester", {
+    requester_label: requesterLabel,
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/** One line per listed person; a primary sender points at their profile block by name. */
+export async function buildThreadParticipantsPrompt(
+  thread: ThreadParticipants,
+  rendered: { requesterProfile: boolean; starterProfile: boolean },
+): Promise<string> {
+  const lines = thread.people.map((person) => {
+    const untrusted = person.trust !== "internal";
+    const roles = [
+      person.newest ? "newest sender" : undefined,
+      person.starter ? "started this work" : undefined,
+      !person.newest && !person.starter && person.asked ? "asked in this batch" : undefined,
+    ].filter(Boolean);
+    const notes = [
+      person.language ? `language: ${person.language}` : undefined,
+      person.verbosity ? `verbosity: ${person.verbosity}` : undefined,
+    ].filter(Boolean);
+    const profile =
+      !untrusted && person.newest && rendered.requesterProfile
+        ? "Profile: Requester Profile above."
+        : !untrusted && person.starter && rendered.starterProfile
+          ? "Profile: Thread starter profile above."
+          : !untrusted && notes.length > 0
+            ? `${notes.join("; ")}.`
+            : "no saved preferences.";
+    return roles.length > 0
+      ? `- ${person.label}: ${roles.join(", ")}. ${profile[0]!.toUpperCase()}${profile.slice(1)}`
+      : `- ${person.label}: ${profile}`;
+  });
+  if (thread.more > 0) lines.push(`- <${thread.more} more...>`);
+  const result = await resolveTemplateAsync("task.thread.participants", {
+    participant_count: String(thread.total),
+    participant_lines: lines.join("\n"),
+  });
+  if (result.skipped) return "";
+  if (!thread.people.some((person) => person.trust !== "internal")) return result.text.trim();
+  const untrusted = await resolveTemplateAsync("task.thread.untrusted_participants", {});
+  return untrusted.skipped ? result.text.trim() : `${result.text.trim()}\n${untrusted.text.trim()}`;
+}
+
+/**
+ * Requester-side blocks of the task prompt: the Requester Profile (or the
+ * untrusted-requester block), the thread starter's profile, and the
+ * participants list. Without thread participants this is the Requester
+ * Profile alone, unchanged.
+ */
+export async function buildRequesterPrompts(
+  requestedBy: RequesterProfile | undefined,
+  thread: ThreadParticipants | undefined,
+): Promise<string[]> {
+  const newest = thread?.people.find((person) => person.newest);
+  const untrustedRequester = !!newest && newest.trust !== "internal";
+  const head =
+    newest && untrustedRequester
+      ? await buildUntrustedRequesterPrompt(newest.label)
+      : await buildRequesterProfilePrompt(requestedBy, !!thread);
+  const starterProfile = await buildThreadStarterProfilePrompt(thread?.starterProfile);
+  const participants = thread
+    ? await buildThreadParticipantsPrompt(thread, {
+        requesterProfile: !untrustedRequester && !!head,
+        starterProfile: !!starterProfile,
+      })
+    : "";
+  return [head, starterProfile, participants];
 }
 
 /**
@@ -3557,6 +3671,7 @@ export function missingTaskDirWarning(
 /** Per-task context that rides in the task prompt, never the system prompt. */
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
+  threadParticipants?: ThreadParticipants;
   /** Set when the task's `dir` does not exist and the session falls back. */
   cwdWarning?: string;
 };
@@ -3588,7 +3703,7 @@ export async function buildTaskSessionPrompts(input: {
       repoContext: context.repoContext,
       slackContext: context.slackContext,
     }),
-    await buildRequesterProfilePrompt(context.requestedBy),
+    ...(await buildRequesterPrompts(context.requestedBy, context.threadParticipants)),
     context.cwdWarning?.trim(),
   ]
     .filter((part): part is string => Boolean(part))
@@ -7235,6 +7350,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 }
               : undefined,
             requestedBy: task.requestedBy,
+            threadParticipants: task.threadParticipants,
             cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
           },
         });
@@ -7821,6 +7937,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             repoContext: currentRepoContext,
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
+            threadParticipants: trigger.threadParticipants,
             cwdWarning,
           },
         });

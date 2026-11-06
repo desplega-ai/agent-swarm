@@ -386,6 +386,8 @@ Do not strip a gateway ID's own provider prefix to avoid the doubled-looking pat
 
 Ramp model IDs are key-specific. Discover them with Ramp's configuration flow instead of reusing an OpenRouter slug.
 
+If the `openrouter/` ID is valid but not in OpenCode's bundled models.dev snapshot (a new or niche model the snapshot hasn't caught up with yet), the swarm synthesizes a minimal catalog entry for it so OpenCode resolves the model instead of silently falling back to its own default. The synthesized entry assumes the model supports tool calls; an ID that's already in the snapshot keeps its real capability flags.
+
 ## Related
 
 - [Harness Configuration](/docs/guides/harness-configuration) — standard credentials, model selection, and worker examples

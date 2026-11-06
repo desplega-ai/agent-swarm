@@ -319,6 +319,7 @@ value:getDueScheduledTasks
 value:getDueWaitStates
 value:getExpiredPendingApprovals
 value:getFavoriteItemIdSet
+value:getFirstTaskInThread
 value:getIdleWorkersWithCapacity
 value:getInProgressSlackTasks
 value:getInProgressTasksByContextKey
