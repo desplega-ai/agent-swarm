@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getSwarmConfigs, upsertSwarmConfig } from "../be/db";
-import type { DbParam } from "../be/db-client";
+import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
+import { type DbParam, DbTransactionDeadlineError } from "../be/db-client";
 import { calibrate, type DerivedCurveSet } from "../be/savings/calibrate";
 import type { SavingsSql } from "../be/savings/compute";
 import {
@@ -55,7 +55,9 @@ function deadlineSql(deadlineAt: number): SavingsSql {
         ]);
       } catch (err) {
         if (!(err instanceof DbQueryConcurrencyCapError)) throw err;
-        await new Promise((r) => setTimeout(r, Math.min(250 * 2 ** attempt, 2000)));
+        // Never sleep past the deadline: the next turn then fails on time.
+        const nap = Math.min(250 * 2 ** attempt, 2000, Math.max(0, deadlineAt - Date.now()));
+        await new Promise((r) => setTimeout(r, nap));
       } finally {
         clearTimeout(timer);
       }
@@ -204,6 +206,8 @@ export async function handleSavingsCalibration(
   const parsed = await postRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
   const { days, end, apply } = parsed.body;
+  // One clock for the whole request: the permission check, every query, the derivation and the write.
+  const deadlineAt = Date.now() + deadlineMs;
   if (apply && !(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
   if (running) {
     jsonError(res, "A calibration run is already in progress", 409);
@@ -211,10 +215,12 @@ export async function handleSavingsCalibration(
   }
   running = true;
   try {
-    const run = await calibrate(deadlineSql(Date.now() + deadlineMs), {
+    const run = await calibrate(deadlineSql(deadlineAt), {
       days,
       end: end ? new Date(end) : new Date(),
     });
+    // The derivation between queries is CPU work no query race can cut short.
+    if (Date.now() >= deadlineAt) throw new DeadlineError();
     const refusals = run.refusal ? [run.refusal] : [];
     let applied = false;
     if (apply && run.calibration) {
@@ -222,14 +228,21 @@ export async function handleSavingsCalibration(
         refusals.push(`not applied: ${run.applyBlocked}`);
       } else {
         StoredCalibrationSchema.parse(run.calibration);
-        await upsertSwarmConfig({
-          scope: "global",
-          key: SAVINGS_CALIBRATION_KEY,
-          value: JSON.stringify(run.calibration),
-          // Read by the API only; keep the ~9 KB blob out of every agent's environment.
-          exportToEnv: false,
-          description: "Savings session curve derived from this deployment's sessions",
-        });
+        // The outer transaction owns the deadline (upsertSwarmConfig's own one becomes a
+        // savepoint inside it): BEGIN stops retrying and COMMIT is skipped once it has
+        // passed, so a 504 is never followed by a late write.
+        await getDbClient().transaction(
+          () =>
+            upsertSwarmConfig({
+              scope: "global",
+              key: SAVINGS_CALIBRATION_KEY,
+              value: JSON.stringify(run.calibration),
+              // Read by the API only; keep the ~9 KB blob out of every agent's environment.
+              exportToEnv: false,
+              description: "Savings session curve derived from this deployment's sessions",
+            }),
+          { deadlineAt },
+        );
         clearCalibrationCache();
         applied = true;
       }
@@ -246,7 +259,7 @@ export async function handleSavingsCalibration(
       applied,
     });
   } catch (err) {
-    if (err instanceof DeadlineError) {
+    if (err instanceof DeadlineError || err instanceof DbTransactionDeadlineError) {
       jsonError(
         res,
         `Calibration passed its ${deadlineMs / 1000} s deadline; use a shorter window`,

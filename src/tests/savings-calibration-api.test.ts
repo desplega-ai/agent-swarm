@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
@@ -210,6 +211,40 @@ describe("savings calibration API", () => {
       setCalibrationDeadlineMs(null);
     }
     expect((await post({})).status).toBe(200);
+  });
+
+  test("a contended write past the deadline is a 504 and is never committed late", async () => {
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = ?", [SAVINGS_CALIBRATION_KEY]);
+    await seed(1);
+    await scaleTo(1);
+    // A second connection plays an external writer (litestream checkpoint, CLI) for longer than the deadline.
+    const locker = new Database(TEST_DB_PATH);
+    locker.exec("PRAGMA busy_timeout = 25");
+    locker.run("BEGIN IMMEDIATE");
+    const holdMs = 2500;
+    const releaseAt = Date.now() + holdMs;
+    const release = setTimeout(() => locker.run("ROLLBACK"), holdMs);
+    setCalibrationDeadlineMs(1000);
+    try {
+      const startedAt = Date.now();
+      const { status, body } = await post({ apply: true });
+      const elapsed = Date.now() - startedAt;
+      expect(status).toBe(504);
+      expect(body.error).toMatch(/deadline/);
+      // Answered at the deadline, not after the holder let go.
+      expect(Date.now()).toBeLessThan(releaseAt);
+      expect(elapsed).toBeLessThan(holdMs);
+      // Outwait the holder: a late retry would commit now.
+      await new Promise((r) => setTimeout(r, releaseAt - Date.now() + 700));
+      expect(await storedRows()).toHaveLength(0);
+    } finally {
+      clearTimeout(release);
+      if (locker.inTransaction) locker.run("ROLLBACK");
+      locker.close();
+      setCalibrationDeadlineMs(null);
+    }
+    // The lock is released and an uncontended apply works again.
+    expect((await post({ apply: true })).body.applied).toBe(true);
   });
 
   test("apply needs config write access; a dry run does not", async () => {
