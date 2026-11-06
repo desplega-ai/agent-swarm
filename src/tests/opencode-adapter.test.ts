@@ -1111,6 +1111,9 @@ describe("provider key splice (one picked key per task)", () => {
     expect(configOf(host).provider.openrouter).toEqual({
       env: [],
       options: { apiKey: PICKED, baseURL: "http://127.0.0.1:1234/v1" },
+      models: {
+        "deepseek/deepseek-v4-flash": { name: "deepseek/deepseek-v4-flash", tool_call: true },
+      },
     });
   });
 
@@ -1126,6 +1129,30 @@ describe("provider key splice (one picked key per task)", () => {
     expect(openrouter.env).toEqual([]);
     expect(openrouter.options.apiKey).toBe(PICKED);
     expect(openrouter.options.headers).toMatchObject({ "X-Title": "Agent Swarm" });
+  });
+
+  test("openrouter: a model id missing from OpenCode's built-in catalog still gets a bare entry", () => {
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "openrouter/acme/uncatalogued", { OPENROUTER_API_KEY: PICKED });
+    expect(config.provider.openrouter.models).toEqual({
+      "acme/uncatalogued": { name: "acme/uncatalogued", tool_call: true },
+    });
+  });
+
+  test("openrouter: an existing models entry for the requested id is left untouched", () => {
+    const config: Record<string, any> = {
+      provider: {
+        openrouter: {
+          models: {
+            "acme/uncatalogued": { name: "Custom Name", tool_call: true, reasoning: true },
+          },
+        },
+      },
+    };
+    applyProviderKeySplice(config, "openrouter/acme/uncatalogued", { OPENROUTER_API_KEY: PICKED });
+    expect(config.provider.openrouter.models).toEqual({
+      "acme/uncatalogued": { name: "Custom Name", tool_call: true, reasoning: true },
+    });
   });
 
   test("no splice without a key, or for providers outside the splice", () => {

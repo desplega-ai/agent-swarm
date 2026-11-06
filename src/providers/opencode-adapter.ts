@@ -410,9 +410,19 @@ export function applyProviderKeySplice(
     }
     delete options.baseURL;
   }
+  // OpenCode's built-in openrouter catalog only lists models.dev's OpenRouter
+  // section. A model id reached through a gateway override (OPENROUTER_BASE_URL,
+  // e.g. a LiteLLM route) is absent from it, so OpenCode fails the session
+  // instead of running the requested model (the same gap buildOpenAICompatibleProviderBlock
+  // already closes for custom-block providers, line ~301).
+  let models = existing?.models;
+  const modelId = model.slice(slash + 1);
+  if (providerId === "openrouter" && modelId && !models?.[modelId]) {
+    models = { ...models, [modelId]: { name: modelId, tool_call: true } };
+  }
   opencodeConfig.provider = {
     ...opencodeConfig.provider,
-    [providerId]: { ...existing, env: [], options },
+    [providerId]: { ...existing, env: [], options, ...(models ? { models } : {}) },
   };
   return picked;
 }
