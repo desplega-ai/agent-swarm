@@ -20,6 +20,23 @@ import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 
+const TAB_WIDTH = 4;
+/** Extra indent for wrapped continuation lines, past the line's own indent. */
+const HANG = 2;
+
+/**
+ * Hanging indent for a wrapped line: the first visual line keeps its own
+ * leading whitespace (it is still in the text, so copy is unchanged), and
+ * every continuation line starts HANG characters right of that indent instead
+ * of at the gutter edge.
+ */
+function hangingIndent(line: { content: string }[]) {
+  const text = line.map((token) => token.content).join("");
+  const lead = /^[\t ]*/.exec(text)?.[0] ?? "";
+  const indent = lead.replaceAll("\t", " ".repeat(TAB_WIDTH)).length + HANG;
+  return { paddingLeft: `${indent}ch`, textIndent: `-${indent}ch`, tabSize: TAB_WIDTH };
+}
+
 export function CodeViewer({
   source,
   language = "tsx",
@@ -118,6 +135,7 @@ export function CodeViewer({
                       "flex-1",
                       wrap ? "min-w-0 whitespace-pre-wrap break-words" : "whitespace-pre",
                     )}
+                    style={wrap ? hangingIndent(line) : undefined}
                   >
                     {line.map((token, k) => (
                       <span key={k} {...getTokenProps({ token })} />
