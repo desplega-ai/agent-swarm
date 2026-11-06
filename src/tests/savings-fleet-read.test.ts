@@ -77,7 +77,7 @@ describe("savings fleet read", () => {
   test("computed days with no runs are valid-less with reason no-runs", async () => {
     const at = new Date(NOW).toISOString();
     for (const day of WEEK) {
-      await writeWorkflowDay(day, [], at);
+      await writeWorkflowDay(day, { buckets: [], links: [] }, at);
       await writeScriptDay(day, [], at);
     }
     const { body } = await get("/api/savings/summary?days=7");
@@ -98,10 +98,13 @@ describe("savings fleet read", () => {
         const b = { ...emptyFacts(4), countedRuns: 4, opsSum: 8, agentUsd: 0.4, agentTasks: 1 };
         await writeWorkflowDay(
           day,
-          [
-            { workflowId: "wf-a", name: "fleet-a", facts: a },
-            { workflowId: "wf-b", name: "fleet-b", facts: b },
-          ],
+          {
+            buckets: [
+              { workflowId: "wf-a", name: "fleet-a", facts: a },
+              { workflowId: "wf-b", name: "fleet-b", facts: b },
+            ],
+            links: [],
+          },
           at,
         );
         const script = { runs: 30, apiRuns: 0, effectRuns: 0, apiEffectRuns: 0, computeSecs: 60 };

@@ -47,6 +47,24 @@ export const workflowSavings: Scenario = {
         `saving band ordered ${JSON.stringify(band)}`,
       );
 
+      // A leaf workflow has no components; with components equals own runs.
+      response = await ctx.api(
+        "GET",
+        `/api/savings/jobs?workflowId=${ran}&days=7&tier=smart&components=true`,
+      );
+      expectStatus(response, [200], "savings with components for a leaf workflow");
+      const tree = asRecord(response.json);
+      expect(
+        Array.isArray(tree.components) && tree.components.length === 0,
+        `no components ${response.text}`,
+      );
+      expect(
+        asRecord(asRecord(tree.withComponents).savingUsd).p50 === band.p50,
+        `with components equals own runs ${response.text}`,
+      );
+      response = await ctx.api("GET", "/api/savings/jobs?kind=workflow&components=true");
+      expectStatus(response, [400], "lists reject components=true");
+
       // The daily series sums to the same p50 saving, to the cent.
       response = await ctx.api("GET", `/api/savings/daily?workflowId=${ran}&days=7&tier=smart`);
       expectStatus(response, [200], "daily savings for a workflow with a run");
