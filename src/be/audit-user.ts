@@ -71,3 +71,21 @@ export async function resolveHttpAuditUserId(
   const sourceTaskId = Array.isArray(header) ? header[0] : header;
   return resolveTaskAuditUserId(sourceTaskId, callerAgentId);
 }
+
+/**
+ * Who made a write: the calling agent (NULL for a human or system write) and
+ * the person behind it. Audited tables store it as `createdByAgentId` /
+ * `created_by` on insert and `updatedByAgentId` / `updated_by` on update.
+ */
+export type AuditActor = { agentId: string | null; userId: string | null };
+
+/** {@link resolveHttpAuditUserId} plus the calling agent, for HTTP routes. */
+export async function resolveHttpAuditActor(
+  req: IncomingMessage,
+  callerAgentId: string | undefined,
+): Promise<AuditActor> {
+  return {
+    agentId: callerAgentId ?? null,
+    userId: await resolveHttpAuditUserId(req, callerAgentId),
+  };
+}

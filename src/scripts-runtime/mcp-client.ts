@@ -36,6 +36,7 @@ function headers(config: SwarmConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
     "X-Agent-ID": Redacted.value(config.agentId),
+    ...(config.sourceTaskId ? { "X-Source-Task-Id": Redacted.value(config.sourceTaskId) } : {}),
     "Content-Type": "application/json",
   };
 }

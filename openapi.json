@@ -4548,6 +4548,34 @@
               "null"
             ]
           },
+          "createdByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "createdAt": {
             "type": "string"
           },
@@ -5525,6 +5553,9 @@
             "minLength": 1
           },
           "createdByAgentId": {
+            "type": "string"
+          },
+          "updatedByAgentId": {
             "type": "string"
           },
           "createdAt": {
@@ -42184,6 +42215,9 @@
                     "createdByAgentId": {
                       "type": "string"
                     },
+                    "updatedByAgentId": {
+                      "type": "string"
+                    },
                     "parentTaskId": {
                       "type": "string"
                     },
@@ -42552,6 +42586,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -42745,6 +42782,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -42983,6 +43023,9 @@
                           "format": "date-time"
                         },
                         "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "updatedByAgentId": {
                           "type": "string"
                         },
                         "parentTaskId": {
@@ -43236,6 +43279,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -43618,6 +43664,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -44031,6 +44080,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -58797,6 +58849,27 @@
                               "null"
                             ]
                           },
+                          "updatedByAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "createdBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "updatedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -58983,6 +59056,27 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "updatedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "createdBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "updatedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
                         },
                         "createdAt": {
                           "type": "string"
@@ -61000,6 +61094,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -61185,6 +61282,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -67893,6 +67993,9 @@
                             "minLength": 1
                           },
                           "createdByAgentId": {
+                            "type": "string"
+                          },
+                          "updatedByAgentId": {
                             "type": "string"
                           },
                           "createdAt": {

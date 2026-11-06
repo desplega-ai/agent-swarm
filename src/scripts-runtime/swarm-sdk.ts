@@ -22,6 +22,7 @@ function headers(config: SwarmConfig): Record<string, string> {
     ...(config.runtimeInstanceId
       ? { "X-Runtime-Instance-ID": Redacted.value(config.runtimeInstanceId) }
       : {}),
+    ...(config.sourceTaskId ? { "X-Source-Task-Id": Redacted.value(config.sourceTaskId) } : {}),
     ...(config.extensionToken
       ? { "X-Extension-Token": Redacted.value(config.extensionToken) }
       : {}),

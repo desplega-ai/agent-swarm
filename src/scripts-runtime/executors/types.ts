@@ -23,6 +23,8 @@ export type SwarmConfigPayload = {
      * context like the agent identity — scripts never supply or override it.
      */
     runtimeInstanceId?: { value: string; isSecret: false };
+    /** Task the run acts for; sent as `X-Source-Task-Id` for audit attribution. */
+    sourceTaskId?: { value: string; isSecret: false };
     /**
      * Per-process secret set only by the in-process extension `ctx.swarm` SDK. The
      * bridge requires it to grant the `extension` call origin. Never sent to scripts.

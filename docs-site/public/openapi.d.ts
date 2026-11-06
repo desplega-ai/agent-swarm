@@ -18198,6 +18198,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -18265,6 +18266,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -18395,6 +18397,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -18518,6 +18521,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -18641,6 +18645,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -18776,6 +18781,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -18979,6 +18985,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -23793,6 +23800,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -23858,6 +23866,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -27762,6 +27771,7 @@ export interface paths {
                             dir?: string;
                             vcsRepo?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             createdAt: string;
                             lastUpdatedAt: string;
                             createdBy?: string;
@@ -30351,6 +30361,14 @@ export interface components {
             /** @description Confirmed invocations across all harnesses, at most one per runner session */
             invocationCount: number;
             lastInvokedAt: string | null;
+            /** @default null */
+            createdByAgentId: string | null;
+            /** @default null */
+            updatedByAgentId: string | null;
+            /** @default null */
+            createdBy: string | null;
+            /** @default null */
+            updatedBy: string | null;
             createdAt: string;
             lastUpdatedAt: string;
             lastFetchedAt: string | null;
@@ -30644,6 +30662,7 @@ export interface components {
             dir?: string;
             vcsRepo?: string;
             createdByAgentId?: string;
+            updatedByAgentId?: string;
             createdAt: string;
             lastUpdatedAt: string;
             createdBy?: string;
@@ -34338,6 +34357,12 @@ export interface operations {
                              */
                             executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
+                            /** @default null */
+                            updatedByAgentId: string | null;
+                            /** @default null */
+                            createdBy: string | null;
+                            /** @default null */
+                            updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
                         }[];
@@ -34418,6 +34443,12 @@ export interface operations {
                              */
                             executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
+                            /** @default null */
+                            updatedByAgentId: string | null;
+                            /** @default null */
+                            createdBy: string | null;
+                            /** @default null */
+                            updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
                             signature: {

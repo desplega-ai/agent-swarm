@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getAgentById, getSkillById, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
@@ -114,7 +115,11 @@ export const registerSkillUpdateTool = (server: McpServer) => {
           updates.scope = args.scope;
         }
 
-        const skill = await updateSkill(args.skillId, updates);
+        const skill = await updateSkill(args.skillId, {
+          ...updates,
+          updatedByAgentId: requestInfo.agentId,
+          updatedBy: await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+        });
         if (!skill) {
           return toolErr("Update failed.", {
             details: "Failed to update skill.",

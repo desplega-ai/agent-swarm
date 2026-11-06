@@ -484,6 +484,7 @@ export async function handleSchedules(
         params: body.params,
         requiredParams: body.requiredParams,
         requires: body.requires,
+        createdByAgentId: myAgentId,
         createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       });
 
@@ -779,8 +780,10 @@ export async function handleSchedules(
       }
     }
 
-    const updatedBy = await resolveHttpAuditUserId(req, myAgentId);
-    if (updatedBy !== null) body.updatedBy = updatedBy;
+    // The audit pair describes this write: the person is null when unknown,
+    // never left over from an earlier writer.
+    body.updatedBy = await resolveHttpAuditUserId(req, myAgentId);
+    body.updatedByAgentId = myAgentId ?? null;
     let schedule: Awaited<ReturnType<typeof updateScheduledTask>>;
     try {
       schedule = await updateScheduledTask(parsed.params.id, body);

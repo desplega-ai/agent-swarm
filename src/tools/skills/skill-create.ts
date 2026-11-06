@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createSkill, getAgentById, installSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
@@ -72,6 +73,8 @@ export const registerSkillCreateTool = (server: McpServer) => {
           agent: parsed.agent,
           disableModelInvocation: parsed.disableModelInvocation,
           userInvocable: parsed.userInvocable,
+          createdByAgentId: requestInfo.agentId,
+          createdBy: await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
         });
 
         // Auto-install for the creating agent

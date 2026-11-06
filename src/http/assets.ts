@@ -388,6 +388,7 @@ export async function handleAssets(
         id: parsed.params.id,
         key,
         changedBy: actor ?? undefined,
+        changedByAgentId: myAgentId,
         descendantTaskIds,
       });
       if (!moved) {
