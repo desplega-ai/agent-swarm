@@ -35,3 +35,7 @@ data:
   {{ $k }}: {{ $v | quote }}
   {{- end }}
   SEED_AUTOMATIONS_ENABLED: {{ .Values.config.seedAutomationsEnabled | quote }}
+  SEED_SCRIPTS_ENABLED: {{ .Values.config.seedScriptsEnabled | quote }}
+  SEED_SKILLS_ENABLED: {{ .Values.config.seedSkillsEnabled | quote }}
+  SEED_WORKFLOWS_ENABLED: {{ .Values.config.seedWorkflowsEnabled | quote }}
+  SEED_SCHEDULES_ENABLED: {{ .Values.config.seedSchedulesEnabled | quote }}

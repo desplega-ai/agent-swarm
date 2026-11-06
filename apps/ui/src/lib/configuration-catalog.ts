@@ -1724,6 +1724,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "SEED_SCRIPTS_ENABLED",
+        label: "Seed built-in scripts",
+        description:
+          "Create the bundled script catalog at boot and via the seed CLI. Turn off for installs whose scripts are managed entirely by an external pipeline. Existing seeded scripts are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SKILLS_ENABLED",
+        label: "Seed built-in skills",
+        description:
+          "Create the bundled skill catalog at boot and via the seed CLI. Turn off for installs whose skills are managed entirely by an external pipeline. Existing seeded skills are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_WORKFLOWS_ENABLED",
+        label: "Seed built-in workflows",
+        description:
+          "Create the bundled workflow catalog at boot and via the seed CLI. Turn off for installs whose workflows are managed entirely by an external pipeline. Existing seeded workflows are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SCHEDULES_ENABLED",
+        label: "Seed built-in schedules",
+        description:
+          "Create the bundled schedule catalog at boot and via the seed CLI. Turn off for installs whose schedules are managed entirely by an external pipeline. Existing seeded schedules are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
         key: "EXTENSION_HANDLER_TIMEOUT_MS",
         label: "Extension handler timeout",
         description: "Maximum time for one extension handler before execution continues.",

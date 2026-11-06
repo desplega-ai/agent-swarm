@@ -87,7 +87,7 @@ The sweep reads the value on every call, so a saved change needs no restart.
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES` |
 | Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_TASK_WATCHER_INTERVAL_MS`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_REACTION_SKIPPED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `COMPANY_EMAIL_DOMAINS` (see below), `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults), `PAGES_FRAME_ANCESTORS` (extra origins that may iframe public pages) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, `SEED_SCHEDULES_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `EVENT_LOOP_STALL_WARN_MS`, `ANONYMIZED_TELEMETRY`, `IMPROVEMENTS_ENABLED` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
@@ -424,6 +424,24 @@ its details page, to stop it.
 The API server reads this value at boot when seeding runs (`restartRequired`): flip it, then restart
 to change what a *future* seed pass creates. It does not retroactively enable or disable automations
 already created on this install.
+
+## Per-kind seed suppression {#seed-suppression}
+
+`SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, and `SEED_SCHEDULES_ENABLED`
+each default to `true` and control whether that kind's bundled catalog is created at all, at boot and
+by the `seed:scripts` CLI. This is a different gate from `SEED_AUTOMATIONS_ENABLED` above: that switch
+only changes whether a freshly seeded workflow or schedule arrives enabled, but the catalog row is
+created either way. These four switches skip creating the row in the first place.
+
+Turn a switch off for an install whose content of that kind is intentionally managed entirely outside
+the bundled catalog, for example by an external GitOps pipeline pushing through the API. The storage
+provisioning seeder (shared org drive) always runs regardless of these switches — the swarm needs it
+to boot.
+
+Setting a switch to `false` only stops *future* seed passes from creating that kind's rows. It never
+retires, disables, or otherwise touches rows a previous seed pass already created; delete those by
+hand if you no longer want them. The API server reads these values at boot (`restartRequired`): flip
+one, then restart to change what the next seed pass includes.
 
 ## Chat SDK
 

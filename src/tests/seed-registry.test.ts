@@ -8,12 +8,19 @@ import {
   listWorkflows,
 } from "../be/db";
 import { getScript } from "../be/scripts/db";
-import { runSeeder, SEEDERS } from "../be/seed";
+import { buildSeeders, runSeeder, SEEDERS } from "../be/seed";
 import { schedulesSeeder } from "../be/seed/schedules-seeder";
 import { workflowsSeeder } from "../be/seed/workflows-seeder";
 import { scriptsSeeder } from "../be/seed-scripts";
 
 const TEST_DB_PATH = "./test-seed-registry.sqlite";
+
+const SEED_TOGGLE_KEYS = [
+  "SEED_SCRIPTS_ENABLED",
+  "SEED_SKILLS_ENABLED",
+  "SEED_WORKFLOWS_ENABLED",
+  "SEED_SCHEDULES_ENABLED",
+] as const;
 
 async function removeDbFiles(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -25,7 +32,12 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
+const ORIGINAL_TOGGLES = Object.fromEntries(
+  SEED_TOGGLE_KEYS.map((key) => [key, process.env[key]]),
+) as Record<(typeof SEED_TOGGLE_KEYS)[number], string | undefined>;
+
 beforeEach(async () => {
+  for (const key of SEED_TOGGLE_KEYS) delete process.env[key];
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
@@ -33,6 +45,11 @@ beforeEach(async () => {
 afterEach(async () => {
   closeDb();
   await removeDbFiles();
+  for (const key of SEED_TOGGLE_KEYS) {
+    const original = ORIGINAL_TOGGLES[key];
+    if (original === undefined) delete process.env[key];
+    else process.env[key] = original;
+  }
 });
 
 describe("seeder registry", () => {
@@ -111,4 +128,32 @@ describe("seeder registry", () => {
     expect(await listWorkflows()).toHaveLength(11);
     expect(await getScheduledTasks()).toHaveLength(11);
   }, 60_000); // typechecks every catalog script with tsc
+
+  test("each SEED_*_ENABLED flag defaults to on and reproduces the full registry when unset", () => {
+    expect(buildSeeders().map((seeder) => seeder.kind)).toEqual([
+      "agent-fs-provision",
+      "script",
+      "skill",
+      "workflow",
+      "schedule",
+    ]);
+  });
+
+  test.each([
+    ["SEED_SCRIPTS_ENABLED", "script"],
+    ["SEED_SKILLS_ENABLED", "skill"],
+    ["SEED_WORKFLOWS_ENABLED", "workflow"],
+    ["SEED_SCHEDULES_ENABLED", "schedule"],
+  ] as const)("%s=false drops only the %s seeder, keeping agent-fs-provision", (envKey, kind) => {
+    process.env[envKey] = "false";
+    const kinds = buildSeeders().map((seeder) => seeder.kind);
+    expect(kinds).not.toContain(kind);
+    expect(kinds).toContain("agent-fs-provision");
+    expect(kinds).toHaveLength(SEEDERS.length - 1);
+  });
+
+  test("all four flags off leaves only agent-fs-provision", () => {
+    for (const key of SEED_TOGGLE_KEYS) process.env[key] = "false";
+    expect(buildSeeders().map((seeder) => seeder.kind)).toEqual(["agent-fs-provision"]);
+  });
 });
