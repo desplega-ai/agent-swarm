@@ -8,6 +8,7 @@ import {
   GitBranch,
   Github,
   GitMerge,
+  HardDrive,
   KeyRound,
   ListChecks,
   type LucideIcon,
@@ -54,11 +55,48 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  "hard-drive": HardDrive,
   mic: Mic,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
   return ICON_MAP[iconKey] ?? Plug;
+}
+
+/**
+ * An integration's mark: a provider glyph, then a full-colour logo image,
+ * then a monochrome logo file, then the lucide icon. Decorative: the name
+ * always renders next to it.
+ */
+export function IntegrationLogo({
+  def,
+  className = "size-5",
+}: {
+  def: Pick<IntegrationDef, "providerIconKey" | "logoImg" | "logoSrc" | "iconKey">;
+  className?: string;
+}) {
+  if (def.providerIconKey) {
+    return (
+      <ProviderIcon
+        provider={def.providerIconKey}
+        className={cn(className, "text-foreground opacity-100")}
+      />
+    );
+  }
+  if (def.logoImg) {
+    return (
+      <img
+        src={def.logoImg}
+        alt=""
+        aria-hidden
+        className={cn(className, "rounded-[4px] object-contain")}
+      />
+    );
+  }
+  if (def.logoSrc)
+    return <BrandLogo src={def.logoSrc} className={cn(className, "text-foreground")} />;
+  const Icon = resolveIcon(def.iconKey);
+  return <Icon className={cn(className, "text-foreground")} aria-hidden="true" />;
 }
 
 interface IntegrationCardProps {
@@ -84,22 +122,12 @@ export function IntegrationCard({
   href = `/integrations/${def.id}`,
   actionLabel = "Configure →",
 }: IntegrationCardProps) {
-  const Icon = resolveIcon(def.iconKey);
-  // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
-  const logo = def.providerIconKey ? (
-    <ProviderIcon provider={def.providerIconKey} className="h-5 w-5 text-foreground opacity-100" />
-  ) : def.logoSrc ? (
-    <BrandLogo src={def.logoSrc} className="size-5 text-foreground" />
-  ) : (
-    <Icon className="h-5 w-5 text-foreground" aria-hidden="true" />
-  );
+  const logo = <IntegrationLogo def={def} />;
 
   return (
     <Card
-      className={cn(
-        "flex flex-col gap-3 py-4 transition-colors hover:border-primary/40",
-        className,
-      )}
+      interactive
+      className={cn("flex flex-col gap-3 py-4", className)}
       data-integration-id={def.id}
     >
       <CardContent className="flex flex-1 flex-col gap-3 px-4">

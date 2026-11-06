@@ -1,28 +1,5 @@
-import {
-  Activity,
-  Bot,
-  Brain,
-  Bug,
-  ChartLine,
-  Cloud,
-  ExternalLink,
-  GitBranch,
-  Github,
-  GitMerge,
-  Info,
-  KeyRound,
-  ListChecks,
-  type LucideIcon,
-  Mail,
-  MessageCircle,
-  MessageSquare,
-  Mic,
-  Plug,
-  Route,
-  Sparkles,
-  SquareCheckBig,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ExternalLink, Info, Plug } from "lucide-react";
+import { type ComponentType, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useChatSdkStatus } from "@/api/hooks/use-chat-sdk";
@@ -41,13 +18,13 @@ import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
 import { ChannelStatusChip } from "@/components/integrations/channel-status-chip";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
+import { IntegrationLogo } from "@/components/integrations/integration-card";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
 import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
-import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -84,33 +61,20 @@ import {
 } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
+import { BitbucketPane, GitHubPane, GitLabPane } from "@/pages/setup/steps/integrations/git-panes";
+import { SlackPane } from "@/pages/setup/steps/integrations/slack-pane";
+import type { PaneProps } from "@/pages/setup/steps/integrations/use-config-form";
 
-// Mirror of the ICON_MAP in integration-card. Keeps the detail page rendering
-// the same icon as the card without a round-trip import.
-const ICON_MAP: Record<string, LucideIcon> = {
-  "message-square": MessageSquare,
-  "message-circle": MessageCircle,
-  github: Github,
-  "git-merge": GitMerge,
-  "git-branch": GitBranch,
-  "square-check-big": SquareCheckBig,
-  "list-checks": ListChecks,
-  activity: Activity,
-  bug: Bug,
-  mail: Mail,
-  brain: Brain,
-  sparkles: Sparkles,
-  bot: Bot,
-  route: Route,
-  "key-round": KeyRound,
-  "chart-line": ChartLine,
-  cloud: Cloud,
-  mic: Mic,
+/**
+ * The numbered setup guide `/setup` shows for these integrations (create the
+ * app, then paste the tokens). It saves as you type, like `/setup`.
+ */
+const SETUP_GUIDES: Record<string, ComponentType<PaneProps>> = {
+  slack: SlackPane,
+  github: GitHubPane,
+  gitlab: GitLabPane,
+  bitbucket: BitbucketPane,
 };
-
-function resolveIcon(iconKey: string): LucideIcon {
-  return ICON_MAP[iconKey] ?? Plug;
-}
 
 export default function IntegrationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -190,15 +154,7 @@ function IntegrationDetailInner({
   envPresence,
   envPresenceRevision,
 }: InnerProps) {
-  const Icon = resolveIcon(def.iconKey);
-  // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
-  const logo = def.providerIconKey ? (
-    <ProviderIcon provider={def.providerIconKey} className="h-6 w-6 text-foreground opacity-100" />
-  ) : def.logoSrc ? (
-    <BrandLogo src={def.logoSrc} className="size-6 text-foreground" />
-  ) : (
-    <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
-  );
+  const logo = <IntegrationLogo def={def} className="size-6" />;
   const chatSdkStatus = useChatSdkStatus({ enabled: def.id === "chat-sdk", poll: false });
   const status = deriveIntegrationStatus(def, configs, envPresence, {
     chatSdkEnabled: chatSdkStatus.data?.enabled,
@@ -362,6 +318,86 @@ function IntegrationDetailInner({
   const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
   const isGithub = def.id === "github";
+  const SetupGuide = SETUP_GUIDES[def.id];
+
+  const formBody = (
+    <>
+      {isReplaced ? null : allFields.length === 0 ? (
+        <EmptyState
+          icon={Plug}
+          title="No configurable fields"
+          description="This integration has no key/value fields. See the docs for the required setup steps."
+        />
+      ) : hasConfigGroups ? (
+        <ConfigGroupSections
+          groups={def.configGroups ?? []}
+          state={state}
+          configs={configs}
+          envPresence={envPresence}
+          onUpdate={updateField}
+          onClearField={handleClearField}
+        />
+      ) : (
+        <div className="space-y-6">
+          {isGithub && (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertDescription>
+                <p className="leading-relaxed">
+                  <strong>PAT mode is the default and simpler path.</strong> For GitHub App
+                  integration (recommended for production), expand <em>Advanced</em> below and fill{" "}
+                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                    GITHUB_APP_ID
+                  </code>{" "}
+                  +{" "}
+                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                    GITHUB_APP_PRIVATE_KEY
+                  </code>
+                  .
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {requiredFields.length > 0 && (
+            <FieldGroup
+              title="Required"
+              fields={requiredFields}
+              state={state}
+              configs={configs}
+              envPresence={envPresence}
+              onUpdate={updateField}
+              onClearField={handleClearField}
+            />
+          )}
+
+          {advancedFields.length > 0 && (
+            <details className="border border-border rounded-md">
+              <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
+                Advanced ({advancedFields.length})
+              </summary>
+              <div className="px-4 pb-4 pt-2">
+                <FieldGroup
+                  title=""
+                  fields={advancedFields}
+                  state={state}
+                  configs={configs}
+                  envPresence={envPresence}
+                  onUpdate={updateField}
+                  onClearField={handleClearField}
+                  bare
+                />
+              </div>
+            </details>
+          )}
+
+          {def.recommendedSkills && def.recommendedSkills.length > 0 && (
+            <RecommendedSkillsSection recommendedSkills={def.recommendedSkills} />
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
     // The page owns its scroll: on lg the main column does not scroll.
@@ -452,6 +488,18 @@ function IntegrationDetailInner({
               </div>
             )}
 
+            {/* The step-by-step guide, ABOVE the generic form. */}
+            {SetupGuide ? (
+              <section className="space-y-3 rounded-md border border-border bg-card p-4">
+                <h2 className="text-sm font-semibold">Setup steps</h2>
+                <SetupGuide
+                  configs={configs}
+                  presence={envPresence}
+                  connected={status === "configured"}
+                />
+              </section>
+            ) : null}
+
             {/* Special flow (OAuth card, CLI explainer, embeddings form), ABOVE the generic form. */}
             {specialFlow && (
               <specialFlow.Section
@@ -463,81 +511,16 @@ function IntegrationDetailInner({
               />
             )}
 
-            {/* Body */}
-            {isReplaced ? null : allFields.length === 0 ? (
-              <EmptyState
-                icon={Plug}
-                title="No configurable fields"
-                description="This integration has no key/value fields. See the docs for the required setup steps."
-              />
-            ) : hasConfigGroups ? (
-              <ConfigGroupSections
-                groups={def.configGroups ?? []}
-                state={state}
-                configs={configs}
-                envPresence={envPresence}
-                onUpdate={updateField}
-                onClearField={handleClearField}
-              />
+            {/* Body: behind "All settings" when the guide above covers the setup. */}
+            {SetupGuide ? (
+              <details className="rounded-md border border-border">
+                <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium">
+                  All settings
+                </summary>
+                <div className="px-4 pb-4 pt-2">{formBody}</div>
+              </details>
             ) : (
-              <div className="space-y-6">
-                {isGithub && (
-                  <Alert>
-                    <Info className="h-4 w-4" />
-                    <AlertDescription>
-                      <p className="leading-relaxed">
-                        <strong>PAT mode is the default and simpler path.</strong> For GitHub App
-                        integration (recommended for production), expand <em>Advanced</em> below and
-                        fill{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_ID
-                        </code>{" "}
-                        +{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_PRIVATE_KEY
-                        </code>
-                        .
-                      </p>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {requiredFields.length > 0 && (
-                  <FieldGroup
-                    title="Required"
-                    fields={requiredFields}
-                    state={state}
-                    configs={configs}
-                    envPresence={envPresence}
-                    onUpdate={updateField}
-                    onClearField={handleClearField}
-                  />
-                )}
-
-                {advancedFields.length > 0 && (
-                  <details className="border border-border rounded-md">
-                    <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
-                      Advanced ({advancedFields.length})
-                    </summary>
-                    <div className="px-4 pb-4 pt-2">
-                      <FieldGroup
-                        title=""
-                        fields={advancedFields}
-                        state={state}
-                        configs={configs}
-                        envPresence={envPresence}
-                        onUpdate={updateField}
-                        onClearField={handleClearField}
-                        bare
-                      />
-                    </div>
-                  </details>
-                )}
-
-                {def.recommendedSkills && def.recommendedSkills.length > 0 && (
-                  <RecommendedSkillsSection recommendedSkills={def.recommendedSkills} />
-                )}
-              </div>
+              formBody
             )}
           </div>
         }

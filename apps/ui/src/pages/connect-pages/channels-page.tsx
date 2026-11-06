@@ -118,10 +118,7 @@ function hrefFor(def: ChannelDef, state: ChannelState): string {
 function ChannelCard({ def, state }: { def: ChannelDef; state: ChannelState }) {
   const action = actionLabel(state);
   return (
-    <Card
-      className="flex-row items-center gap-3 px-4 py-4 transition-colors hover:border-foreground/20"
-      data-channel-id={def.id}
-    >
+    <Card interactive className="flex-row items-center gap-3 px-4 py-4" data-channel-id={def.id}>
       <ChannelLogo def={def} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 items-center gap-2">

@@ -54,6 +54,7 @@ import { unhealthyCredentialCount } from "@/lib/ai-providers";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
+import { navActivePath } from "@/lib/integrations-catalog";
 import { needsYouBadgePoll } from "@/lib/needs-you";
 import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
@@ -646,6 +647,8 @@ function SidebarBrandRow({
 
 export function AppSidebar() {
   const location = useLocation();
+  // An integration page highlights the Connect page that lists it.
+  const activePath = navActivePath(location.pathname);
   const { data: status } = useStatusContext();
   // Feature-gate lookups for nav items whose backing routes need a min API
   // version. Add a new entry here when introducing another gated surface.
@@ -762,9 +765,7 @@ export function AppSidebar() {
                     <SidebarMenu>
                       {items.map((item) => {
                         const isActive =
-                          item.path === "/"
-                            ? location.pathname === "/"
-                            : location.pathname.startsWith(item.path);
+                          item.path === "/" ? activePath === "/" : activePath.startsWith(item.path);
                         if (isHidden(item)) return null;
                         const badge = badges[item.path];
                         return (
@@ -797,9 +798,7 @@ export function AppSidebar() {
                   <SidebarMenu>
                     {items.map((item) => {
                       const isActive =
-                        item.path === "/"
-                          ? location.pathname === "/"
-                          : location.pathname.startsWith(item.path);
+                        item.path === "/" ? activePath === "/" : activePath.startsWith(item.path);
                       if (isHidden(item)) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
@@ -833,7 +832,7 @@ export function AppSidebar() {
               <FooterNavItem
                 key={item.path}
                 item={{ ...item, flyout }}
-                isActive={location.pathname.startsWith(item.path)}
+                isActive={activePath.startsWith(item.path)}
                 badge={badges[item.path]}
                 entryBadges={{ "/people": badges["/people"] }}
               />

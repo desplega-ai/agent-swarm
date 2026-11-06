@@ -1,4 +1,4 @@
-import { Cloud, Route } from "lucide-react";
+import { Cloud, Route, Scale } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { ProviderIcon } from "@/components/shared/provider-icon";
@@ -26,8 +26,10 @@ export function ProviderLogo({
     mark = <ProviderIcon provider={logo.provider} className={cn(glyph, "opacity-100")} />;
   } else if ("src" in logo) {
     mark = <BrandLogo src={logo.src} className={glyph} />;
+  } else if ("img" in logo) {
+    mark = <img src={logo.img} alt="" className={cn(glyph, "rounded-[3px] object-contain")} />;
   } else if ("lucide" in logo) {
-    const Icon = logo.lucide === "cloud" ? Cloud : Route;
+    const Icon = logo.lucide === "cloud" ? Cloud : logo.lucide === "scale" ? Scale : Route;
     mark = <Icon aria-hidden className={glyph} />;
   } else {
     mark = (

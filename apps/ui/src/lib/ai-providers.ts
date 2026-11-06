@@ -21,8 +21,11 @@ export const AI_PROVIDER_GROUPS: { id: AiProviderGroup; label: string }[] = [
 /** A provider mark: a `ProviderIcon` glyph, a mono logo file, a lucide icon, or a letter. */
 export type AiProviderLogo =
   | { provider: ProviderIconKey }
+  /** A monochrome mark, tinted with the text colour. */
   | { src: string }
-  | { lucide: "route" | "cloud" }
+  /** A full-colour logo image, shown as is. */
+  | { img: string }
+  | { lucide: "route" | "cloud" | "scale" }
   | { letter: string };
 
 /**
@@ -258,7 +261,7 @@ export const AI_PROVIDERS: AiProvider[] = [
     name: "Cursor",
     group: "api-key",
     type: "API key",
-    logo: { letter: "C" },
+    logo: { src: "/provider-logos/cursor.svg" },
     harnesses: ["cursor"],
     noun: "key",
     vendor: "Cursor",
@@ -551,7 +554,7 @@ export const SYSTEM_ONE_SETUP: AiProvider[] = [
     name: "Jev via TypeSafe",
     group: "api-key",
     type: "System One",
-    logo: { letter: "T" },
+    logo: { img: "/provider-logos/typesafe.png" },
     harnesses: ["workflow decisions"],
     noun: "key",
     vendor: "TypeSafe",
@@ -579,7 +582,7 @@ export const SYSTEM_ONE_SETUP: AiProvider[] = [
     name: "Clef via Cloudflare",
     group: "api-key",
     type: "System One",
-    logo: { lucide: "cloud" },
+    logo: { src: "/provider-logos/cloudflare.svg" },
     harnesses: ["workflow decisions", "extraction"],
     noun: "token",
     vendor: "Cloudflare",
@@ -617,7 +620,8 @@ export const SYSTEM_ONE_SETUP: AiProvider[] = [
     name: "laya",
     group: "api-key",
     type: "System One",
-    logo: { letter: "la" },
+    // laya has no published mark yet: a neutral "decides" glyph.
+    logo: { lucide: "scale" },
     harnesses: ["workflow decisions"],
     noun: "key",
     vendor: "laya",

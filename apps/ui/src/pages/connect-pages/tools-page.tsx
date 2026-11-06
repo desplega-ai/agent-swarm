@@ -1,4 +1,14 @@
-import { ChevronDown, Plug, Plus } from "lucide-react";
+import {
+  Activity,
+  ChevronDown,
+  Code,
+  Contact,
+  type LucideIcon,
+  Mail,
+  Plug,
+  Plus,
+  Shapes,
+} from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
@@ -49,6 +59,14 @@ const TOOL_GROUPS: ToolGroup[] = [
   { title: "Other", tools: catalogDefs(["agentfs", "composio", "serply"]) },
 ];
 const ALL_TOOLS = TOOL_GROUPS.flatMap((group) => group.tools);
+/** Each group's icon, by title. */
+const GROUP_ICONS: Record<string, LucideIcon> = {
+  "Code and issues": Code,
+  Email: Mail,
+  CRM: Contact,
+  Monitoring: Activity,
+  Other: Shapes,
+};
 const PRESENCE_KEYS = Array.from(new Set(ALL_TOOLS.flatMap((def) => getPresenceKeys(def))));
 
 const TABS = [
@@ -236,8 +254,15 @@ function ToolCardGrid({
       ) : (
         groups.map((group) => (
           <section key={group.title} aria-label={group.title} className="flex flex-col gap-3">
-            <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              {(() => {
+                const Icon = GROUP_ICONS[group.title] ?? Plug;
+                return <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />;
+              })()}
               {group.title}
+              <span className="font-mono text-xs font-normal text-muted-foreground">
+                {group.tools.length}
+              </span>
             </h2>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {group.tools.map((def) => (

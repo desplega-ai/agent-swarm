@@ -9,6 +9,7 @@ import {
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { KeyStatusPill } from "@/components/shared/key-status-pill";
 import { SecretInput } from "@/components/shared/secret-input";
 import { StatusLine } from "@/components/shared/status-icon";
@@ -32,6 +33,7 @@ import {
   TRANSCRIPTION_PROVIDERS,
   type TranscriptionStatus,
 } from "@/lib/transcription-status";
+import { cn } from "@/lib/utils";
 import { FactRow, KeyName, Mono, SetupCard, TabIntro } from "./ai-tab-parts";
 
 const VOICE_NOTES_GUIDE = "https://docs.agent-swarm.dev/docs/integrations/chat-sdk#voice-notes";
@@ -41,6 +43,22 @@ type ProviderChoice = "auto" | (typeof TRANSCRIPTION_PROVIDERS)[number]["id"];
 function stored(configs: SwarmConfig[], key: string): string | undefined {
   const value = configs.find((c) => c.scope === "global" && c.key === key)?.value.trim();
   return value ? value : undefined;
+}
+
+/** Each transcription provider's mark; `img` logos are full colour. */
+const PROVIDER_MARKS: Record<string, { src?: string; img?: string }> = {
+  elevenlabs: { src: "/provider-logos/elevenlabs.svg" },
+  openai: { src: "/provider-logos/openai.svg" },
+  groq: { img: "/provider-logos/groq.svg" },
+};
+
+function ProviderMark({ id, className = "size-4" }: { id: string; className?: string }) {
+  const mark = PROVIDER_MARKS[id];
+  if (mark?.img) {
+    return <img src={mark.img} alt="" aria-hidden className={cn(className, "rounded-[3px]")} />;
+  }
+  if (mark?.src) return <BrandLogo src={mark.src} className={cn(className, "text-foreground")} />;
+  return <Mic aria-hidden className={className} />;
 }
 
 function providerSpec(id: string | null) {
@@ -118,9 +136,9 @@ export function TranscriptionTab() {
         mark={
           <span
             aria-hidden
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background font-mono text-sm font-semibold"
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background "
           >
-            {spec ? spec.label.charAt(0) : <Mic className="size-5" />}
+            {spec ? <ProviderMark id={spec.id} className="size-5" /> : <Mic className="size-5" />}
           </span>
         }
         title={title}
@@ -180,6 +198,7 @@ export function TranscriptionTab() {
                   ) : (
                     <Minus aria-label="not set" className="size-3.5 text-muted-foreground" />
                   )}
+                  <ProviderMark id={p.id} className="size-3.5" />
                   <span className="flex-1">{p.label}</span>
                   <KeyName>{p.keyEnv}</KeyName>
                 </li>
@@ -291,7 +310,15 @@ function PanelBody({ onDone }: { onDone: () => void }) {
             onValueChange={setChoice}
             options={[
               { value: "auto", label: "Auto-detect" },
-              ...TRANSCRIPTION_PROVIDERS.map((p) => ({ value: p.id, label: p.label })),
+              ...TRANSCRIPTION_PROVIDERS.map((p) => ({
+                value: p.id,
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <ProviderMark id={p.id} className="size-3.5" />
+                    {p.label}
+                  </span>
+                ),
+              })),
             ]}
             className="w-full"
           />

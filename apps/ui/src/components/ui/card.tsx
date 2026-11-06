@@ -2,12 +2,23 @@ import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * `interactive`: a card that opens something. On hover (and when focus is
+ * inside) it takes the HITL question card's active look: an amber border and
+ * a soft ring.
+ */
+function Card({
+  className,
+  interactive = false,
+  ...props
+}: React.ComponentProps<"div"> & { interactive?: boolean }) {
   return (
     <div
       data-slot="card"
       className={cn(
         "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm",
+        interactive &&
+          "transition-[border-color,box-shadow] duration-200 ease-snappy hover:border-primary/60 hover:ring-2 hover:ring-primary/20 focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20",
         className,
       )}
       {...props}
