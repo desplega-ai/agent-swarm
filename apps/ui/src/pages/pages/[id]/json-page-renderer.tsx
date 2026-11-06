@@ -59,6 +59,13 @@ interface ActionState {
   actionError: string | null;
 }
 
+/** A json-render spec names its `root` element and carries an `elements` map. */
+function isSpecLike(spec: unknown): boolean {
+  if (typeof spec !== "object" || spec === null) return false;
+  const candidate = spec as { root?: unknown; elements?: unknown };
+  return typeof candidate.root === "string" && typeof candidate.elements === "object";
+}
+
 export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
   const [state, setState] = useState<ActionState>({
     lastResponse: undefined,
@@ -155,6 +162,19 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
   // After the `kind === "err"` early-return above, `compiled` is narrowed to
   // the success variant by TS's flow analysis.
   const { spec, registry, handlers } = compiled;
+
+  // Valid JSON that is not a json-render spec (no `root` + `elements`) renders
+  // as nothing at all: an empty card. Show the JSON itself instead.
+  if (!isSpecLike(spec)) {
+    return (
+      <pre
+        data-testid="json-page-renderer-raw"
+        className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/80 [overflow-wrap:anywhere]"
+      >
+        {JSON.stringify(spec, null, 2)}
+      </pre>
+    );
+  }
 
   let renderedSpec: React.ReactNode;
   try {
