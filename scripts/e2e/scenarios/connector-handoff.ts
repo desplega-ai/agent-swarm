@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { reloadConfig } from "./platform-helpers";
 
 // Mirrors the agent-swarm.dev connector's handoff from the swarm side:
 // discovery → mint a code as the operator → exchange it without auth → the
@@ -67,7 +68,11 @@ export const connectorHandoff: Scenario = {
       await setPublicOrigin(publicOrigin);
       await handoff(ctx, userId, publicOrigin);
     } finally {
-      if (configId) await ctx.api("DELETE", `/api/config/${configId}`);
+      if (configId) {
+        expectStatus(await ctx.api("DELETE", `/api/config/${configId}`), [200], "delete public origin");
+        // Settle env un-injection before the next scenario reads the origin.
+        await reloadConfig(ctx);
+      }
     }
   },
 };

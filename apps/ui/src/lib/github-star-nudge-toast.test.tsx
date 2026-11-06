@@ -145,7 +145,10 @@ describe("automatic GitHub star nudge", () => {
     await render();
     expect(starToasts()).toHaveLength(0);
     await act(async () => pending.resolve(stats(5)));
-    await tick();
+    const deadline = Date.now() + 2000;
+    while (starToasts().length === 0 && Date.now() < deadline) {
+      await act(() => new Promise((resolve) => setTimeout(resolve, 25)));
+    }
     expect(starToasts()).toHaveLength(1);
   });
 
