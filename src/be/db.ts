@@ -368,6 +368,7 @@ export {
   getAllTasks,
   getChildTasks,
   getCompletedSlackTasks,
+  getFirstTaskInThread,
   getInProgressSlackTasks,
   getInProgressTasksByContextKey,
   getLatestActiveTaskByContextKey,
@@ -2585,6 +2586,9 @@ export async function createTaskExtended(
       if (parent.slackUserId && !options.slackUserId && !explicitForeignChannel) {
         options.slackUserId = parent.slackUserId;
       }
+      if (parent.slackParticipants && !options.slackParticipants && !explicitForeignChannel) {
+        options.slackParticipants = parent.slackParticipants;
+      }
 
       // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
@@ -2960,14 +2964,14 @@ export async function createTaskExtended(
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
+        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId, slackParticipants,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
         sourceStepId, sourceScriptRunId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -2990,6 +2994,7 @@ export async function createTaskExtended(
         options?.slackThreadTs ?? null,
         options?.slackTriggerMessageTs ?? null,
         options?.slackUserId ?? null,
+        options?.slackParticipants ? JSON.stringify(options.slackParticipants) : null,
         options?.vcsProvider ?? null,
         options?.vcsRepo ?? null,
         options?.vcsEventType ?? null,

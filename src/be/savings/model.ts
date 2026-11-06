@@ -650,3 +650,25 @@ export function splitScriptByDay(
     estimatedLlmUsd: 0,
   }));
 }
+
+const TIER_MODEL: Record<SavingsTier, string> = {
+  smol: "haiku-5-5",
+  regular: "sonnet-5-5",
+  smart: "opus-5-5",
+  ultra: "fable-5-1",
+};
+
+/** The model's assumptions in words, from the v7 estimator, with this port's constants. */
+export function savingsAssumptions(tier: SavingsTier): string[] {
+  return [
+    `Tier ${tier} prices sessions at ${TIER_MODEL[tier]} on the fleet's measured session token profile (${CALIBRATION_MODEL}, calibrated ${CALIBRATED_AT}).`,
+    `Agent turns per deterministic op K=${K}, bootstrap T0=${T0} turns, session length capped at ${TAU_MAX} turns (fleet p95).`,
+    `Schedule-triggered runs count at most ${CAP_PER_DAY} a day per job (an agent would not poll faster than hourly) unless they caused a downstream effect; event and manual runs count 1:1; skipped and cancelled runs are excluded.`,
+    `Event routers (over ${ROUTER_MIN_RUNS_PER_DAY} event runs a day, under ${ROUTER_MAX_EFFECT_SHARE * 100}% with an effect) and API-invoked script runs are enabled-only: an effect run counts as one agent decision, never as the job it starts, which is priced on its own row.`,
+    "Effect links: a workflow run created an agent task (agent_tasks.workflowRunId) or started a child workflow run (workflow_runs.parentStepId); a script run wrote the id of an agent task created during the run into its output.",
+    `Failure and retry multiplier R=${R.p50} (p10 ${R.p10}, p90 ${R.p90}) from scheduled agent tasks; lead follow-up review $${F_FOLLOWUP} per standalone agent task.`,
+    "Scripts no schedule targets are priced as the extra turns they add to the calling agent's session (no bootstrap, no review).",
+    "Agent-task nodes inside workflows count at their actual cost on both sides; only the deterministic glue is substituted.",
+    "Scripts record no LLM spend, so their actual cost counts as $0; LLM calls made inside scripts are not counted.",
+  ];
+}

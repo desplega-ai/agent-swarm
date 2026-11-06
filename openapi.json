@@ -279,6 +279,54 @@
           "slackUserId": {
             "type": "string"
           },
+          "slackParticipants": {
+            "type": "object",
+            "properties": {
+              "people": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slackUserId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "enum": [
+                        "internal",
+                        "external",
+                        "unknown"
+                      ]
+                    },
+                    "starter": {
+                      "type": "boolean"
+                    },
+                    "newest": {
+                      "type": "boolean"
+                    },
+                    "asked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slackUserId",
+                    "trust"
+                  ]
+                }
+              },
+              "more": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "people",
+              "more"
+            ]
+          },
           "slackReplySent": {
             "type": "boolean",
             "default": false
@@ -36869,6 +36917,87 @@
                                   "name"
                                 ]
                               },
+                              "threadParticipants": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "more": {
+                                    "type": "integer"
+                                  },
+                                  "people": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "trust": {
+                                          "type": "string",
+                                          "enum": [
+                                            "internal",
+                                            "external",
+                                            "unknown"
+                                          ]
+                                        },
+                                        "starter": {
+                                          "type": "boolean"
+                                        },
+                                        "newest": {
+                                          "type": "boolean"
+                                        },
+                                        "asked": {
+                                          "type": "boolean"
+                                        },
+                                        "language": {
+                                          "type": "string"
+                                        },
+                                        "verbosity": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "label",
+                                        "trust"
+                                      ]
+                                    }
+                                  },
+                                  "starterProfile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "email": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "notes": {
+                                        "type": "string"
+                                      },
+                                      "comms": {
+                                        "$ref": "#/components/schemas/UserCommsPrefs"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "more",
+                                  "people"
+                                ]
+                              },
                               "credentialAllowlist": {
                                 "type": "object",
                                 "additionalProperties": {
@@ -39663,6 +39792,87 @@
                               "required": [
                                 "name"
                               ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
+                              ]
                             }
                           },
                           "required": [
@@ -39764,6 +39974,87 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
                               ]
                             }
                           },
@@ -51431,7 +51722,7 @@
     "/api/savings/jobs": {
       "get": {
         "summary": "Estimated automation savings per workflow or script",
-        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -51462,9 +51753,19 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scheduleId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "workflow",
-                "script"
+                "script",
+                "schedule"
               ]
             },
             "required": false,
@@ -51580,6 +51881,7 @@
                       "enum": [
                         "not-computed",
                         "no-runs",
+                        "target-missing",
                         null
                       ]
                     },
@@ -51590,168 +51892,242 @@
                     "rows": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "workflow",
-                              "script-scheduled",
-                              "script-agent-invoked"
-                            ]
-                          },
-                          "workflowId": {
-                            "type": "string"
-                          },
-                          "scriptName": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "basis": {
-                            "type": "string",
-                            "enum": [
-                              "modelled"
-                            ]
-                          },
-                          "enabledOnlyRule": {
-                            "type": "boolean"
-                          },
-                          "runs": {
-                            "type": "integer"
-                          },
-                          "substitutedRuns": {
-                            "type": "integer"
-                          },
-                          "effectRuns": {
-                            "type": "integer"
-                          },
-                          "enabledOnlyRuns": {
-                            "type": "integer"
-                          },
-                          "capApplied": {
-                            "type": "boolean"
-                          },
-                          "opsPerRun": {
-                            "type": "number"
-                          },
-                          "measuredUsd": {
-                            "type": "number",
-                            "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
-                          },
-                          "estimatedLlmUsd": {
-                            "type": "number",
-                            "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
-                          },
-                          "actualUsd": {
-                            "type": "number",
-                            "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
-                          },
-                          "agentOnlyUsd": {
+                        "anyOf": [
+                          {
                             "type": "object",
                             "properties": {
-                              "p10": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "workflow",
+                                  "script-scheduled",
+                                  "script-agent-invoked"
+                                ]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "scriptName": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "modelled"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": [
+                                  "target-job"
+                                ]
+                              },
+                              "enabledOnlyRule": {
+                                "type": "boolean"
+                              },
+                              "runs": {
+                                "type": "integer"
+                              },
+                              "substitutedRuns": {
+                                "type": "integer"
+                              },
+                              "effectRuns": {
+                                "type": "integer"
+                              },
+                              "enabledOnlyRuns": {
+                                "type": "integer"
+                              },
+                              "capApplied": {
+                                "type": "boolean"
+                              },
+                              "opsPerRun": {
                                 "type": "number"
                               },
-                              "p50": {
-                                "type": "number"
+                              "measuredUsd": {
+                                "type": "number",
+                                "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
                               },
-                              "p90": {
+                              "estimatedLlmUsd": {
+                                "type": "number",
+                                "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
+                              },
+                              "agentOnlyUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "savingUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "actualHours": {
+                                "type": "number",
+                                "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
+                              },
+                              "agentOnlyHours": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "hoursSaved": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "agentOnlyUsdPerRun": {
                                 "type": "number"
                               }
                             },
                             "required": [
-                              "p10",
-                              "p50",
-                              "p90"
+                              "kind",
+                              "name",
+                              "basis",
+                              "enabledOnlyRule",
+                              "runs",
+                              "substitutedRuns",
+                              "effectRuns",
+                              "enabledOnlyRuns",
+                              "capApplied",
+                              "opsPerRun",
+                              "measuredUsd",
+                              "estimatedLlmUsd",
+                              "actualUsd",
+                              "agentOnlyUsd",
+                              "savingUsd",
+                              "actualHours",
+                              "agentOnlyHours",
+                              "hoursSaved",
+                              "agentOnlyUsdPerRun"
                             ]
                           },
-                          "savingUsd": {
+                          {
                             "type": "object",
                             "properties": {
-                              "p10": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-task-schedule"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "measured"
+                                ]
+                              },
+                              "runs": {
+                                "type": "integer",
+                                "description": "Agent tasks the schedule created in the window."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule."
+                              },
+                              "actualHours": {
                                 "type": "number"
                               },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
+                              "savingUsd": {
+                                "type": "null"
                               }
                             },
                             "required": [
-                              "p10",
-                              "p50",
-                              "p90"
+                              "kind",
+                              "scheduleId",
+                              "scheduleName",
+                              "scheduleEnabled",
+                              "name",
+                              "basis",
+                              "runs",
+                              "actualUsd",
+                              "actualHours",
+                              "savingUsd"
                             ]
-                          },
-                          "actualHours": {
-                            "type": "number",
-                            "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
-                          },
-                          "agentOnlyHours": {
-                            "type": "object",
-                            "properties": {
-                              "p10": {
-                                "type": "number"
-                              },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "p10",
-                              "p50",
-                              "p90"
-                            ]
-                          },
-                          "hoursSaved": {
-                            "type": "object",
-                            "properties": {
-                              "p10": {
-                                "type": "number"
-                              },
-                              "p50": {
-                                "type": "number"
-                              },
-                              "p90": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "p10",
-                              "p50",
-                              "p90"
-                            ]
-                          },
-                          "agentOnlyUsdPerRun": {
-                            "type": "number"
                           }
-                        },
-                        "required": [
-                          "kind",
-                          "name",
-                          "basis",
-                          "enabledOnlyRule",
-                          "runs",
-                          "substitutedRuns",
-                          "effectRuns",
-                          "enabledOnlyRuns",
-                          "capApplied",
-                          "opsPerRun",
-                          "measuredUsd",
-                          "estimatedLlmUsd",
-                          "actualUsd",
-                          "agentOnlyUsd",
-                          "savingUsd",
-                          "actualHours",
-                          "agentOnlyHours",
-                          "hoursSaved",
-                          "agentOnlyUsdPerRun"
                         ]
                       }
                     },
@@ -52088,7 +52464,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of workflowId, scriptName and kind, `components=true` without workflowId, or an unknown days or tier value",
+            "description": "Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52098,7 +52474,7 @@
             }
           },
           "404": {
-            "description": "Workflow or script not found",
+            "description": "Workflow, script or schedule not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -52112,8 +52488,8 @@
     },
     "/api/savings/daily": {
       "get": {
-        "summary": "Daily automation savings of a workflow or script",
-        "description": "The workflow's or script's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs` for the same `workflowId` or `scriptName`.",
+        "summary": "Daily automation savings of a workflow, a script or the fleet",
+        "description": "The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.",
         "tags": [
           "Savings"
         ],
@@ -52237,6 +52613,7 @@
                       "enum": [
                         "not-computed",
                         "no-runs",
+                        "target-missing",
                         null
                       ]
                     },
@@ -52295,7 +52672,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of workflowId and scriptName, or an unknown days or tier value",
+            "description": "Both workflowId and scriptName, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {
@@ -52306,6 +52683,388 @@
           },
           "404": {
             "description": "Workflow or script not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/summary": {
+      "get": {
+        "summary": "Fleet automation savings",
+        "description": "What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet savings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "computedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not-computed",
+                        "no-runs",
+                        "target-missing",
+                        null
+                      ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
+                    },
+                    "byKind": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "workflows": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "scheduledScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "agentInvokedScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workflows",
+                        "scheduledScripts",
+                        "agentInvokedScripts"
+                      ]
+                    },
+                    "fleetLlmUsd": {
+                      "type": "number",
+                      "description": "Measured session spend of the whole swarm in the window, as on the usage page."
+                    },
+                    "selfOptimizationRatio": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "`(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total."
+                    },
+                    "excluded": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "enabledOnlyRuns": {
+                          "type": "integer",
+                          "description": "Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs."
+                        }
+                      },
+                      "required": [
+                        "enabledOnlyRuns"
+                      ]
+                    },
+                    "assumptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "calibrationSource",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "boundaryEstimated",
+                    "total",
+                    "byKind",
+                    "fleetLlmUsd",
+                    "selfOptimizationRatio",
+                    "excluded",
+                    "assumptions"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {

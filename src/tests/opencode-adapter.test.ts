@@ -1108,6 +1108,7 @@ describe("provider key splice (one picked key per task)", () => {
         env: { OPENROUTER_API_KEY: PICKED, OPENROUTER_BASE_URL: "http://127.0.0.1:1234/v1" },
       }),
     );
+    // deepseek/deepseek-v4-flash is a real catalog row, so no bare entry is synthesized.
     expect(configOf(host).provider.openrouter).toEqual({
       env: [],
       options: { apiKey: PICKED, baseURL: "http://127.0.0.1:1234/v1" },
@@ -1128,8 +1129,42 @@ describe("provider key splice (one picked key per task)", () => {
     expect(openrouter.options.headers).toMatchObject({ "X-Title": "Agent Swarm" });
   });
 
-  test("no splice without a key, or for providers outside the splice", () => {
-    for (const model of ["nan/qwen3.6", "helmcode/glm5.3", "openrouter/x/y"]) {
+  test("openrouter: a model id missing from OpenCode's built-in catalog still gets a bare entry", () => {
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "openrouter/acme/uncatalogued", { OPENROUTER_API_KEY: PICKED });
+    expect(config.provider.openrouter.models).toEqual({
+      "acme/uncatalogued": { name: "acme/uncatalogued", tool_call: true },
+    });
+  });
+
+  test("openrouter: an existing models entry for the requested id is left untouched", () => {
+    const config: Record<string, any> = {
+      provider: {
+        openrouter: {
+          models: {
+            "acme/uncatalogued": { name: "Custom Name", tool_call: true, reasoning: true },
+          },
+        },
+      },
+    };
+    applyProviderKeySplice(config, "openrouter/acme/uncatalogued", { OPENROUTER_API_KEY: PICKED });
+    expect(config.provider.openrouter.models).toEqual({
+      "acme/uncatalogued": { name: "Custom Name", tool_call: true, reasoning: true },
+    });
+  });
+
+  test("openrouter: a model id already in the catalog snapshot gets no bare entry, even non-tool-calling", () => {
+    // thedrummer/cydonia-24b-v4.1 is a real snapshot row with tool_call: false;
+    // a bare `{ tool_call: true }` entry would make OpenCode send it tools it rejects.
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "openrouter/thedrummer/cydonia-24b-v4.1", {
+      OPENROUTER_API_KEY: PICKED,
+    });
+    expect(config.provider.openrouter.models).toBeUndefined();
+  });
+
+  test("no splice without a key, for providers outside the splice", () => {
+    for (const model of ["nan/qwen3.6", "helmcode/glm5.3"]) {
       const config = {};
       expect(applyProviderKeySplice(config, model, {})).toBeUndefined();
       expect(config).toEqual({});
@@ -1143,6 +1178,18 @@ describe("provider key splice (one picked key per task)", () => {
       });
       expect(config).toEqual({});
     }
+  });
+
+  test("openrouter: an uncatalogued gateway model id still gets a bare entry without a key", () => {
+    // No OPENROUTER_API_KEY in env — the credential comes from opencode's own
+    // ~/.local/share/opencode/auth.json instead, which pickProviderKey never
+    // sees. The catalog entry still has to exist or OpenCode falls back to its
+    // default model and fails the task as a catalog mismatch.
+    const config: Record<string, any> = {};
+    expect(applyProviderKeySplice(config, "openrouter/x/y", {})).toBeUndefined();
+    expect(config.provider.openrouter.models).toEqual({ "x/y": { name: "x/y", tool_call: true } });
+    expect(config.provider.openrouter.env).toBeUndefined();
+    expect(config.provider.openrouter.options).toBeUndefined();
   });
 });
 

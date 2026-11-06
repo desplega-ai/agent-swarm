@@ -22,7 +22,7 @@ ARG SKILLS_CLI_VERSION=1.5.20
 # context-mode pins BOTH the global CLI/MCP server (worker-base) and the
 # Claude/Codex plugin marketplaces (worker-full-base). Global so the two
 # stages cannot drift; each stage re-declares it.
-ARG CONTEXT_MODE_VERSION=1.0.169
+ARG CONTEXT_MODE_VERSION=2.1.4
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
@@ -168,7 +168,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.166.0
+ARG CODEX_VERSION=0.167.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -580,9 +580,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793887133-gbf8b08
-ARG AMP_SHA512_AMD64=7f98b1f456097745c0a2f59a5935f36cab7c86bbfdada3786d1dfc0904eb72d688a8629a8dbf9b0b988fb594198edf1f4cfc11071cfa90d226630b7f5ce57c8e
-ARG AMP_SHA512_ARM64=9d1946097611f86e695d760487561798a649ebb6ab43b33a13e79ac0a4730401a7585a621d82431dc7ce65bf56c105ca9c3d776e21d080ba3111c6de74d66a67
+ARG AMP_VERSION=0.0.1793937652-gdc5d48
+ARG AMP_SHA512_AMD64=63b570e77b7ef5cf301a660e44f3b9b33c4693b5dac18d126fb7483d58125e60ba30e4d8d00d54bd660fa55216ee6fb0fd2997d811211ad33fd2b44c4950662d
+ARG AMP_SHA512_ARM64=f275a25adbd3d286ac40f213a5efdb327a4ce8b54f8af5a55d7338ef48fefa934f7a2468c9801dec20be7dcf74814ebb799edf18ce45c43cfeb53e5f6cfdea89
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -630,7 +630,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.105
+ARG COPILOT_CLI_VERSION=1.0.106
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -641,7 +641,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
 # scripts are not needed for ACP (verified on 0.26.7), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.7
+ARG QWEN_CODE_VERSION=0.26.8
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -671,9 +671,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.0.0
-ARG KIRO_CLI_SHA256_AMD64=2ebb8688b84765e4baf46d6e28b3e79780e7724e198591c22d0528d03a88a282
-ARG KIRO_CLI_SHA256_ARM64=ee719fcf8d1166a44eb543e9acada6e2766cf13765787612336d0a43f3903766
+ARG KIRO_CLI_VERSION=3.1.0
+ARG KIRO_CLI_SHA256_AMD64=006835b2f4f433f55bb02601cd3053ccb10bd3d408478719c33d320f18e46ba5
+ARG KIRO_CLI_SHA256_ARM64=acf8e80a10a079bad0c4e28b38a00aa4b3c537067c7844490384fddf94f88e7d
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -691,9 +691,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.70
-ARG GROK_SHA512_AMD64=ac496c872733ffa4a03d2922146b4a1c0e2f495388f2a43a7748c57aee08f7685708c7efc603223af352cee0619b63fc25dfb8acd180b72db35b45709a01d278
-ARG GROK_SHA512_ARM64=ac7d137d6393fc26bfb0132d00927e189f54c9996bfd3913a881eaf052fba3e653cc93015af0afe34242e13fd7bb0119dd6326c4e1c688f6a9ec7f41e126c34b
+ARG GROK_VERSION=1.0.77
+ARG GROK_SHA512_AMD64=0ee3d2130d4d623fdbc0b3822bfecb270f37375ae029cf2112c220e0282027dcbbe3269b00e51d6a6af895f23e8b670a2cfabd87c4d07f628d6f213fcd7f3dca
+ARG GROK_SHA512_ARM64=29be3229b544ced5f4ee233b72f281d8bff18903f533f90b8c99f2464f3880db6bdc81bb6a1a89a7ad34e6e07f54bbf0d22b2fd428f9d3327d8d84caecd88eab
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \

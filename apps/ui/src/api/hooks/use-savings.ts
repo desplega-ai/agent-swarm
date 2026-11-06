@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../client";
-import type { SavingsTarget } from "../types";
+import type { SavingsTarget, SavingsTier } from "../types";
 
 /** Savings come from an hourly rollup; 10 minutes is fresh enough. */
 const STALE_MS = 10 * 60 * 1000;
@@ -52,6 +52,55 @@ export function useScriptsSavings() {
   return useQuery({
     queryKey: ["savings", "scripts"],
     queryFn: () => api.getSavingsJobs({ kind: "script" }, { days: 30 }),
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}
+
+export type SavingsWindow = { days: 7 | 30 | 90; tier: SavingsTier };
+
+/** The fleet page: summary, daily series, and every workflow and script, for one window and tier. */
+export function useFleetSavings(window: SavingsWindow) {
+  const opts = { staleTime: STALE_MS, retry: false, placeholderData: keepPreviousData } as const;
+  const summary = useQuery({
+    queryKey: ["savings", "fleet", window],
+    queryFn: () => api.getSavingsSummary(window),
+    ...opts,
+  });
+  const daily = useQuery({
+    queryKey: ["savings", "fleet-daily", window],
+    queryFn: () => api.getSavingsDaily(undefined, window),
+    ...opts,
+  });
+  const workflows = useQuery({
+    queryKey: ["savings", "workflows", window],
+    queryFn: () => api.getSavingsJobs({ kind: "workflow" }, window),
+    ...opts,
+  });
+  const scripts = useQuery({
+    queryKey: ["savings", "scripts", window],
+    queryFn: () => api.getSavingsJobs({ kind: "script" }, window),
+    ...opts,
+  });
+  return { summary, daily, workflows, scripts };
+}
+
+/** Saving of one schedule over the last 30 days. */
+export function useScheduleSavings(scheduleId: string | undefined) {
+  return useQuery({
+    queryKey: ["savings", "schedule", scheduleId],
+    queryFn: () => api.getSavingsSchedules({ scheduleId: scheduleId as string }, { days: 30 }),
+    enabled: !!scheduleId,
+    staleTime: STALE_MS,
+    retry: false,
+  });
+}
+
+/** Saving of every schedule over the last 30 days, for the schedules list. */
+export function useSchedulesSavings() {
+  return useQuery({
+    queryKey: ["savings", "schedules"],
+    queryFn: () => api.getSavingsSchedules({ kind: "schedule" }, { days: 30 }),
     staleTime: STALE_MS,
     retry: false,
   });

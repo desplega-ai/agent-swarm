@@ -1,8 +1,9 @@
 // Automation savings, read from the hourly rollup: a run is priced on the
 // detail route right away, the daily points add up to it, the list route
-// answers, an idle workflow is not valid (never $0), the script routes answer,
-// bad input is rejected, and the calibration routes report the shipped curve
-// and apply nothing on a dry run.
+// answers, the fleet summary and fleet daily series agree, an idle workflow
+// is not valid (never $0), the script and schedule routes answer, bad input is
+// rejected, and the calibration routes report the shipped curve and apply
+// nothing on a dry run.
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -88,6 +89,33 @@ export const workflowSavings: Scenario = {
         `daily points sum to the p50 saving ${pointCents} vs ${band.p50}`,
       );
 
+      // The fleet total covers the run, and the fleet daily series sums to it.
+      // Script days follow workflow days in the tick, so wait for both.
+      await pollUntil(async () => {
+        response = await ctx.api("GET", "/api/savings/summary?days=7&tier=smart");
+        return asRecord(response.json).reason !== "not-computed";
+      }, 30_000);
+      expectStatus(response, [200], "fleet savings summary");
+      const summary = asRecord(response.json);
+      const fleetP50 = Number(asRecord(asRecord(summary.total).savingUsd).p50);
+      expect(summary.valid === true && Number.isFinite(fleetP50), `fleet total ${response.text}`);
+      expect(
+        Array.isArray(summary.assumptions) && typeof summary.fleetLlmUsd === "number",
+        `summary carries spend and assumptions ${response.text}`,
+      );
+      response = await ctx.api("GET", "/api/savings/daily?days=7&tier=smart");
+      expectStatus(response, [200], "fleet daily savings");
+      const fleetCents = Math.round(
+        asRecords(asRecord(response.json), "points").reduce((s, p) => s + Number(p.savingUsd), 0) *
+          100,
+      );
+      expect(
+        fleetCents === Math.round(fleetP50 * 100),
+        `fleet daily points sum to the fleet p50 ${fleetCents} vs ${fleetP50}`,
+      );
+      response = await ctx.api("GET", "/api/savings/summary?tier=huge");
+      expectStatus(response, [400], "summary: unknown tier");
+
       // The default 30-day window can still be backfilling after the 7-day one is done;
       // workflow and script days share the tick, newest first.
       await pollUntil(async () => {
@@ -136,6 +164,16 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [404], "daily: unknown script");
       response = await ctx.api("GET", `/api/savings/jobs?scriptName=x&workflowId=${ran}`);
       expectStatus(response, [400], "two targets");
+
+      // Schedules read the same rollup through their target.
+      response = await ctx.api("GET", "/api/savings/jobs?kind=schedule&days=7");
+      expectStatus(response, [200], "savings for every schedule");
+      json = asRecord(response.json);
+      expect(Array.isArray(json.rows) && json.total === null, `schedule list ${response.text}`);
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=missing-${ctx.nonce}`);
+      expectStatus(response, [404], "unknown schedule");
+      response = await ctx.api("GET", `/api/savings/jobs?scheduleId=x&workflowId=${ran}`);
+      expectStatus(response, [400], "schedule and workflow targets");
 
       // Calibration: the shipped curve is in use; a dry run on a fresh deployment applies nothing.
       response = await ctx.api("GET", "/api/savings/calibration");

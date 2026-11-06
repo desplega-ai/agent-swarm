@@ -415,6 +415,9 @@
     "fallbackHops": {
       "exempt": "JSON hop list written by the API: profile names, an error-class enum, ISO times, and profile-check row text (var names and 5-character key suffixes only)"
     },
+    "slackParticipants": {
+      "exempt": "JSON participant list written by the API: Slack user ids, users.id identifiers, a trust enum and booleans"
+    },
     "sourceStepId": {
       "exempt": "identifier"
     },

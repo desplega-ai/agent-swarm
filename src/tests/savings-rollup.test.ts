@@ -687,7 +687,7 @@ describe("savings rollup", () => {
       expect((await get("/api/savings/jobs")).status).toBe(400);
       expect((await get("/api/savings/jobs?workflowId=nope")).status).toBe(404);
       expect((await get("/api/savings/daily?workflowId=nope")).status).toBe(404);
-      expect((await get("/api/savings/daily")).status).toBe(400);
+      expect((await get("/api/savings/daily?workflowId=a&scriptName=b")).status).toBe(400);
       expect((await get(`/api/savings/jobs?workflowId=${capLive}&tier=huge`)).status).toBe(400);
       expect((await get("/api/savings/jobs?kind=workflow&days=12")).status).toBe(400);
     });

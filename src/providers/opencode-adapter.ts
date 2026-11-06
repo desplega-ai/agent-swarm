@@ -40,6 +40,7 @@ import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
 } from "../utils/openrouter-base-url";
+import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -369,6 +370,38 @@ export function applyProviderKeySplice(
   const slash = model?.indexOf("/") ?? -1;
   if (!model || slash <= 0) return undefined;
   const providerId = model.slice(0, slash);
+  const modelId = model.slice(slash + 1);
+
+  // OpenCode's built-in openrouter catalog only lists models.dev's OpenRouter
+  // section. A model id reached through a gateway override (OPENROUTER_BASE_URL,
+  // e.g. a LiteLLM route) can be absent from it, so OpenCode fails the session
+  // instead of running the requested model (the same gap buildOpenAICompatibleProviderBlock
+  // already closes for custom-block providers). This runs before any key-splice
+  // early return below: a credential opencode reads from its own
+  // `~/.local/share/opencode/auth.json` never reaches `pickProviderKey`, so a
+  // catalog entry computed only on the success path would never be written for
+  // that credential source. Only synthesize a bare entry for ids truly missing
+  // from the catalog snapshot; an id the catalog already lists (even one it
+  // marks non-tool-calling) keeps its real capability flags instead of a
+  // blanket `tool_call: true`.
+  if (
+    providerId === "openrouter" &&
+    modelId &&
+    !opencodeConfig.provider?.openrouter?.models?.[modelId] &&
+    !snapshotCatalogRows("openrouter")[modelId]
+  ) {
+    opencodeConfig.provider = {
+      ...opencodeConfig.provider,
+      openrouter: {
+        ...opencodeConfig.provider?.openrouter,
+        models: {
+          ...opencodeConfig.provider?.openrouter?.models,
+          [modelId]: { name: modelId, tool_call: true },
+        },
+      },
+    };
+  }
+
   const existing = opencodeConfig.provider?.[providerId];
 
   const custom = customBlockProvider(providerId);

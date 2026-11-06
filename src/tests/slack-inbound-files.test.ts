@@ -1034,8 +1034,9 @@ describe("Slack ingress with files", () => {
         ],
       );
       const task = await followUp();
+      // Rows after the first are indented as continuation lines of the author line.
       expect(task.task).toContain(
-        "| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |",
+        "| Acme | /casos-de-exito/acme |\n  | --- | --- |\n  | Globex | /casos-de-exito/globex |",
       );
       expect(task.task).not.toContain("!now");
     });

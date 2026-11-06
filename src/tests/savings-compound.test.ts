@@ -21,7 +21,12 @@ import {
   SAVINGS_CALIBRATION_KEY,
   SAVINGS_TIERS,
 } from "../be/savings/model";
-import { readScriptSavings, readWorkflowComponents, readWorkflowSavings } from "../be/savings/read";
+import {
+  readScriptSavings,
+  readWorkflowComponents,
+  readWorkflowSavings,
+  resetSavingsReadCache,
+} from "../be/savings/read";
 import { resetSavingsRollupForTests, runSavingsRollupTick } from "../be/savings/rollup";
 import { mintScriptRunToken, resolveSessionToken } from "../be/users";
 import { clearCalibrationCache, handleSavings, resetSavingsRefreshCache } from "../http/savings";
@@ -708,6 +713,8 @@ describe("each task counts under one root", () => {
       "UPDATE automation_savings_daily SET childTaskUsd=0, childTaskMs=0 WHERE jobKind='workflow' AND jobId=?",
       [chained],
     );
+    // A raw UPDATE bypasses the rollup writers, so drop the cached fleet read by hand.
+    resetSavingsReadCache();
     const without = await read();
     expect(counted.measuredUsd - without.measuredUsd).toBeCloseTo(3, 6);
     expect(counted.savingUsd.p50).toBeGreaterThan(0);

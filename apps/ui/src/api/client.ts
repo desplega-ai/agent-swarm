@@ -123,6 +123,8 @@ import type {
   RuntimePoolRuntime,
   SavingsDailyResponse,
   SavingsJobsResponse,
+  SavingsScheduleResponse,
+  SavingsSummaryResponse,
   SavingsTarget,
   SavingsTier,
   ScheduledTask,
@@ -4026,17 +4028,48 @@ class ApiClient {
     return (await res.json()) as SavingsJobsResponse;
   }
 
-  /** The modelled saving of one workflow or script per UTC day, from the same rollup as `getSavingsJobs`. */
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
+  }
+
+  /**
+   * The modelled saving of one workflow or script per UTC day, from the same
+   * rollup as `getSavingsJobs`; with no target, of the whole fleet.
+   */
   async getSavingsDaily(
-    target: SavingsTarget,
+    target: SavingsTarget | undefined,
     opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
   ): Promise<SavingsDailyResponse> {
     const res = await fetch(
-      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target, opts)}`,
+      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target ?? {}, opts)}`,
       { headers: this.getHeaders() },
     );
     if (!res.ok) throw new Error(`Failed to load daily savings: ${res.status}`);
     return (await res.json()) as SavingsDailyResponse;
+  }
+
+  /** The fleet's modelled saving, spend and assumptions, from the savings rollup. */
+  async getSavingsSummary(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsSummaryResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/summary?${savingsParams({}, opts)}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load the savings summary: ${res.status}`);
+    return (await res.json()) as SavingsSummaryResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
