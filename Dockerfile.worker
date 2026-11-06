@@ -22,7 +22,7 @@ ARG SKILLS_CLI_VERSION=1.5.20
 # context-mode pins BOTH the global CLI/MCP server (worker-base) and the
 # Claude/Codex plugin marketplaces (worker-full-base). Global so the two
 # stages cannot drift; each stage re-declares it.
-ARG CONTEXT_MODE_VERSION=1.0.169
+ARG CONTEXT_MODE_VERSION=2.1.4
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
