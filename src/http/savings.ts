@@ -136,6 +136,11 @@ const savingsMeta = {
   /** False when there is nothing to show: the window is not computed yet, or had no runs. Never $0. */
   valid: z.boolean(),
   reason: z.enum(["not-computed", "no-runs"]).nullable(),
+  boundaryEstimated: z
+    .boolean()
+    .describe(
+      "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead.",
+    ),
 };
 
 const SavingsJobsResponseSchema = z.object({
@@ -301,7 +306,7 @@ function notFound(res: ServerResponse, what: "Workflow" | "Script" = "Workflow")
  */
 async function readScript(scriptName: string, days: number, tier: (typeof SAVINGS_TIERS)[number]) {
   if (!(await isKnownScriptName(scriptName))) return null;
-  return readScriptSavings({ days, tier, now: Date.now(), scriptName });
+  return readScriptSavings({ days, tier, now: Date.now(), scriptName, sql: requestSql });
 }
 
 function badTarget(res: ServerResponse, message: string): true {
@@ -364,11 +369,15 @@ async function readOne(workflowId: string, days: number, tier: (typeof SAVINGS_T
   if (!workflow) return null;
   const now = Date.now();
   await refreshToday(workflow, now);
-  return readWorkflowSavings({ days, tier, now, workflowId });
+  return readWorkflowSavings({ days, tier, now, workflowId, sql: requestSql });
 }
 
 function meta(
-  read: { window: { start: string; end: string; days: number }; computedAt: string | null },
+  read: {
+    window: { start: string; end: string; days: number };
+    computedAt: string | null;
+    boundaryEstimated: boolean;
+  },
   tier: (typeof SAVINGS_TIERS)[number],
   valid: { complete: boolean; hasRows: boolean },
 ) {
@@ -384,6 +393,7 @@ function meta(
       : valid.hasRows
         ? null
         : ("no-runs" as const),
+    boundaryEstimated: read.boundaryEstimated,
   };
 }
 
@@ -433,8 +443,8 @@ export async function handleSavings(
     : scriptName
       ? await readScript(scriptName, days, tier)
       : kind === "script"
-        ? await readScriptSavings({ days, tier, now: Date.now() })
-        : await readWorkflowSavings({ days, tier, now: Date.now() });
+        ? await readScriptSavings({ days, tier, now: Date.now(), sql: requestSql })
+        : await readWorkflowSavings({ days, tier, now: Date.now(), sql: requestSql });
   if (!read) return notFound(res, scriptName ? "Script" : "Workflow");
   const show = read.complete;
   savingsJobsRoute.respond(res, 200, {
