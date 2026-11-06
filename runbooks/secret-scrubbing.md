@@ -64,7 +64,7 @@ Do not scrub inside `db-client.execute()`: a blanket scrub corrupts byte-exact v
 ## Refreshing the gitleaks rules
 
 1. Replace everything below the marker line of `scripts/vendor/gitleaks/gitleaks.toml` with upstream `config/gitleaks.toml` at the new tag, and update `version`, `commit` and `sha256` in its header. Keep `version` in step with `GITLEAKS_VERSION` in `scripts/gitleaks.sh`.
-2. Run `bun run build:secret-rules`. It fails on any RE2-only syntax it cannot convert, on a body that does not match the header sha256, and on an `EXCLUDED` id upstream no longer has.
+2. Run `bun run build:secret-rules`. It fails on any RE2-only syntax it cannot convert, on an allowlist regex that mixes anchored and unanchored `|` branches (it rewrites `^a|b$` to `^(?:a|b)$` itself), on a body that does not match the header sha256, and on an `EXCLUDED` id upstream no longer has.
 3. Run `bun run test:root -- src/tests/secret-rules.test.ts`. A new rule that trips the 50 ms ReDoS bound gets fixed in the generator or added to `EXCLUDED` with a reason.
 4. Bump `SCRUBBER_RULES_VERSION`. CI's `check:secret-rules` fails if the generated file is stale.
 
