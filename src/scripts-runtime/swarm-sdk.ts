@@ -534,6 +534,11 @@ function hasIdempotencyKey(headers: Record<string, string> | undefined): boolean
   return Object.keys(headers ?? {}).some((key) => key.toLowerCase() === "idempotency-key");
 }
 
+/** A keyed write may repeat, but it stays a write: only a read gets the retry deadline. */
+function bridgeSafety(readOnly: boolean, keyed: boolean) {
+  return { repeatSafe: readOnly || keyed, readOnly };
+}
+
 /** Waits `ms`, or less when `signal` aborts first. */
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
@@ -565,16 +570,19 @@ function budgetSpentResponse(previous: Response): Response {
  * `signal` is the run's own signal (quickjs aborts it when the run ends): an
  * aborted run gets the current outcome at once, never another wait or attempt.
  *
+ * `repeatSafe`: a 502/503/504 or a network error may be retried (a read, or a
+ * keyed write). `readOnly`: the call only reads.
+ *
  * The first attempt runs unbounded, as it did before retries existed. A retry
- * of a repeat-safe call (`readOnly`) is cut off when the retry budget is
- * spent, and the caller gets the earlier failure. A write retried after a 429
- * is not cut off: the 429 means its first real run is the retry, and aborting
- * it midway could leave it half applied.
+ * of a read is cut off when the retry budget is spent, and the caller gets
+ * the earlier failure. A write's retry, keyed or not, is never cut off: it may
+ * be the write's first real run (after a 429) or start the work a keyed route
+ * dedupes, and cutting it off reports a failure for work that went ahead.
  */
 async function bridgeFetch(
   url: string,
   init: RequestInit,
-  readOnly: boolean,
+  { repeatSafe, readOnly }: { repeatSafe: boolean; readOnly: boolean },
   signal: AbortSignal | undefined,
 ): Promise<Response> {
   const started = Date.now();
@@ -594,13 +602,13 @@ async function bridgeFetch(
       const delay = backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
       // An abort means the run is ending: settle now, never wait and retry.
       const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
-      if (aborted || !readOnly || attempt > BRIDGE_MAX_RETRIES || !fits(delay)) throw error;
+      if (aborted || !repeatSafe || attempt > BRIDGE_MAX_RETRIES || !fits(delay)) throw error;
       previous = { error };
       await sleep(delay, signal);
       if (signal?.aborted) throw error;
       continue;
     }
-    const retryable = res.status === 429 || (readOnly && READ_RETRY_STATUSES.has(res.status));
+    const retryable = res.status === 429 || (repeatSafe && READ_RETRY_STATUSES.has(res.status));
     if (!retryable || attempt > BRIDGE_MAX_RETRIES || signal?.aborted) return res;
     const delay =
       (res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined) ??
@@ -633,7 +641,7 @@ async function callBridgeApi(
         headers: headers(config),
         body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
       },
-      isReadOnlyBridgeCall(name, "POST"),
+      bridgeSafety(isReadOnlyBridgeCall(name, "POST"), false),
       options.signal,
     );
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
@@ -671,7 +679,7 @@ async function callBridgeApi(
       headers: { ...headers(config), ...request.headers },
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
     },
-    isReadOnlyBridgeCall(name, request.method) || hasIdempotencyKey(request.headers),
+    bridgeSafety(isReadOnlyBridgeCall(name, request.method), hasIdempotencyKey(request.headers)),
     options.signal,
   );
   const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);

@@ -920,6 +920,33 @@ export default async (_args, ctx) => {
       expect(result.writeMs).toBeGreaterThanOrEqual(5_900);
       expect(hitsOf(`/api/kv/${key}`).length).toBe(2);
     });
+
+    // A keyed write is repeat-safe, but it is still a write: its retry may start
+    // a run, so the read retry budget must not cut it off and report a failure.
+    retryTest("ctx.swarm never cuts off a keyed write's retry", async () => {
+      const keys = { after429: `429-1-slow-${name}-k429`, after502: `502-1-slow-${name}-k502` };
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const timed = async (id) => {
+    const started = Date.now();
+    const r = await ctx.swarm.workflow_trigger({ id, idempotencyKey: "same-key" });
+    return { result: [r.success, r.status], ms: Date.now() - started };
+  };
+  const [after429, after502] = await Promise.all([timed(args.after429), timed(args.after502)]);
+  return { after429, after502 };
+};`,
+        keys,
+      );
+      expect(output.error).toBeUndefined();
+      const result = output.result as Record<string, { result: unknown; ms: number }>;
+      for (const [label, id] of Object.entries(keys)) {
+        expect(result[label].result).toEqual([true, 200]);
+        expect(result[label].ms).toBeGreaterThanOrEqual(5_900);
+        const hits = hitsOf(`/api/workflows/${id}/trigger`);
+        expect(hits.map((hit) => hit.key)).toEqual(["same-key", "same-key"]);
+      }
+    });
   }
 });
 
