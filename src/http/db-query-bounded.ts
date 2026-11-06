@@ -43,6 +43,7 @@ import {
   DbQueryTimeoutError,
   executeReadOnlyQuery,
   getDbQueryConcurrencyCap,
+  isDbQueryWorkerPoolEnabled,
   warnDbQuerySpawnUnavailableOnce,
 } from "./db-query-shared";
 
@@ -209,7 +210,8 @@ export async function executeReadOnlyQueryBounded(
   acquireBoundedQuerySlot();
 
   try {
-    return await runBoundedQueryChild(sql, params, budgetMs, maxRows);
+    const run = isDbQueryWorkerPoolEnabled() ? runPooledQuery : runBoundedQueryChild;
+    return await run(sql, params, budgetMs, maxRows);
   } finally {
     releaseBoundedQuerySlot();
   }
@@ -229,13 +231,13 @@ export function isReportableTimeout(timedOut: boolean, exitCode: number, stdout:
   return timedOut && !(exitCode === 0 && stdout.length > 0);
 }
 
-async function runBoundedQueryChild(
+function buildPayload(
   sql: string,
   params: unknown[],
   budgetMs: number,
   maxRows?: number,
-): Promise<DbQueryResult> {
-  const payload: ChildPayload = {
+): ChildPayload {
+  return {
     file: getDb().filename,
     sql,
     params,
@@ -243,6 +245,27 @@ async function runBoundedQueryChild(
     maxRows,
     busyTimeoutMs: budgetMs,
   };
+}
+
+function timeoutError(budgetMs: number): DbQueryTimeoutError {
+  return new DbQueryTimeoutError(
+    `Query exceeded the ${budgetMs}ms budget and was terminated. Filter on an indexed column and add a LIMIT. Aggregates such as COUNT(*), SUM(...) or typeof() over session_logs, agent_log, events or task_context_snapshots read every row in range and cannot be made cheap by chunking on rowid.`,
+  );
+}
+
+/** No `bun` to spawn (see the catch in runBoundedQueryChild): run in-process, loudly, once. */
+function isMissingExecutable(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /executable not found/i.test(message) || /enoent/i.test(message);
+}
+
+async function runBoundedQueryChild(
+  sql: string,
+  params: unknown[],
+  budgetMs: number,
+  maxRows?: number,
+): Promise<DbQueryResult> {
+  const payload = buildPayload(sql, params, budgetMs, maxRows);
 
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
@@ -259,10 +282,7 @@ async function runBoundedQueryChild(
     // the systemd installer) ships or requires `bun` on $PATH, so this is
     // expected to be rare; fall back to the in-process path rather than
     // failing every db-query outright.
-    const message = err instanceof Error ? err.message : String(err);
-    if (!/executable not found/i.test(message) && !/enoent/i.test(message)) {
-      throw err;
-    }
+    if (!isMissingExecutable(err)) throw err;
     warnDbQuerySpawnUnavailableOnce();
     return executeReadOnlyQuery(sql, params, maxRows);
   }
@@ -290,9 +310,7 @@ async function runBoundedQueryChild(
   }
 
   if (isReportableTimeout(timedOut, exitCode, stdout)) {
-    throw new DbQueryTimeoutError(
-      `Query exceeded the ${budgetMs}ms budget and was terminated. Filter on an indexed column and add a LIMIT. Aggregates such as COUNT(*), SUM(...) or typeof() over session_logs, agent_log, events or task_context_snapshots read every row in range and cannot be made cheap by chunking on rowid.`,
-    );
+    throw timeoutError(budgetMs);
   }
 
   if (exitCode === WRITE_REJECTED_EXIT_CODE) {
@@ -313,4 +331,231 @@ async function runBoundedQueryChild(
     elapsed: parsed.elapsed,
     total: parsed.total,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Worker pool. The per-request `bun -e` spawn costs ~65 ms of runtime start,
+// module load and sqlite-vec load per call, which dominated POST /api/db-query
+// latency (~70k calls/day). Long-lived children keep one read-only connection
+// and take newline-delimited JSON requests on stdin. The kill-on-budget
+// guarantee is unchanged: the parent SIGKILLs the worker, drops it from the
+// pool, and the next request spawns a fresh one. `acquireBoundedQuerySlot`
+// already caps in-flight queries, so live workers never exceed the cap.
+// ---------------------------------------------------------------------------
+
+/** Recycle a worker after this many queries to bound its RSS growth. */
+const POOL_MAX_QUERIES_PER_WORKER = 500;
+const POOL_IDLE_REAP_MS = 60_000;
+/** A reply this large left the worker holding a big heap; recycle it instead of parking it. */
+const POOL_MAX_PARKED_REPLY_CHARS = 8 * 1024 * 1024;
+
+// Plain JS like CHILD_SCRIPT. Same read-only guard, iteration and BLOB handling;
+// JSON.stringify output has no raw newline, so "\n" delimits messages.
+const WORKER_SCRIPT = `
+const { Database } = require("bun:sqlite");
+
+let db = null;
+let dbFile = null;
+
+function run(req) {
+  const { file, sql, params, vecExtensionPath, maxRows, busyTimeoutMs } = req;
+  if (!db || dbFile !== file) {
+    if (db) db.close();
+    db = null;
+    const opened = new Database(file, { readonly: true });
+    if (vecExtensionPath) {
+      try {
+        opened.loadExtension(vecExtensionPath);
+      } catch {
+        // Non-fatal: only queries that reference vec0 tables/functions need it.
+      }
+    }
+    db = opened;
+    dbFile = file;
+  }
+  db.exec("PRAGMA busy_timeout = " + Math.trunc(busyTimeoutMs) + ";");
+  const stmt = db.prepare(sql);
+  try {
+    if (stmt.columnNames.length === 0) throw new Error("Only read-only queries are allowed");
+    const columns = stmt.columnNames;
+    const start = performance.now();
+    const rowArrays = [];
+    let total = 0;
+    for (const row of stmt.iterate(...(params || []))) {
+      total++;
+      if (!maxRows || rowArrays.length < maxRows) {
+        rowArrays.push(
+          columns.map((col) => {
+            const value = row[col];
+            return value instanceof Uint8Array ? Array.from(value) : value;
+          }),
+        );
+      }
+    }
+    return { columns, rows: rowArrays, elapsed: Math.round(performance.now() - start), total };
+  } finally {
+    // Finalize so no read transaction stays open and blocks WAL checkpoints.
+    stmt.finalize();
+  }
+}
+
+function handle(line) {
+  let out;
+  try {
+    out = JSON.stringify(run(JSON.parse(line)));
+  } catch (err) {
+    out = JSON.stringify({ error: err && err.message ? err.message : String(err) });
+  }
+  process.stdout.write(out + "\\n");
+}
+
+(async () => {
+  const decoder = new TextDecoder();
+  let buf = "";
+  for await (const chunk of Bun.stdin.stream()) {
+    buf += decoder.decode(chunk, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line) handle(line);
+    }
+  }
+})();
+`;
+
+interface PoolWorker {
+  proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+  queries: number;
+  stderr: Promise<string>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+  /** Set only while a query is in flight on this worker. */
+  onLine?: (line: string) => void;
+  onExit?: (reason: string) => void;
+}
+
+const idleWorkers: PoolWorker[] = [];
+
+/** Kill a worker and forget it. Idempotent. */
+function retireWorker(w: PoolWorker): void {
+  clearTimeout(w.idleTimer);
+  const i = idleWorkers.indexOf(w);
+  if (i >= 0) idleWorkers.splice(i, 1);
+  w.proc.kill("SIGKILL");
+}
+
+async function pumpWorker(w: PoolWorker): Promise<void> {
+  const decoder = new TextDecoder();
+  let partial = "";
+  try {
+    for await (const chunk of w.proc.stdout) {
+      const text = decoder.decode(chunk, { stream: true });
+      // Only scan the new chunk: a reply can be tens of MB and arrive in many chunks.
+      let from = 0;
+      let nl = text.indexOf("\n", from);
+      while (nl >= 0) {
+        const line = partial + text.slice(from, nl);
+        partial = "";
+        from = nl + 1;
+        w.onLine?.(line);
+        nl = text.indexOf("\n", from);
+      }
+      partial += text.slice(from);
+    }
+  } catch {
+    // A broken stdout pipe means the worker is gone; handled below like a clean EOF.
+  }
+  const code = await w.proc.exited;
+  const stderr = (await w.stderr).trim();
+  retireWorker(w);
+  w.onExit?.(stderr || `db-query worker exited with code ${code}`);
+}
+
+function spawnWorker(): PoolWorker {
+  const proc = Bun.spawn(["bun", "-e", WORKER_SCRIPT], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  // Idle workers must not keep the API (or a test run) alive; they exit on stdin EOF anyway.
+  proc.unref();
+  const w: PoolWorker = { proc, queries: 0, stderr: new Response(proc.stderr).text() };
+  void pumpWorker(w);
+  return w;
+}
+
+async function runPooledQuery(
+  sql: string,
+  params: unknown[],
+  budgetMs: number,
+  maxRows?: number,
+): Promise<DbQueryResult> {
+  let worker = idleWorkers.pop();
+  if (worker) {
+    clearTimeout(worker.idleTimer);
+  } else {
+    try {
+      worker = spawnWorker();
+    } catch (err) {
+      // Same fallback as runBoundedQueryChild: no spawnable `bun` means in-process.
+      if (!isMissingExecutable(err)) throw err;
+      warnDbQuerySpawnUnavailableOnce();
+      return executeReadOnlyQuery(sql, params, maxRows);
+    }
+  }
+  const w = worker;
+  const request = `${JSON.stringify(buildPayload(sql, params, budgetMs, maxRows))}\n`;
+
+  let reply: string;
+  try {
+    reply = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        retireWorker(w);
+        reject(timeoutError(budgetMs));
+      }, budgetMs);
+      w.onLine = (line) => {
+        clearTimeout(timer);
+        resolve(line);
+      };
+      w.onExit = (reason) => {
+        clearTimeout(timer);
+        reject(new Error(reason));
+      };
+      w.proc.stdin.write(request);
+      w.proc.stdin.flush();
+    });
+  } catch (err) {
+    retireWorker(w);
+    throw err;
+  } finally {
+    w.onLine = undefined;
+    w.onExit = undefined;
+  }
+
+  w.queries++;
+  if (w.queries >= POOL_MAX_QUERIES_PER_WORKER || reply.length > POOL_MAX_PARKED_REPLY_CHARS) {
+    retireWorker(w);
+  } else {
+    w.idleTimer = setTimeout(() => retireWorker(w), POOL_IDLE_REAP_MS);
+    idleWorkers.push(w);
+  }
+
+  const parsed = JSON.parse(reply) as ChildSuccess & { error?: string };
+  if (parsed.error !== undefined) throw new Error(parsed.error);
+  return {
+    columns: parsed.columns,
+    rows: parsed.rows,
+    elapsed: parsed.elapsed,
+    total: parsed.total,
+  };
+}
+
+/** Exposed for tests only — pids of the parked workers. */
+export function getDbQueryWorkerPidsForTests(): number[] {
+  return idleWorkers.map((w) => w.proc.pid);
+}
+
+/** Exposed for tests only — kills every parked worker. */
+export function resetDbQueryWorkerPoolForTests(): void {
+  for (const w of [...idleWorkers]) retireWorker(w);
 }

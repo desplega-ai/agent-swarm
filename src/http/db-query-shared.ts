@@ -247,6 +247,15 @@ export function isDbQueryBoundedEnabled(env: NodeJS.ProcessEnv = process.env): b
 }
 
 /**
+ * Long-lived worker children for the bounded path, instead of one `bun -e`
+ * spawn per query. On by default; `false` restores the per-request spawn.
+ * Read dynamically on every call, like `isDbQueryBoundedEnabled`.
+ */
+export function isDbQueryWorkerPoolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isEnvFlagEnabled("DB_QUERY_WORKER_POOL_ENABLED", true, env);
+}
+
+/**
  * Node/Bun's `setTimeout` takes a 32-bit signed delay internally; a value
  * above this silently wraps instead of waiting that long (observed as the
  * timer firing almost immediately). A budget read from an env var must never
