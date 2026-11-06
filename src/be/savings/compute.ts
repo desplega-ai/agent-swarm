@@ -233,7 +233,7 @@ const DISPATCH_SQL =
  * `scriptName` (runs without one by INLINE_SCRIPT_NAME), ops are the `await`
  * count of the catalog source (the global row wins), and a run had an effect
  * when its output names an agent task created while it ran (up to 20 minutes
- * after it started). v7 folds names beyond its first 900 into a tail row; here
+ * after it started), counted on the day the run started. v7 folds names beyond its first 900 into a tail row; here
  * every name keeps its own row and ops.
  */
 export async function computeScriptWindow(
@@ -264,16 +264,19 @@ export async function computeScriptWindow(
     );
     dispatchers.push(...rows.map((r) => String(r.name)));
   }
-  // Effect runs per day of the task they created (v7 counts tasks created in the window).
+  // Effect runs per day the run started, like their runs: a run at 23:59 whose
+  // task lands after midnight still credits its own day, so tasks are read up
+  // to 20 minutes past the window end.
   const effects = new Map<string, { other: number; api: number }>();
   if (dispatchers.length > 0) {
     const rows = await sql<{ d: string; nm: string; api: number; n: number }>(
-      `SELECT substr(t.createdAt,1,10) d, r.scriptName nm, (r.apiEndpointId IS NOT NULL) api, count(DISTINCT r.id) n
+      `SELECT substr(r.startedAt,1,10) d, r.scriptName nm, (r.apiEndpointId IS NOT NULL) api, count(DISTINCT r.id) n
         FROM agent_tasks t INDEXED BY idx_agent_tasks_created
         JOIN script_runs r INDEXED BY idx_script_runs_scriptName_startedAt ON r.scriptName IN (${dispatchers.map(() => "?").join(",")})
           AND r.startedAt>=strftime('%Y-%m-%dT%H:%M:%fZ',t.createdAt,'-20 minutes') AND r.startedAt<=t.createdAt AND r.output LIKE '%'||t.id||'%'
-        WHERE t.createdAt>=? AND t.createdAt<? GROUP BY 1,2,3`,
-      [...dispatchers, ...span],
+          AND r.startedAt>=? AND r.startedAt<?
+        WHERE t.createdAt>=? AND t.createdAt<strftime('%Y-%m-%dT%H:%M:%fZ',?,'+20 minutes') GROUP BY 1,2,3`,
+      [...dispatchers, ...span, ...span],
     );
     for (const row of rows) {
       const key = `${row.nm}\u0000${row.d}`;
@@ -285,14 +288,12 @@ export async function computeScriptWindow(
   }
 
   const byName = new Map<string, ScriptDayFacts[]>();
-  const seen = new Set<string>();
   const push = (nm: string, f: ScriptDayFacts) => byName.set(nm, [...(byName.get(nm) ?? []), f]);
   for (const r of runs) {
     const nm = String(r.nm);
     const n = num(r.n);
     const perRun = nm === INLINE_SCRIPT_NAME ? INLINE_OPS : (ops.get(nm) ?? DEFAULT_OPS);
     const e = effects.get(`${nm}\u0000${r.d}`);
-    seen.add(`${nm}\u0000${r.d}`);
     push(nm, {
       day: String(r.d),
       runs: n,
@@ -301,21 +302,6 @@ export async function computeScriptWindow(
       apiEffectRuns: e?.api ?? 0,
       opsSum: perRun * n,
       computeSecs: num(r.secs),
-    });
-  }
-  // A run that started on one day and created its task after midnight credits the task's day.
-  for (const [key, e] of effects) {
-    if (seen.has(key)) continue;
-    const [nm, day] = key.split("\u0000") as [string, string];
-    if (!byName.has(nm)) continue;
-    push(nm, {
-      day,
-      runs: 0,
-      apiRuns: 0,
-      effectRuns: e.other,
-      apiEffectRuns: e.api,
-      opsSum: 0,
-      computeSecs: 0,
     });
   }
   return [...byName.entries()]

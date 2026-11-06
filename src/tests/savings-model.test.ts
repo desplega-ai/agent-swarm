@@ -391,6 +391,37 @@ describe("savings model", () => {
       expect(priced.savingUsd.p50).toBeCloseTo(804 * unit, 6);
     });
 
+    test("script runs keep no agent active, so agent-hours saved never go negative", () => {
+      const cases: [ScriptFacts, "script-scheduled" | "script-agent-invoked"][] = [
+        // One API run with an effect that took 30 seconds.
+        [script({ runs: 1, apiRuns: 1, apiEffectRuns: 1, computeSecs: 30 }), "script-scheduled"],
+        [
+          script({ runs: 1, apiRuns: 1, apiEffectRuns: 1, computeSecs: 30 }),
+          "script-agent-invoked",
+        ],
+        // Mixed API effect and non-API runs with long wall time.
+        [
+          script({ runs: 3, apiRuns: 1, apiEffectRuns: 1, computeSecs: 3 * 600 }),
+          "script-agent-invoked",
+        ],
+        // An agent-invoked run with no ops adds no turns, so it saves no hours.
+        [script({ runs: 1, computeSecs: 30 }), "script-agent-invoked"],
+      ];
+      for (const [f, kind] of cases) {
+        const priced = priceScript(f, { tier: "smart", days: 1, band: "job", kind });
+        expect(priced.actualHours).toBe(0);
+        expect(priced.hoursSaved).toEqual(priced.agentOnlyHours);
+        expect(priced.hoursSaved.p10).toBeGreaterThanOrEqual(0);
+      }
+      const api = priceScript(cases[0]?.[0] as ScriptFacts, {
+        tier: "smart",
+        days: 1,
+        band: "job",
+        kind: "script-scheduled",
+      });
+      expect(api.hoursSaved.p50).toBeCloseTo(R.p50 * curve(T0, "smart", "hrs"), 9);
+    });
+
     test("daily split sums to the window saving", () => {
       const days = [
         { day: "2026-10-01", ...script({ runs: 900, opsSum: 900 * 5 }) },

@@ -485,7 +485,8 @@ export type ScriptKind = "script-scheduled" | "script-agent-invoked";
  * calling agent's session (no bootstrap, no review). Non-API runs count at
  * most 24 a day, unless they had a downstream effect. An API run counts only
  * when it had an effect, then as a standalone decision with a review.
- * Scripts record no LLM spend, so their actual cost is 0.
+ * Scripts record no LLM spend and keep no agent active, so their actual
+ * cost and agent-hours are 0.
  */
 export function priceScript(
   facts: ScriptFacts,
@@ -511,8 +512,10 @@ export function priceScript(
   const agentOnlyHours = bandOf(
     (q) => v * R[q] * unitHrs * err[q] + apiV * R[q] * fullHrs * err[q],
   );
-  // v7 scales the runs' wall time by the substituted share of non-API runs over all runs.
-  const actualHours = runs > 0 ? (facts.computeSecs / 3600) * (v / runs) : 0;
+  // A script run keeps no agent active: scheduled and API runs have no agent,
+  // and an agent-invoked run's wait is already inside the turns `unitHrs`
+  // removes. v7 subtracted the runs' wall time, which made short runs negative.
+  const actualHours = 0;
   return {
     enabledOnlyRule: false,
     runs,

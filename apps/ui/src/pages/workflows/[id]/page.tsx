@@ -93,7 +93,7 @@ import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const RUNS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -934,12 +934,11 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
             </div>
             <Editor
               language={language}
-              theme={theme === "dark" ? "github-dark" : "github-light"}
+              theme={MONACO_GITHUB_THEME[theme]}
               value={code}
               height={`${editorHeight}px`}
               beforeMount={(monaco) => {
-                monaco.editor.defineTheme("github-light", monacoLightTheme);
-                monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+                defineGithubThemes(monaco);
               }}
               options={{
                 readOnly: true,
@@ -1526,13 +1525,12 @@ function JsonMonacoEditor({
     <div className="rounded-md overflow-hidden border border-border" data-testid={testId}>
       <Editor
         language="json"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={value}
         height={`${height}px`}
         onChange={(v) => onChange(v ?? "")}
         beforeMount={(monaco) => {
-          monaco.editor.defineTheme("github-light", monacoLightTheme);
-          monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+          defineGithubThemes(monaco);
         }}
         options={{
           readOnly,

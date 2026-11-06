@@ -98,7 +98,11 @@ function SavingsKpis({ row, note, days }: { row: SavingsJobRow; note: string; da
         label="Agent-hours saved"
         value={<span className="font-mono tabular-nums">{formatHours(row.hoursSaved.p50)}</span>}
         detail={`${formatHours(row.hoursSaved.p10)} to ${formatHours(row.hoursSaved.p90)}`}
-        info={`Agent-active hours the same work would have taken, minus the time it took. ${note}`}
+        info={
+          isScript(row)
+            ? `Agent-active hours the same work would have taken. A script run keeps no agent active, so nothing is subtracted. ${note}`
+            : `Agent-active hours the same work would have taken, minus the time it took. ${note}`
+        }
       />
       <StatPanel
         label="Substituted runs"
