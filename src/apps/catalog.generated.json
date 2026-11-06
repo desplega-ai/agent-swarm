@@ -41,6 +41,10 @@
     "Calendar",
     "ContributionGraph",
     "Tree",
+    "Files",
+    "File",
+    "DateRange",
+    "Timeline",
     "SchemaForm",
     "ElementRef",
     "ElementSlot"
@@ -851,14 +855,14 @@
       }
     },
     "Chart": {
-      "description": "Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: \"category\"` (default) keeps row order, `\"time\"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `height` px (120-640, default 240). No rows renders `emptyMessage` (default \"No data yet\"). Wrap it in a `Card` for a title.",
+      "description": "Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: \"category\"` (default) keeps row order, `\"time\"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `kind: \"pie\"` or `\"donut\"` takes exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip shows the value in `format` plus the share, and the legend defaults on (`xType` and `stacked` do not apply). `height` px (120-640, default 240). No rows renders `emptyMessage` (default \"No data yet\"). Wrap it in a `Card` for a title.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["line", "area", "bar"]
+            "enum": ["line", "area", "bar", "pie", "donut"]
           },
           "data": {
             "type": "array",
@@ -2207,7 +2211,7 @@
       }
     },
     "Form": {
-      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.",
+      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs. `kind: \"file\"` attaches agent-fs files with the VIEWER's own agent-fs key (swarm default drive): `source: \"upload\"` (default) picks local files and uploads them on submit, before the chain, to `<dir>/<timestamp>-<name>`; `\"pick\"` opens a browser of `dir` (or `/`) to attach a file that already exists; `\"both\"` offers both. `$form.<name>` is the path, or an array of paths with `multiple: true`. `accept` filters the file picker. An upload failure stops the chain and keeps the values. Without an agent-fs connection the field shows a \"Connect agent-fs\" card, and a required file field disables submit.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -2232,7 +2236,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": ["string", "text", "number", "boolean", "date", "enum"]
+                  "enum": ["string", "text", "number", "boolean", "date", "enum", "file"]
                 },
                 "options": {
                   "type": "array",
@@ -2245,6 +2249,22 @@
                 },
                 "required": {
                   "type": "boolean"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "accept": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "multiple": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["upload", "pick", "both"]
                 }
               },
               "required": ["name"],
@@ -3135,6 +3155,232 @@
           }
         },
         "required": ["id", "nodes"],
+        "additionalProperties": false
+      }
+    },
+    "Files": {
+      "description": "agent-fs folder listing, read as the VIEWER with their own agent-fs key (Comb's connection), from the swarm's default drive. `path` is an absolute folder. `mode: \"list\"` (default) shows that folder; `\"browser\"` also opens subfolders, with crumbs that never go above `path`. Folders sort first. Clicking a file (or, in list mode, a folder) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }` (`type` is `file` or `directory`), usually an `app.navigate` that puts `$row.path` in a route param a `File` reads. `selectedPath` highlights that row. `upload: true` adds an Upload button and a drop zone that upload into the open folder with the viewer's key and refresh the list; a taken name asks Keep both or Skip. A viewer who has not connected agent-fs sees a \"Connect agent-fs\" card instead; access is whatever their drive membership allows. Rows scroll inside `maxHeight` (default 480px), or set `fill: true` to grow inside a `fill`-aware parent.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["list", "browser"]
+          },
+          "selectedPath": {
+            "type": "string"
+          },
+          "emptyMessage": {
+            "type": "string"
+          },
+          "maxHeight": {
+            "description": "CSS max-height for the scrollable list, e.g. '480px' (default '480px')",
+            "type": "string"
+          },
+          "fill": {
+            "type": "boolean"
+          },
+          "onSelect": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "upload": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    },
+    "File": {
+      "description": "One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm's default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser's viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and \"Open in agent-fs\". An empty `path` shows a \"No file selected\" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a \"Connect agent-fs\" card.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "height": {
+            "type": "string"
+          },
+          "fill": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    },
+    "DateRange": {
+      "description": "Date range filter: preset buttons (`7d`, `30d`, `90d`, `mtd` month to date, `custom`) that write `/ui/<id>/from` and `/ui/<id>/to` as inclusive `YYYY-MM-DD` dates ending today. Bind query params to them with `{ \"$state\": \"/ui/<id>/from\" }`, so the query refetches when the range changes. `presets` picks and orders the buttons (default all five); `defaultPreset` is written on first load (default the first preset). `custom` opens two date inputs in a popover and applies when from is not after to.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "presets": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["7d", "30d", "90d", "mtd", "custom"]
+            }
+          },
+          "defaultPreset": {
+            "type": "string",
+            "enum": ["7d", "30d", "90d", "mtd", "custom"]
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "Timeline": {
+      "description": "Vertical event list over rows, newest first, grouped under day headings (Today, Yesterday, then dates). Bind `data`/`loading` to a named query like Table. `timeField` (ISO date or epoch ms; rows that do not parse are left out), `titleField`, optional `descriptionField`, and `statusField` with `tones` (value → pill tone, lifecycle values get the status chip) shape each event; `icon` replaces the marker dot. `onSelect` runs with `$row` and `$rowIndex` when an event is clicked. No rows renders `emptyMessage`.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "timeField": {
+            "type": "string"
+          },
+          "titleField": {
+            "type": "string"
+          },
+          "descriptionField": {
+            "type": "string"
+          },
+          "statusField": {
+            "type": "string"
+          },
+          "tones": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "neutral",
+                "success",
+                "active",
+                "error",
+                "info",
+                "pending",
+                "warning",
+                "paused"
+              ]
+            }
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
+          },
+          "emptyMessage": {
+            "type": "string"
+          },
+          "onSelect": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["timeField", "titleField"],
         "additionalProperties": false
       }
     },

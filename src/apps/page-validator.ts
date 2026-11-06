@@ -56,6 +56,7 @@ const UI_STATE_COMPONENTS = new Set([
   "SchemaForm",
   "Table",
   "Accordion",
+  "DateRange",
 ]);
 
 // A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
@@ -75,6 +76,8 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
   Approval: ["onResolved"],
+  Files: ["onSelect"],
+  Timeline: ["onSelect"],
 };
 
 /**
@@ -1425,6 +1428,13 @@ function chartPropIssues(
     }
   }
   if (
+    (props.kind === "pie" || props.kind === "donut") &&
+    Array.isArray(props.series) &&
+    props.series.length !== 1
+  ) {
+    issues.push(issue(`${propsPath}.series`, `kind "${props.kind}" takes exactly one series`));
+  }
+  if (
     typeof props.height === "number" &&
     (!Number.isInteger(props.height) || props.height < 120 || props.height > 640)
   ) {
@@ -1508,6 +1518,100 @@ function currencyIssues(
         }
       }
     }
+  }
+  return issues;
+}
+
+/** The `$row` fields `Files.onSelect` publishes. */
+const FILE_ROW_FIELDS = new Set(["path", "name", "type", "size", "modifiedAt"]);
+
+function collectFileRowIssues(value: unknown, path: string, issues: AppValidationIssue[]): void {
+  if (isPlainObject(value) && typeof value.$row === "string") {
+    if (!FILE_ROW_FIELDS.has(value.$row)) {
+      issues.push(
+        issue(
+          appendPath(path, "$row"),
+          `unknown Files row field "${value.$row}" (one of ${[...FILE_ROW_FIELDS].join(", ")})`,
+        ),
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value) || isPlainObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      collectFileRowIssues(child, appendPath(path, key), issues);
+    }
+  }
+}
+
+/**
+ * `File` / `Files`: a literal `path` must be absolute without `..` segments.
+ * Hygiene only: agent-fs drive membership is the access boundary.
+ */
+function agentFsPropIssues(
+  type: "File" | "Files",
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (typeof props.path === "string" && !isAgentFsPath(props.path)) {
+    issues.push(issue(`${propsPath}.path`, 'must be an absolute agent-fs path without ".."'));
+  }
+  if (type === "Files") collectFileRowIssues(props.onSelect, `${propsPath}.onSelect`, issues);
+  return issues;
+}
+
+function isAgentFsPath(value: string): boolean {
+  return value.startsWith("/") && !value.split("/").includes("..");
+}
+
+/**
+ * Form `kind: "file"` fields: `dir` is required unless `source: "pick"`, and
+ * a literal `dir` follows the `File` / `Files` path rules.
+ */
+function formFileFieldIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (!Array.isArray(props.fields)) return issues;
+  for (const [index, field] of props.fields.entries()) {
+    if (!isPlainObject(field) || field.kind !== "file") continue;
+    const fieldPath = `${elementPath}.props.fields.${index}`;
+    if (field.dir === undefined && field.source !== "pick") {
+      issues.push(issue(`${fieldPath}.dir`, 'is required for kind "file" unless source is "pick"'));
+    } else if (typeof field.dir === "string" && !isAgentFsPath(field.dir)) {
+      issues.push(issue(`${fieldPath}.dir`, 'must be an absolute agent-fs path without ".."'));
+    }
+  }
+  return issues;
+}
+
+/** `DateRange`: a plain-token id (it roots `/ui/<id>/from|to`) and a listed `defaultPreset`. */
+function dateRangePropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (
+    typeof props.id === "string" &&
+    (!SCHEMA_FORM_ID.test(props.id) || RESERVED_UI_IDS.has(props.id))
+  ) {
+    issues.push(
+      issue(
+        `${propsPath}.id`,
+        "DateRange id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+      ),
+    );
+  }
+  if (
+    Array.isArray(props.presets) &&
+    typeof props.defaultPreset === "string" &&
+    !props.presets.includes(props.defaultPreset)
+  ) {
+    issues.push(issue(`${propsPath}.defaultPreset`, "must be one of the listed presets"));
   }
   return issues;
 }
@@ -1684,6 +1788,11 @@ export function validatePage(
       if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
       issues.push(...currencyIssues(type, rawElement.props, elementPath));
       if (type === "Accordion") issues.push(...accordionIssues(rawElement, elementPath));
+      if (type === "File" || type === "Files") {
+        issues.push(...agentFsPropIssues(type, rawElement.props, elementPath));
+      }
+      if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
+      if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;

@@ -341,6 +341,33 @@ const treeProps = z.object({
   fill: z.boolean().optional(),
 });
 
+const filesProps = z.object({
+  /** Absolute agent-fs folder in the swarm drive, e.g. "/apps/launch-tracker/docs". */
+  path: z.string(),
+  /** `list` shows one folder; `browser` lets the viewer open subfolders, with crumbs. */
+  mode: z.enum(["list", "browser"]).optional(),
+  /** The file path to highlight, usually `{ "$state": "/route/params/<param>" }`. */
+  selectedPath: z.string().optional(),
+  emptyMessage: z.string().optional(),
+  maxHeight: z
+    .string()
+    .optional()
+    .describe("CSS max-height for the scrollable list, e.g. '480px' (default '480px')"),
+  fill: z.boolean().optional(),
+  /** Chain run when a row is clicked; `$row` = `{ path, name, type, size, modifiedAt }`. */
+  onSelect: actionChainSchema.optional(),
+  /** Adds an Upload button and a drop zone that upload into the open folder, then refetch. */
+  upload: z.boolean().optional(),
+});
+
+const fileProps = z.object({
+  /** Absolute agent-fs file path in the swarm drive. Empty renders a "No file selected" state. */
+  path: z.string(),
+  /** CSS height of the scrolling view, e.g. '480px'. Without it the view sizes to content. */
+  height: z.string().optional(),
+  fill: z.boolean().optional(),
+});
+
 const schemaFormProps = z.object({
   /** State id — the current draft values object lands at `/ui/<id>/value`. */
   id: z.string(),
@@ -464,6 +491,38 @@ export const BADGE_TONES = [
 
 export type BadgeTone = (typeof BADGE_TONES)[number];
 
+const dateRangePresetSchema = z.enum(["7d", "30d", "90d", "mtd", "custom"]);
+
+const dateRangeProps = z.object({
+  /** State id: the range lands at `/ui/<id>/from` and `/ui/<id>/to` as `YYYY-MM-DD`. */
+  id: z.string(),
+  /** Buttons shown, in order. Defaults to all five. */
+  presets: z.array(dateRangePresetSchema).min(1).optional(),
+  /** Selected on first load. Defaults to the first preset. */
+  defaultPreset: dateRangePresetSchema.optional(),
+  label: z.string().optional(),
+});
+
+const timelineProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` — one event per row. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Row field with the event time (ISO date or epoch ms). Rows without one are left out. */
+  timeField: z.string(),
+  titleField: z.string(),
+  descriptionField: z.string().optional(),
+  /** Row field shown as a status pill (lifecycle values get the dashboard status chip). */
+  statusField: z.string().optional(),
+  /** For `statusField` — value → pill tone and dot color. Falls back to `neutral`. */
+  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** Icon on every event marker, instead of a dot. */
+  icon: iconName.optional(),
+  emptyMessage: z.string().optional(),
+  /** Chain run when an event is clicked; `$row` = the row, `$rowIndex` its index in `data`. */
+  onSelect: actionChainSchema.optional(),
+});
+
 const badgeProps = z.object({
   text: z.union([z.string(), z.number()]),
   tone: z.enum(BADGE_TONES).optional(),
@@ -537,7 +596,7 @@ const chartSeriesSchema = z.object({
 });
 
 const chartProps = z.object({
-  kind: z.enum(["line", "area", "bar"]),
+  kind: z.enum(["line", "area", "bar", "pie", "donut"]),
   /** Usually `{ "$state": "/queries/<name>/data" }`. */
   data: z.array(z.record(z.string(), z.unknown())).optional(),
   /** Usually `{ "$state": "/queries/<name>/loading" }`. */
@@ -948,12 +1007,20 @@ const formFieldSchema = z.object({
    * render as (and be clobbered by) the failure state. */
   name: z.string().regex(/^[^$]/, "field names must not start with '$' (reserved)"),
   label: z.string().optional(),
-  /** `text` is a multi-line variant of `string` (textarea). */
-  kind: z.enum(["string", "text", "number", "boolean", "date", "enum"]).optional(),
+  /** `text` is a multi-line variant of `string` (textarea). `file` attaches agent-fs files. */
+  kind: z.enum(["string", "text", "number", "boolean", "date", "enum", "file"]).optional(),
   /** Required for `kind: "enum"`. */
   options: z.array(z.string()).optional(),
   placeholder: z.string().optional(),
   required: z.boolean().optional(),
+  /** `kind: "file"` — absolute agent-fs folder uploads land in. Required unless `source: "pick"`. */
+  dir: z.string().optional(),
+  /** `kind: "file"` — file-input accept list, e.g. `[".pdf", "image/*"]`. */
+  accept: z.array(z.string()).optional(),
+  /** `kind: "file"` — several files; `$form.<name>` is then an array of paths. */
+  multiple: z.boolean().optional(),
+  /** `kind: "file"` — `upload` (default) a new file, `pick` an existing one, or `both`. */
+  source: z.enum(["upload", "pick", "both"]).optional(),
 });
 
 const formProps = z.object({
@@ -1165,6 +1232,8 @@ export type ChipOption = z.infer<typeof chipOptionSchema>;
 export type DrawerAction = NonNullable<z.infer<typeof drawerProps>["actions"]>[number];
 export type MetricTrend = z.infer<typeof metricTrendSchema>;
 export type ChartProps = z.infer<typeof chartProps>;
+export type DateRangeProps = z.infer<typeof dateRangeProps>;
+export type TimelineProps = z.infer<typeof timelineProps>;
 export type ChartColor = (typeof CHART_COLORS)[number];
 export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
@@ -1267,7 +1336,7 @@ export const swarmCatalogSpec = {
     Chart: {
       props: chartProps,
       description:
-        'Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: "category"` (default) keeps row order, `"time"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `height` px (120-640, default 240). No rows renders `emptyMessage` (default "No data yet"). Wrap it in a `Card` for a title.',
+        'Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: "category"` (default) keeps row order, `"time"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `kind: "pie"` or `"donut"` takes exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip shows the value in `format` plus the share, and the legend defaults on (`xType` and `stacked` do not apply). `height` px (120-640, default 240). No rows renders `emptyMessage` (default "No data yet"). Wrap it in a `Card` for a title.',
     },
     Alert: {
       props: alertProps,
@@ -1338,7 +1407,7 @@ export const swarmCatalogSpec = {
     Form: {
       props: formProps,
       description:
-        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.',
+        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs. `kind: "file"` attaches agent-fs files with the VIEWER\'s own agent-fs key (swarm default drive): `source: "upload"` (default) picks local files and uploads them on submit, before the chain, to `<dir>/<timestamp>-<name>`; `"pick"` opens a browser of `dir` (or `/`) to attach a file that already exists; `"both"` offers both. `$form.<name>` is the path, or an array of paths with `multiple: true`. `accept` filters the file picker. An upload failure stops the chain and keeps the values. Without an agent-fs connection the field shows a "Connect agent-fs" card, and a required file field disables submit.',
     },
     Dialog: {
       props: dialogProps,
@@ -1386,6 +1455,26 @@ export const swarmCatalogSpec = {
       props: treeProps,
       description:
         'Collapsible tree view of a json-render flat element map. Bind `nodes` to a doc-shaped value (`{ root: string | string[], elements: Record<key,{type,children?}> }`) — usually `{ "$state": "/queries/<name>/data/0/<jsonColumn>" }`. Each row shows `key — type`; clicking one writes the node key to `/ui/<id>/value`, and the row bound to that path renders selected. A malformed or absent `nodes` value renders an empty state. Rows scroll inside a fixed-height viewport — `maxHeight` overrides the default `480px` — or set `fill: true` to grow inside a `fill`-aware parent and scroll within whatever height that gives it instead (ignores `maxHeight`). Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.',
+    },
+    Files: {
+      props: filesProps,
+      description:
+        'agent-fs folder listing, read as the VIEWER with their own agent-fs key (Comb\'s connection), from the swarm\'s default drive. `path` is an absolute folder. `mode: "list"` (default) shows that folder; `"browser"` also opens subfolders, with crumbs that never go above `path`. Folders sort first. Clicking a file (or, in list mode, a folder) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }` (`type` is `file` or `directory`), usually an `app.navigate` that puts `$row.path` in a route param a `File` reads. `selectedPath` highlights that row. `upload: true` adds an Upload button and a drop zone that upload into the open folder with the viewer\'s key and refresh the list; a taken name asks Keep both or Skip. A viewer who has not connected agent-fs sees a "Connect agent-fs" card instead; access is whatever their drive membership allows. Rows scroll inside `maxHeight` (default 480px), or set `fill: true` to grow inside a `fill`-aware parent.',
+    },
+    File: {
+      props: fileProps,
+      description:
+        'One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm\'s default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser\'s viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and "Open in agent-fs". An empty `path` shows a "No file selected" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a "Connect agent-fs" card.',
+    },
+    DateRange: {
+      props: dateRangeProps,
+      description:
+        'Date range filter: preset buttons (`7d`, `30d`, `90d`, `mtd` month to date, `custom`) that write `/ui/<id>/from` and `/ui/<id>/to` as inclusive `YYYY-MM-DD` dates ending today. Bind query params to them with `{ "$state": "/ui/<id>/from" }`, so the query refetches when the range changes. `presets` picks and orders the buttons (default all five); `defaultPreset` is written on first load (default the first preset). `custom` opens two date inputs in a popover and applies when from is not after to.',
+    },
+    Timeline: {
+      props: timelineProps,
+      description:
+        "Vertical event list over rows, newest first, grouped under day headings (Today, Yesterday, then dates). Bind `data`/`loading` to a named query like Table. `timeField` (ISO date or epoch ms; rows that do not parse are left out), `titleField`, optional `descriptionField`, and `statusField` with `tones` (value → pill tone, lifecycle values get the status chip) shape each event; `icon` replaces the marker dot. `onSelect` runs with `$row` and `$rowIndex` when an event is clicked. No rows renders `emptyMessage`.",
     },
     SchemaForm: {
       props: schemaFormProps,
