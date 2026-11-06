@@ -211,6 +211,13 @@ export function reuseWatermark(o: { from: Cursor; at: string; reuseRan: boolean;
 
 const esc = (s: string, n: number) => String(s ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").slice(0, n);
 
+/** Measured triage cost: "this run" only when every triage task has a session_costs row; rows land late, so a short count is "partial". */
+export function measuredCost(row: { tasks?: unknown; usd?: unknown } | undefined, taskCount: number): { usd: number; basis: string } | null {
+  const tasks = Number(row?.tasks ?? 0);
+  if (!row || row.usd === null || row.usd === undefined || tasks === 0) return null;
+  return { usd: Number(row.usd), basis: tasks >= taskCount ? "this run" : `partial: ${tasks} of ${taskCount} tasks` };
+}
+
 export function renderSection(r: { skipReason?: string | null; read: number; planned: number; newRead: number; reuseRead: number; batches: number; okBatches: number; failedBatches: Array<{ batchId: string; status: string }>; promoted: number; kept: number; keptHowto: number; dropped: number; dropWhy: Record<string, number>; guards: Record<string, number>; invalid: Record<string, number>; missing: number; left: number | null; cursor: { from: string; to: string } | null; cost: { usd: number | null; basis: string }; samples: TriageRow[]; names: Record<string, string> }): string {
   const L: string[] = [HEADING];
   if (r.skipReason) {
@@ -439,8 +446,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const taskIds = parsed.map((x) => x.taskId).filter(Boolean) as string[];
     let cost: { usd: number | null; basis: string } = { usd: null, basis: "no tasks" };
     if (taskIds.length) {
-      const c = (await q("cost", `SELECT SUM(totalCostUsd) usd FROM session_costs WHERE taskId IN (${taskIds.map(() => "?").join(",")})`, taskIds))[0];
-      if (c && c.usd !== null && c.usd !== undefined) cost = { usd: Number(c.usd), basis: "this run" };
+      const c = (await q("cost", `SELECT COUNT(DISTINCT taskId) tasks, SUM(totalCostUsd) usd FROM session_costs WHERE taskId IN (${taskIds.map(() => "?").join(",")})`, taskIds))[0];
+      const measured = measuredCost(c, new Set(taskIds).size);
+      if (measured) cost = measured;
       else {
         const prior = (await q("cost-prior", `SELECT COUNT(*) tasks, AVG(s.usd) usd FROM (SELECT sc.taskId, SUM(sc.totalCostUsd) usd FROM session_costs sc JOIN agent_tasks t ON t.id = sc.taskId WHERE t.tags LIKE '%dreaming-v2-learnings%' AND t.status = 'completed' AND sc.createdAt >= datetime('now','-7 days') GROUP BY sc.taskId) s`))[0];
         cost = prior && Number(prior.tasks) > 0 && prior.usd !== null ? { usd: Number(prior.usd) * taskIds.length, basis: `estimate: mean of ${prior.tasks} triage tasks in 7 days` } : { usd: null, basis: "session_costs lands after the triage tasks finish" };
