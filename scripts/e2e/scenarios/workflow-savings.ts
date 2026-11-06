@@ -81,11 +81,11 @@ export const workflowSavings: Scenario = {
       expectStatus(response, [200], "calibration in use");
       json = asRecord(response.json);
       expect(json.source === "shipped" && json.stored === null, `shipped curve ${response.text}`);
-      response = await ctx.api("POST", "/api/savings/calibration", { days: 7 });
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 7 } });
       expectStatus(response, [200], "calibration dry run");
       json = asRecord(response.json);
       expect(json.applied === false, `a dry run applies nothing ${response.text}`);
-      response = await ctx.api("POST", "/api/savings/calibration", { days: 0 });
+      response = await ctx.api("POST", "/api/savings/calibration", { body: { days: 0 } });
       expectStatus(response, [400], "calibration: bad days");
     } finally {
       await deleteWorkflowQuietly(ctx, ran);
