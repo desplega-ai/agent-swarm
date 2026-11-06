@@ -4,8 +4,8 @@ import { fetchInstalledMcpServers } from "./mcp-server-fetcher.ts";
 const originalFetch = global.fetch;
 
 function mockFetchWithServers(servers: unknown[]) {
-  global.fetch = mock(async () =>
-    new Response(JSON.stringify({ servers }), { status: 200 }),
+  global.fetch = mock(
+    async () => new Response(JSON.stringify({ servers }), { status: 200 }),
   ) as unknown as typeof fetch;
 }
 
