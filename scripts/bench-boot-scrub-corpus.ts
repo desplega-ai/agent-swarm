@@ -46,7 +46,9 @@ export function buildLinePool(repoRoot: string, seed = 1): string[] {
     const start = Math.floor(rand() * Math.max(1, text.length - len));
     return text.slice(start, start + len);
   };
-  const uuid = () => crypto.randomUUID();
+  const hex = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(rand() * 16).toString(16)).join("");
+  const uuid = () => `${hex(8)}-${hex(4)}-4${hex(3)}-${hex(4)}-${hex(12)}`;
   const usage = () =>
     `"usage":{"input_tokens":${Math.floor(rand() * 5000)},"cache_creation_input_tokens":${Math.floor(rand() * 9000)},"cache_read_input_tokens":${Math.floor(rand() * 90000)},"output_tokens":${Math.floor(rand() * 900)}}`;
   const pool: string[] = [];

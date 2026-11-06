@@ -1259,26 +1259,28 @@ let keyNeedles: LiteralMatcher | null = null;
 function sensitiveKeyNeedles(): LiteralMatcher {
   if (keyNeedles) return keyNeedles;
   const strip = (name: string) => name.toUpperCase().replace(/[_.-]/g, "");
-  const names = [
-    ...SENSITIVE_KEY_SUFFIXES,
-    ...SENSITIVE_KEY_EXACT,
-    ...registeredSensitiveKeys,
-    "codex_oauth",
-  ]
-    .map(strip)
+  const all = [...SENSITIVE_KEY_SUFFIXES, ...SENSITIVE_KEY_EXACT, ...registeredSensitiveKeys].map(
+    strip,
+  );
+  const names = all
     // A key is ASCII, so a name with other characters can never equal one.
     .filter((name) => /^[A-Z0-9]+$/.test(name));
   // An ending that another name ends with already covers the longer name.
   const needles = [...new Set(names)].filter(
     (name) => !names.some((other) => other !== name && name.endsWith(other)),
   );
-  // `codex_oauth_<n>` is sensitive too, so for that needle a digit also ends the key.
-  const ends = (needle: string) => [
-    ...'=: \t"\\',
-    ...(needle === "CODEXOAUTH" ? "0123456789" : ""),
-  ];
+  // `codex_oauth_<n>` is sensitive too, so a digit also ends that key. No other
+  // name covers it (a suffix like `OAUTH` ends before the digit), so it skips the dedupe.
+  const codexOauth = "CODEXOAUTH";
+  const ends = [...'=: \t"\\'];
+  // A name of only `_ . -` strips to "": its key is the bare name, so any end can follow.
+  const bare = all.includes("") ? ends : [];
   keyNeedles = new LiteralMatcher(
-    needles.flatMap((needle) => ends(needle).map((end) => needle + end)),
+    [
+      ...needles.flatMap((needle) => ends.map((end) => needle + end)),
+      ...[...ends, ..."0123456789"].map((end) => codexOauth + end),
+      ...bare,
+    ],
     { skip: "_.-" },
   );
   return keyNeedles;

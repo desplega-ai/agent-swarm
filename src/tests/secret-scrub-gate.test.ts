@@ -213,3 +213,45 @@ describe("gate fuzz", () => {
     expect(changed).toBeGreaterThan(total * 0.2);
   });
 });
+
+describe("gate key needles", () => {
+  const value = "hunter2xyz99";
+  const keys = ["codex_oauth", "codex_oauth_0", "codex_oauth_12", "CODEX_OAUTH_3", "codex.oauth.7"];
+  const wrap = (key: string) => [
+    `${key}=${value}`,
+    `${key}: ${value}`,
+    `{"${key}":"${value}"}`,
+    `${key}=[REDACTED:${key}]`,
+  ];
+
+  // A registered name that is a suffix of another needle drops the longer needle from the dedupe;
+  // `codex_oauth_<n>` ends in a digit, which no other needle covers.
+  const registered = [
+    "OAUTH",
+    "AUTH",
+    "x_oauth",
+    "CODEX_OAUTH",
+    "_",
+    "-",
+    "._",
+    ...["gateCustomThing", "CustomThing", "Thing", "g"],
+  ];
+  for (const name of registered) {
+    test(`registered ${JSON.stringify(name)}: the gate keeps what the scrub changes`, () => {
+      registerSensitiveKeyName(name);
+      const keyed = [...keys, name, `x${name}`, `${name}_2`, `a.${name}`];
+      let checked = 0;
+      for (const key of keyed) {
+        for (const text of wrap(key)) {
+          checked++;
+          if (scrubSecrets(text) !== text && !mayRedactForTesting(text)) {
+            expect.unreachable(`gate cleared a text the scrub changes: ${text}`);
+          }
+        }
+      }
+      // The pool-slot keys are among the changed texts, so the check is not vacuous.
+      expect(scrubSecrets(`codex_oauth_12=${value}`)).not.toBe(`codex_oauth_12=${value}`);
+      expect(checked).toBe(keyed.length * 4);
+    });
+  }
+});
