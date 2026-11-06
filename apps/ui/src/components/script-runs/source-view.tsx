@@ -1,6 +1,7 @@
 import { Check, Copy, WrapText } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { hangingIndent } from "@/components/shared/code-viewer";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
@@ -232,6 +233,7 @@ export function SourceView({
                         "flex-1",
                         wrap ? "min-w-0 whitespace-pre-wrap break-words" : "whitespace-pre",
                       )}
+                      style={wrap ? hangingIndent(line) : undefined}
                     >
                       {line.map((token, k) => (
                         <span key={k} {...getTokenProps({ token })} />

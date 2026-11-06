@@ -30,7 +30,7 @@ const HANG = 2;
  * every continuation line starts HANG characters right of that indent instead
  * of at the gutter edge.
  */
-function hangingIndent(line: { content: string }[]) {
+export function hangingIndent(line: { content: string }[]) {
   const text = line.map((token) => token.content).join("");
   const lead = /^[\t ]*/.exec(text)?.[0] ?? "";
   const indent = lead.replaceAll("\t", " ".repeat(TAB_WIDTH)).length + HANG;
