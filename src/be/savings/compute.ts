@@ -79,16 +79,26 @@ async function scriptOps(names: string[], sql: SavingsSql): Promise<Map<string, 
   return ops;
 }
 
-/** UTC day (`YYYY-MM-DD`) of an ISO `startedAt`. */
-const DAY_SQL = "substr(r.startedAt,1,10)";
+/**
+ * How runs are grouped: by UTC day (`YYYY-MM-DD`), or by UTC minute
+ * (`YYYY-MM-DDTHH:MM`) so a reader can drop the runs before a window start
+ * that falls inside the scanned slice.
+ */
+export type SavingsBucket = "day" | "minute";
 
-/** Every run's facts, grouped by the UTC day it started; the window facts are their sum. */
+/** The SQL key of an ISO `startedAt` column for `bucket`. */
+function bucketSql(column: string, bucket: SavingsBucket = "day"): string {
+  return `substr(${column},1,${bucket === "minute" ? 16 : 10})`;
+}
+
+/** Every run's facts, grouped by the UTC day (or minute) it started; the window facts are their sum. */
 export async function computeWorkflowWindow(
   workflow: { id: string; definition: unknown },
   window: { start: string; end: string },
   sql: SavingsSql = defaultSql,
-  opts: { maxRuns?: number } = {},
+  opts: { maxRuns?: number; bucket?: SavingsBucket } = {},
 ): Promise<WorkflowWindow> {
+  const DAY_SQL = bucketSql("r.startedAt", opts.bucket);
   const span = [workflow.id, window.start, window.end];
   const maxRuns = opts.maxRuns ?? LIVE_MAX_RUNS;
   // Index-only count first, so a high-volume workflow never reaches the step scans.
@@ -229,9 +239,37 @@ export type ScriptWindowFacts = { scriptName: string; byDay: ScriptDayFacts[] };
 const DISPATCH_SQL =
   "(source LIKE '%task_send%' OR source LIKE '%send_task%' OR source LIKE '%sendTask%' OR source LIKE '%workflow_trigger%')";
 
+/** The script_runs filter of a window, narrowed to one script name (runs without one by INLINE_SCRIPT_NAME). */
+function scriptRunsFilter(
+  window: { start: string; end: string },
+  opts: { scriptName?: string },
+): { where: string; params: string[] } {
+  const span = [window.start, window.end];
+  return opts.scriptName === undefined
+    ? { where: "", params: span }
+    : {
+        where: "AND coalesce(scriptName, ?)=?",
+        params: [...span, INLINE_SCRIPT_NAME, opts.scriptName],
+      };
+}
+
+/** Runs of every script (or of one script) in the window. */
+export async function countScriptRuns(
+  window: { start: string; end: string },
+  sql: SavingsSql = defaultSql,
+  opts: { scriptName?: string } = {},
+): Promise<number> {
+  const { where, params } = scriptRunsFilter(window, opts);
+  const rows = await sql<{ n: number }>(
+    `SELECT count(*) n FROM script_runs WHERE startedAt>=? AND startedAt<? ${where}`,
+    params,
+  );
+  return num(rows[0]?.n);
+}
+
 /**
  * Facts of every script with runs in the window (or of one script), grouped by
- * the UTC day the runs started. Ported from v7 `scriptJobs`: runs are keyed by
+ * the UTC day (or minute) the runs started. Ported from v7 `scriptJobs`: runs are keyed by
  * `scriptName` (runs without one by INLINE_SCRIPT_NAME), ops are the `await`
  * count of the catalog source (the global row wins), and a run had an effect
  * when its output names an agent task created while it ran (up to 20 minutes
@@ -241,14 +279,12 @@ const DISPATCH_SQL =
 export async function computeScriptWindow(
   window: { start: string; end: string },
   sql: SavingsSql = defaultSql,
-  opts: { scriptName?: string } = {},
+  opts: { scriptName?: string; bucket?: SavingsBucket } = {},
 ): Promise<ScriptWindowFacts[]> {
   const span = [window.start, window.end];
-  const where = opts.scriptName === undefined ? "" : "AND coalesce(scriptName, ?)=?";
-  const params =
-    opts.scriptName === undefined ? span : [...span, INLINE_SCRIPT_NAME, opts.scriptName];
+  const { where, params } = scriptRunsFilter(window, opts);
   const runs = await sql<{ d: string; nm: string; n: number; api: number; secs: number | null }>(
-    `SELECT substr(startedAt,1,10) d, coalesce(scriptName,'${INLINE_SCRIPT_NAME}') nm, count(*) n, sum(apiEndpointId IS NOT NULL) api,
+    `SELECT ${bucketSql("startedAt", opts.bucket)} d, coalesce(scriptName,'${INLINE_SCRIPT_NAME}') nm, count(*) n, sum(apiEndpointId IS NOT NULL) api,
       sum((julianday(coalesce(finishedAt,startedAt))-julianday(startedAt))*86400) secs
       FROM script_runs WHERE startedAt>=? AND startedAt<? ${where} GROUP BY 1,2`,
     params,
@@ -275,7 +311,7 @@ export async function computeScriptWindow(
   const tasksTo = "strftime('%Y-%m-%dT%H:%M:%fZ',?,'+20 minutes')";
   const probe =
     dispatchers.length > 0
-      ? `UNION SELECT substr(r.startedAt,1,10) d, r.scriptName nm, (r.apiEndpointId IS NOT NULL) api, r.id
+      ? `UNION SELECT ${bucketSql("r.startedAt", opts.bucket)} d, r.scriptName nm, (r.apiEndpointId IS NOT NULL) api, r.id
         FROM agent_tasks t INDEXED BY idx_agent_tasks_created
         JOIN script_runs r INDEXED BY idx_script_runs_scriptName_startedAt ON r.scriptName IN (${dispatchers.map(() => "?").join(",")})
           AND r.startedAt>=strftime('%Y-%m-%dT%H:%M:%fZ',t.createdAt,'-20 minutes') AND r.startedAt<=t.createdAt AND r.output LIKE '%'||t.id||'%'
@@ -284,7 +320,7 @@ export async function computeScriptWindow(
       : "";
   const rows = await sql<{ d: string; nm: string; api: number; n: number }>(
     `SELECT d, nm, api, count(DISTINCT id) n FROM (
-       SELECT substr(r.startedAt,1,10) d, coalesce(r.scriptName,'${INLINE_SCRIPT_NAME}') nm, (r.apiEndpointId IS NOT NULL) api, r.id
+       SELECT ${bucketSql("r.startedAt", opts.bucket)} d, coalesce(r.scriptName,'${INLINE_SCRIPT_NAME}') nm, (r.apiEndpointId IS NOT NULL) api, r.id
        FROM agent_tasks t INDEXED BY idx_agent_tasks_sourceScriptRun_created JOIN script_runs r ON r.id=t.sourceScriptRunId
        WHERE t.sourceScriptRunId IS NOT NULL AND t.createdAt>=? AND t.createdAt<${tasksTo}
          AND r.startedAt>=? AND r.startedAt<? ${opts.scriptName === undefined ? "" : "AND coalesce(r.scriptName, ?)=?"}

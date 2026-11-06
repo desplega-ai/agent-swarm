@@ -10,7 +10,7 @@ import {
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
-import { computeScriptWindow, type SavingsSql } from "../be/savings/compute";
+import { computeScriptWindow, LIVE_MAX_RUNS, type SavingsSql } from "../be/savings/compute";
 import {
   CURVE,
   type CurveSet,
@@ -24,7 +24,7 @@ import {
   SAVINGS_TIERS,
   T0,
 } from "../be/savings/model";
-import { readScriptSavings } from "../be/savings/read";
+import { readScriptSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   daysToCompute,
   RECOMPUTE_AFTER_MS,
@@ -311,13 +311,125 @@ describe("savings scripts", () => {
     const failing: SavingsSql = async () => {
       throw new Error("database is busy");
     };
+    resetSavingsReadCache();
     const scaled = await readScriptSavings({ ...opts, sql: failing });
     expect(scaled.boundaryEstimated).toBe(true);
     const firstDay = await count(`${WEEK[3]}T00:00:00.000Z`, `${WEEK[4]}T00:00:00.000Z`);
     expect(firstDay).toBeGreaterThan(0);
-    expect(scaled.rows[0]?.runs).toBe(
-      (await count(`${WEEK[4]}T00:00:00.000Z`)) + Math.round(firstDay / 2),
-    );
+    const scaledRuns = (await count(`${WEEK[4]}T00:00:00.000Z`)) + Math.round(firstDay / 2);
+    expect(scaled.rows[0]?.runs).toBe(scaledRuns);
+    // The failed scan is not kept: the next read in the same minute scans again.
+    const again = await readScriptSavings({ ...opts, sql: inProcessSql });
+    expect(again.boundaryEstimated).toBe(false);
+    expect(again.rows).toEqual(live.rows);
+
+    // Above LIVE_MAX_RUNS runs in the slice the scan is skipped and the day is scaled.
+    const scans: string[] = [];
+    const busy =
+      (runs: number): SavingsSql =>
+      async (sql, params) => {
+        if (sql.startsWith("SELECT count(*) n FROM script_runs")) return [{ n: runs }] as never;
+        scans.push(sql);
+        return inProcessSql(sql, params);
+      };
+    resetSavingsReadCache();
+    const capped = await readScriptSavings({ ...opts, sql: busy(LIVE_MAX_RUNS + 1) });
+    expect(capped.boundaryEstimated).toBe(true);
+    expect(capped.rows[0]?.runs).toBe(scaledRuns);
+    expect(scans).toEqual([]);
+    // Control: at the cap the slice is scanned exactly.
+    resetSavingsReadCache();
+    const atCap = await readScriptSavings({ ...opts, sql: busy(LIVE_MAX_RUNS) });
+    expect(atCap.boundaryEstimated).toBe(false);
+    expect(atCap.rows).toEqual(live.rows);
+    expect(scans.length).toBeGreaterThan(0);
+    resetSavingsReadCache();
+  });
+
+  test("fleet reads across the minutes of an hour scan the first day once", async () => {
+    resetSavingsReadCache();
+    const MINUTE = 60_000;
+    let scans = 0;
+    const counting: SavingsSql = (sql, params) => {
+      // Every first-day scan opens with this count.
+      if (sql.startsWith("SELECT count(*) n FROM script_runs")) scans += 1;
+      return inProcessSql(sql, params);
+    };
+    const list = (now: number) => readScriptSavings({ days: 3, tier: "smart", now, sql: counting });
+    const first = await list(NOW + MINUTE);
+    expect(first.boundaryEstimated).toBe(false);
+    expect(first.rows.length).toBeGreaterThan(1);
+    expect(scans).toBe(1);
+    for (const m of [2, 17, 59]) {
+      // Within the hour every fleet read prices the same slice, from 12:00.
+      expect((await list(NOW + m * MINUTE)).rows).toEqual(first.rows);
+    }
+    expect(scans).toBe(1);
+    // Concurrent reads share one scan.
+    resetSavingsReadCache();
+    await Promise.all([list(NOW + MINUTE), list(NOW + 2 * MINUTE)]);
+    expect(scans).toBe(2);
+    // The next hour's window scans again.
+    await list(NOW + 61 * MINUTE);
+    expect(scans).toBe(3);
+    resetSavingsReadCache();
+  });
+
+  test("fleet reads keep only the runs from a mid-hour or midnight window start", async () => {
+    const MINUTE = 60_000;
+    const day = WEEK[3] as string;
+    const times = ["00:15", "00:45", "12:15", "12:45"];
+    for (const t of times) {
+      await getDbClient().run(
+        `INSERT INTO script_runs (id, agentId, scriptName, source, status, startedAt, finishedAt)
+         VALUES (?, ?, 'edge-window', 'x', 'completed', ?, ?)`,
+        [`edge-window-${t}`, agentId, `${day}T${t}:00.000Z`, `${day}T${t}:30.000Z`],
+      );
+    }
+    const rollUp = async () => {
+      await getDbClient().run("DELETE FROM automation_savings_days WHERE day=?", [day]);
+      await runSavingsRollupTick(inProcessSql, { now: NOW });
+      resetSavingsReadCache();
+    };
+    await rollUp();
+    const read = (now: number, sql: SavingsSql = inProcessSql, scriptName?: string) =>
+      readScriptSavings({ days: 3, tier: "smart", now, sql, scriptName });
+    const runsOf = (r: { rows: { scriptName: string; runs: number }[] }, name: string) =>
+      r.rows.find((row) => row.scriptName === name)?.runs ?? 0;
+
+    // Mid-hour: a 12:10 start keeps both 12:xx runs.
+    expect(runsOf(await read(NOW + 10 * MINUTE), "edge-window")).toBe(2);
+    // The same hour's cached slice starts at 12:00; a 12:30 start drops the 12:15 run.
+    const mid = await read(NOW + 30 * MINUTE);
+    expect(mid.window.start).toBe(`${day}T12:30:00.000Z`);
+    expect(mid.boundaryEstimated).toBe(false);
+    expect(runsOf(mid, "edge-window")).toBe(1);
+
+    // Midnight: a 00:30 start (slice floored to the day start) drops the 00:15 run.
+    resetSavingsReadCache();
+    const midnight = Date.parse("2026-10-31T00:30:00.000Z");
+    const night = await read(midnight);
+    expect(runsOf(night, "edge-window")).toBe(3);
+    // poll-sched's first-day runs all fall from 00:00 to 00:29: the fleet row matches the exact single-script read.
+    const single = await read(midnight, inProcessSql, "poll-sched");
+    expect(runsOf(night, "poll-sched")).toBe(single.rows[0]?.runs ?? -1);
+    // Control: a window starting at midnight keeps the whole first day.
+    expect(runsOf(await read(Date.parse("2026-10-31T00:00:00.000Z")), "edge-window")).toBe(4);
+
+    // A failed scan scales the first day by the share of it from the window start, not the hour.
+    const failing: SavingsSql = async () => {
+      throw new Error("database is busy");
+    };
+    resetSavingsReadCache();
+    const scaledFleet = await read(NOW + 30 * MINUTE, failing);
+    resetSavingsReadCache();
+    const scaledSingle = await read(NOW + 30 * MINUTE, failing, "poll-sched");
+    expect(scaledFleet.boundaryEstimated).toBe(true);
+    // 30 x 11.5/24 rounds to 14; from 12:00 it would be 15.
+    expect(runsOf(scaledFleet, "poll-sched")).toBe(scaledSingle.rows[0]?.runs ?? -1);
+
+    await getDbClient().run("DELETE FROM script_runs WHERE scriptName='edge-window'");
+    await rollUp();
   });
 
   describe("routes", () => {
