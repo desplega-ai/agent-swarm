@@ -21,13 +21,14 @@ mock.module("@/lib/session-groups", () => require("../../lib/session-groups"));
 mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/components/shared/task-status-icon", () => require("../shared/task-status-icon"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
 mock.module("@/api/hooks/use-agents", () => ({ useAgents: () => ({}) }));
 mock.module("@/api/hooks/use-session-tree", () => ({
   useSessionLabels: () => ({}),
   useSessionTree: () => ({}),
 }));
-mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({}) }));
+mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({}), useRetryTask: () => ({}) }));
 mock.module("@/contexts/current-user-context", () => ({ useCurrentUser: () => ({}) }));
 mock.module("@/hooks/use-needs-you", () => ({ useNeedsYou: () => ({}) }));
 mock.module("@/hooks/use-minute-clock", () => ({ useMinuteClock: () => 0 }));

@@ -56,7 +56,7 @@ function render(overrides: Partial<InProgressViewProps>) {
   };
   return renderToStaticMarkup(
     <MemoryRouter>
-      <InProgressView {...props} />
+      <InProgressView {...props} defaultCollapsed={false} />
     </MemoryRouter>,
   );
 }

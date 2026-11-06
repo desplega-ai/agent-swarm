@@ -20,6 +20,10 @@ mock.module("@/components/dashboard/dashboard-nudges", () => ({ DashboardNudges:
 mock.module("@/components/home/needs-you", () => ({ NeedsYou: stub("needs-you") }));
 mock.module("@/components/home/in-progress", () => ({ InProgress: stub("in-progress") }));
 mock.module("@/components/home/favorites", () => ({ Favorites: stub("favorites") }));
+mock.module("@/components/home/up-next", () => ({ UpNext: stub("up-next") }));
+mock.module("@/components/home/home-metrics", () => ({ HomeMetrics: stub("metrics") }));
+mock.module("@/components/home/activity-density", () => ({ ActivityDensity: stub("density") }));
+mock.module("@/components/ui/segmented-control", () => ({ SegmentedControl: () => null }));
 mock.module("@/components/onboarding/setup-checklist-card", () => ({
   SetupChecklistCard: stub("setup-checklist"),
 }));
@@ -51,27 +55,20 @@ function widgets(html: string): string[] {
   return [...html.matchAll(/data-widget="([^"]+)"/g)].map((m) => m[1]);
 }
 
-test("nudges on top, the two columns, the timeline below", () => {
+test("nudges and metrics on top; main column: Needs you, checklist, activity; side: Favorites, In progress, Up next", () => {
   const html = render();
   expect(widgets(html)).toEqual([
     "nudges",
+    "metrics",
     "needs-you",
-    "in-progress",
     "setup-checklist",
     "checklist",
+    "density",
     "favorites",
-    "timeline",
+    "in-progress",
+    "up-next",
   ]);
-  expect(html).toContain("xl:grid-cols-2");
-});
-
-test("one column below xl: Needs you, checklist, In progress, Favorites", () => {
-  const html = render();
-  const order = (name: string) =>
-    Number(new RegExp(`data-widget="${name}" class="order-(\\d)"`).exec(html)?.[1]);
-  const narrow = ["needs-you", "checklist", "in-progress", "favorites"].map(order);
-  expect(narrow).toEqual([1, 2, 3, 4]);
-  expect(order("setup-checklist")).toBe(2);
+  expect(html).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
 });
 
 test("an older API gets the notice in the timeline slot, the widgets stay", () => {
@@ -80,5 +77,5 @@ test("an older API gets the notice in the timeline slot, the widgets stay", () =
   supported = true;
   expect(html).toContain("requires Agent Swarm API 1.76+");
   expect(widgets(html)).toContain("needs-you");
-  expect(widgets(html)).not.toContain("timeline");
+  expect(widgets(html)).not.toContain("density");
 });

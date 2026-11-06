@@ -59,6 +59,7 @@ export function FavoritesView({
       title="Favorites"
       icon={<Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={favorites.length > 0 ? <HomeWidgetCount>{favorites.length}</HomeWidgetCount> : null}
+      collapse={{ id: "favorites" }}
     >
       <SectionBody query={state} what="favorites">
         {favorites.length === 0 ? (

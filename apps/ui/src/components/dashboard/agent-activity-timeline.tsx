@@ -582,7 +582,12 @@ function TimelineIconButton({
   );
 }
 
-export function AgentActivityTimeline() {
+export function AgentActivityTimeline({
+  viewToggle,
+}: {
+  /** Home's Density / Detail switch, first in the header actions. */
+  viewToggle?: ReactNode;
+} = {}) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const labelWidth = isMobile ? LABEL_WIDTH_MOBILE : LABEL_WIDTH;
@@ -1010,7 +1015,8 @@ export function AgentActivityTimeline() {
   // `isLoading` no longer implies "nothing to draw".
   if (!liveTasksQ.data && (agentsQ.isLoading || liveTasksQ.isLoading)) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     );
@@ -1018,7 +1024,8 @@ export function AgentActivityTimeline() {
 
   if (visibleTasks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <EmptyState
           icon={Clock}
           title="No task activity yet"
@@ -1048,6 +1055,7 @@ export function AgentActivityTimeline() {
       // to its icon so all five buttons fit next to the title.
       action={
         <div className="flex shrink-0 items-center gap-1.5">
+          {viewToggle}
           <Button
             type="button"
             variant={live ? "secondary" : "outline"}

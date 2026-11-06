@@ -89,6 +89,8 @@ test("home lists what needs you, what runs by use case, the starred group, and b
   await expect(badge).toHaveText(String(withApproval), { timeout: 15_000 });
 
   const inProgress = page.getByRole("region", { name: "In progress" });
+  // In progress starts folded in Home's side column.
+  await inProgress.getByRole("button", { name: "In progress", expanded: false }).click();
   await expect(inProgress.getByRole("link", { name: `${groupName}, 1 running` })).toBeVisible();
   await expect(inProgress.getByText(`e2e home running ${suffix}`)).toBeVisible();
   await expect(

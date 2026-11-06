@@ -68,6 +68,8 @@ export interface InProgressViewProps {
   starred: string[];
   me: string | null;
   agentName: (id: string | null | undefined) => string | null;
+  /** Folded on a first visit (Home's side column); the tests open it. */
+  defaultCollapsed?: boolean;
 }
 
 export function InProgressView({
@@ -77,6 +79,7 @@ export function InProgressView({
   starred,
   me,
   agentName,
+  defaultCollapsed = true,
 }: InProgressViewProps) {
   const groups = useMemo(() => inProgressGroups(tree.data, running, me), [tree.data, running, me]);
   const total = groups.reduce((sum, group) => sum + group.running, 0);
@@ -89,6 +92,7 @@ export function InProgressView({
       icon={<Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={tree.data ? <HomeWidgetCount>{total} running</HomeWidgetCount> : null}
       action={<HomeWidgetLink to="/sessions">All sessions</HomeWidgetLink>}
+      collapse={{ id: "in-progress", defaultCollapsed }}
     >
       <SectionBody query={tree} what="running sessions">
         {tree.isLoading && !tree.data ? (
