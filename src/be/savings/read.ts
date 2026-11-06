@@ -253,6 +253,9 @@ function parseDefinition(definition: unknown): unknown {
   }
 }
 
+/** Binary order, as SQLite compares text. */
+const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 const isRetired = (name: string) => /-retired-\d{4}-\d{2}-\d{2}$/.test(name);
 
 /** At most about this many bucket rows per synchronous query (a single larger day is read whole). */
@@ -262,7 +265,16 @@ const PRICE_BATCH = 100;
 /** A cached fleet read is reused at most this long, even when nothing bumped. */
 const FLEET_CACHE_TTL_MS = 60_000;
 
-const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Yield to the event loop. Turns chain across every read in flight: the
+ * workflow and script reads of a fleet read run together, and two of their
+ * slices in one loop turn would stall it for both.
+ */
+let lastTurn: Promise<void> = Promise.resolve();
+const yieldLoop = (): Promise<void> => {
+  lastTurn = lastTurn.then(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  return lastTurn;
+};
 
 /**
  * Read the buckets matching `where` over the window and fold them with
@@ -320,8 +332,10 @@ async function forEachBucketChunk<T>(
   // The first slice starts on the first day and the last one ends on the last day.
   ends[Math.max(0, ends.length - 1)] = lastDay;
   let from = firstDay;
-  for (const [i, to] of ends.entries()) {
-    if (i > 0) await yieldLoop();
+  for (const to of ends) {
+    // Also before the first slice: database calls settle as microtasks, so
+    // without it a parallel read's first slice would run in this same turn.
+    await yieldLoop();
     await onRows(
       await client.query<T>(
         `SELECT ${columns} FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
@@ -574,7 +588,8 @@ async function priceWorkflowBuckets(scope: {
     fleetParts.push(priceWorkflow(job.facts, { ...pricing, band: "fleet" }, allocation));
     daily.add(splitByDay(job.facts, job.days, pricing, priced));
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  // Ties break on the id, so the order does not depend on which index served the read.
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.workflowId, b.workflowId));
 
   return {
     computedAt,
@@ -896,7 +911,7 @@ async function priceScriptBuckets(scope: {
       ),
     );
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.scriptName, b.scriptName));
 
   return {
     computedAt,
