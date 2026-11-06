@@ -26,7 +26,7 @@ Set one of these on the API server. A global `swarm_config` row with the same ke
 |---|---|
 | `id` | Lowercase slug. The source owns every resource it imports under this id. Do not rename it. |
 | `type` | `dir`. Only directory sources exist today. |
-| `path` | Absolute path of the package root. The importer only reads it, so mount it read-only. |
+| `path` | Absolute path of the package root. The importer only reads it, so mount it read-only. Every file it reads must resolve inside this root; a symlink that points outside rejects the package. |
 | `onConflict` | `noop` (default) or `overwrite`. See [Conflicts and edits](#conflicts-and-edits). |
 
 JSON Schema for this value: `templates/import/sources.schema.json`.

@@ -8,8 +8,8 @@
  * `skills/<id>/SKILL.md`, `scripts/*.ts`, `agents/<name>.md`.
  */
 
-import { stat } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, dirname, extname, join, sep } from "node:path";
 import { extractScriptSignature } from "../../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../../scripts-runtime/import-allowlist";
 import { ExtensionWorkflowFileSchema } from "../../types";
@@ -97,8 +97,18 @@ async function scan(root: string, pattern: string): Promise<string[]> {
   }
 }
 
+/**
+ * Read `path` relative to the package root. Symlinks and `..` segments may
+ * point anywhere, so the resolved path must stay inside the resolved root.
+ */
 async function readText(root: string, path: string): Promise<string | undefined> {
-  const file = Bun.file(join(root, path));
+  const resolved = await realpath(join(root, path)).catch(() => null);
+  if (resolved === null) return undefined;
+  const base = await realpath(root);
+  if (resolved !== base && !resolved.startsWith(base + sep)) {
+    throw new ImportPackageError([`${path}: resolves outside the package`]);
+  }
+  const file = Bun.file(resolved);
   return (await file.exists()) ? await file.text() : undefined;
 }
 
@@ -220,7 +230,7 @@ async function loadSkills(
     }
     const files: SkillFileSpec[] = [];
     for (const path of await scan(join(root, entry.dir, "files"), "**/*")) {
-      files.push({ path, content: (await readText(join(root, entry.dir, "files"), path)) ?? "" });
+      files.push({ path, content: (await readText(root, `${entry.dir}/files/${path}`)) ?? "" });
     }
     skills.push({ key: entry.id, spec, files, hash: skillHash(spec, files) });
   }

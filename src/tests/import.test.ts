@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { unlink } from "node:fs/promises";
+import { mkdtemp, symlink, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as db from "../be/db";
 import {
@@ -22,6 +23,7 @@ import {
   updateWorkflow,
 } from "../be/db";
 import { type ImportReport, importSource, runImports } from "../be/import";
+import { type ImportPackageError, loadDirPackage } from "../be/import/dir-source";
 import type { ImportSource } from "../be/import/schema";
 import { getOwnedId } from "../be/import/seeders";
 import { getScript } from "../be/scripts/db";
@@ -288,6 +290,35 @@ agents:
     expect(report.error?.length).toBeGreaterThan(0);
     expect(report.results).toEqual([]);
     expect(await workflowByName("invalid-pkg-ok")).toBeNull();
+  });
+
+  test("a declared path that resolves outside the package is rejected", async () => {
+    const outside = join(await mkdtemp(join(tmpdir(), "import-outside-")), "secret.md");
+    await writeFile(outside, "host secret");
+    const viaSymlink = await writePackage({
+      "swarm-import.yaml": "agents:\n  - name: linked\n    instructions: linked.md\n",
+    });
+    await symlink(outside, join(viaSymlink, "linked.md"));
+    // `..` segments are already refused by the manifest schema.
+    const report = await importSource(src("via-symlink", viaSymlink));
+    expect(report.error?.join("\n")).toContain("resolves outside the package");
+    expect(report.results).toEqual([]);
+  });
+
+  test("a scanned symlink never reads a file outside the package", async () => {
+    const outside = join(await mkdtemp(join(tmpdir(), "import-outside-")), "secret.md");
+    await writeFile(outside, "host secret");
+    const dir = await writePackage({
+      "skills/leak/SKILL.md": SKILL_MD("escape-leak"),
+      "skills/leak/files/ok.md": "inside",
+      "agents/.keep": "",
+    });
+    await symlink(outside, join(dir, "skills/leak/files/secret.md"));
+    await symlink(outside, join(dir, "agents/escaper.md"));
+    const pkg = await loadDirPackage(src("scanned", dir)).catch(
+      (error: ImportPackageError) => error,
+    );
+    expect(JSON.stringify(pkg)).not.toContain("host secret");
   });
 });
 
