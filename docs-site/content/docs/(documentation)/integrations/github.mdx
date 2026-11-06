@@ -126,6 +126,34 @@ GITHUB_EMAIL=worker@example.com    # Git commit email
 GITHUB_NAME=Worker Agent           # Git commit name
 ```
 
+## GitHub Enterprise Server
+
+One deployment can target a single GitHub Enterprise Server (GHES) instance instead of github.com. Set the same `GITHUB_URL` on the API server **and every worker**:
+
+```bash
+GITHUB_URL=https://ghe.example.com        # web base of your instance (default https://github.com)
+GITHUB_API_URL=https://ghe.example.com/api/v3   # optional: only if your REST API is not at <GITHUB_URL>/api/v3
+```
+
+| `GITHUB_URL` | REST base | GraphQL |
+|---|---|---|
+| unset or `https://github.com` | `https://api.github.com` | `https://api.github.com/graphql` |
+| `https://ghe.example.com` | `https://ghe.example.com/api/v3` | `https://ghe.example.com/api/graphql` |
+| `https://acme.ghe.com` (GHE.com) | `https://api.acme.ghe.com` | `https://api.acme.ghe.com/graphql` |
+| any, plus `GITHUB_API_URL=X` | `X` | `X` with `/api/v3` replaced by `/api/graphql`, else `X/graphql` |
+
+`GITHUB_URL` must be the instance root (`https://` or, for labs, `http://` with a warning): no path, query or credentials. An invalid value disables the GitHub integration on the API and stops the worker at boot, so a GHES token is never sent to github.com.
+
+Both variables are deployment-env only. `PUT /api/config` rejects them because the API base receives your PAT, App JWT and installation tokens. Set them in compose, or in Helm with `config.githubUrl` / `config.githubApiUrl`.
+
+Setup on GHES:
+
+1. Create the GitHub App at `https://<host>/settings/apps/new` with the permissions and events above, and the webhook URL `https://<swarm-api>/api/github/webhook`. The GHES instance must reach that URL.
+2. Create a PAT (or bot-user token) on the GHES host with `repo` scope for `GITHUB_TOKEN`.
+3. Workers export `GH_HOST` and `GH_ENTERPRISE_TOKEN` for `gh`, and add a git credential helper for the GHES host. Boot logs `GitHub Enterprise auth configured (host: <host>)`.
+
+Not supported: github.com and GHES in one deployment, the `claude-managed` harness (it refuses to start a repo task when `GITHUB_URL` is set), and remote skill install, which still reads public github.com repos.
+
 ## Related
 
 - [GitLab Integration](/docs/integrations/gitlab) — GitLab webhook support (same adapter pattern)

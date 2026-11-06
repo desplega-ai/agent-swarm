@@ -3,7 +3,7 @@ date: 2026-11-06
 author: Researcher (swarm)
 topic: "GitHub Enterprise Server support via a configurable GitHub base URL"
 tags: [plan, github, ghes, enterprise, vcs, config]
-status: draft
+status: in-progress
 autonomy: autopilot
 base_commit: cac056330f58a837fa77ab5488dab3fcf0b0c553
 last_updated: 2026-11-06
