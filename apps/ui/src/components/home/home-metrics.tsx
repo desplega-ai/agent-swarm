@@ -157,7 +157,7 @@ function Metric({
       </span>
       <span className="flex min-w-0 items-end justify-between gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-xl tabular-nums">
-          {value ?? <span className="text-muted-foreground">—</span>}
+          {value ?? <span className="text-muted-foreground">–</span>}
         </span>
         {aside}
       </span>
