@@ -156,8 +156,26 @@ const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<un
 const SLICE_TTL_MS = 2 * MINUTE_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const FLEET_SLICE_TTL_MS = HOUR_MS + 2 * MINUTE_MS;
-/** First-day scans in flight per read: below the default db-query concurrency cap of 3. */
+/**
+ * First-day scans in flight, across every read (the workflow and script reads
+ * of a fleet read run together): below the default db-query concurrency cap of 3.
+ */
 const FIRST_DAY_SCAN_CONCURRENCY = 2;
+let scansInFlight = 0;
+const scanWaiters: (() => void)[] = [];
+
+async function withScanSlot<T>(scan: () => Promise<T>): Promise<T> {
+  if (scansInFlight < FIRST_DAY_SCAN_CONCURRENCY) scansInFlight++;
+  else await new Promise<void>((resolve) => scanWaiters.push(resolve));
+  try {
+    return await scan();
+  } finally {
+    // Hand the slot to the next waiter, or free it.
+    const next = scanWaiters.shift();
+    if (next) next();
+    else scansInFlight--;
+  }
+}
 
 /** One scan per key at a time, kept for `ttl`; a failed scan reads as `failed` and is not kept. */
 function cachedScan<T>(
@@ -172,7 +190,7 @@ function cachedScan<T>(
   const now = Date.now();
   // A slice start of an older minute (or hour) is never read again.
   for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
-  const result: Promise<T> = scan().catch((err): T => {
+  const result: Promise<T> = withScanSlot(scan).catch((err): T => {
     console.warn(
       `[savings-read] first-day scan of ${label} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
     );
@@ -235,38 +253,96 @@ function parseDefinition(definition: unknown): unknown {
   }
 }
 
+/** Binary order, as SQLite compares text. */
+const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 const isRetired = (name: string) => /-retired-\d{4}-\d{2}-\d{2}$/.test(name);
 
-/** At most this many UTC days of buckets per synchronous query. */
-const CHUNK_DAYS = 3;
+/** At most about this many bucket rows per synchronous query (a single larger day is read whole). */
+const CHUNK_ROWS = 5_000;
 /** Jobs priced between two event-loop yields. */
 const PRICE_BATCH = 100;
 /** A cached fleet read is reused at most this long, even when nothing bumped. */
 const FLEET_CACHE_TTL_MS = 60_000;
 
-const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Yield to the event loop. Turns chain across every read in flight: the
+ * workflow and script reads of a fleet read run together, and two of their
+ * slices in one loop turn would stall it for both.
+ */
+let lastTurn: Promise<void> = Promise.resolve();
+const yieldLoop = (): Promise<void> => {
+  lastTurn = lastTurn.then(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  return lastTurn;
+};
 
 /**
- * Run a bucket query over the window in CHUNK_DAYS slices and fold each slice
- * with `onRows`, yielding to the event loop between them: a fleet window is
- * ~100k rows, and one synchronous read and fold of them stalls every other
- * request. `params` gets each slice's bounds; slices arrive oldest first.
+ * Read the buckets matching `where` over the window and fold them with
+ * `onRows`, in slices of whole days of at most about CHUNK_ROWS rows, oldest
+ * first, yielding to the event loop between them: a fleet window is ~100k
+ * rows, and one synchronous read and fold of them stalls every other request.
+ *
+ * Slices follow the row counts, not the calendar. Every query waits its turn
+ * on the shared connection, which takes up to a second on a busy API, so a
+ * read pays one wait per slice: fixed 3-day slices made a 90-day read 31
+ * waits even when most of its days are empty. The slices cover the window
+ * end to end, so a day that gains rows after the count is still read.
+ *
+ * `oneJob` names the index of a one-job filter (`jobKey` or `jobId`): its few
+ * rows are read in one query, through that index. Without ANALYZE statistics
+ * (production has none) the planner would pick the kind-and-day index and
+ * read every job's buckets of the window.
  */
-async function forEachDayChunk<T>(
-  sql: string,
-  params: (from: string, to: string) => DbParam[],
+async function forEachBucketChunk<T>(
+  columns: string,
+  where: string,
+  params: DbParam[],
   firstDay: string,
   lastDay: string,
   onRows: (rows: T[]) => void | Promise<void>,
+  oneJob?: "idx_automation_savings_daily_key" | "idx_automation_savings_daily_job",
 ): Promise<void> {
-  for (let from = firstDay; from <= lastDay; ) {
-    const toMs = Math.min(
-      Date.parse(dayStartIso(from)) + (CHUNK_DAYS - 1) * DAY_MS,
-      Date.parse(dayStartIso(lastDay)),
+  const client = getDbClient();
+  if (oneJob) {
+    await onRows(
+      await client.query<T>(
+        `SELECT ${columns} FROM automation_savings_daily INDEXED BY ${oneJob} WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
+        [...params, firstDay, lastDay],
+      ),
     );
-    if (from !== firstDay) await yieldLoop();
-    await onRows(await getDbClient().query<T>(sql, params(from, utcDay(toMs))));
-    from = utcDay(toMs + DAY_MS);
+    return;
+  }
+  const counts = await client.query<{ day: string; n: number }>(
+    `SELECT day, count(*) n FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? GROUP BY day ORDER BY day`,
+    [...params, firstDay, lastDay],
+  );
+  // Each slice ends on its last counted day; the next starts the day after.
+  const ends: string[] = [];
+  let rows = 0;
+  for (const c of counts) {
+    const n = Number(c.n) || 0;
+    if (ends.length > 0 && rows + n <= CHUNK_ROWS) {
+      ends[ends.length - 1] = c.day;
+      rows += n;
+    } else {
+      ends.push(c.day);
+      rows = n;
+    }
+  }
+  // The first slice starts on the first day and the last one ends on the last day.
+  ends[Math.max(0, ends.length - 1)] = lastDay;
+  let from = firstDay;
+  for (const to of ends) {
+    // Also before the first slice: database calls settle as microtasks, so
+    // without it a parallel read's first slice would run in this same turn.
+    await yieldLoop();
+    await onRows(
+      await client.query<T>(
+        `SELECT ${columns} FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
+        [...params, from, to],
+      ),
+    );
+    from = utcDay(Date.parse(dayStartIso(to)) + DAY_MS);
   }
 }
 
@@ -462,15 +538,14 @@ async function priceWorkflowBuckets(scope: {
       job.days.push(b);
     }
   };
-  await forEachDayChunk(
-    `SELECT day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}
-     FROM automation_savings_daily
-     WHERE jobKind='workflow' AND subKind='' AND modelVersion=? AND day>=? AND day<=? ${keyFilter}
-     ORDER BY day`,
-    (from, to) => [MODEL_VERSION, from, to, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
+  await forEachBucketChunk(
+    `day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}`,
+    `jobKind='workflow' AND subKind='' AND modelVersion=? ${keyFilter}`,
+    [MODEL_VERSION, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
     scope.firstDay,
     scope.lastDay,
     fold,
+    scope.jobKey !== undefined ? "idx_automation_savings_daily_key" : undefined,
   );
 
   // Versions of one job share the schedule cap: the live version first, then
@@ -513,7 +588,8 @@ async function priceWorkflowBuckets(scope: {
     fleetParts.push(priceWorkflow(job.facts, { ...pricing, band: "fleet" }, allocation));
     daily.add(splitByDay(job.facts, job.days, pricing, priced));
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  // Ties break on the id, so the order does not depend on which index served the read.
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.workflowId, b.workflowId));
 
   return {
     computedAt,
@@ -725,16 +801,19 @@ export async function readScriptSavings(opts: {
   const client = getDbClient();
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
   const calendarDays = daysBetween(firstDay, lastDay);
-  const marker = await client.get<{ n: number; at: string | null }>(
-    "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
-    [MODEL_VERSION, firstDay, lastDay],
-  );
-  const complete = Number(marker?.n) >= calendarDays.length;
-  const scheduled = (
-    await client.query<{ scriptName: string }>(
+  // Issued together: each query waits its turn on the shared connection, and
+  // two queued at once wait about once.
+  const [marker, scheduledRows] = await Promise.all([
+    client.get<{ n: number; at: string | null }>(
+      "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
+      [MODEL_VERSION, firstDay, lastDay],
+    ),
+    client.query<{ scriptName: string }>(
       "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL ORDER BY scriptName",
-    )
-  ).map((r) => r.scriptName);
+    ),
+  ]);
+  const complete = Number(marker?.n) >= calendarDays.length;
+  const scheduled = scheduledRows.map((r) => r.scriptName);
   const scope = {
     days: opts.days,
     tier: opts.tier,
@@ -784,12 +863,10 @@ async function priceScriptBuckets(scope: {
   const byName = scope.scriptName !== undefined;
   let computedAt = scope.markerAt;
   const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
-  await forEachDayChunk<ScriptBucketRow>(
-    `SELECT day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs
-     FROM automation_savings_daily
-     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${byName ? "AND jobId=?" : ""}
-     ORDER BY day`,
-    (from, to) => [MODEL_VERSION, from, to, ...(byName ? [scope.scriptName as string] : [])],
+  await forEachBucketChunk<ScriptBucketRow>(
+    "day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs",
+    `jobKind='script' AND modelVersion=? ${byName ? "AND jobId=?" : ""}`,
+    [MODEL_VERSION, ...(byName ? [scope.scriptName as string] : [])],
     scope.firstDay,
     scope.lastDay,
     (buckets) => {
@@ -806,6 +883,7 @@ async function priceScriptBuckets(scope: {
         job.days.set(b.day, day);
       }
     },
+    byName ? "idx_automation_savings_daily_job" : undefined,
   );
   const boundaryEstimated = await clipScriptFirstDay(jobs, scope.window, scope.firstDay, scope);
 
@@ -833,7 +911,7 @@ async function priceScriptBuckets(scope: {
       ),
     );
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.scriptName, b.scriptName));
 
   return {
     computedAt,
@@ -1108,8 +1186,11 @@ export async function readFleetSavings(opts: {
   /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
   curve?: CurveSet;
 }): Promise<FleetSavingsRead> {
-  const wf = await readWorkflowSavings({ ...opts, band: "fleet" });
-  const sc = await readScriptSavings({ ...opts, band: "fleet" });
+  // Independent reads: run together, so their database waits overlap.
+  const [wf, sc] = await Promise.all([
+    readWorkflowSavings({ ...opts, band: "fleet" }),
+    readScriptSavings({ ...opts, band: "fleet" }),
+  ]);
   const { firstDay, lastDay } = savingsWindow(opts.days, opts.now);
   const all: PricedWorkflow[] = [...wf.rows, ...sc.rows];
   const total =
