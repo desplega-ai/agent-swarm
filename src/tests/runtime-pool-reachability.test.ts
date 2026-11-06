@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   claimOfferedTask,
   closeDb,
@@ -20,6 +22,7 @@ import { isAgentReachable, isRuntimePoolWakeable } from "../be/runtime-pools/rea
 import { codeLevelTriage, gatherSystemStatus, getBootTriageFindings } from "../heartbeat/heartbeat";
 import { routeMessage } from "../slack/router";
 import { resolveLeadOnlyRecoveryAssignment } from "../tasks/worker-follow-up";
+import { registerGetSwarmTool } from "../tools/get-swarm";
 import { sendTaskHandler } from "../tools/send-task";
 import { userCtx } from "../tools/task-tool-ctx";
 import type { RuntimePool } from "../types";
@@ -324,5 +327,39 @@ describe("pool agent reachability", () => {
     expect((await gatherSystemStatus({ isBootTriage: true })).includes("Orphaned Tasks")).toBe(
       !enabled,
     );
+  });
+  test.each([
+    true,
+    false,
+  ])("get-swarm marks wakeable pool agents as on demand with pool enabled=%s", async (enabled) => {
+    const lead = await createAgent({ name: "online-lead", isLead: true, status: "idle" });
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    const gone = await createAgent({ name: "gone", isLead: false, status: "offline" });
+    if (!enabled) await updateRuntimePool(pool.id, { enabled: false });
+    const mcp = new McpServer({ name: "get-swarm-on-demand", version: "1.0.0" });
+    registerGetSwarmTool(mcp);
+    const tool = (
+      mcp as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<CallToolResult> }
+        >;
+      }
+    )._registeredTools["get-swarm"];
+    const result = await tool!.handler(
+      {},
+      { sessionId: "test-session", requestInfo: { headers: { "x-agent-id": lead.id } } },
+    );
+    const agents = (result.structuredContent as { agents: { id: string; onDemand?: boolean }[] })
+      .agents;
+    const onDemand = (id: string) => agents.find((a) => a.id === id)?.onDemand;
+    expect(onDemand(worker.id)).toBe(enabled ? true : undefined);
+    expect(onDemand(gone.id)).toBeUndefined();
+    expect(onDemand(lead.id)).toBeUndefined();
+    const text = result.content.map((c) => ("text" in c ? c.text : "")).join("\n");
+    expect(text.includes("sleeping-worker (offline, on demand: send-task starts it)")).toBe(
+      enabled,
+    );
+    expect(text).toContain("gone (offline)");
   });
 });

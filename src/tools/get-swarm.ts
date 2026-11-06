@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAllAgents } from "@/be/db";
+import { isAgentReachable } from "@/be/runtime-pools/reachability";
 import { createToolRegistrar, swarmToolOutputSchema, toolOk } from "@/tools/utils";
 import { AgentStatusSchema, ProviderNameSchema } from "@/types";
 
@@ -11,6 +12,12 @@ const agentOutputShape = z.looseObject({
   name: z.string().optional(),
   isLead: z.boolean().optional(),
   status: AgentStatusSchema.optional(),
+  onDemand: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when the agent is offline but bound to a runtime pool that can wake it. send-task to it starts a runtime.",
+    ),
   description: z.string().optional(),
   role: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
@@ -57,12 +64,23 @@ export const registerGetSwarmTool = (server: McpServer) => {
       }),
     },
     async ({ includeFull }, requestInfo, _meta) => {
-      const agents = await getAllAgents({ slim: !includeFull });
+      // A pool agent without a live runtime reports "offline", but a task sent
+      // to it starts a runtime. Mark it, so a Lead does not read it as unavailable.
+      const agents = await Promise.all(
+        (await getAllAgents({ slim: !includeFull })).map(async (a) =>
+          a.status === "offline" && a.runtimePoolId && (await isAgentReachable(a))
+            ? { ...a, onDemand: true }
+            : a,
+        ),
+      );
 
       // Include the ID — send-task targets agents by ID, and text-only
       // harnesses never see the structured data to look it up.
       const agentList = agents
-        .map((a) => `- ${a.name} (${a.status}${a.isLead ? ", lead" : ""}) — id: ${a.id}`)
+        .map((a) => {
+          const onDemand = "onDemand" in a ? ", on demand: send-task starts it" : "";
+          return `- ${a.name} (${a.status}${onDemand}${a.isLead ? ", lead" : ""}) — id: ${a.id}`;
+        })
         .join("\n");
 
       return toolOk(
