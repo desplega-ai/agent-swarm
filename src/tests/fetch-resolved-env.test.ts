@@ -284,7 +284,32 @@ describe("fetchResolvedEnv", () => {
           true,
         ),
       ).toBeNull();
-      expect(requestedNames.every((name) => name === "fixture")).toBe(true);
+      // A name miss falls back to the unfiltered list (no `name`); every filtered call is normalized.
+      expect(
+        requestedNames.filter((name) => name !== null).every((name) => name === "fixture"),
+      ).toBe(true);
+    } finally {
+      api.stop(true);
+    }
+  });
+
+  test("finds a repo registered under a display name by its URL", async () => {
+    const repoId = crypto.randomUUID();
+    const repo = { id: repoId, url: "https://github.com/acme/web.git", name: "frontend" };
+    const api = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const name = new URL(req.url).searchParams.get("name");
+        return Response.json({ repos: name === null || name === repo.name ? [repo] : [] });
+      },
+    });
+    try {
+      for (const exact of [true, false]) {
+        expect((await fetchRepoConfig(api.url.toString(), "k", "acme/web", exact))?.id).toBe(
+          repoId,
+        );
+        expect(await fetchRepoConfig(api.url.toString(), "k", "acme/other", exact)).toBeNull();
+      }
     } finally {
       api.stop(true);
     }

@@ -6,6 +6,7 @@ import { useRepos } from "@/api/hooks/use-repos";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { Combobox } from "@/components/shared/combobox";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,11 @@ export function CreateTaskDialog({
 }) {
   const { data: agents } = useAgents();
   const { data: repos } = useRepos();
+  // Empty while loading or when no repos are registered; the field stays hidden either way.
+  const repoOptions = useMemo(
+    () => (repos ?? []).map((repo) => ({ value: repo.url, label: repo.name })),
+    [repos],
+  );
   const { data: tasksData } = useTasks({ status: "pending", limit: 200 });
   const { data: runningTasksData } = useTasks({ status: "in_progress", limit: 200 });
   const [form, setForm] = useState<TaskFormData>(() => ({ ...emptyTaskForm, ...initialValues }));
@@ -206,28 +212,26 @@ export function CreateTaskDialog({
           <div id={`${fieldsId}-advanced`}>
             <AnimatedReveal open={advancedOpen}>
               <fieldset disabled={isPending} className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor={`${fieldsId}-repo`}>Repository</Label>
-                  <Select
-                    value={form.vcsRepo || "_none"}
-                    onValueChange={(v) => setForm({ ...form, vcsRepo: v === "_none" ? "" : v })}
-                  >
-                    <SelectTrigger id={`${fieldsId}-repo`} className="w-full">
-                      <SelectValue placeholder="None" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_none">None</SelectItem>
-                      {repos?.map((repo) => (
-                        <SelectItem key={repo.id} value={repo.url}>
-                          {repo.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    The agent works in this repo and reads its CLAUDE.md.
-                  </p>
-                </div>
+                {repoOptions.length > 0 && (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor={`${fieldsId}-repo`}>Repository</Label>
+                    <Combobox
+                      id={`${fieldsId}-repo`}
+                      options={repoOptions}
+                      value={form.vcsRepo || null}
+                      onChange={(v) => setForm({ ...form, vcsRepo: v ?? "" })}
+                      placeholder="None"
+                      searchPlaceholder="Search repos…"
+                      emptyMessage="No matching repos."
+                      allowClear
+                      clearLabel="None"
+                      triggerClassName="w-full"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The agent works in this repo and reads its CLAUDE.md.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor={`${fieldsId}-type`}>Task type</Label>
                   <Input

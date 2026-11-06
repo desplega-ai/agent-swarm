@@ -212,13 +212,7 @@ function scheduleRunnerGc(reason: string): boolean {
   return true;
 }
 
-/** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
-export async function fetchRepoConfig(
-  apiUrl: string,
-  apiKey: string,
-  vcsRepo: string,
-  requireExactMatch = false,
-): Promise<{
+type RegisteredRepo = {
   id: string;
   url: string;
   name: string;
@@ -226,28 +220,33 @@ export async function fetchRepoConfig(
   defaultBranch: string;
   hooks?: { enabled: boolean } | null;
   guidelines?: RepoGuidelines | null;
-} | null> {
-  try {
-    const repoName = vcsRepoName(vcsRepo);
-    const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
+};
+
+/** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
+export async function fetchRepoConfig(
+  apiUrl: string,
+  apiKey: string,
+  vcsRepo: string,
+  requireExactMatch = false,
+): Promise<RegisteredRepo | null> {
+  const listRepos = async (name?: string): Promise<RegisteredRepo[] | null> => {
+    const query = name ? `?name=${encodeURIComponent(name)}` : "";
+    const resp = await fetch(`${apiUrl}/api/repos${query}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!resp.ok) return null;
-    const data = (await resp.json()) as {
-      repos: Array<{
-        id: string;
-        url: string;
-        name: string;
-        clonePath: string;
-        defaultBranch: string;
-        hooks?: { enabled: boolean } | null;
-        guidelines?: RepoGuidelines | null;
-      }>;
-    };
-    if (requireExactMatch) {
-      return data.repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ?? null;
-    }
-    return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
+    return ((await resp.json()) as { repos: RegisteredRepo[] }).repos;
+  };
+  try {
+    const named = await listRepos(vcsRepoName(vcsRepo));
+    if (!named) return null;
+    const match = requireExactMatch
+      ? named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo))
+      : (named.find((r) => r.url.includes(vcsRepo)) ?? named[0]);
+    if (match) return match;
+    // A repo registered under a display name (`frontend` for acme/web) has no name hit:
+    // match its URL across all registered repos, as the API's vcsRepoId does.
+    return (await listRepos())?.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ?? null;
   } catch {
     return null;
   }

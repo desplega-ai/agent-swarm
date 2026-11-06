@@ -4,7 +4,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { closeDb, createAgent, createSwarmRepo, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createSwarmRepo,
+  getSwarmRepoById,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { vcsRepoId } from "../be/model-profile-check";
 import { handleTasks } from "../http/tasks";
 import { setRequestAuth } from "../utils/request-auth-context";
@@ -29,6 +36,8 @@ beforeAll(async () => {
   leadId = (await createAgent({ name: "vcs-repo-lead", isLead: true, status: "idle" })).id;
   await createSwarmRepo({ url: "https://github.com/acme/widgets.git", name: "widgets" });
   await createSwarmRepo({ url: "git@gitlab.com:team/sub/tools.git", name: "tools" });
+  // A display name that is not the URL's last segment.
+  await createSwarmRepo({ url: "https://github.com/acme/web.git", name: "frontend" });
 
   server = createServer((req, res) => {
     setRequestAuth(req, { kind: "operator", fingerprint: "create-task-vcs-repo-test" });
@@ -87,6 +96,17 @@ describe("POST /api/tasks vcsRepo", () => {
       expect((await getTaskById(body.id))?.vcsRepo).toBe(stored);
       // The stored form resolves back to a registered repo, as the worker's lookup does.
       expect(await vcsRepoId(stored)).not.toBeNull();
+    }
+  });
+
+  test("a repo registered under a display name resolves by URL", async () => {
+    for (const input of ["https://github.com/acme/web.git", "acme/web"]) {
+      const { status, body } = await createTask({ vcsRepo: input });
+      expect(status).toBe(201);
+      expect(body.vcsRepo).toBe("acme/web");
+      const repoId = await vcsRepoId(body.vcsRepo);
+      expect(repoId).not.toBeNull();
+      expect((await getSwarmRepoById(repoId as string))?.name).toBe("frontend");
     }
   });
 
