@@ -186,13 +186,17 @@
       }
     },
     "Divider": {
-      "description": "Horizontal rule between sections, optionally with a centered `label` (e.g. `\"Filters\"`).",
+      "description": "Rule between sections, optionally with a centered `label` (e.g. `\"Filters\"`). `orientation: \"vertical\"` draws it between the items of a row `Stack`, as tall as the row.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "label": {
             "type": "string"
+          },
+          "orientation": {
+            "type": "string",
+            "enum": ["horizontal", "vertical"]
           }
         },
         "additionalProperties": false
@@ -2184,7 +2188,7 @@
       }
     },
     "Drawer": {
-      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`.",
+      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ \"$state\": \"/route/params/<param>\" }`. `presentation: \"split\"` renders it inline as a right pane beside the page instead of a sheet: the page canvas shrinks, the pane has a draggable edge (arrow keys too, double-click resets) and its width is kept per viewer; below 768px it is the sheet. At most one split Drawer per page; `side` does not apply to it.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2206,6 +2210,10 @@
           "size": {
             "type": "string",
             "enum": ["sm", "md", "lg", "xl"]
+          },
+          "presentation": {
+            "type": "string",
+            "enum": ["sheet", "split"]
           },
           "actions": {
             "type": "array",

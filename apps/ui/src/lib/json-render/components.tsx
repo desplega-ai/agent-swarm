@@ -57,7 +57,6 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
 import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
@@ -215,6 +214,7 @@ import {
 import { parseNumberInputValue } from "./number-input-value";
 import { SchemaFormComponent } from "./schema-form";
 import { SmartLink } from "./smart-link";
+import { SplitDrawerPane, useRouteParamPanel, useSplitDetailRegion } from "./split-pane";
 import {
   activeFilterCount,
   type ColumnFilterMode,
@@ -773,7 +773,26 @@ function SplitComponent({ props, children }: { props: SplitProps; children: Reac
   );
 }
 
-function DividerComponent({ props }: { props: { label?: string } }) {
+function DividerComponent({
+  props,
+}: {
+  props: { label?: string; orientation?: "horizontal" | "vertical" };
+}) {
+  // Vertical: a rule between the items of a row Stack, as tall as the row.
+  if (props.orientation === "vertical") {
+    if (!props.label) {
+      return <Separator orientation="vertical" className="mx-1 h-auto self-stretch" />;
+    }
+    return (
+      <div className="flex flex-col items-center gap-1 self-stretch px-1">
+        <Separator orientation="vertical" className="h-auto flex-1" />
+        <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {props.label}
+        </span>
+        <Separator orientation="vertical" className="h-auto flex-1" />
+      </div>
+    );
+  }
   if (!props.label) return <Separator className="my-1" />;
   return (
     <div className="flex items-center gap-3 py-1">
@@ -2959,26 +2978,40 @@ function DrawerComponent({
   props: DrawerComponentProps;
   children: ReactNode;
 }) {
-  const { state } = useStateStore();
-  const [, setSearchParams] = useSearchParams();
   const themeAttr = useJsonRenderThemeAttr();
+  const { open, close } = useRouteParamPanel(props.param);
+  const region = useSplitDetailRegion();
+  const isMobile = useIsMobile();
+  const footer =
+    props.actions && props.actions.length > 0 ? (
+      <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
+    ) : null;
 
-  const value = getByPath(state, `/route/params/${props.param}`);
-  const open = value !== undefined && value !== null && value !== "";
+  // Split: an inline pane in the surface's detail region. Below md, or on a
+  // surface without one, it is the sheet below.
+  const regionSlot = region?.slot;
+  if (props.presentation === "split" && region && regionSlot && isMobile === false) {
+    if (!open) return null;
+    return (
+      <SplitDrawerPane
+        region={{ ...region, slot: regionSlot }}
+        param={props.param}
+        size={props.size ?? "md"}
+        title={props.title}
+        description={props.description}
+        onClose={close}
+        footer={footer}
+      >
+        {children}
+      </SplitDrawerPane>
+    );
+  }
 
   return (
     <Sheet
       open={open}
       onOpenChange={(next) => {
-        if (next) return;
-        setSearchParams(
-          (prev) => {
-            const params = new URLSearchParams(prev);
-            params.delete(props.param);
-            return params;
-          },
-          { replace: true },
-        );
+        if (!next) close();
       }}
     >
       <SheetContent
@@ -3008,9 +3041,7 @@ function DrawerComponent({
           )}
         </SheetHeader>
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
-        {props.actions && props.actions.length > 0 ? (
-          <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
-        ) : null}
+        {footer}
       </SheetContent>
     </Sheet>
   );

@@ -221,6 +221,8 @@ const splitProps = z.object({
 
 const dividerProps = z.object({
   label: z.string().optional(),
+  /** `vertical` is a rule between the items of a row Stack, as tall as the row. */
+  orientation: z.enum(["horizontal", "vertical"]).optional(),
 });
 
 const tabsTabSchema = z.object({
@@ -959,6 +961,12 @@ const drawerProps = z.object({
   side: z.enum(["right", "left"]).optional(),
   size: z.enum(["sm", "md", "lg", "xl"]).optional(),
   /**
+   * `sheet` (default) slides over the page. `split` renders an inline right
+   * pane beside the page canvas, with a draggable edge whose width is kept
+   * per viewer; below md it is the sheet. At most one per page.
+   */
+  presentation: z.enum(["sheet", "split"]).optional(),
+  /**
    * Buttons in a sticky footer. Same shape and confirm rules as Table
    * `rowActions` (destructive variants confirm; an `app.mutate` delete always
    * confirms), minus `placement`. Chains have no `$row`; read the open record
@@ -1161,7 +1169,7 @@ export const swarmCatalogSpec = {
     Divider: {
       props: dividerProps,
       description:
-        'Horizontal rule between sections, optionally with a centered `label` (e.g. `"Filters"`).',
+        'Rule between sections, optionally with a centered `label` (e.g. `"Filters"`). `orientation: "vertical"` draws it between the items of a row `Stack`, as tall as the row.',
     },
     Tabs: {
       props: tabsProps,
@@ -1298,7 +1306,7 @@ export const swarmCatalogSpec = {
       props: drawerProps,
       slots: ["default"],
       description:
-        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set \u2014 open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed \u2014 unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ "$state": "/route/params/<param>" }`.',
+        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set \u2014 open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed \u2014 unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ "$state": "/route/params/<param>" }`. `presentation: "split"` renders it inline as a right pane beside the page instead of a sheet: the page canvas shrinks, the pane has a draggable edge (arrow keys too, double-click resets) and its width is kept per viewer; below 768px it is the sheet. At most one split Drawer per page; `side` does not apply to it.',
     },
     DetailList: {
       props: detailListProps,

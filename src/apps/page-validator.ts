@@ -90,6 +90,9 @@ const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]>
   Drawer: [["actions", "actions"]],
 };
 
+/** Route-driven panels: open exactly while their declared page `param` is set. */
+const ROUTE_PANEL_TYPES = new Set(["Drawer", "Dialog"]);
+
 /** The `$chain` keys an `Approval.onResolved` chain may read (first path segment). */
 const APPROVAL_CHAIN_KEYS = new Set(["status", "responses", "resolvedBy"]);
 
@@ -948,17 +951,25 @@ export function crossPageDefinitionIssues(
     });
 
     if (!isPlainObject(page.elements)) continue;
+    const splitDrawers: string[] = [];
     for (const [elementId, rawElement] of Object.entries(page.elements)) {
       if (!isPlainObject(rawElement)) continue;
       const elementPath = `${pagePath}.elements.${elementId}`;
-      if (rawElement.type === "Drawer" && isPlainObject(rawElement.props)) {
+      const panelType = typeof rawElement.type === "string" ? rawElement.type : "";
+      if (ROUTE_PANEL_TYPES.has(panelType) && isPlainObject(rawElement.props)) {
+        if (panelType === "Drawer" && rawElement.props.presentation === "split") {
+          splitDrawers.push(elementPath);
+        }
         const paramPath = `${elementPath}.props.param`;
         if (
           Object.hasOwn(rawElement.props, "param") &&
           typeof rawElement.props.param !== "string"
         ) {
           issues.push(
-            issue(paramPath, "Drawer param must be a literal route param name (not a binding)"),
+            issue(
+              paramPath,
+              `${panelType} param must be a literal route param name (not a binding)`,
+            ),
           );
         } else if (
           typeof rawElement.props.param === "string" &&
@@ -972,6 +983,16 @@ export function crossPageDefinitionIssues(
           );
         }
       }
+    }
+    // One detail region per surface: a second split Drawer would fight the
+    // first for the same pane.
+    for (const path of splitDrawers.slice(1)) {
+      issues.push(
+        issue(
+          `${path}.props.presentation`,
+          `only one presentation: "split" Drawer per page (first: ${splitDrawers[0]})`,
+        ),
+      );
     }
 
     const refs: StateRef[] = [];

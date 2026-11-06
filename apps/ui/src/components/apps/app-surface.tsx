@@ -116,9 +116,11 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useVersionedAppReferences } from "@/hooks/use-versioned-app-references";
 import { useVersionedValue } from "@/hooks/use-versioned-value";
+import { getConfig } from "@/lib/config";
 import {
   type ActionHandlerMap,
   createSwarmActionHandlers,
@@ -133,6 +135,7 @@ import {
   OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
 import { haltChain, installChainHaltGuard, isChainHalt } from "@/lib/json-render/chain-halt";
+import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
@@ -1164,6 +1167,23 @@ export function AppSurface({
   } else {
     try {
       renderedSpec = <Renderer spec={activeSpec as never} registry={compiled.registry} />;
+      // A `presentation: "split"` Drawer portals into a detail region beside
+      // the canvas; pages without one keep the canvas exactly as before.
+      const elements = (activeSpec as { elements?: Record<string, unknown> } | null)?.elements;
+      if (pageHasSplitDrawer(elements)) {
+        const rootId = (activeSpec as { root?: string }).root;
+        const rootProps = (elements?.[rootId ?? ""] as { props?: { fill?: unknown } } | undefined)
+          ?.props;
+        renderedSpec = (
+          <SplitDetailRegion
+            storageKey={deriveStorageKey(getConfig().apiUrl, `apps:${app.id}:split`)}
+            fill={rootProps?.fill === true}
+            scrollRef={scrollRef}
+          >
+            {renderedSpec}
+          </SplitDetailRegion>
+        );
+      }
     } catch (e) {
       renderedSpec = (
         <AlertCallout tone="error" icon={AlertCircle} title="Failed to render app page">

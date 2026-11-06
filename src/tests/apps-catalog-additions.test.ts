@@ -118,3 +118,85 @@ describe("Stack and Split fill", () => {
     expect(paths).toContain(`${el("split")}.props.fill`);
   });
 });
+
+function pageWith(elements: Record<string, Element>, params: Record<string, unknown>) {
+  return {
+    models: {},
+    pages: { main: { title: "Main", root: "root", params, elements } },
+    defaultPage: "main",
+  };
+}
+
+describe("Drawer presentation split and vertical Divider", () => {
+  const params = { issue: { kind: "string" }, other: { kind: "string" } };
+
+  test("one split Drawer and a vertical Divider validate", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: { direction: "row" }, children: ["a", "rule", "drawer"] },
+          a: { type: "Text", props: { content: "list" } },
+          rule: { type: "Divider", props: { orientation: "vertical" } },
+          drawer: {
+            type: "Drawer",
+            props: { param: "issue", presentation: "split", size: "md", title: "Issue" },
+            children: ["body"],
+          },
+          body: { type: "Text", props: { content: "detail" } },
+        },
+        params,
+      ),
+    );
+    if (issues.length > 0) console.error(issues);
+    expect(issues).toEqual([]);
+  });
+
+  test("a second split Drawer on the page is rejected", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["d1", "d2"] },
+          d1: { type: "Drawer", props: { param: "issue", presentation: "split" } },
+          d2: { type: "Drawer", props: { param: "other", presentation: "split" } },
+        },
+        params,
+      ),
+    );
+    expect(issues).toEqual([
+      {
+        path: `${el("d2")}.props.presentation`,
+        message: `only one presentation: "split" Drawer per page (first: ${el("d1")})`,
+      },
+    ]);
+  });
+
+  test("a split Drawer next to a sheet Drawer validates", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["d1", "d2"] },
+          d1: { type: "Drawer", props: { param: "issue", presentation: "split" } },
+          d2: { type: "Drawer", props: { param: "other", presentation: "sheet" } },
+        },
+        params,
+      ),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  test("unknown presentation and orientation values are rejected", async () => {
+    const issues = await issuesFor(
+      pageWith(
+        {
+          root: { type: "Stack", props: {}, children: ["d1", "rule"] },
+          d1: { type: "Drawer", props: { param: "issue", presentation: "inline" } },
+          rule: { type: "Divider", props: { orientation: "diagonal" } },
+        },
+        params,
+      ),
+    );
+    expect(issues.map((entry) => entry.path).sort()).toEqual(
+      [`${el("d1")}.props.presentation`, `${el("rule")}.props.orientation`].sort(),
+    );
+  });
+});

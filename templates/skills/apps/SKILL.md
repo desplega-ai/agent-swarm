@@ -546,7 +546,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; `motion: "rise"` (default), `"fade"`, or `"none"` (see Motion below); `fill` (grow to fill a `fill`-aware parent; see Layout below); has the `default` child slot. |
 | `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
 | `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`, `fill` (same contract as Stack); has the positional `default` child slot. |
-| `Divider` | none | `label`; no children. |
+| `Divider` | none | `label`, `orientation: "horizontal"` (default) or `"vertical"` (a rule between the items of a row `Stack`, as tall as the row); no children. |
 | `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label?, icon?, count? }` (`count` is a number shown as a small pill); `defaultTab`; `variant: "line"` (default) or `"segmented"` (a compact segmented control, same state and warm panels); has the positional `default` child slot. |
 | `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
 | `Card` | none | `title`, `description`; has the `default` child slot. |
@@ -573,7 +573,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
 | `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
-| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below); has the `default` child slot. |
+| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below), `presentation: "sheet"` (default) or `"split"` (an inline right pane beside the page; see below); has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
 | `CardGrid` | `titleKey` | `data`, `loading`, `error`, `emptyMessage`, `imageKey`, `fields`, `columns`, `onClick`; one card per row for record browsers; see below. |
 | `Kanban` | `columnField`, `columns`, `titleField` | `data`, `loading`, `cardFields`, `idField` (default `id`), `onMove`, `onCardClick`; see below. |
@@ -689,6 +689,24 @@ Drawer details:
 
 - `param` must name a param declared on the containing page. The drawer is open exactly when `/route/params/<param>` has a non-empty value, so its open state survives refresh and is shareable. Its children mount only while open; closing it clears that param with history replacement.
 - `actions[]`: `{ label, variant?, icon?, confirm?, actions }`, rendered as buttons in a sticky footer under the scrolling body. Confirmation follows Table `rowActions`: destructive variants confirm by default, and a chain with an `app.mutate` delete always confirms. Chains have no `$row`; address the open record with `{ "$state": "/route/params/<param>" }`, for example `{ "action": "app.mutate", "params": { "model": "order", "op": "delete", "rowId": { "$state": "/route/params/panel" } } }`. Prev/next record navigation is not available.
+- `presentation: "split"` renders the Drawer as an inline right pane beside the page instead of a sheet over it. The page canvas shrinks while it is open; the pane has a draggable left edge (arrow keys, Shift for big steps, Home/End for the min/max, double-click or Enter to reset) and the viewer's width is kept per app in the browser. `size` sets its starting width (360/480/640/800px). Opening, closing, refresh and shared links work exactly as for the sheet. Below 768px it falls back to the sheet. At most one split Drawer per page; `side` does not apply.
+
+List + detail recipe (a row click opens the record beside the table):
+
+```json
+"params": { "issue": { "kind": "string" } },
+"elements": {
+  "root": { "type": "Stack", "props": {}, "children": ["table", "issue"] },
+  "table": { "type": "Table", "props": {
+    "data": { "$state": "/queries/issues/data" },
+    "columns": [{ "key": "title" }, { "key": "status", "kind": "status" }],
+    "selectedId": { "$state": "/route/params/issue" },
+    "onRowClick": [{ "action": "app.navigate", "params": { "page": "main", "params": { "issue": { "$row": "id" } } } }] } },
+  "issue": { "type": "Drawer", "props": { "param": "issue", "presentation": "split", "size": "md", "title": "Issue" },
+    "children": ["issueDetail"] },
+  "issueDetail": { "type": "DetailList", "props": { "data": { "$state": "/queries/issue/data/0" }, "fields": [{ "key": "title" }] } }
+}
+```
 
 DetailList details:
 
