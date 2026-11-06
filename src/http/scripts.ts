@@ -56,6 +56,7 @@ import {
   ScriptScopeSchema,
   ScriptVersionRecordSchema,
 } from "../types";
+import { getCurrentRunProvenance } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -807,20 +808,30 @@ export async function handleScripts(
       ? await touchScratchScriptLastUsed(namedScript.id)
       : null;
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
-    const output = await runScriptWithRunCredential({
-      source: source as string,
-      args: parsed.body.args,
-      fsMode,
-      executor,
-      agentId: agent.id,
-      runtimeInstanceId,
-      egressSecrets: credentials.egressSecrets,
-      failedBindings: credentials.failedBindings,
-      userConfig: credentials.userConfig,
-      agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
-    });
+    // The run's script_runs id is fixed up front so the rows the script creates
+    // through its token can point at it; a nested call keeps its caller's step.
+    const runId = crypto.randomUUID();
+    const callerProvenance = getCurrentRunProvenance();
+    const output = await runScriptWithRunCredential(
+      {
+        source: source as string,
+        args: parsed.body.args,
+        fsMode,
+        executor,
+        agentId: agent.id,
+        runtimeInstanceId,
+        egressSecrets: credentials.egressSecrets,
+        failedBindings: credentials.failedBindings,
+        userConfig: credentials.userConfig,
+        agentFs: credentials.agentFs,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      },
+      {
+        sourceScriptRunId: runId,
+        sourceStepId: callerProvenance?.sourceStepId ?? undefined,
+      },
+    );
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
 
     if (namedScript?.isScratch && ok) {
@@ -895,7 +906,7 @@ export async function handleScripts(
         );
     try {
       await recordInlineScriptRun({
-        id: crypto.randomUUID(),
+        id: runId,
         agentId: agent.id,
         source: source as string,
         // Scrub args + result before persisting: the stored row is later served

@@ -7,6 +7,7 @@ import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "..
 import { getScript, listScripts } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { configSecretName, registerStoredSecret } from "../be/secret-registry";
+import { mintScriptRunToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -696,6 +697,60 @@ describe("/api/scripts HTTP", () => {
     expect(result).toBeDefined();
     expect(result?.argsJsonSchema).not.toBeNull();
   });
+
+  skip(
+    "a nested run takes its step and parent run from the token only",
+    async () => {
+      const forged = {
+        "X-Source-Step-Id": "forged-step",
+        "X-Source-Script-Run-Id": "forged-run",
+      };
+      const body = (marker: string) =>
+        JSON.stringify({
+          source: `export default async () => "${marker}";`,
+          intent: "provenance",
+          sourceStepId: "forged-step",
+          parentScriptRunId: "forged-run",
+          sourceScriptRunId: "forged-run",
+        });
+      const row = async (marker: string) =>
+        await getDbClient().get<{ sourceStepId: string | null; parentScriptRunId: string | null }>(
+          "SELECT sourceStepId, parentScriptRunId FROM script_runs WHERE source LIKE ?",
+          [`%${marker}%`],
+        );
+
+      // The caller's per-run token carries the step and its run id.
+      const token = await mintScriptRunToken(workerId, 60_000, {
+        sourceStepId: "step-from-token",
+        sourceScriptRunId: "run-from-token",
+      });
+      const nested = await dispatch("/api/scripts/run", {
+        method: "POST",
+        agentId: workerId,
+        headers: { Authorization: `Bearer ${token.plaintext}`, ...forged },
+        body: body("nested-provenance"),
+      });
+      expect(nested.status).toBe(200);
+      expect(await row("nested-provenance")).toEqual({
+        sourceStepId: "step-from-token",
+        parentScriptRunId: "run-from-token",
+      });
+
+      // The operator key with an agent header and the same forged fields stamps nothing.
+      const plain = await dispatch("/api/scripts/run", {
+        method: "POST",
+        agentId: workerId,
+        headers: forged,
+        body: body("plain-provenance"),
+      });
+      expect(plain.status).toBe(200);
+      expect(await row("plain-provenance")).toEqual({
+        sourceStepId: null,
+        parentScriptRunId: null,
+      });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
 
 describe("script source with an embedded secret is refused at write", () => {

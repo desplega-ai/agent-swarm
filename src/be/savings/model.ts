@@ -27,7 +27,7 @@ export const CALIBRATED_AT = "2026-11-05";
  * with any change here or in the rollup's SQL: buckets computed under an older
  * version are recomputed on the next tick.
  */
-export const MODEL_VERSION = 1;
+export const MODEL_VERSION = 2;
 
 /** Agent turns per deterministic op. */
 export const K = 0.2753;
@@ -280,6 +280,13 @@ export type WorkflowFacts = {
   agentMs: number;
   /** Lead follow-up review cost of those agent tasks. */
   followupUsd: number;
+  /**
+   * Session cost of tasks the runs caused without owning them: descendants of
+   * the agent-task nodes' tasks, and tasks the script steps created with their
+   * descendants. Kept on both sides of the saving, like `agentUsd`.
+   */
+  childTaskUsd: number;
+  childTaskMs: number;
   /** LLM cost a run reported itself (report node). */
   recordedLlmUsd: number;
   /** LLM cost estimated from SystemOne tokens and raw-llm output size. */
@@ -321,6 +328,10 @@ export type PricedWorkflow = {
   agentOnlyUsdPerRun: number;
 };
 
+/** Agent spend the runs caused: kept on both sides of the saving. */
+const keptSpendOf = (f: WorkflowFacts): number => f.agentUsd + f.followupUsd + f.childTaskUsd;
+const keptHoursOf = (f: WorkflowFacts): number => (f.agentMs + f.childTaskMs) / 3.6e6;
+
 /**
  * Split spend into measured and estimated. The window picks the LLM source
  * (`useRecorded`): when any run recorded its LLM cost, no day adds an estimate.
@@ -330,7 +341,7 @@ function spendOf(
   useRecorded: boolean,
 ): { measuredUsd: number; estimatedLlmUsd: number } {
   return {
-    measuredUsd: facts.agentUsd + facts.followupUsd + (useRecorded ? facts.recordedLlmUsd : 0),
+    measuredUsd: keptSpendOf(facts) + (useRecorded ? facts.recordedLlmUsd : 0),
     estimatedLlmUsd: useRecorded ? 0 : facts.estimatedLlmUsd,
   };
 }
@@ -436,10 +447,10 @@ export function priceWorkflow(
   const review = unitUsd > 0 ? F_FOLLOWUP : 0;
   const share = runs > 0 ? substituted / runs : 0;
   const { measuredUsd, estimatedLlmUsd } = spendOf(facts, facts.recordedLlmUsd > 0);
-  const keptUsd = (facts.agentUsd + facts.followupUsd) * share;
-  const keptHours = (facts.agentMs / 3.6e6) * share;
+  const keptUsd = keptSpendOf(facts) * share;
+  const keptHours = keptHoursOf(facts) * share;
   const actualUsd = (measuredUsd + estimatedLlmUsd) * share;
-  const actualHours = (facts.agentMs / 3.6e6 + facts.computeSecs / 3600) * share;
+  const actualHours = (keptHoursOf(facts) + facts.computeSecs / 3600) * share;
   const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
   const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
   const agentOnlyHours = bandOf((q) => keptHours + substituted * R[q] * unitHrs * err[q]);
@@ -508,7 +519,7 @@ export function splitByDay(
       (facts.schedRuns > 0 ? (vSched * d.schedRuns) / facts.schedRuns : 0) +
       (d.countedRuns - d.schedRuns);
     const { measuredUsd, estimatedLlmUsd } = spendOf(d, useRecorded);
-    const keptUsd = (d.agentUsd + d.followupUsd) * share;
+    const keptUsd = keptSpendOf(d) * share;
     const actualUsd = (measuredUsd + estimatedLlmUsd) * share;
     return {
       day: d.day,

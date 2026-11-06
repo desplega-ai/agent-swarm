@@ -687,8 +687,28 @@ export async function mintRuntimeToken(
 export async function mintScriptRunToken(
   agentId: string,
   ttlMs: number,
+  provenance: { sourceStepId?: string; sourceScriptRunId?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
-  return await insertSessionToken(agentId, null, null, ttlMs, null, undefined, null, null, true);
+  const token = await insertSessionToken(
+    agentId,
+    null,
+    null,
+    ttlMs,
+    null,
+    undefined,
+    null,
+    null,
+    true,
+  );
+  // Recorded before the plaintext leaves this function, so no request can
+  // present the token without its provenance.
+  if (provenance.sourceStepId || provenance.sourceScriptRunId) {
+    await getDbClient().run(
+      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ? WHERE id = ?",
+      [provenance.sourceStepId ?? null, provenance.sourceScriptRunId ?? null, token.tokenId],
+    );
+  }
+  return token;
 }
 
 /** Whether a session token was minted by `mintScriptRunToken`. */
@@ -956,6 +976,8 @@ export async function resolveSessionToken(
       taskId: string | null;
       runtimeId: string | null;
       expiresAt: string;
+      sourceStepId?: string | null;
+      sourceScriptRunId?: string | null;
     }
   | null
 > {
@@ -972,9 +994,11 @@ export async function resolveSessionToken(
     placement: string | null;
     expiresAt: string;
     revokedAt: string | null;
+    sourceStepId: string | null;
+    sourceScriptRunId: string | null;
   }>(
     `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
      WHERE s.tokenHash = ?`,
     [hash],
   );
@@ -1011,6 +1035,9 @@ export async function resolveSessionToken(
     taskId: row.taskId,
     runtimeId: row.runtimeId,
     expiresAt: row.expiresAt,
+    ...(row.sourceStepId || row.sourceScriptRunId
+      ? { sourceStepId: row.sourceStepId, sourceScriptRunId: row.sourceScriptRunId }
+      : {}),
   };
 }
 
