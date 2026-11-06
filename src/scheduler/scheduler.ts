@@ -91,6 +91,8 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
   const agentId = schedule.createdByAgentId ?? "schedule";
   const args = schedule.scriptArgs ?? {};
   const record = {
+    // Fixed before the run so rows the script creates can point at it.
+    id: crypto.randomUUID(),
     agentId,
     scriptName: schedule.scriptName,
     // A pointer, not a copy: script schedules fire as often as every minute and
@@ -105,19 +107,22 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
   let output: Awaited<ReturnType<typeof runScriptWithRunCredential>>;
   try {
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId });
-    output = await runScriptWithRunCredential({
-      source: script.source,
-      args,
-      fsMode: "none",
-      executor: script.executor,
-      agentId,
-      egressSecrets: credentials.egressSecrets,
-      userConfig: credentials.userConfig,
-      agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
-      timeoutMs: 60_000,
-    });
+    output = await runScriptWithRunCredential(
+      {
+        source: script.source,
+        args,
+        fsMode: "none",
+        executor: script.executor,
+        agentId,
+        egressSecrets: credentials.egressSecrets,
+        userConfig: credentials.userConfig,
+        agentFs: credentials.agentFs,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+        timeoutMs: 60_000,
+      },
+      { sourceScriptRunId: record.id },
+    );
   } catch (err) {
     await recordScheduleScriptRun({
       ...record,
@@ -151,6 +156,7 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
  * Best effort: a persistence error never changes the schedule's outcome.
  */
 async function recordScheduleScriptRun(run: {
+  id: string;
   agentId: string;
   scriptName: string;
   source: string;
@@ -162,7 +168,7 @@ async function recordScheduleScriptRun(run: {
 }): Promise<void> {
   try {
     await recordInlineScriptRun({
-      id: crypto.randomUUID(),
+      id: run.id,
       agentId: run.agentId,
       scriptName: run.scriptName,
       source: run.source,

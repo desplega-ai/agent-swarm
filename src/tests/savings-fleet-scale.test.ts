@@ -203,13 +203,16 @@ describe("savings fleet read at fleet scale", () => {
     const today = utcDay(NOW);
     await writeWorkflowDay(
       today,
-      [
-        {
-          workflowId: "wf-new",
-          name: "wf new",
-          facts: { ...emptyFacts(), runs: 5, countedRuns: 5 },
-        },
-      ],
+      {
+        buckets: [
+          {
+            workflowId: "wf-new",
+            name: "wf new",
+            facts: { ...emptyFacts(), runs: 5, countedRuns: 5 },
+          },
+        ],
+        links: [],
+      },
       new Date().toISOString(),
     );
     const { body } = await get(`/api/savings/jobs?kind=workflow&days=${DAYS}`);

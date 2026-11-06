@@ -693,6 +693,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "283_workflow_run_definitions.sql");
       // 284 alters model_profiles (made by the skipped 220) and agent_tasks.
       markMigrationApplied(database, "284_model_profile_fallbacks.sql");
+      // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
+      markMigrationApplied(database, "293_savings_component_links.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

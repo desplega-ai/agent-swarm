@@ -4018,7 +4018,7 @@ class ApiClient {
    */
   async getSavingsJobs(
     target: SavingsTarget | { kind: "workflow" | "script" },
-    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
   ): Promise<SavingsJobsResponse> {
     const res = await fetch(
       `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
@@ -4595,10 +4595,11 @@ export const api = new ApiClient();
 
 function savingsParams(
   target: Record<string, string>,
-  opts: { days?: 7 | 30 | 90; tier?: SavingsTier },
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
 ): URLSearchParams {
   const params = new URLSearchParams(target);
   if (opts.days) params.set("days", String(opts.days));
   if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
   return params;
 }

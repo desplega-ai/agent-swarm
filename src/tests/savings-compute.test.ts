@@ -184,6 +184,8 @@ describe("savings compute", () => {
       agentUsd: 3,
       agentMs: 5_400_000,
       followupUsd: 0.5,
+      childTaskUsd: 0,
+      childTaskMs: 0,
       recordedLlmUsd: 0,
       estimatedLlmUsd: 0,
       // 6 scheduled steps + fetch + sw, 2 s each; the agent step is excluded.
