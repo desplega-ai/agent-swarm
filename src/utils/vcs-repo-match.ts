@@ -27,3 +27,14 @@ export function vcsRepoUrlMatches(url: string, vcsRepo: string): boolean {
   if (requested.includes(":")) return false;
   return normalized.endsWith(`/${requested}`) || normalized.endsWith(`:${requested}`);
 }
+
+/**
+ * The repo path a registered URL names: `owner/repo` on GitHub, the full group
+ * path on GitLab. Strips the scheme and host (`https://host/`, `ssh://git@host/`)
+ * or the scp-style `git@host:` prefix; a local path comes back unchanged.
+ */
+export function vcsRepoPath(url: string): string {
+  const normalized = normalizeVcsRepo(url);
+  const match = normalized.match(/^(?:[a-z][a-z0-9+.-]*:\/\/[^/]+\/|[^@/:]+@[^/:]+:)(.+)$/i);
+  return match?.[1] ?? normalized;
+}

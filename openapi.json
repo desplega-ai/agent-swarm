@@ -35127,6 +35127,11 @@
                   "dir": {
                     "type": "string"
                   },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the repo path (`owner/repo`); an unregistered repo is a 400."
+                  },
                   "parentTaskId": {
                     "type": "string"
                   },
@@ -35221,7 +35226,7 @@
             }
           },
           "400": {
-            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not a registered repo, or agentId/offeredTo targets an extension identity",
             "content": {
               "application/json": {
                 "schema": {

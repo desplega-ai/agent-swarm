@@ -2,6 +2,7 @@ import { ChevronDown, MessageSquare, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useRepos } from "@/api/hooks/use-repos";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
@@ -37,6 +38,8 @@ export interface TaskFormData {
   dependsOn: string[];
   modelTier: string;
   effort: string;
+  /** A registered repo's URL; empty links no repo. */
+  vcsRepo: string;
 }
 
 const emptyTaskForm: TaskFormData = {
@@ -48,6 +51,7 @@ const emptyTaskForm: TaskFormData = {
   dependsOn: [],
   modelTier: "",
   effort: "",
+  vcsRepo: "",
 };
 
 export function CreateTaskDialog({
@@ -65,6 +69,7 @@ export function CreateTaskDialog({
   initialValues?: Partial<TaskFormData>;
 }) {
   const { data: agents } = useAgents();
+  const { data: repos } = useRepos();
   const { data: tasksData } = useTasks({ status: "pending", limit: 200 });
   const { data: runningTasksData } = useTasks({ status: "in_progress", limit: 200 });
   const [form, setForm] = useState<TaskFormData>(() => ({ ...emptyTaskForm, ...initialValues }));
@@ -201,6 +206,28 @@ export function CreateTaskDialog({
           <div id={`${fieldsId}-advanced`}>
             <AnimatedReveal open={advancedOpen}>
               <fieldset disabled={isPending} className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor={`${fieldsId}-repo`}>Repository</Label>
+                  <Select
+                    value={form.vcsRepo || "_none"}
+                    onValueChange={(v) => setForm({ ...form, vcsRepo: v === "_none" ? "" : v })}
+                  >
+                    <SelectTrigger id={`${fieldsId}-repo`} className="w-full">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">None</SelectItem>
+                      {repos?.map((repo) => (
+                        <SelectItem key={repo.id} value={repo.url}>
+                          {repo.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    The agent works in this repo and reads its CLAUDE.md.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor={`${fieldsId}-type`}>Task type</Label>
                   <Input

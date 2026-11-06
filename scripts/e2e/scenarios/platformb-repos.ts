@@ -153,6 +153,37 @@ export const platformbRepos: Scenario = {
         `swarm_repos row differs from the API: ${JSON.stringify(row)}`,
       );
 
+      // --- a task links a registered repo by URL or shorthand; the repo path is stored.
+      for (const vcsRepo of [urlRepo.url, `e2e/${urlName}`]) {
+        const taskResponse = await ctx.api("POST", "/api/tasks", {
+          body: {
+            task: `E2E repo task ${ctx.nonce}`,
+            agentId: workerId,
+            routingReason: "human_pinned",
+            vcsRepo,
+          },
+        });
+        expectStatus(taskResponse, [201], `create a task linked to ${String(vcsRepo)}`);
+        const task = asRecord(taskResponse.json);
+        const taskId = asString(task.id, "repo task id");
+        cleanup.add(`cancel repo task ${taskId}`, async () => {
+          await ctx.api("POST", `/api/tasks/${taskId}/cancel`, { body: {} });
+        });
+        expect(
+          task.vcsRepo === `e2e/${urlName}`,
+          `Task stored vcsRepo ${String(task.vcsRepo)} for ${String(vcsRepo)}`,
+        );
+      }
+      const unknownRepoTask = await ctx.api("POST", "/api/tasks", {
+        body: {
+          task: `E2E unknown repo task ${ctx.nonce}`,
+          agentId: workerId,
+          routingReason: "human_pinned",
+          vcsRepo: `e2e/missing-${ctx.nonce}`,
+        },
+      });
+      expectStatus(unknownRepoTask, [400], "reject a task linked to an unregistered repo");
+
       // --- create negatives
       let response = await ctx.api("POST", "/api/repos", { body: { url: "https://x.invalid/a" } });
       expectStatus(response, [400], "reject a repo without a name");

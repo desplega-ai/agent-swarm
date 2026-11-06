@@ -14048,6 +14048,8 @@ export interface paths {
                         dependsOn?: string[];
                         offeredTo?: string;
                         dir?: string;
+                        /** @description A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the repo path (`owner/repo`); an unregistered repo is a 400. */
+                        vcsRepo?: string;
                         parentTaskId?: string;
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
@@ -14080,7 +14082,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not a registered repo, or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;
