@@ -17,11 +17,11 @@ const DAYS = 90;
 const WORKFLOWS = 1000;
 const SCRIPTS = 400;
 const FIRST_DAY = utcDay(NOW - (DAYS - 1) * 86_400_000);
-const PAGE_READS = [
-  `/api/savings/summary?days=${DAYS}`,
-  `/api/savings/daily?days=${DAYS}`,
-  `/api/savings/jobs?kind=workflow&days=${DAYS}`,
-  `/api/savings/jobs?kind=script&days=${DAYS}`,
+const pageReads = (days: number) => [
+  `/api/savings/summary?days=${days}`,
+  `/api/savings/daily?days=${days}`,
+  `/api/savings/jobs?kind=workflow&days=${days}`,
+  `/api/savings/jobs?kind=script&days=${days}`,
 ];
 
 describe("savings fleet read at fleet scale", () => {
@@ -32,8 +32,11 @@ describe("savings fleet read at fleet scale", () => {
     return { status: res.status, body: (await res.json()) as Record<string, any> };
   };
 
-  /** Fire the page's four reads at once; return their bodies and the longest event-loop stall. */
-  async function pageLoad() {
+  /**
+   * Fire the page's four reads at once, for `viewers` simultaneous viewers;
+   * return the bodies (viewer by viewer) and the longest event-loop stall.
+   */
+  async function pageLoad(days = DAYS, viewers = 1) {
     let last = performance.now();
     let maxGapMs = 0;
     const ticker = setInterval(() => {
@@ -42,7 +45,8 @@ describe("savings fleet read at fleet scale", () => {
       last = t;
     }, 2);
     try {
-      const results = await Promise.all(PAGE_READS.map(get));
+      const paths = Array.from({ length: viewers }, () => pageReads(days)).flat();
+      const results = await Promise.all(paths.map(get));
       return { results, maxGapMs };
     } finally {
       clearInterval(ticker);
@@ -121,6 +125,40 @@ describe("savings fleet read at fleet scale", () => {
         cold.results.map((r) => ({ ...r.body, window: expect.anything() })),
       );
       expect(savingsFleetLoads()).toBe(2);
+    },
+    { retry: 2, timeout: 30_000 },
+  );
+
+  test(
+    "30 days and simultaneous viewers: one load per kind and window, no long stall",
+    async () => {
+      resetSavingsReadCache();
+      const cold = await pageLoad(30, 3);
+      for (const r of cold.results) expect(r.status).toBe(200);
+      // `window.end` is each request's own clock; everything else must match.
+      const bodies = cold.results.map((r) => ({ ...r.body, window: { ...r.body.window, end: 0 } }));
+      const [summary, daily, workflows, scripts] = bodies;
+      expect(summary?.byKind.workflows.jobs).toBe(WORKFLOWS);
+      expect(daily?.points).toHaveLength(30);
+      expect(workflows?.rows).toHaveLength(WORKFLOWS);
+      expect(scripts?.rows).toHaveLength(SCRIPTS);
+      // Every viewer gets the same answer from the same two loads.
+      for (let v = 1; v < 3; v++)
+        expect(bodies.slice(v * 4, v * 4 + 4)).toEqual(bodies.slice(0, 4));
+      expect(savingsFleetLoads()).toBe(2);
+      expect(cold.maxGapMs).toBeLessThan(150);
+      // The daily points add up to the summary total.
+      const pointsSum = daily?.points.reduce(
+        (a: number, p: { savingUsd: number }) => a + p.savingUsd,
+        0,
+      );
+      expect(pointsSum).toBeCloseTo(summary?.total.savingUsd.p50, 2);
+
+      // A 90-day viewer arriving later is its own window: two more loads, not four.
+      const wide = await pageLoad(DAYS, 2);
+      expect(wide.results[1]?.body.points).toHaveLength(DAYS);
+      expect(savingsFleetLoads()).toBe(4);
+      expect(wide.maxGapMs).toBeLessThan(150);
     },
     { retry: 2, timeout: 30_000 },
   );
