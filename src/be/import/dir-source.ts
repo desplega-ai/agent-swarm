@@ -16,7 +16,7 @@ import { ExtensionWorkflowFileSchema } from "../../types";
 import { IDENTITY_MD_MAX_CHARS } from "../../utils/identity-field-budget";
 import { getExecutorRegistry } from "../../workflows";
 import { validateDefinition } from "../../workflows/definition";
-import { computeContentHash } from "../db";
+import { computeContentHash, normalizeSkillFilePath, SKILL_FILE_LIMITS } from "../db";
 import {
   hashOf,
   type ScriptSpec,
@@ -208,6 +208,28 @@ async function loadWorkflows(
   return workflows;
 }
 
+/**
+ * The checks `upsertSkillFiles` runs at storage time, run before any write.
+ * The seeder replaces a skill's whole file set, so `files` is the stored set.
+ */
+function assertSkillFileSet(files: SkillFileSpec[]): void {
+  let total = 0;
+  for (const file of files) {
+    const path = normalizeSkillFilePath(file.path);
+    const size = Buffer.byteLength(file.content, "utf8");
+    if (size > SKILL_FILE_LIMITS.maxFileBytes) {
+      throw new Error(`File ${path} exceeds max size ${SKILL_FILE_LIMITS.maxFileBytes}`);
+    }
+    total += size;
+  }
+  if (files.length > SKILL_FILE_LIMITS.maxCount) {
+    throw new Error(`Skill file count exceeds max ${SKILL_FILE_LIMITS.maxCount}`);
+  }
+  if (total > SKILL_FILE_LIMITS.maxTotalBytes) {
+    throw new Error(`Skill files exceed max total size ${SKILL_FILE_LIMITS.maxTotalBytes}`);
+  }
+}
+
 async function loadSkills(
   root: string,
   manifest: ImportManifest,
@@ -221,16 +243,17 @@ async function loadSkills(
       diagnostics.push(`${label}: ${entry.dir}/SKILL.md not found`);
       continue;
     }
-    let spec: SkillSpec;
-    try {
-      spec = skillSpecOf(content, parseSkillContent(content));
-    } catch (error) {
-      diagnostics.push(`${label}: ${(error as Error).message}`);
-      continue;
-    }
     const files: SkillFileSpec[] = [];
     for (const path of await scan(join(root, entry.dir, "files"), "**/*")) {
       files.push({ path, content: (await readText(root, `${entry.dir}/files/${path}`)) ?? "" });
+    }
+    let spec: SkillSpec;
+    try {
+      spec = skillSpecOf(content, parseSkillContent(content), files.length > 0);
+      assertSkillFileSet(files);
+    } catch (error) {
+      diagnostics.push(`${label}: ${(error as Error).message}`);
+      continue;
     }
     skills.push({ key: entry.id, spec, files, hash: skillHash(spec, files) });
   }

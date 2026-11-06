@@ -29,6 +29,7 @@ import { getOwnedId } from "../be/import/seeders";
 import { getScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { recordSeedState } from "../be/seed/state-db";
+import { buildSkillsBundle, syncSkillsToFilesystem } from "../be/skill-sync";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
@@ -160,12 +161,25 @@ agents:
 
     const skill = (await getAgentSkills(agentId)).find((s) => s.name === "full-guide");
     expect(skill?.scope).toBe("global");
+    expect(skill?.isComplex).toBe(true);
     expect((await getSkillFiles(skill?.id ?? "")).map((f) => f.path)).toEqual(["checklist.md"]);
 
     expect((await getScript({ name: "full-report", scope: "global" }))?.description).toBe(
       "Build the report",
     );
     expect((await getAgentById(agentId))?.identityMd).toBe("# Reviewer\nReview every PR.\n");
+  });
+
+  test("a worker refresh delivers the imported skill's bundled files", async () => {
+    const bundle = await buildSkillsBundle(() => getAgentSkills(agentId), getSkillFiles);
+    const skill = bundle.skills.find((s) => s.name === "full-guide");
+    expect(skill?.files.map((f) => f.path)).toEqual(["checklist.md"]);
+
+    const home = await mkdtemp(join(tmpdir(), "import-skill-home-"));
+    await syncSkillsToFilesystem(agentId, "claude", home);
+    expect(await Bun.file(join(home, ".claude/skills/full-guide/checklist.md")).text()).toBe(
+      "- [ ] tests\n",
+    );
   });
 
   test("repeating an unchanged import writes nothing and adds no history", async () => {
@@ -290,6 +304,46 @@ agents:
     expect(report.error?.length).toBeGreaterThan(0);
     expect(report.results).toEqual([]);
     expect(await workflowByName("invalid-pkg-ok")).toBeNull();
+  });
+
+  test("a skill file storage would reject fails validation and writes nothing", async () => {
+    const dir = await writePackage({
+      "workflows/ok.yaml": WORKFLOW_YAML("limits-pkg-ok"),
+      "skills/big/SKILL.md": SKILL_MD("limits-big"),
+      "skills/big/files/big.txt": "x".repeat(db.SKILL_FILE_LIMITS.maxFileBytes + 1),
+      "skills/reserved/SKILL.md": SKILL_MD("limits-reserved"),
+      "skills/reserved/files/SKILL.md": "shadows the skill body",
+    });
+    const report = await importSource(src("limits", dir));
+    expect(report.failedAt).toBe("validate");
+    const errors = report.error?.join("\n") ?? "";
+    expect(errors).toContain("skill big: File big.txt exceeds max size");
+    expect(errors).toContain("skill reserved: SKILL.md is stored on the skill record");
+    expect(report.results).toEqual([]);
+    expect(await workflowByName("limits-pkg-ok")).toBeNull();
+    const skills = await getDbClient().query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM skills WHERE name LIKE 'limits-%'",
+    );
+    expect(skills[0]?.n).toBe(0);
+  });
+
+  test("skill file count and total size limits fail validation", async () => {
+    const limits = { ...db.SKILL_FILE_LIMITS };
+    Object.assign(db.SKILL_FILE_LIMITS, { maxCount: 1, maxTotalBytes: 4 });
+    try {
+      const dir = await writePackage({
+        "skills/many/SKILL.md": SKILL_MD("limits-many"),
+        "skills/many/files/a.md": "a",
+        "skills/many/files/b.md": "b",
+        "skills/heavy/SKILL.md": SKILL_MD("limits-heavy"),
+        "skills/heavy/files/a.md": "12345",
+      });
+      const errors = (await importSource(src("limits-sum", dir))).error?.join("\n") ?? "";
+      expect(errors).toContain("skill many: Skill file count exceeds max 1");
+      expect(errors).toContain("skill heavy: Skill files exceed max total size 4");
+    } finally {
+      Object.assign(db.SKILL_FILE_LIMITS, limits);
+    }
   });
 
   test("a declared path that resolves outside the package is rejected", async () => {

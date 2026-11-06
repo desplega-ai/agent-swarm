@@ -243,7 +243,11 @@ export function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
   };
 }
 
-export function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
+/**
+ * `hasFiles`: the skill ships bundled files. Workers fetch `skill_files` only for
+ * complex skills, so a skill with files stored as simple loses them on refresh.
+ */
+export function skillSpecOf(content: string, parsed: ParsedSkill, hasFiles: boolean): SkillSpec {
   return {
     name: parsed.name,
     description: parsed.description,
@@ -263,7 +267,7 @@ export function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
     sourcePath: null,
     sourceBranch: "main",
     sourceHash: null,
-    isComplex: false,
+    isComplex: hasFiles,
   };
 }
 
@@ -416,7 +420,7 @@ export async function preflightAssets(
         content: fileContent,
       }))
       .sort((a, b) => a.path.localeCompare(b.path));
-    const spec = skillSpecOf(content, parsed);
+    const spec = skillSpecOf(content, parsed, skillFiles.length > 0);
     skills.push({
       kind: "skill",
       name: parsed.name,

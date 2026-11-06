@@ -58,6 +58,7 @@ agents:
 - `id` values are local to the package. They are never database ids.
 - A workflow file uses the same format as an extension workflow: `name`, `description`, `definition`, `triggers`, `cooldown`, `input`, `triggerSchema`.
 - A skill directory holds `SKILL.md` and optional `files/**`. The skill name comes from the `SKILL.md` frontmatter.
+- Bundled files follow the skill file limits (`SKILL_FILES_MAX_FILE_BYTES`, `SKILL_FILES_MAX_COUNT`, `SKILL_FILES_MAX_TOTAL_BYTES`), and `files/SKILL.md` is refused. A file over a limit fails validation, so the package imports nothing.
 - Scripts are global scripts, keyed by `name`.
 - An agent entry names an agent by `name` or by `id`, never both. Use `id` when names repeat.
 

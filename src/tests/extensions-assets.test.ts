@@ -475,14 +475,18 @@ describe("extension assets", () => {
       ownerAgentId: string;
       isEnabled: number;
       systemDefault: number;
-    }>("SELECT id, scope, ownerAgentId, isEnabled, systemDefault FROM skills WHERE name = ?", [
-      "digest-guide",
-    ]);
+      isComplex: number;
+    }>(
+      "SELECT id, scope, ownerAgentId, isEnabled, systemDefault, isComplex FROM skills WHERE name = ?",
+      ["digest-guide"],
+    );
+    // Complex, or a worker refresh skips its bundled files.
     expect(skill).toMatchObject({
       scope: "global",
       ownerAgentId: agentId,
       isEnabled: 0,
       systemDefault: 0,
+      isComplex: 1,
     });
     const files = await getDbClient().query<{ path: string }>(
       "SELECT path FROM skill_files WHERE skillId = ?",
