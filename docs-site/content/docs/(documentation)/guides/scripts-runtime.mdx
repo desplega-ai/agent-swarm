@@ -128,7 +128,9 @@ network error.
   (GET routes and read tools such as `db_query`, `kv_get`, `get_*`, `list_*`)
   or on a write whose route dedupes by its `Idempotency-Key` header, such as
   `workflow_trigger` with `idempotencyKey`. Any other write is not repeated:
-  it may have landed. Retries stop after about 5 seconds.
+  it may have landed. Retries of a read stop after about 5 seconds, including
+  a retry that hangs: the call then returns the earlier failure. A write
+  retried after a 429 is never cut off, because the 429 means it had not run.
 - **`ctx.stdlib.fetch` / `fetchJson`** retry by method. A 429 retries on every
   method. A 502, 503, 504 or network error retries on GET, HEAD, OPTIONS, PUT
   and DELETE, and on a POST or PATCH only when it carries an `Idempotency-Key`

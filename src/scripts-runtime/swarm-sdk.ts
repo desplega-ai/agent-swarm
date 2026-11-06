@@ -491,7 +491,9 @@ const READ_RETRY_STATUSES = new Set([502, 503, 504]);
 
 // MCP tool names that only read. Prefix/suffix rules cover get-* / list-* /
 // *-get / *-list / *-search; the set lists the rest. A tool missing here is
-// treated as a write, which is the safe default.
+// treated as a write, which is the safe default. tool-annotations.test.ts
+// fails when a tool annotated `readOnlyHint: true` is missing here.
+// read-messages may mark messages read; repeating that is harmless.
 const READ_TOOL_PATTERN = /^(get|list)-|-(get|list|search)$/;
 const READ_TOOLS = new Set([
   "db-query",
@@ -511,6 +513,13 @@ const READ_TOOLS = new Set([
   "context-diff",
   "extension-catalog",
   "tracker-status",
+  "tracker-sync-status",
+  "app-query",
+  "resolve-user",
+  "room-decode",
+  "read-messages",
+  "check-model-profile",
+  "preview-prompt-template",
 ]);
 // GET routes that change state: polling claims work.
 const NON_READ_GET_METHODS = new Set(["task_poll"]);
@@ -539,8 +548,28 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 }
 
 /**
+ * What a retry that ran out of budget hands back: the failure the caller would
+ * have seen with no retry, the earlier status with a note in place of its
+ * already-cancelled body.
+ */
+function budgetSpentResponse(previous: Response): Response {
+  return Response.json(
+    {
+      error: `HTTP ${previous.status}; the retry did not answer within the ${BRIDGE_RETRY_BUDGET_MS}ms retry budget`,
+    },
+    { status: previous.status, statusText: previous.statusText },
+  );
+}
+
+/**
  * `signal` is the run's own signal (quickjs aborts it when the run ends): an
  * aborted run gets the current outcome at once, never another wait or attempt.
+ *
+ * The first attempt runs unbounded, as it did before retries existed. A retry
+ * of a repeat-safe call (`readOnly`) is cut off when the retry budget is
+ * spent, and the caller gets the earlier failure. A write retried after a 429
+ * is not cut off: the 429 means its first real run is the retry, and aborting
+ * it midway could leave it half applied.
  */
 async function bridgeFetch(
   url: string,
@@ -549,16 +578,24 @@ async function bridgeFetch(
   signal: AbortSignal | undefined,
 ): Promise<Response> {
   const started = Date.now();
-  const fits = (delay: number) => Date.now() - started + delay <= BRIDGE_RETRY_BUDGET_MS;
+  const remaining = () => BRIDGE_RETRY_BUDGET_MS - (Date.now() - started);
+  const fits = (delay: number) => delay <= remaining();
+  let previous: { response: Response } | { error: unknown } | undefined;
   for (let attempt = 1; ; attempt++) {
+    const budget = previous && readOnly ? AbortSignal.timeout(Math.max(1, remaining())) : undefined;
     let res: Response;
     try {
-      res = await fetch(url, init);
+      res = await fetch(url, budget ? { ...init, signal: budget } : init);
     } catch (error) {
+      if (budget?.aborted && !signal?.aborted && previous) {
+        if ("error" in previous) throw previous.error;
+        return budgetSpentResponse(previous.response);
+      }
       const delay = backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
       // An abort means the run is ending: settle now, never wait and retry.
       const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
       if (aborted || !readOnly || attempt > BRIDGE_MAX_RETRIES || !fits(delay)) throw error;
+      previous = { error };
       await sleep(delay, signal);
       if (signal?.aborted) throw error;
       continue;
@@ -571,6 +608,7 @@ async function bridgeFetch(
     // A Retry-After past the budget: hand the 429 back rather than wait.
     if (!fits(delay)) return res;
     await res.body?.cancel().catch(() => {});
+    previous = { response: res };
     await sleep(delay, signal);
     if (signal?.aborted) return res;
   }

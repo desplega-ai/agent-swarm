@@ -574,23 +574,33 @@ describe("quickjs structuredClone boundaries", () => {
 // Retries: `retry()` in the stdlib, method-aware `ctx.stdlib.fetch` retries,
 // and the bridge's own retries under `ctx.swarm`. The fixture fails the first
 // N hits of a path whose segment reads `<status>-<N>-<tag>`, then answers 200.
+// Routes with a fixed path (the MCP bridge, rooms/decode, scripts/run) carry
+// the spec in the JSON body instead; their hits are keyed by the spec. A tag
+// with `stall` holds the next answer for 20 s, one with `slow` for 6 s.
 type RetryHit = { at: number; key: string | null };
 const retryHits = new Map<string, RetryHit[]>();
+const holdFor = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref?.());
 const retryServer = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
-  fetch(req) {
+  idleTimeout: 60,
+  async fetch(req) {
     const path = new URL(req.url).pathname;
-    const hits = retryHits.get(path) ?? [];
+    const body = req.method === "POST" ? await req.text() : "";
+    const bodySpec = /(\d{3})-(\d+)-([\w-]+)/.exec(body);
+    const spec = /(\d{3})-(\d+)-([^/]+)/.exec(path) ?? bodySpec;
+    const hitKey = spec === bodySpec && spec ? spec[0] : path;
+    const hits = retryHits.get(hitKey) ?? [];
     hits.push({ at: Date.now(), key: req.headers.get("idempotency-key") });
-    retryHits.set(path, hits);
-    const spec = /(\d{3})-(\d+)-([^/]+)/.exec(path);
+    retryHits.set(hitKey, hits);
     if (spec && hits.length <= Number(spec[2])) {
       const status = Number(spec[1]);
       const headers: Record<string, string> =
         status === 429 && spec[3].includes("ra") ? { "retry-after": "1" } : {};
       return Response.json({ error: "transient" }, { status, headers });
     }
+    if (spec?.[3].includes("stall")) await holdFor(20_000);
+    if (spec?.[3].includes("slow")) await holdFor(6_000);
     return Response.json({ ok: true, key: "k", value: 1 });
   },
 });
@@ -598,19 +608,49 @@ afterAll(() => retryServer.stop(true));
 const retryBase = `http://127.0.0.1:${retryServer.port}`;
 const hitsOf = (path: string) => retryHits.get(path) ?? [];
 
+// A raw TCP server whose first connection for each path closes before any
+// answer (a network error on the client); later connections answer 200.
+const dropHits = new Map<string, number>();
+const dropServer = Bun.listen({
+  hostname: "127.0.0.1",
+  port: 0,
+  socket: {
+    data(socket, chunk) {
+      const path = /^[A-Z]+ (\S+)/.exec(chunk.toString())?.[1] ?? "";
+      const count = (dropHits.get(path) ?? 0) + 1;
+      dropHits.set(path, count);
+      if (count === 1) {
+        socket.end();
+        return;
+      }
+      const reply = JSON.stringify({ ok: true, key: "k", value: 1 });
+      socket.end(
+        `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${reply.length}\r\nConnection: close\r\n\r\n${reply}`,
+      );
+    },
+  },
+});
+afterAll(() => dropServer.stop(true));
+const dropBase = `http://127.0.0.1:${dropServer.port}`;
+
 describe("retries match across executors", () => {
   const executors: Array<[string, () => ScriptExecutor, boolean]> = [
     ["native", () => new NativeScriptExecutor(), true],
     ["quickjs", () => new QuickJSScriptExecutor(), false],
   ];
-  const run = (makeExecutor: () => ScriptExecutor, source: string, args: unknown = {}) =>
+  const run = (
+    makeExecutor: () => ScriptExecutor,
+    source: string,
+    args: unknown = {},
+    mcpBaseUrl = retryBase,
+  ) =>
     makeExecutor().run(
       input({
         source,
         args,
         configPayload: {
           ...payload,
-          system: { ...payload.system, mcpBaseUrl: { value: retryBase, isSecret: false } },
+          system: { ...payload.system, mcpBaseUrl: { value: mcpBaseUrl, isSecret: false } },
         },
         resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 15_000 },
       }),
@@ -765,6 +805,120 @@ export default async (_args, ctx) => {
       expect(hitsOf(`/api/kv/${keys.write502}`).length).toBe(1);
       const trigger = hitsOf(`/api/workflows/${keys.trigger502}/trigger`);
       expect(trigger.map((hit) => hit.key)).toEqual(["same-key", "same-key"]);
+    });
+
+    retryTest("ctx.swarm retries a 502 on reads sent by POST", async () => {
+      const keys = {
+        appQuery: `502-1-appq-${name}`,
+        userResolve: `502-1-user-${name}`,
+        roomDecode: `502-1-room-${name}`,
+        scriptRun: `502-1-srun-${name}`,
+      };
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const out = {
+    appQuery: (await ctx.swarm.app_query({ appId: args.appQuery, sql: "select 1" })).success,
+    userResolve: (await ctx.swarm.user_resolve({ query: args.userResolve })).success,
+    roomDecode: (await ctx.swarm.room.decode({ token: args.roomDecode })).ok,
+  };
+  try {
+    await ctx.swarm.script_run({ name: args.scriptRun, idempotencyKey: "same-key", args: {} });
+    out.scriptRun = "resolved";
+  } catch (error) {
+    out.scriptRun = error.message.includes("502");
+  }
+  return out;
+};`,
+        keys,
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({
+        appQuery: true,
+        userResolve: true,
+        roomDecode: true,
+        scriptRun: true,
+      });
+      expect(hitsOf(keys.appQuery).length).toBe(2);
+      expect(hitsOf(keys.userResolve).length).toBe(2);
+      expect(hitsOf(keys.roomDecode).length).toBe(2);
+      // script_run's idempotencyKey does not dedupe the run, so a 502 never repeats it.
+      expect(hitsOf(keys.scriptRun).length).toBe(1);
+    });
+
+    retryTest("ctx.swarm retries a network error on a read, never on a write", async () => {
+      const keys = { read: `drop-read-${name}`, write: `drop-write-${name}` };
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const read = await ctx.swarm.kv_get({ key: args.read });
+  let write;
+  try {
+    await ctx.swarm.kv_set({ key: args.write, value: 1 });
+    write = "resolved";
+  } catch {
+    write = "threw";
+  }
+  return { read: [read.success, read.status], write };
+};`,
+        keys,
+        dropBase,
+      );
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({ read: [true, 200], write: "threw" });
+      expect(dropHits.get(`/api/kv/${keys.read}`)).toBe(2);
+      expect(dropHits.get(`/api/kv/${keys.write}`)).toBe(1);
+    });
+
+    retryTest("ctx.swarm cuts a stalled read retry off at the retry budget", async () => {
+      const keys = { read: `502-1-stall-${name}`, room: `502-1-stallroom-${name}` };
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  let started = Date.now();
+  const read = await ctx.swarm.kv_get({ key: args.read });
+  const readMs = Date.now() - started;
+  started = Date.now();
+  let room;
+  try {
+    await ctx.swarm.room.decode({ token: args.room });
+    room = "resolved";
+  } catch (error) {
+    room = error.message;
+  }
+  return { read: [read.success, read.status], readMs, room, roomMs: Date.now() - started };
+};`,
+        keys,
+      );
+      expect(output.error).toBeUndefined();
+      const result = output.result as Record<string, unknown>;
+      expect(result.read).toEqual([false, 502]);
+      expect(result.readMs).toBeLessThan(6_000);
+      expect(result.room).toContain("failed with 502");
+      expect(result.room).toContain("retry budget");
+      expect(result.roomMs).toBeLessThan(6_000);
+      expect(hitsOf(`/api/kv/${keys.read}`).length).toBe(2);
+      expect(hitsOf(keys.room).length).toBe(2);
+    });
+
+    retryTest("ctx.swarm never cuts off a write retried after a 429", async () => {
+      const key = `429-1-slow-${name}`;
+      const output = await run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  const started = Date.now();
+  const write = await ctx.swarm.kv_set({ key: args.key, value: 1 });
+  return { write: [write.success, write.status], writeMs: Date.now() - started };
+};`,
+        { key },
+      );
+      expect(output.error).toBeUndefined();
+      const result = output.result as Record<string, unknown>;
+      // The 429 means the write never ran, so its retry is the real run and
+      // may take longer than the retry budget.
+      expect(result.write).toEqual([true, 200]);
+      expect(result.writeMs).toBeGreaterThanOrEqual(5_900);
+      expect(hitsOf(`/api/kv/${key}`).length).toBe(2);
     });
   }
 });
