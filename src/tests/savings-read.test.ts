@@ -9,6 +9,7 @@ import {
   initDb,
 } from "../be/db";
 import { emptyFacts } from "../be/savings/compute";
+import { CURVE, type CurveSet } from "../be/savings/model";
 import { readFleetSavings, resetSavingsReadCache } from "../be/savings/read";
 import {
   resetSavingsRollupForTests,
@@ -163,6 +164,17 @@ describe("savings fleet read", () => {
       expect(cents).toBe(Math.round(body.total.savingUsd.p50 * 100));
       const both = await get("/api/savings/daily?workflowId=wf-a&scriptName=fleet-poll");
       expect(both.status).toBe(400);
+    });
+
+    test("a deployment curve prices the fleet read, not the cached shipped one", async () => {
+      const shipped = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
+      const doubled = Object.fromEntries(
+        Object.entries(CURVE).map(([tier, c]) => [tier, { ...c, usd: c.usd.map((u) => u * 2) }]),
+      ) as CurveSet;
+      const read = await readFleetSavings({ days: 7, tier: "smart", now: NOW, curve: doubled });
+      expect(read.total?.agentOnlyUsd.p50).toBeGreaterThan(shipped.total?.agentOnlyUsd.p50 ?? 0);
+      const again = await readFleetSavings({ days: 7, tier: "smart", now: NOW });
+      expect(again.total).toEqual(shipped.total);
     });
 
     test("one job alone keeps the single-job band", async () => {

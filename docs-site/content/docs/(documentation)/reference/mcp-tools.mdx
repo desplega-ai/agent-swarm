@@ -148,7 +148,7 @@ Slack metadata and `requestedByUserId` are auto-inherited from the creator's cur
 
 ### list-model-profiles
 
-List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on `send-task` (or `task-action` `create`) to run that task on it, or set it as an agent's default through `PATCH /api/agents/{id}/runtime`. A profile runs only on its own harness. Profile writes are operator-only.
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on `send-task` (or `task-action` `create`) to run that task on it, or set it as an agent's default through `PATCH /api/agents/{id}/runtime`. A profile runs only on its own harness. `fallbacks` are the same-harness profiles a task hops to, in order, when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; with no fallback left the task fails as before. Profile writes are operator-only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
