@@ -44,8 +44,11 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * v10 = the sweep covers the dreaming-v2 KV namespace and decodes its legacy
  * hex copies. A new sweep target needs a bump too: an install that finished
  * the previous version never sweeps it otherwise.
+ * v11 = a pass 2 hit inside a longer gitleaks secret redacts that whole
+ * secret, so a generic `sk-` match in a Heroku key's tail no longer leaves
+ * the key's prefix behind.
  */
-export const SCRUBBER_RULES_VERSION = 10;
+export const SCRUBBER_RULES_VERSION = 11;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -670,12 +673,14 @@ function allowedBy(list: CompiledAllowlist, secret: string, match: string): bool
   return list.stopwords.some((word) => lower.includes(word));
 }
 
-function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: CompiledAllowlist) {
+/** Secret spans `[start, end)` a rule redacts in `text`, after its entropy and allowlist gates. */
+function* gitleaksSecretSpans(
+  text: string,
+  rule: CompiledGitleaksRule,
+  global: CompiledAllowlist,
+): Generator<[number, number]> {
   const { re } = rule;
   re.lastIndex = 0;
-  let out = "";
-  let last = 0;
-  let changed = false;
   for (let m = re.exec(text); m !== null; m = re.exec(text)) {
     if (m[0].length === 0) {
       re.lastIndex++;
@@ -700,8 +705,17 @@ function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: Com
     if (rule.entropy && shannonEntropy(secret) <= rule.entropy) continue;
     if (allowedBy(global, secret, m[0])) continue;
     if (rule.allowlists.some((list) => allowedBy(list, secret, m[0]))) continue;
-    out += `${text.slice(last, span[0])}[REDACTED:gitleaks:${rule.id}]`;
-    last = span[1];
+    yield [span[0], span[1]];
+  }
+}
+
+function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: CompiledAllowlist) {
+  let out = "";
+  let last = 0;
+  let changed = false;
+  for (const [start, end] of gitleaksSecretSpans(text, rule, global)) {
+    out += `${text.slice(last, start)}[REDACTED:gitleaks:${rule.id}]`;
+    last = end;
     changed = true;
   }
   return changed ? out + text.slice(last) : text;
@@ -714,9 +728,10 @@ export function setGitleaksPassEnabledForTesting(enabled: boolean): void {
   gitleaksPassEnabled = enabled;
 }
 
-function scrubGitleaks(text: string): string {
-  if (!gitleaksPassEnabled) return text;
-  const { keywordRe, implied, rules, global } = getGitleaks();
+/** The gitleaks rules whose keywords appear in `text` (empty when pass 5 is off). */
+function activeGitleaksRules(text: string): CompiledGitleaksRule[] {
+  if (!gitleaksPassEnabled) return [];
+  const { keywordRe, implied, rules } = getGitleaks();
   // Visit every start position that has a keyword. The alternation is
   // longest-first, so a shorter keyword starting at the same position is a
   // substring of the one found, and `implied` adds it.
@@ -726,14 +741,64 @@ function scrubGitleaks(text: string): string {
     for (const keyword of implied.get(m[0].toLowerCase()) ?? []) present.add(keyword);
     keywordRe.lastIndex = m.index + 1;
   }
-  if (present.size === 0) return text;
+  if (present.size === 0) return [];
+  return rules.filter((rule) => rule.keywords.some((keyword) => present.has(keyword)));
+}
+
+function scrubGitleaks(text: string): string {
   let out = text;
-  for (const rule of rules) {
-    if (rule.keywords.some((keyword) => present.has(keyword))) {
-      out = applyGitleaksRule(out, rule, global);
-    }
+  for (const rule of activeGitleaksRules(text)) {
+    out = applyGitleaksRule(out, rule, getGitleaks().global);
   }
   return out;
+}
+
+/**
+ * Pass 2 for one structural rule. A gitleaks secret that strictly contains a
+ * hit wins (longest span): it is redacted whole first, so a generic rule
+ * matching inside it (`sk-…` in a Heroku key's tail) cannot leave its prefix
+ * behind for pass 5 to miss.
+ */
+function applyTokenRegex(text: string, name: string, re: RegExp): string {
+  type VendorSpan = { start: number; end: number; id: string };
+  const covering: VendorSpan[] = [];
+  let vendor: VendorSpan[] | null = null;
+  const out = text.replace(re, (match: string, ...rest: unknown[]) => {
+    const start = rest.find((x) => typeof x === "number") as number;
+    const end = start + match.length;
+    if (vendor === null) {
+      const { global } = getGitleaks();
+      vendor = activeGitleaksRules(text).flatMap((rule) =>
+        [...gitleaksSecretSpans(text, rule, global)].map(([s, e]) => ({
+          start: s,
+          end: e,
+          id: rule.id,
+        })),
+      );
+    }
+    let best: VendorSpan | undefined;
+    for (const v of vendor) {
+      if (v.start <= start && end <= v.end && v.end - v.start > match.length) {
+        if (!best || v.end - v.start > best.end - best.start) best = v;
+      }
+    }
+    if (!best) return `[REDACTED:${name}]`;
+    covering.push(best);
+    return match;
+  });
+  if (covering.length === 0) return out;
+  // Redact the covering secrets right to left, longest first on a tie; one
+  // that overlaps the marker to its right merges into that marker.
+  covering.sort((x, y) => y.start - x.start || y.end - x.end);
+  let result = text;
+  let floor = Number.POSITIVE_INFINITY;
+  for (const v of covering) {
+    if (v.start >= floor) continue;
+    const marker = v.end > floor ? "" : `[REDACTED:gitleaks:${v.id}]`;
+    result = result.slice(0, v.start) + marker + result.slice(Math.min(v.end, floor));
+    floor = v.start;
+  }
+  return result.replace(re, `[REDACTED:${name}]`);
 }
 
 interface EnvValueEntry {
@@ -940,9 +1005,7 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
   // Pass 2: structural patterns (catches secrets we never saw in env, e.g.
   // a token pasted into a tool_result by the operator or fetched from a
   // third-party API during a task).
-  for (const { name, re } of TOKEN_REGEXES) {
-    out = out.replace(re, `[REDACTED:${name}]`);
-  }
+  for (const { name, re } of TOKEN_REGEXES) out = applyTokenRegex(out, name, re);
 
   // Pass 3: values of sensitive `KEY=value` assignments (env dumps, .env
   // files, shell traces), including ones too short for pass 1.
@@ -990,18 +1053,8 @@ export function findSecretsIn(text: string): SecretFindings {
     }
   }
 
-  if (gitleaksPassEnabled) {
-    const { keywordRe, implied, rules, global } = getGitleaks();
-    const present = new Set<string>();
-    keywordRe.lastIndex = 0;
-    for (let m = keywordRe.exec(text); m !== null; m = keywordRe.exec(text)) {
-      for (const keyword of implied.get(m[0].toLowerCase()) ?? []) present.add(keyword);
-      keywordRe.lastIndex = m.index + 1;
-    }
-    for (const rule of rules) {
-      if (!rule.keywords.some((keyword) => present.has(keyword))) continue;
-      if (applyGitleaksRule(text, rule, global) !== text) gitleaksRules.add(rule.id);
-    }
+  for (const rule of activeGitleaksRules(text)) {
+    if (applyGitleaksRule(text, rule, getGitleaks().global) !== text) gitleaksRules.add(rule.id);
   }
 
   return { knownValues: [...knownValues].sort(), gitleaksRules: [...gitleaksRules].sort() };
