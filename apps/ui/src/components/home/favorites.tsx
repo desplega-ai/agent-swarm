@@ -1,13 +1,15 @@
 /**
  * Favorites on Home: every starred use case (a Sessions group key), page,
  * workflow, schedule and agent-fs path of the picked user, newest star first.
+ * The first 3 show; "Show all" opens the rest, with a search past 6. The
+ * header's "New use case" starts a session that asks the Lead to plan one.
  * A star can outlive its item: a deleted group, page or schedule still lists,
  * with a muted note, so the user can open it or unstar it where it lived.
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Clock, File, FolderOpen, Globe, Star, Workflow } from "lucide-react";
-import type { ReactNode } from "react";
+import { Clock, File, FolderOpen, Globe, Plus, Search, Star, Workflow } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFavorites } from "@/api/hooks/use-favorites";
 import { usePage } from "@/api/hooks/use-pages";
@@ -44,15 +46,40 @@ export function Favorites({ className }: { className?: string }) {
   return <FavoritesView className={className} favorites={favorites} state={state} />;
 }
 
+/** Rows before "Show all". */
+const FAVORITES_SHOWN = 3;
+/** Past this many, the open list gets a search field. */
+const SEARCH_FROM = 6;
+
+/** The seeded prompt of "New use case": the Lead plans it with you. */
+export const NEW_USE_CASE_HREF = `/sessions?seed=${encodeURIComponent(
+  "Help me set up a new use case: what it should do, how often it runs, and where its outputs go.",
+)}`;
+
 export function FavoritesView({
   className,
   favorites,
   state,
+  initialLimit = FAVORITES_SHOWN,
 }: {
   className?: string;
   favorites: UserFavorite[];
   state: SectionQuery<unknown>;
+  /** Rows shown before "Show all". */
+  initialLimit?: number;
 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matching = q
+    ? favorites.filter((favorite) =>
+        `${favorite.itemId} ${favoriteKind(favorite.itemType, favorite.itemId)}`
+          .toLowerCase()
+          .includes(q),
+      )
+    : favorites;
+  const shown = open ? matching : favorites.slice(0, initialLimit);
+  const hidden = favorites.length - initialLimit;
   return (
     <HomeWidget
       className={className}
@@ -60,6 +87,30 @@ export function FavoritesView({
       icon={<Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={favorites.length > 0 ? <HomeWidgetCount>{favorites.length}</HomeWidgetCount> : null}
       collapse={{ id: "favorites" }}
+      action={
+        <Link
+          to={NEW_USE_CASE_HREF}
+          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <Plus className="size-3.5" aria-hidden />
+          New use case
+        </Link>
+      }
+      footer={
+        hidden > 0 ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => {
+              setOpen((value) => !value);
+              setQuery("");
+            }}
+            className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {open ? "Show fewer" : `Show all ${favorites.length}`}
+          </button>
+        ) : null
+      }
     >
       <SectionBody query={state} what="favorites">
         {favorites.length === 0 ? (
@@ -71,7 +122,23 @@ export function FavoritesView({
           )
         ) : (
           <ul className="divide-y divide-border-subtle">
-            {favorites.map((favorite) => (
+            {open && favorites.length > SEARCH_FROM ? (
+              <li className="flex items-center gap-2 px-4 py-2">
+                <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search favorites"
+                  aria-label="Search favorites"
+                  className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </li>
+            ) : null}
+            {open && shown.length === 0 ? (
+              <li className="px-4 py-3 text-sm text-muted-foreground">No favorite matches.</li>
+            ) : null}
+            {shown.map((favorite) => (
               <li key={`${favorite.itemType}:${favorite.itemId}`}>
                 <FavoriteRow favorite={favorite} />
               </li>

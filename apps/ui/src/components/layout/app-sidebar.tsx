@@ -12,6 +12,7 @@ import { useStatusContext } from "@/app/status-context";
 import { BookOpenIcon } from "@/components/icons/book-open";
 import { BrainIcon } from "@/components/icons/brain";
 import { ChartColumnIcon } from "@/components/icons/chart-column";
+import { ClipboardCheckIcon } from "@/components/icons/clipboard-check";
 import { ClockIcon } from "@/components/icons/clock";
 import { CpuIcon } from "@/components/icons/cpu";
 import { FileClockIcon } from "@/components/icons/file-clock";
@@ -169,6 +170,7 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Schedules", path: "/schedules", icon: ClockIcon, adminOnly: true },
       { title: "Workflows", path: "/workflows", icon: WorkflowIcon, adminOnly: true },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },
     ],
   },
   {
@@ -692,7 +694,12 @@ export function AppSidebar() {
       badges["/people"] = formatCompactNumber(users.length);
     }
     if (needsYou.count > 0) {
-      badges["/"] = formatCompactNumber(needsYou.count);
+      // A filled pill, not a muted count: this one asks for action.
+      badges["/"] = (
+        <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-primary px-1.5 font-mono text-[11px] font-bold tabular-nums text-primary-foreground">
+          {formatCompactNumber(needsYou.count)}
+        </span>
+      );
     }
     // The same rule as the LLMs tab dot on Connect › AI providers.
     const failingKeys = unhealthyCredentialCount(apiKeys, codexAccounts);

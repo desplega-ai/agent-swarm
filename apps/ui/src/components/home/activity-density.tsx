@@ -39,7 +39,13 @@ function hhmm(ms: number): string {
   return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
-export function ActivityDensity({ viewToggle }: { viewToggle?: ReactNode }) {
+export function ActivityDensity({
+  viewToggle,
+  className,
+}: {
+  viewToggle?: ReactNode;
+  className?: string;
+}) {
   const isMobile = useIsMobile();
   const binMs = (isMobile ? 30 : 15) * 60 * 1000;
   const now = useMinuteClock();
@@ -85,6 +91,8 @@ export function ActivityDensity({ viewToggle }: { viewToggle?: ReactNode }) {
 
   return (
     <HomeWidget
+      className={className}
+      bodyClassName="min-h-0 flex-1 overflow-y-auto"
       title={isMobile ? "Activity" : "Swarm activity"}
       icon={<Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={

@@ -9,7 +9,8 @@ test("home renders", async ({ page, clean }) => {
 
 test("home shows the post-onboarding checklist defaults", async ({ page, clean }) => {
   await page.goto("/");
-  const card = page.getByRole("region", { name: "Get the swarm working" });
+  // "Getting started" once the status loads (Set up + Get the swarm working).
+  const card = page.getByRole("region", { name: /^(Getting started|Get the swarm working)$/ });
   await expect(card).toBeVisible();
   for (const label of [
     "Connect a chat channel",
@@ -21,7 +22,7 @@ test("home shows the post-onboarding checklist defaults", async ({ page, clean }
   await clean.assertClean();
 });
 
-test("home lists what needs you, what runs by use case, the starred group, and badges Home", async ({
+test("home lists what needs you, the starred group with its running count, and badges Home", async ({
   page,
   seed,
   swarm,
@@ -88,14 +89,13 @@ test("home lists what needs you, what runs by use case, the starred group, and b
   // The badge on Home in the sidebar shows the same count.
   await expect(badge).toHaveText(String(withApproval), { timeout: 15_000 });
 
-  const inProgress = page.getByRole("region", { name: "In progress" });
-  // In progress starts folded in Home's side column.
-  await inProgress.getByRole("button", { name: "In progress", expanded: false }).click();
-  await expect(inProgress.getByRole("link", { name: `${groupName}, 1 running` })).toBeVisible();
-  await expect(inProgress.getByText(`e2e home running ${suffix}`)).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Favorites" }).getByText(groupName, { exact: true }),
-  ).toBeVisible();
+  // The starred group lists in Favorites with what runs in it.
+  const favorite = page
+    .getByRole("region", { name: "Favorites" })
+    .getByRole("link")
+    .filter({ hasText: groupName });
+  await expect(favorite).toBeVisible();
+  await expect(favorite.getByText("1 running")).toBeVisible();
 
   // Answering the approval takes it off Home and the badge on the next poll (5s).
   await api.post(`/api/approval-requests/${approval.approvalRequest.id}/respond`, {

@@ -7,12 +7,21 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Check, CircleAlert, CircleX, ClipboardCheck, KeyRound, MessageCircle } from "lucide-react";
+import {
+  Check,
+  CircleAlert,
+  CircleX,
+  ClipboardCheck,
+  Eye,
+  KeyRound,
+  MessageCircle,
+} from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionLabels } from "@/api/hooks/use-session-tree";
+import { useSessions } from "@/api/hooks/use-sessions";
 import { useRetryTask, useTasks } from "@/api/hooks/use-tasks";
 import type {
   AgentTask,
@@ -32,7 +41,7 @@ import { summarizeRecentFailures } from "@/lib/recent-failures";
 import { groupLabel } from "@/lib/session-groups";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { HomeWidget, HomeWidgetEmpty, HomeWidgetLink } from "./home-widget";
+import { HomeWidget, HomeWidgetLink } from "./home-widget";
 import { isUnavailable, SectionBody, type SectionQuery } from "./section-state";
 
 /** Failed tasks fetched to find the last 24h; past this the count reads "N+". */
@@ -40,12 +49,61 @@ const FAILURE_PAGE = 50;
 /** Rows per list before a "View all" link takes over. */
 const MAX_ROWS = 5;
 const MAX_FAILURE_ROWS = 5;
+/** Unread sessions read for "To review"; the days they reach back. */
+const REVIEW_PAGE = 30;
+const REVIEW_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-type NeedsFilter = "all" | "approvals" | "waiting" | "blocked" | "failed";
+/** What a row asks for, and its colour: decisions amber, failures red, blocked orange, reviews blue. */
+type RowTone = "decide" | "failed" | "blocked" | "review";
+const TONE: Record<RowTone, { tile: string; icon: string; chip: string }> = {
+  decide: {
+    tile: "border-status-active/40 bg-status-active/10",
+    icon: "text-status-active-strong",
+    chip: "border-status-active/40 text-status-active-strong",
+  },
+  failed: {
+    tile: "border-status-error/40 bg-status-error/10",
+    icon: "text-status-error-strong",
+    chip: "border-status-error/40 text-status-error-strong",
+  },
+  blocked: {
+    tile: "border-status-warning/40 bg-status-warning/10",
+    icon: "text-status-warning-strong",
+    chip: "border-status-warning/40 text-status-warning-strong",
+  },
+  review: {
+    tile: "border-status-info/40 bg-status-info/10",
+    icon: "text-status-info-strong",
+    chip: "border-status-info/40 text-status-info-strong",
+  },
+};
+
+/**
+ * Unread sessions of the last days that ended (done, not failed) and are not
+ * listed above: results waiting for a look. Newest first.
+ */
+export function sessionsToReview(
+  unread: SessionListItem[],
+  listed: SessionListItem[],
+  now: number,
+): SessionListItem[] {
+  const seen = new Set(listed.map((session) => session.root.id));
+  return unread.filter(
+    (session) =>
+      !seen.has(session.root.id) &&
+      session.readState === "unread" &&
+      session.latestStatus === "completed" &&
+      now - new Date(session.lastActivityAt).getTime() < REVIEW_DAYS * DAY_MS,
+  );
+}
+
+type NeedsFilter = "all" | "approvals" | "waiting" | "blocked" | "failed" | "review";
 
 export function NeedsYou({ className }: { className?: string }) {
   const { items, count, approvals, sessions, credentials } = useNeedsYou();
   const failed = useTasks({ status: "failed", limit: FAILURE_PAGE, orderBy: "lastUpdatedAt" });
+  const unread = useSessions({ triage: "unread", scope: "tree", limit: REVIEW_PAGE });
   const { data: agents } = useAgents();
   const { userId } = useCurrentUser();
   const labels = useSessionLabels();
@@ -82,6 +140,7 @@ export function NeedsYou({ className }: { className?: string }) {
       now={now}
       onRetry={onRetry}
       retrying={retry.isPending ? (retry.variables?.task.id ?? null) : null}
+      review={sessionsToReview(unread.data?.sessions ?? [], sessions.data?.sessions ?? [], now)}
     />
   );
 }
@@ -101,6 +160,8 @@ export interface NeedsYouViewProps {
   onRetry?: (task: AgentTask) => void;
   /** The failed task a retry is running for. */
   retrying?: string | null;
+  /** Finished, unread sessions of the last days (`sessionsToReview`). Not counted in the badge. */
+  review?: SessionListItem[];
 }
 
 export function NeedsYouView({
@@ -116,6 +177,7 @@ export function NeedsYouView({
   now,
   onRetry,
   retrying = null,
+  review = [],
 }: NeedsYouViewProps) {
   const [filter, setFilter] = useState<NeedsFilter>("all");
   const recent = useMemo(
@@ -133,13 +195,32 @@ export function NeedsYouView({
     !loading &&
     count === 0 &&
     failures.length === 0 &&
+    review.length === 0 &&
     !isUnavailable(approvals) &&
     !isUnavailable(sessions) &&
     !isUnavailable(failed);
 
+  // All good: one quiet line, so the space goes to the activity below.
+  if (nothing) {
+    return (
+      <HomeWidget
+        className={className}
+        title="Needs you"
+        icon={<Check className="size-4 shrink-0 text-status-success-strong" aria-hidden />}
+        meta={
+          <span className="truncate text-xs text-muted-foreground">
+            All good. Nothing waits on you.
+          </span>
+        }
+        action={<HomeWidgetLink to="/sessions">All sessions</HomeWidgetLink>}
+      />
+    );
+  }
+
   return (
     <HomeWidget
       className={className}
+      bodyClassName="min-h-0 flex-1 overflow-y-auto"
       title="Needs you"
       icon={<CircleAlert className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={
@@ -163,8 +244,6 @@ export function NeedsYouView({
     >
       {loading ? (
         <LoadingRows />
-      ) : nothing ? (
-        <HomeWidgetEmpty>Nothing needs you.</HomeWidgetEmpty>
       ) : (
         <div>
           <FilterChips
@@ -175,6 +254,7 @@ export function NeedsYouView({
               waiting: items.sessions.length,
               blocked: items.credentials.length,
               failed: failures.length,
+              review: review.length,
             }}
           />
           {/* j / k (or the arrows) move between rows; Enter opens one. */}
@@ -217,21 +297,13 @@ export function NeedsYouView({
               <SectionBody query={failed} what="failed tasks">
                 {failures.length > 0 ? (
                   <div className="divide-y divide-border-subtle">
-                    <div className="flex h-9 items-center gap-2 pl-4 pr-3 text-xs text-muted-foreground">
-                      <span className="font-medium uppercase tracking-wide">
-                        Failed in the last 24h
-                      </span>
+                    <SectionHeader to="/tasks?status=failed">
+                      Failed in the last 24h
                       <span className="font-mono tabular-nums text-foreground">
                         {failures.length}
                         {recent.complete ? "" : "+"}
                       </span>
-                      <Link
-                        to="/tasks?status=failed"
-                        className="ml-auto rounded-md px-2 py-1 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                      >
-                        View all
-                      </Link>
-                    </div>
+                    </SectionHeader>
                     {failures.slice(0, MAX_FAILURE_ROWS).map((task) => (
                       <FailureRow
                         key={task.id}
@@ -244,6 +316,29 @@ export function NeedsYouView({
                   </div>
                 ) : null}
               </SectionBody>
+            ) : null}
+            {show(filter, "review") && review.length > 0 ? (
+              <div className="divide-y divide-border-subtle">
+                <SectionHeader to="/sessions?view=inbox">
+                  To review, last {REVIEW_DAYS} days
+                  <span className="font-mono tabular-nums text-foreground">{review.length}</span>
+                </SectionHeader>
+                {review.slice(0, MAX_ROWS).map((session) => (
+                  <NeedsRow
+                    key={session.root.id}
+                    icon={Eye}
+                    tone="review"
+                    kind="To review"
+                    title={taskListTitle(session.root)}
+                    meta={[
+                      groupName(session.groupKey),
+                      formatRelativeTime(session.lastActivityAt),
+                    ].join(" · ")}
+                    to={`/sessions/${session.root.id}`}
+                    action="Open"
+                  />
+                ))}
+              </div>
             ) : null}
           </div>
         </div>
@@ -285,6 +380,7 @@ const FILTER_LABELS: Record<Exclude<NeedsFilter, "all">, string> = {
   waiting: "Waiting",
   blocked: "Blocked",
   failed: "Failed",
+  review: "To review",
 };
 
 /** All, then one chip per kind that has rows. Hidden when only one kind does. */
@@ -345,6 +441,23 @@ function moveBetweenRows(event: KeyboardEvent<HTMLDivElement>) {
   links[next]?.focus();
 }
 
+/** A group label inside the queue, with a "View all" link. */
+function SectionHeader({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <div className="flex h-9 items-center gap-2 pl-4 pr-3 text-xs text-muted-foreground">
+      <span className="flex items-center gap-2 font-medium uppercase tracking-wide">
+        {children}
+      </span>
+      <Link
+        to={to}
+        className="ml-auto rounded-md px-2 py-1 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        View all
+      </Link>
+    </div>
+  );
+}
+
 function LoadingRows() {
   return (
     <div className="flex flex-col gap-3 px-4 py-3" aria-busy="true">
@@ -361,6 +474,7 @@ function LoadingRows() {
  */
 function NeedsRow({
   icon: Icon,
+  tone,
   kind,
   title,
   meta,
@@ -370,6 +484,7 @@ function NeedsRow({
   primary = false,
 }: {
   icon: LucideIcon;
+  tone: RowTone;
   kind: string;
   title: string;
   meta: ReactNode;
@@ -380,8 +495,10 @@ function NeedsRow({
 }) {
   return (
     <div className="group/row relative flex min-h-[56px] items-center gap-3 px-4 py-2 transition-colors hover:bg-accent focus-within:bg-accent">
-      <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border-subtle bg-surface">
-        <Icon className="size-3.5 text-foreground" aria-hidden />
+      <span
+        className={cn("grid size-7 shrink-0 place-items-center rounded-md border", TONE[tone].tile)}
+      >
+        <Icon className={cn("size-3.5", TONE[tone].icon)} aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
         <Link
@@ -392,7 +509,7 @@ function NeedsRow({
           {title}
         </Link>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <Badge variant="outline" size="tag" className="shrink-0">
+          <Badge variant="outline" size="tag" className={cn("shrink-0", TONE[tone].chip)}>
             {kind}
           </Badge>
           <span className="truncate">{meta}</span>
@@ -442,6 +559,7 @@ function ApprovalRow({
   return (
     <NeedsRow
       icon={ClipboardCheck}
+      tone="decide"
       kind="Approval"
       primary={primary}
       title={approval.title || "Approval requested"}
@@ -464,6 +582,7 @@ function SessionRow({
   return (
     <NeedsRow
       icon={MessageCircle}
+      tone={session.latestStatus === "failed" ? "failed" : "decide"}
       kind={session.latestStatus === "failed" ? "Failed" : "Waiting"}
       primary={primary}
       title={taskListTitle(session.root)}
@@ -485,6 +604,7 @@ function CredentialRow({ agent }: { agent: CredentialMissingAgent }) {
   return (
     <NeedsRow
       icon={KeyRound}
+      tone="blocked"
       kind="Blocked"
       title={`${agent.name || "An agent"} is blocked on credentials`}
       meta={meta}
@@ -518,6 +638,7 @@ function FailureRow({
   return (
     <NeedsRow
       icon={CircleX}
+      tone="failed"
       kind="Failed"
       title={taskListTitle(task)}
       meta={[agent, formatRelativeTime(task.finishedAt ?? task.lastUpdatedAt)]

@@ -3,8 +3,9 @@ import { expect, test } from "../fixtures";
 
 /**
  * The use-case Overview tab (step-10, `apps/ui/src/components/sessions-v2/overview/`).
- * A group with a schedule under its key opens on a pinned Overview tab next to its
- * list tab. A plain thread group (no schedule, no files) opens on its list, as before.
+ * A use case is one tab. A group with a schedule under its key opens on its Overview,
+ * with an Overview / Sessions switch inside the tab. A plain thread group (no
+ * schedule, no files) opens on its list, with no switch.
  *
  * Files is off in this suite (no agent-fs), so a schedule is what qualifies a group.
  * Each test makes its own group key, so a worker's API can run the spec more than once.
@@ -16,7 +17,7 @@ test.describe("sessions overview", () => {
     test.skip(isMobile, "desktop tab strip");
   });
 
-  test("a use-case group opens on its pinned overview; Run now adds a run to the list", async ({
+  test("a use-case group opens as one tab on its overview; Run now adds a run to the list", async ({
     page,
     api,
     seed,
@@ -46,12 +47,12 @@ test.describe("sessions overview", () => {
 
     await page.goto(`/sessions?view=${groupKey}`);
     const tabs = page.getByRole("tablist", { name: "Tabs" });
-    const overview = tabs.getByRole("tab", { name: "Overview" });
-    await expect(overview).toHaveAttribute("aria-selected", "true");
-    // Pinned: no close button on the Overview, one on the list tab.
-    await expect(overview.getByRole("button", { name: /^Close tab/ })).toHaveCount(0);
-    const listTab = tabs.getByRole("tab", { name: slug });
-    await expect(listTab.getByRole("button", { name: `Close tab ${slug}` })).toHaveCount(1);
+    // One tab for the use case; its two faces are a switch inside it.
+    const groupTab = tabs.getByRole("tab", { name: slug });
+    await expect(groupTab).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveCount(0);
+    const views = page.getByRole("radiogroup", { name: "Use case view" });
+    await expect(views.getByRole("radio", { name: "Overview" })).toBeChecked();
 
     const schedules = page.getByRole("list", { name: "Schedules in this group" });
     await expect(schedules.getByText(`e2e scan ${slug}`)).toBeVisible();
@@ -64,11 +65,15 @@ test.describe("sessions overview", () => {
       .click();
     await expect(page.getByText(`Started a run of e2e scan ${slug}.`)).toBeVisible();
 
-    await listTab.click();
+    await views.getByRole("radio", { name: "Sessions" }).click();
     await expect(page).toHaveURL(/tab=list/);
     await expect(page.getByRole("tabpanel").getByText("e2e overview scan")).toBeVisible({
       timeout: 15_000,
     });
+
+    // Closing the one tab closes the use case.
+    await groupTab.getByRole("button", { name: `Close tab ${slug}` }).click();
+    await expect(tabs.getByRole("tab", { name: slug })).toHaveCount(0);
 
     await clean.assertClean();
   });
@@ -92,6 +97,7 @@ test.describe("sessions overview", () => {
     await expect(tabs.getByRole("tab", { name: slug })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("tabpanel").getByText(`e2e plain thread ${slug}`)).toBeVisible();
     await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "Use case view" })).toHaveCount(0);
 
     await clean.assertClean();
   });

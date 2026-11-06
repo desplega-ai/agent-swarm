@@ -44,11 +44,11 @@ test("sidebar groups: BUILD starts collapsed, AUTOMATE holds the jobs", {
   );
   await expect(sidebar.getByRole("link", { name: "Agents", exact: true })).toBeHidden();
 
-  // The AUTOMATE section lists Schedules then Workflows.
+  // The AUTOMATE section lists Schedules, Workflows, then Approvals.
   const automate = sidebar
     .getByRole("button", { name: "AUTOMATE", exact: true })
     .locator("xpath=..");
-  await expect(automate.getByRole("link")).toHaveText(["Schedules", "Workflows"]);
+  await expect(automate.getByRole("link")).toHaveText(["Schedules", "Workflows", "Approvals"]);
   for (const name of ["Channels", "Tools", "AI providers"]) {
     await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
   }

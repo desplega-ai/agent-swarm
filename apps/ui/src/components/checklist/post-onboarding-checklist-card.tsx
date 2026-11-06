@@ -3,13 +3,20 @@ import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useChecklist, useChecklistMutation } from "@/api/hooks/use-checklist";
-import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
+import {
+  isOnboardingOpen,
+  onboardingDoneCount,
+  useOnboarding,
+  useVisibleOnboardingSteps,
+} from "@/api/hooks/use-onboarding";
 import type {
   ChecklistAddRequest,
   ChecklistItem,
   ChecklistResponse,
   ChecklistUpdateRequest,
 } from "@/api/types";
+import { useOptionalStatusContext } from "@/app/status-context";
+import { NEW_USE_CASE_HREF } from "@/components/home/favorites";
 import { HomeWidget, HomeWidgetCount } from "@/components/home/home-widget";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
@@ -34,28 +41,51 @@ import {
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { failingChecks } from "@/lib/setup-checks";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 
 /**
- * The post-onboarding checklist on Home ("Get the swarm working"). It takes
- * over from `SetupChecklistCard` once `/setup` is finished or dismissed, and
- * shows for every non-admin at once (they never see the setup card). Items
- * check themselves from server signals; editing goes through the API, which
- * enforces who may change what (`editable` per item).
+ * "Getting started" on Home: two phases in one list. Phase 1 (Set up) is the
+ * low-level config: the setup wizard while it is open, then the health checks
+ * that fail (the header badge's list). Phase 2 (Get the swarm working) is the
+ * post-onboarding checklist: a channel, work tools, a first use case, the
+ * team. Items check themselves from server signals; editing goes through the
+ * API, which enforces who may change what (`editable` per item).
  *
- * Self-contained, in the shared `HomeWidget` chrome, so Home mounts it in its widget grid.
+ * Self-contained, in the shared `HomeWidget` chrome. Wrapper `id="setup"` is
+ * the `/#setup` anchor.
  */
 export function PostOnboardingChecklistCard({ className }: { className?: string }) {
-  const { data: onboarding, isPending: onboardingPending } = useOnboarding();
+  const { data: onboarding } = useOnboarding();
+  const steps = useVisibleOnboardingSteps();
+  const status = useOptionalStatusContext()?.data;
   const canSetup = useCan("config.write.any");
-  // An admin with setup still open sees the setup card in this slot instead.
-  const setupOpen = canSetup && isOnboardingOpen(onboarding);
-  const waiting = canSetup && onboardingPending;
-  const { data, isError } = useChecklist({ enabled: !setupOpen && !waiting });
+  const { data, isError } = useChecklist();
   const mutation = useChecklistMutation();
 
-  if (setupOpen || waiting || isError || !data) return null;
+  if (isError || !data) return null;
+
+  const setup: SetupPhaseItem[] = [];
+  if (canSetup && onboarding && isOnboardingOpen(onboarding)) {
+    setup.push({
+      id: "wizard",
+      label: "Finish the setup wizard",
+      hint: `${onboardingDoneCount(onboarding.state, steps)} of ${steps.length} steps done`,
+      href: "/setup",
+      action: "Resume",
+    });
+  }
+  for (const check of status ? failingChecks(status) : []) {
+    setup.push({
+      id: check.milestone.id,
+      label: check.milestone.label,
+      hint: check.milestone.hint ?? null,
+      href: check.milestone.action_url ?? null,
+      action: "Fix",
+      blocks: check.blocks,
+    });
+  }
 
   async function run(input: Parameters<typeof mutation.mutateAsync>[0]) {
     try {
@@ -68,12 +98,24 @@ export function PostOnboardingChecklistCard({ className }: { className?: string 
   return (
     <PostOnboardingChecklistView
       data={data}
+      setup={status ? setup : undefined}
       busy={mutation.isPending}
       className={className}
       onAdd={(body) => run({ type: "add", body })}
       onUpdate={(id, body) => run({ type: "update", id, body })}
     />
   );
+}
+
+/** A Set up row: a failing check or the open wizard. */
+export interface SetupPhaseItem {
+  id: string;
+  label: string;
+  hint: string | null;
+  href: string | null;
+  action: string;
+  /** No task can run until it passes. */
+  blocks?: boolean;
 }
 
 const CHANNEL_ADAPTERS = [
@@ -109,6 +151,8 @@ function removedNote(item: ChecklistItem): string {
 
 export interface PostOnboardingChecklistViewProps {
   data: ChecklistResponse;
+  /** Phase 1 rows; empty = set up. Undefined while the status is unknown (no phase 1). */
+  setup?: SetupPhaseItem[];
   busy?: boolean;
   className?: string;
   onAdd: (body: ChecklistAddRequest) => void | Promise<void>;
@@ -117,6 +161,7 @@ export interface PostOnboardingChecklistViewProps {
 
 export function PostOnboardingChecklistView({
   data,
+  setup,
   busy = false,
   className,
   onAdd,
@@ -129,7 +174,8 @@ export function PostOnboardingChecklistView({
   const visible = data.items.filter((item) => item.status !== "removed");
   const removed = data.items.filter((item) => item.status === "removed");
   const doneCount = visible.filter((item) => item.done).length;
-  const allDone = doneCount === visible.length;
+  const setupDone = !setup || setup.length === 0;
+  const allDone = doneCount === visible.length && setupDone;
   const collapsed = allDone && !expanded;
   const count = `${doneCount} of ${visible.length}`;
 
@@ -145,7 +191,8 @@ export function PostOnboardingChecklistView({
   return (
     <HomeWidget
       className={className}
-      title={allDone ? "Setup complete" : "Get the swarm working"}
+      id="setup"
+      title={allDone ? "Setup complete" : setup ? "Getting started" : "Get the swarm working"}
       icon={
         allDone ? (
           <StatusIcon tone="success" focusable={false} />
@@ -181,7 +228,34 @@ export function PostOnboardingChecklistView({
     >
       {collapsed ? null : (
         <>
-          <ul className="divide-y divide-border-subtle">
+          {setup ? (
+            <>
+              <PhaseHeader
+                step={1}
+                title="Set up"
+                note={setupDone ? "Done" : `${setup.length} to fix`}
+              />
+              {setupDone ? (
+                <p className="flex items-center gap-2 border-t border-border-subtle px-4 py-2.5 text-sm text-muted-foreground">
+                  <StatusIcon tone="success" focusable={false} />
+                  The swarm can run tasks.
+                </p>
+              ) : (
+                <ul className="divide-y divide-border-subtle border-t border-border-subtle">
+                  {setup.map((item) => (
+                    <SetupRow key={item.id} item={item} />
+                  ))}
+                </ul>
+              )}
+              <PhaseHeader step={2} title="Get the swarm working" note={count} />
+            </>
+          ) : null}
+          <ul
+            className={cn(
+              "divide-y divide-border-subtle",
+              setup && "border-t border-border-subtle",
+            )}
+          >
             {visible.map((item) => (
               <ChecklistRow
                 key={item.id}
@@ -251,6 +325,38 @@ export function PostOnboardingChecklistView({
   );
 }
 
+function PhaseHeader({ step, title, note }: { step: number; title: string; note: string }) {
+  return (
+    <div className="flex h-9 items-center gap-2 border-t border-border-subtle bg-muted/30 px-4 text-xs first:border-t-0">
+      <span className="grid size-4 shrink-0 place-items-center rounded-full border border-border font-mono text-[10px] text-muted-foreground">
+        {step}
+      </span>
+      <span className="font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
+      <span className="ml-auto font-mono tabular-nums text-muted-foreground">{note}</span>
+    </div>
+  );
+}
+
+function SetupRow({ item }: { item: SetupPhaseItem }) {
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <StatusIcon
+        tone={item.blocks ? "error" : "warning"}
+        label={item.blocks ? "Blocks every task" : "Needs attention"}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{item.label}</p>
+        {item.hint ? <p className="text-xs text-muted-foreground">{item.hint}</p> : null}
+      </div>
+      {item.href ? (
+        <Button asChild size="xs" variant="outline" className="shrink-0">
+          <Link to={item.href}>{item.action}</Link>
+        </Button>
+      ) : null}
+    </li>
+  );
+}
+
 function ChecklistRow({
   item,
   busy,
@@ -268,7 +374,9 @@ function ChecklistRow({
 }) {
   const hint = item.done ? null : itemHint(item);
   // A swarm item a member cannot change has no action for them: Connect pages are admin only.
-  const action = !item.done && item.href && item.editable ? item.href : null;
+  // A use case starts as a session that asks the Lead to plan it.
+  const href = item.kind === "use_case" ? NEW_USE_CASE_HREF : item.href;
+  const action = !item.done && href && item.editable ? href : null;
   const hasMenu = item.editable || canAddChannel;
 
   return (

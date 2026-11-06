@@ -18,15 +18,10 @@ mock.module("@/hooks/use-config", () => ({
 }));
 mock.module("@/components/dashboard/dashboard-nudges", () => ({ DashboardNudges: stub("nudges") }));
 mock.module("@/components/home/needs-you", () => ({ NeedsYou: stub("needs-you") }));
-mock.module("@/components/home/in-progress", () => ({ InProgress: stub("in-progress") }));
 mock.module("@/components/home/favorites", () => ({ Favorites: stub("favorites") }));
-mock.module("@/components/home/up-next", () => ({ UpNext: stub("up-next") }));
 mock.module("@/components/home/home-metrics", () => ({ HomeMetrics: stub("metrics") }));
 mock.module("@/components/home/activity-density", () => ({ ActivityDensity: stub("density") }));
 mock.module("@/components/ui/segmented-control", () => ({ SegmentedControl: () => null }));
-mock.module("@/components/onboarding/setup-checklist-card", () => ({
-  SetupChecklistCard: stub("setup-checklist"),
-}));
 mock.module("@/components/checklist/post-onboarding-checklist-card", () => ({
   PostOnboardingChecklistCard: stub("checklist"),
 }));
@@ -55,18 +50,15 @@ function widgets(html: string): string[] {
   return [...html.matchAll(/data-widget="([^"]+)"/g)].map((m) => m[1]);
 }
 
-test("nudges and metrics on top; main column: Needs you, checklist, activity; side: Favorites, In progress, Up next", () => {
+test("nudges and metrics on top; main column: Needs you, activity; side: Favorites, Getting started", () => {
   const html = render();
   expect(widgets(html)).toEqual([
     "nudges",
     "metrics",
     "needs-you",
-    "setup-checklist",
-    "checklist",
     "density",
     "favorites",
-    "in-progress",
-    "up-next",
+    "checklist",
   ]);
   expect(html).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
 });

@@ -4,10 +4,11 @@
  * `/` shows, change this file.
  *
  * The admin nudge banner and the metrics strip on top, then two columns from
- * `xl`. The main column holds what needs input: Needs you, the checklist,
- * and the swarm activity. The side column holds Favorites, then In progress
- * and Up next (both folded by default). From `xl` the strip stays put and
- * each column scrolls on its own; below it the page scrolls as one column.
+ * `xl`. The main column: Needs you (up to half the height, scrolling inside;
+ * one quiet line when nothing waits) over the swarm activity, which takes the
+ * rest. The side column: Favorites, then "Getting started" (Set up, then Get
+ * the swarm working). From `xl` the strip stays put and the columns scroll on
+ * their own; below it the page scrolls as one column.
  *
  * The page owns its scroll: from `lg` the layout's `main` does not scroll.
  *
@@ -27,19 +28,18 @@ import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { ActivityDensity } from "@/components/home/activity-density";
 import { Favorites } from "@/components/home/favorites";
 import { HomeMetrics } from "@/components/home/home-metrics";
-import { InProgress } from "@/components/home/in-progress";
 import { NeedsYou } from "@/components/home/needs-you";
-import { UpNext } from "@/components/home/up-next";
-import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
 import { LocalNetworkHelp } from "@/components/shared/local-network-help";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfig } from "@/hooks/use-config";
 
-/** A column from `xl`: it scrolls on its own under the fixed strip. */
-const COLUMN =
+/** The side column from `xl`: it scrolls on its own under the fixed strip. */
+const SIDE_COLUMN =
   "flex min-w-0 flex-col gap-4 xl:min-h-0 xl:overflow-y-auto xl:pb-6 xl:[scrollbar-gutter:stable] [&>*]:shrink-0";
+/** The main column from `xl`: Needs you and the activity share its height. */
+const MAIN_COLUMN = "flex min-w-0 flex-col gap-4 xl:min-h-0 xl:pb-6";
 
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
@@ -58,26 +58,23 @@ export function UnifiedHome() {
         <DashboardNudges />
         <HomeMetrics className="shrink-0" />
         <div className="grid grid-cols-1 gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:grid-rows-[minmax(0,1fr)]">
-          <div className={COLUMN}>
-            <NeedsYou />
-            {/* The setup card while onboarding is open for an admin, else the
-                post-onboarding checklist: never both. */}
-            <SetupChecklistCard />
-            <PostOnboardingChecklistCard />
-            <TimelineRegion
-              versionResolved={versionResolved}
-              supported={supported}
-              // A connection from URL params is not stored until the naming
-              // dialog saves it: no attempt has failed yet.
-              isError={isError && !pendingConnection}
-              error={error}
-              apiUrl={config.apiUrl}
-            />
+          <div className={MAIN_COLUMN}>
+            <NeedsYou className="shrink-0 xl:max-h-[50%] xl:min-h-0" />
+            <div className="flex min-h-0 flex-col xl:flex-1">
+              <TimelineRegion
+                versionResolved={versionResolved}
+                supported={supported}
+                // A connection from URL params is not stored until the naming
+                // dialog saves it: no attempt has failed yet.
+                isError={isError && !pendingConnection}
+                error={error}
+                apiUrl={config.apiUrl}
+              />
+            </div>
           </div>
-          <div className={COLUMN}>
+          <div className={SIDE_COLUMN}>
             <Favorites />
-            <InProgress />
-            <UpNext />
+            <PostOnboardingChecklistCard />
           </div>
         </div>
       </div>
@@ -121,9 +118,9 @@ function HomeActivity() {
     />
   );
   return view === "density" ? (
-    <ActivityDensity viewToggle={toggle} />
+    <ActivityDensity viewToggle={toggle} className="xl:min-h-0 xl:flex-1" />
   ) : (
-    <div className="h-80 shrink-0 md:h-[28rem]">
+    <div className="h-80 shrink-0 md:h-[28rem] xl:h-auto xl:min-h-[20rem] xl:flex-1">
       <AgentActivityTimeline viewToggle={toggle} />
     </div>
   );

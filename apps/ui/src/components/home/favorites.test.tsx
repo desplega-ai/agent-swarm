@@ -58,10 +58,10 @@ const fav = (itemType: UserFavorite["itemType"], itemId: string): UserFavorite =
 
 const ok = { data: [], isLoading: false, isError: false, errorUpdateCount: 0, refetch: () => {} };
 
-function render(favorites: UserFavorite[]) {
+function render(favorites: UserFavorite[], initialLimit = Number.POSITIVE_INFINITY) {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <FavoritesView favorites={favorites} state={ok} />
+      <FavoritesView favorites={favorites} state={ok} initialLimit={initialLimit} />
     </MemoryRouter>,
   );
 }
@@ -98,4 +98,15 @@ test("a star that outlived its item still lists, with a note", () => {
 
 test("no favorites says how to star things", () => {
   expect(render([])).toContain("Nothing starred yet.");
+});
+
+test("the first 3 show, then Show all", () => {
+  const html = render(
+    [fav("page", "p1"), fav("workflow", "w1"), fav("schedule", "s1"), fav("key", "shared/po-qa/")],
+    3,
+  );
+  expect(html).toContain('href="/pages/p1"');
+  expect(html).not.toContain('href="/sessions?view=shared%2Fpo-qa%2F"');
+  expect(html).toContain("Show all 4");
+  expect(html).toContain("New use case");
 });

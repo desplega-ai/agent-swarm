@@ -19,9 +19,14 @@ mock.module("@/api/hooks/use-checklist", () => ({
 }));
 mock.module("@/api/hooks/use-onboarding", () => ({
   isOnboardingOpen: () => false,
+  onboardingDoneCount: () => 0,
   useOnboarding: () => ({ data: null, isPending: false }),
+  useVisibleOnboardingSteps: () => [],
 }));
 mock.module("@/lib/use-can", () => ({ useCan: () => true }));
+mock.module("@/app/status-context", () => ({ useOptionalStatusContext: () => null }));
+mock.module("@/lib/setup-checks", () => require("../../lib/setup-checks"));
+mock.module("@/components/home/favorites", () => ({ NEW_USE_CASE_HREF: "/sessions?seed=x" }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/components/home/home-widget", () => require("../home/home-widget"));
 mock.module("@/components/shared/status-icon", () => ({
@@ -192,7 +197,8 @@ test("shows the three defaults with progress and one action per open row", async
   ]);
   expect(links).toEqual([
     ["Open", "/integrations/tools"],
-    ["Start", "/sessions"],
+    // A use case starts as a session that asks the Lead to plan it.
+    ["Start", "/sessions?seed=x"],
   ]);
 });
 

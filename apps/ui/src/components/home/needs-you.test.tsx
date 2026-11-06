@@ -24,6 +24,7 @@ mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
 mock.module("@/api/hooks/use-agents", () => ({ useAgents: () => ({}) }));
+mock.module("@/api/hooks/use-sessions", () => ({ useSessions: () => ({}) }));
 mock.module("@/api/hooks/use-session-tree", () => ({
   useSessionLabels: () => ({}),
   useSessionTree: () => ({}),
@@ -33,7 +34,7 @@ mock.module("@/contexts/current-user-context", () => ({ useCurrentUser: () => ({
 mock.module("@/hooks/use-needs-you", () => ({ useNeedsYou: () => ({}) }));
 mock.module("@/hooks/use-minute-clock", () => ({ useMinuteClock: () => 0 }));
 
-const { NeedsYouView } = await import("./needs-you");
+const { NeedsYouView, sessionsToReview } = await import("./needs-you");
 const { needsYouCount, needsYouItems } = await import("../../lib/needs-you");
 
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -147,14 +148,35 @@ describe("NeedsYouView", () => {
 
   test("nothing at all reads as all clear", () => {
     const html = render({});
-    expect(html).toContain("Nothing needs you.");
-    expect(html).toContain("No blocked agents and no failed runs in the last 24h.");
+    expect(html).toContain("All good. Nothing waits on you.");
     expect(html).not.toContain("needs you</span>");
   });
 
   test("a failed read is never an all clear", () => {
     const html = render({ overrides: { approvals: failedRead() } });
     expect(html).toContain("Couldn&#x27;t load approvals");
-    expect(html).not.toContain("Nothing needs you.");
+    expect(html).not.toContain("All good.");
+  });
+});
+
+describe("sessionsToReview", () => {
+  test("finished unread sessions of the last days, not the ones listed", () => {
+    const item = (id: string, status: string, ago: number, read = "unread") =>
+      ({
+        root: { id },
+        latestStatus: status,
+        readState: read,
+        lastActivityAt: new Date(NOW - ago * 3_600_000).toISOString(),
+      }) as unknown as SessionListItem;
+    const unread = [
+      item("a", "completed", 2),
+      item("b", "failed", 2),
+      item("c", "completed", 100),
+      item("d", "completed", 1, "read"),
+      item("e", "completed", 1),
+    ];
+    expect(
+      sessionsToReview(unread, [item("e", "completed", 1)], NOW).map((s) => s.root.id),
+    ).toEqual(["a"]);
   });
 });
