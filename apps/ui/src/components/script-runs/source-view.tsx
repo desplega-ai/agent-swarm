@@ -2,6 +2,7 @@ import { Check, Copy, WrapText } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import type { SourceAnchor, StepBlock } from "./source-map";
@@ -59,7 +60,11 @@ export function SourceView({
 }: SourceViewProps) {
   const { theme } = useTheme();
   const { copied, copy } = useCopyToClipboard();
-  const [wrap, setWrap] = useState(false);
+  // Mockup (UI audit 2026-11-06): on a phone the viewer grows to the full
+  // source height and the PAGE scrolls (no scroll box inside the page
+  // scroll), and long lines wrap by default so nothing is clipped.
+  const isPhone = useIsPhone();
+  const [wrap, setWrap] = useState(isPhone);
 
   const lineInfo = useMemo(() => {
     const map = new Map<
@@ -95,6 +100,10 @@ export function SourceView({
     const row = refs.current.get(key);
     const container = scrollRef.current;
     if (!row || !container) return;
+    if (container.scrollHeight <= container.clientHeight + 1) {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     const offset = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
     const target = container.scrollTop + offset - container.clientHeight * 0.3;
     container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
@@ -112,9 +121,18 @@ export function SourceView({
 
   return (
     <div
-      className={cn("flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card", className)}
+      className={cn(
+        "flex flex-col rounded-lg border bg-card",
+        isPhone ? "h-auto" : "min-h-0 overflow-hidden",
+        className,
+      )}
     >
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 border-b bg-card px-4 py-2",
+          isPhone && "sticky top-11 z-10 rounded-t-lg",
+        )}
+      >
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Source</h2>
           <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -134,7 +152,7 @@ export function SourceView({
             aria-pressed={wrap}
             title={wrap ? "Disable line wrap" : "Wrap long lines"}
             className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",
+              "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground md:size-6",
               wrap && "bg-muted-foreground/15 text-foreground",
             )}
           >
@@ -145,7 +163,7 @@ export function SourceView({
             onClick={() => copy(source)}
             aria-label={copied ? "Copied" : "Copy source"}
             className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",
+              "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground md:size-6",
               copied && "text-status-success-strong",
             )}
           >
@@ -154,7 +172,10 @@ export function SourceView({
         </div>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+      <div
+        ref={scrollRef}
+        className={cn(isPhone ? "overflow-x-auto" : "min-h-0 flex-1 overflow-auto")}
+      >
         <Highlight
           code={source.replace(/\n$/, "")}
           language="tsx"
