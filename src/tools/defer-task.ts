@@ -287,7 +287,8 @@ export const registerDeferTaskTool = (server: McpServer) => {
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
       const createdBy =
-        (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ?? undefined;
+        (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
+        undefined;
 
       // Validate before creating the schedule or changing the task.
       if (task.outputSchema) {

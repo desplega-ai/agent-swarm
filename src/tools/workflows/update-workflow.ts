@@ -138,7 +138,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         }
 
         const updatedBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
         const assetKey =
           key === undefined ? undefined : await authorizeAssetKeyWrite(key, updatedBy);

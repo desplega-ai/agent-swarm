@@ -85,7 +85,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
     async ({ id, key, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
       try {
         const updatedBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
         const updates: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
         if (key !== undefined) {

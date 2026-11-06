@@ -118,7 +118,10 @@ export const registerSkillUpdateTool = (server: McpServer) => {
         const skill = await updateSkill(args.skillId, {
           ...updates,
           updatedByAgentId: requestInfo.agentId,
-          updatedBy: await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+          updatedBy: await resolveTaskAuditUserId(
+            requestInfo.auditSourceTaskId,
+            requestInfo.agentId,
+          ),
         });
         if (!skill) {
           return toolErr("Update failed.", {

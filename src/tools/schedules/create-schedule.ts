@@ -325,7 +325,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         }
 
         const createdBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
         const assetKey = key ? await authorizeAssetKeyWrite(key, createdBy) : undefined;
 

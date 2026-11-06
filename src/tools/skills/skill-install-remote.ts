@@ -114,7 +114,10 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           disableModelInvocation: parsedMeta.disableModelInvocation,
           userInvocable: parsedMeta.userInvocable,
           createdByAgentId: requestInfo.agentId,
-          createdBy: await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+          createdBy: await resolveTaskAuditUserId(
+            requestInfo.auditSourceTaskId,
+            requestInfo.agentId,
+          ),
         });
 
         return toolOk(`Installed remote skill "${skill.name}".`, {

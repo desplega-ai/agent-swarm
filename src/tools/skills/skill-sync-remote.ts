@@ -50,7 +50,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
         // A content change is attributed to the caller; a lastFetchedAt-only
         // touch is a fetch, not an edit, and leaves the audit pair alone.
         const updatedBy = await resolveTaskAuditUserId(
-          requestInfo.sourceTaskId,
+          requestInfo.auditSourceTaskId,
           requestInfo.agentId,
         );
 

@@ -59,7 +59,9 @@ export async function resolveTaskAuditUserId(
  *
  * Resolves the audit actor from trusted server-side request context first (an
  * authenticated request user is never client-controlled), then falls back to
- * the ownership-validated `X-Source-Task-Id` resolution.
+ * the ownership-validated source task: `X-Source-Task-Id`, else the audit-only
+ * `X-Audit-Source-Task-Id` that script `ctx.swarm` calls send. Scripts must not
+ * send `X-Source-Task-Id`: kv, send-task and store-progress read it as task context.
  */
 export async function resolveHttpAuditUserId(
   req: IncomingMessage,
@@ -67,8 +69,9 @@ export async function resolveHttpAuditUserId(
 ): Promise<string | null> {
   const userId = authUserId(getRequestAuth(req));
   if (userId) return userId;
-  const header = req.headers["x-source-task-id"];
-  const sourceTaskId = Array.isArray(header) ? header[0] : header;
+  const first = (h: string | string[] | undefined) => (Array.isArray(h) ? h[0] : h);
+  const sourceTaskId =
+    first(req.headers["x-source-task-id"]) ?? first(req.headers["x-audit-source-task-id"]);
   return resolveTaskAuditUserId(sourceTaskId, callerAgentId);
 }
 

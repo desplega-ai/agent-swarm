@@ -74,7 +74,10 @@ export const registerSkillCreateTool = (server: McpServer) => {
           disableModelInvocation: parsed.disableModelInvocation,
           userInvocable: parsed.userInvocable,
           createdByAgentId: requestInfo.agentId,
-          createdBy: await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+          createdBy: await resolveTaskAuditUserId(
+            requestInfo.auditSourceTaskId,
+            requestInfo.agentId,
+          ),
         });
 
         // Auto-install for the creating agent

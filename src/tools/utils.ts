@@ -50,6 +50,12 @@ export type RequestInfo = {
   /** Calling worker process, when multi-runtime mode is on. */
   runtimeInstanceId: string | undefined;
   sourceTaskId: string | undefined;
+  /**
+   * Task for audit attribution only: `sourceTaskId`, else the
+   * `X-Audit-Source-Task-Id` header script `ctx.swarm` calls send. Pass it only
+   * to `resolveTaskAuditUserId`; never use it as task context.
+   */
+  auditSourceTaskId: string | undefined;
   contextKey: string | undefined;
   callOrigin: "mcp" | "script-sdk" | "extension";
 };
@@ -57,6 +63,7 @@ export type RequestInfo = {
 export const getRequestInfo = (req: Meta): RequestInfo => {
   const agentIdHeader = req.requestInfo?.headers?.["x-agent-id"];
   const sourceTaskIdHeader = req.requestInfo?.headers?.["x-source-task-id"];
+  const auditSourceTaskIdHeader = req.requestInfo?.headers?.["x-audit-source-task-id"];
   const contextKeyHeader = req.requestInfo?.headers?.["x-context-key"];
   const runtimeHeader = req.requestInfo?.headers?.["x-runtime-instance-id"];
   const runtimeInstanceId = Array.isArray(runtimeHeader) ? runtimeHeader[0] : runtimeHeader;
@@ -87,6 +94,13 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
     agentId,
     runtimeInstanceId: typeof runtimeInstanceId === "string" ? runtimeInstanceId : undefined,
     sourceTaskId,
+    auditSourceTaskId:
+      sourceTaskId ??
+      (Array.isArray(auditSourceTaskIdHeader)
+        ? auditSourceTaskIdHeader[0]
+        : typeof auditSourceTaskIdHeader === "string"
+          ? auditSourceTaskIdHeader
+          : undefined),
     contextKey,
     callOrigin: extensionRequestOrigins.has(req)
       ? "extension"

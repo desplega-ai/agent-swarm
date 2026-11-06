@@ -22,7 +22,10 @@ function headers(config: SwarmConfig): Record<string, string> {
     ...(config.runtimeInstanceId
       ? { "X-Runtime-Instance-ID": Redacted.value(config.runtimeInstanceId) }
       : {}),
-    ...(config.sourceTaskId ? { "X-Source-Task-Id": Redacted.value(config.sourceTaskId) } : {}),
+    // Audit-only header: X-Source-Task-Id would also rescope kv, parent send-task, etc.
+    ...(config.auditSourceTaskId
+      ? { "X-Audit-Source-Task-Id": Redacted.value(config.auditSourceTaskId) }
+      : {}),
     ...(config.extensionToken
       ? { "X-Extension-Token": Redacted.value(config.extensionToken) }
       : {}),

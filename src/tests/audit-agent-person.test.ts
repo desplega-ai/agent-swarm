@@ -29,11 +29,13 @@ import {
   getDbClient,
   getScheduledTaskById,
   getSkillById,
+  getTaskById,
   getWorkflow,
   initDb,
 } from "../be/db";
 import { getScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { handleKv } from "../http/kv";
 import { handleMcpBridge } from "../http/mcp-bridge";
 import { handleSchedules } from "../http/schedules";
 import { handleScripts } from "../http/scripts";
@@ -189,15 +191,17 @@ async function http(
   return { status, json: text ? (JSON.parse(text) as Record<string, unknown>) : {} };
 }
 
-/** The SDK a script gets as `ctx.swarm`, acting for `sourceTaskId`. */
-function scriptSdk(agentId: string, sourceTaskId: string) {
+/** The SDK a script gets as `ctx.swarm`, acting for `sourceTaskId` (none when omitted). */
+function scriptSdk(agentId: string, sourceTaskId?: string) {
   return createSwarmSdk(
     new SwarmConfig({
       system: {
         apiKey: { value: API_KEY, isSecret: true },
         agentId: { value: agentId, isSecret: false },
         mcpBaseUrl: { value: bridgeUrl, isSecret: false },
-        sourceTaskId: { value: sourceTaskId, isSecret: false },
+        ...(sourceTaskId
+          ? { auditSourceTaskId: { value: sourceTaskId, isSecret: false as const } }
+          : {}),
       },
       user: {},
     }),
@@ -233,7 +237,13 @@ beforeAll(async () => {
     const segments = getPathSegments(req.url ?? "");
     const query = parseQueryParams(req.url ?? "");
     // The SDK reaches some tools through their REST route, others through the bridge.
-    for (const handler of [handleMcpBridge, handleWorkflows, handleSchedules, handleSkills]) {
+    for (const handler of [
+      handleMcpBridge,
+      handleWorkflows,
+      handleSchedules,
+      handleSkills,
+      handleKv,
+    ]) {
       if (await handler(req, res, segments, query, agentId)) return;
     }
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -356,7 +366,7 @@ describe("scripts audit", () => {
       const scratch = await getScript({ name: slug, scope: "agent", scopeId: agentA });
       expectAudit(await auditRow("scripts", scratch!.id), { updated: false });
 
-      // X-Source-Task-Id travelled from the run request into the script's SDK call.
+      // The run request's task travelled into the script's SDK call (audit header).
       const scheduleId = (
         await getDbClient().get<{ id: string }>("SELECT id FROM scheduled_tasks WHERE name = ?", [
           scheduleName,
@@ -678,6 +688,81 @@ describe("skills audit", () => {
   test("negative control: another agent's source task leaves the person NULL", async () => {
     const id = await createViaTool(taskB);
     const row = await auditRow("skills", id);
+    expect(row.createdByAgentId).toBe(agentA);
+    expect(row.created_by).toBeNull();
+  });
+});
+
+// ─── ctx.swarm task context ─────────────────────────────────────────────────
+
+// The run's task rides X-Audit-Source-Task-Id, which only the audit resolvers
+// read. X-Source-Task-Id would also rescope kv and send-task to that task.
+describe("ctx.swarm sends the run's task for audit only", () => {
+  let scheduleTask: string;
+
+  beforeAll(async () => {
+    scheduleTask = (
+      await createTaskExtended("audit schedule run", {
+        agentId: agentA,
+        requestedByUserId: userA,
+        contextKey: "task:schedule:abc",
+      })
+    ).id;
+  });
+
+  /** Runs inline `body` as a script for agent A's schedule task; returns its result. */
+  async function runForScheduleTask(body: string): Promise<unknown> {
+    const run = await http(
+      handleScripts,
+      "POST",
+      "/api/scripts/run",
+      {
+        intent: unique("audit task context"),
+        source: `export default async (_args: unknown, ctx: any) => { ${body} };`,
+      },
+      agentA,
+      scheduleTask,
+    );
+    expect(run.status).toBe(200);
+    return run.json.result;
+  }
+
+  spawnTest(
+    "kv_set with no namespace lands in the agent namespace",
+    async () => {
+      const key = unique("state");
+      await runForScheduleTask(`await ctx.swarm.kv_set({ key: "${key}", value: "x" }); return 1;`);
+      // A run with no task (or one for another task) reads the same state.
+      expect(await scriptSdk(agentA).kv_getOrNull({ key })).toMatchObject({ value: "x" });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  spawnTest(
+    "task_send infers no parent from the run's task",
+    async () => {
+      const childId = await runForScheduleTask(`
+        const r = await ctx.swarm.task_send({
+          task: "${unique("audit child")}", agentId: "${agentB}",
+          routingReason: "skill", routingNote: "audit test dispatch to agent B",
+        });
+        return r.data.task.id;`);
+      expect(typeof childId).toBe("string");
+      const child = await getTaskById(childId as string);
+      expect(child?.parentTaskId).toBeUndefined();
+      expect(child?.dispatchedByTaskId).toBeUndefined();
+      expect(child?.contextKey).not.toBe("task:schedule:abc");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test("negative control: another agent's task in the audit header leaves the person NULL", async () => {
+    const result = (await scriptSdk(agentA, taskB).workflow_create({
+      name: unique("audit-wf-sdk-foreign"),
+      definition: WORKFLOW_DEFINITION,
+    })) as { success: boolean; data: { id: string } };
+    expect(result).toMatchObject({ success: true });
+    const row = await auditRow("workflows", result.data.id);
     expect(row.createdByAgentId).toBe(agentA);
     expect(row.created_by).toBeNull();
   });
